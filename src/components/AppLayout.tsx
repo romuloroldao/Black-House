@@ -3,6 +3,7 @@ import Sidebar from "./Sidebar";
 import Dashboard from "./Dashboard";
 import StudentManager from "./StudentManager";
 import WorkoutManager from "./WorkoutManager";
+import VideoGallery from "./VideoGallery";
 
 const AppLayout = () => {
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -16,7 +17,7 @@ const AppLayout = () => {
       case "workouts":
         return <WorkoutManager />;
       case "videos":
-        return <div className="p-6"><h1 className="text-3xl font-bold">Galeria de Vídeos</h1><p className="text-muted-foreground">Galeria estilo Netflix em desenvolvimento...</p></div>;
+        return <VideoGallery />;
       case "nutrition":
         return <div className="p-6"><h1 className="text-3xl font-bold">Planos Alimentares</h1><p className="text-muted-foreground">Sistema de nutrição em desenvolvimento...</p></div>;
       case "messages":
