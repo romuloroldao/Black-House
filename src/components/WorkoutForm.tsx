@@ -51,8 +51,14 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
     notes: workout?.notes || ""
   });
 
-  const [exercises, setExercises] = useState<Exercise[]>(
-    workout?.exercises || [
+  const [exercises, setExercises] = useState<Exercise[]>(() => {
+    // Ensure we always have an array of exercises
+    if (workout?.exercises && Array.isArray(workout.exercises)) {
+      return workout.exercises;
+    }
+    
+    // Default exercise if no valid exercises array
+    return [
       {
         id: "1",
         name: "",
@@ -63,8 +69,8 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
         notes: "",
         order: 1
       }
-    ]
-  );
+    ];
+  });
 
   const [newTag, setNewTag] = useState("");
 
