@@ -2,6 +2,7 @@ import { useState } from "react";
 import Sidebar from "./Sidebar";
 import Dashboard from "./Dashboard";
 import StudentManager from "./StudentManager";
+import WorkoutManager from "./WorkoutManager";
 
 const AppLayout = () => {
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -13,7 +14,7 @@ const AppLayout = () => {
       case "students":
         return <StudentManager />;
       case "workouts":
-        return <div className="p-6"><h1 className="text-3xl font-bold">Treinos</h1><p className="text-muted-foreground">Sistema de criação de treinos em desenvolvimento...</p></div>;
+        return <WorkoutManager />;
       case "videos":
         return <div className="p-6"><h1 className="text-3xl font-bold">Galeria de Vídeos</h1><p className="text-muted-foreground">Galeria estilo Netflix em desenvolvimento...</p></div>;
       case "nutrition":
