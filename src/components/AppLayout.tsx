@@ -4,6 +4,7 @@ import Dashboard from "./Dashboard";
 import StudentManager from "./StudentManager";
 import WorkoutManager from "./WorkoutManager";
 import VideoGallery from "./VideoGallery";
+import NutritionManager from "./NutritionManager";
 
 const AppLayout = () => {
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -19,7 +20,7 @@ const AppLayout = () => {
       case "videos":
         return <VideoGallery />;
       case "nutrition":
-        return <div className="p-6"><h1 className="text-3xl font-bold">Planos Alimentares</h1><p className="text-muted-foreground">Sistema de nutrição em desenvolvimento...</p></div>;
+        return <NutritionManager />;
       case "messages":
         return <div className="p-6"><h1 className="text-3xl font-bold">Mensagens</h1><p className="text-muted-foreground">Chat com alunos em desenvolvimento...</p></div>;
       case "payments":
