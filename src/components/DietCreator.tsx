@@ -50,11 +50,8 @@ const DietCreator = () => {
   const [objetivo, setObjetivo] = useState('');
   const [refeicoes, setRefeicoes] = useState<Refeicao[]>([
     { nome: 'Café da Manhã', itens: [] },
-    { nome: 'Lanche da Manhã', itens: [] },
     { nome: 'Almoço', itens: [] },
-    { nome: 'Lanche da Tarde', itens: [] },
-    { nome: 'Jantar', itens: [] },
-    { nome: 'Ceia', itens: [] }
+    { nome: 'Jantar', itens: [] }
   ]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
@@ -102,6 +99,27 @@ const DietCreator = () => {
   const removerItem = (refeicaoIndex: number, itemIndex: number) => {
     const novasRefeicoes = [...refeicoes];
     novasRefeicoes[refeicaoIndex].itens.splice(itemIndex, 1);
+    setRefeicoes(novasRefeicoes);
+  };
+
+  const adicionarRefeicao = () => {
+    const novaRefeicao: Refeicao = {
+      nome: `Refeição ${refeicoes.length + 1}`,
+      itens: []
+    };
+    setRefeicoes([...refeicoes, novaRefeicao]);
+  };
+
+  const removerRefeicao = (refeicaoIndex: number) => {
+    if (refeicoes.length > 1) {
+      const novasRefeicoes = refeicoes.filter((_, index) => index !== refeicaoIndex);
+      setRefeicoes(novasRefeicoes);
+    }
+  };
+
+  const editarNomeRefeicao = (refeicaoIndex: number, novoNome: string) => {
+    const novasRefeicoes = [...refeicoes];
+    novasRefeicoes[refeicaoIndex].nome = novoNome;
     setRefeicoes(novasRefeicoes);
   };
 
@@ -235,11 +253,8 @@ const DietCreator = () => {
       setSelectedAluno('');
       setRefeicoes([
         { nome: 'Café da Manhã', itens: [] },
-        { nome: 'Lanche da Manhã', itens: [] },
         { nome: 'Almoço', itens: [] },
-        { nome: 'Lanche da Tarde', itens: [] },
-        { nome: 'Jantar', itens: [] },
-        { nome: 'Ceia', itens: [] }
+        { nome: 'Jantar', itens: [] }
       ]);
 
     } catch (error) {
@@ -353,6 +368,14 @@ const DietCreator = () => {
 
       {/* Refeições */}
       <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold">Refeições</h2>
+          <Button onClick={adicionarRefeicao} variant="outline" size="sm">
+            <Plus className="w-4 h-4 mr-2" />
+            Adicionar Refeição
+          </Button>
+        </div>
+        
         {refeicoes.map((refeicao, refeicaoIndex) => {
           const totaisRefeicao = calcularTotaisRefeicao(refeicao);
           
@@ -360,7 +383,23 @@ const DietCreator = () => {
             <Card key={refeicaoIndex}>
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle>{refeicao.nome}</CardTitle>
+                  <div className="flex items-center gap-2 flex-1">
+                    <Input
+                      value={refeicao.nome}
+                      onChange={(e) => editarNomeRefeicao(refeicaoIndex, e.target.value)}
+                      className="font-semibold bg-transparent border-none p-0 h-auto text-lg"
+                    />
+                    {refeicoes.length > 1 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removerRefeicao(refeicaoIndex)}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    )}
+                  </div>
                   <div className="flex gap-2 text-sm">
                     <Badge variant="outline">{Math.round(totaisRefeicao.kcal)} kcal</Badge>
                     <Badge variant="outline">{Math.round(totaisRefeicao.proteinas)}g prot</Badge>

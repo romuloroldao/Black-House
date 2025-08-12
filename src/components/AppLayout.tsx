@@ -4,13 +4,10 @@ import Dashboard from "./Dashboard";
 import StudentManager from "./StudentManager";
 import WorkoutManager from "./WorkoutManager";
 import VideoGallery from "./VideoGallery";
-import NutritionManager from "./NutritionManager";
-import DietCreator from "./DietCreator";
-import DietViewer from "./DietViewer";
+import NutritionInterface from "./NutritionInterface";
 
 const AppLayout = () => {
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [activeSubTab, setActiveSubTab] = useState("foods");
 
   const renderContent = () => {
     switch (activeTab) {
@@ -23,47 +20,7 @@ const AppLayout = () => {
       case "videos":
         return <VideoGallery />;
       case "nutrition":
-        return (
-          <div className="space-y-6">
-            <div className="border-b bg-card">
-              <div className="flex space-x-8 px-6">
-                <button 
-                  className={`py-4 px-2 border-b-2 transition-colors ${
-                    activeSubTab === 'foods' 
-                      ? 'border-primary text-primary' 
-                      : 'border-transparent text-muted-foreground hover:text-foreground'
-                  }`}
-                  onClick={() => setActiveSubTab('foods')}
-                >
-                  Lista de Alimentos
-                </button>
-                <button 
-                  className={`py-4 px-2 border-b-2 transition-colors ${
-                    activeSubTab === 'create' 
-                      ? 'border-primary text-primary' 
-                      : 'border-transparent text-muted-foreground hover:text-foreground'
-                  }`}
-                  onClick={() => setActiveSubTab('create')}
-                >
-                  Criar Dieta
-                </button>
-                <button 
-                  className={`py-4 px-2 border-b-2 transition-colors ${
-                    activeSubTab === 'view' 
-                      ? 'border-primary text-primary' 
-                      : 'border-transparent text-muted-foreground hover:text-foreground'
-                  }`}
-                  onClick={() => setActiveSubTab('view')}
-                >
-                  Ver Dietas
-                </button>
-              </div>
-            </div>
-            {activeSubTab === 'foods' && <NutritionManager />}
-            {activeSubTab === 'create' && <DietCreator />}
-            {activeSubTab === 'view' && <DietViewer />}
-          </div>
-        );
+        return <NutritionInterface />;
       case "messages":
         return <div className="p-6"><h1 className="text-3xl font-bold">Mensagens</h1><p className="text-muted-foreground">Chat com alunos em desenvolvimento...</p></div>;
       case "payments":
