@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Combobox } from '@/components/ui/combobox';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -299,18 +299,18 @@ const DietCreator = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="aluno">Aluno</Label>
-              <Select value={selectedAluno} onValueChange={setSelectedAluno}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione um aluno" />
-                </SelectTrigger>
-                <SelectContent>
-                  {alunos.map(aluno => (
-                    <SelectItem key={aluno.id} value={aluno.id}>
-                      {aluno.nome} - {aluno.objetivo}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Combobox
+                options={alunos.map(aluno => ({
+                  value: aluno.id,
+                  label: aluno.nome,
+                  description: aluno.objetivo
+                }))}
+                value={selectedAluno}
+                onSelect={setSelectedAluno}
+                placeholder="Selecione um aluno"
+                searchPlaceholder="Buscar aluno..."
+                emptyText="Nenhum aluno encontrado."
+              />
             </div>
 
             <div className="space-y-2">
@@ -412,21 +412,18 @@ const DietCreator = () => {
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                       <div className="space-y-2">
                         <Label>Alimento</Label>
-                        <Select
-                          value={item.alimento_id.toString()}
-                          onValueChange={(value) => atualizarItem(refeicaoIndex, itemIndex, 'alimento_id', Number(value))}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecione um alimento" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {alimentos.map(alimento => (
-                              <SelectItem key={alimento.id} value={alimento.id.toString()}>
-                                {alimento.nome} ({alimento.grupo})
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <Combobox
+                          options={alimentos.map(alimento => ({
+                            value: alimento.id.toString(),
+                            label: alimento.nome,
+                            description: `${alimento.grupo} - ${alimento.kcal}kcal/100g`
+                          }))}
+                          value={item.alimento_id > 0 ? item.alimento_id.toString() : ''}
+                          onSelect={(value) => atualizarItem(refeicaoIndex, itemIndex, 'alimento_id', Number(value))}
+                          placeholder="Selecione um alimento"
+                          searchPlaceholder="Buscar alimento..."
+                          emptyText="Nenhum alimento encontrado."
+                        />
                       </div>
 
                       <div className="space-y-2">
