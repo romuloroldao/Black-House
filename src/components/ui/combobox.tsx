@@ -27,6 +27,33 @@ interface ComboboxProps {
   disabled?: boolean
 }
 
+// Função para normalizar texto (remover acentos e caracteres especiais)
+const normalizeText = (text: string) => {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // Remove acentos
+    .replace(/[^a-z0-9\s]/g, "") // Remove caracteres especiais
+    .trim()
+}
+
+// Função de busca flexível
+const flexibleSearch = (searchTerm: string, targetText: string, description?: string) => {
+  const normalizedSearch = normalizeText(searchTerm)
+  const normalizedTarget = normalizeText(targetText)
+  const normalizedDescription = description ? normalizeText(description) : ""
+  
+  if (normalizedSearch === "") return true
+  
+  // Busca por palavras individuais
+  const searchWords = normalizedSearch.split(/\s+/)
+  
+  return searchWords.every(word => 
+    normalizedTarget.includes(word) || 
+    normalizedDescription.includes(word)
+  )
+}
+
 export function Combobox({
   options,
   value,
@@ -43,8 +70,7 @@ export function Combobox({
   const selectedOption = options.find((option) => option.value === value)
 
   const filteredOptions = options.filter((option) =>
-    option.label.toLowerCase().includes(searchValue.toLowerCase()) ||
-    (option.description && option.description.toLowerCase().includes(searchValue.toLowerCase()))
+    flexibleSearch(searchValue, option.label, option.description)
   )
 
   return (
