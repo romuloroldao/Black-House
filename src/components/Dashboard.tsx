@@ -1,3 +1,5 @@
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,17 +24,49 @@ import {
 } from "lucide-react";
 
 const Dashboard = () => {
+  const [totalAlunos, setTotalAlunos] = useState(0);
+  const [totalDietas, setTotalDietas] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    carregarEstatisticas();
+  }, []);
+
+  const carregarEstatisticas = async () => {
+    try {
+      // Carregar total de alunos
+      const { count: countAlunos, error: errorAlunos } = await supabase
+        .from('alunos')
+        .select('*', { count: 'exact', head: true });
+
+      if (errorAlunos) throw errorAlunos;
+      setTotalAlunos(countAlunos || 0);
+
+      // Carregar total de dietas
+      const { count: countDietas, error: errorDietas } = await supabase
+        .from('dietas')
+        .select('*', { count: 'exact', head: true });
+
+      if (errorDietas) throw errorDietas;
+      setTotalDietas(countDietas || 0);
+    } catch (error) {
+      console.error('Erro ao carregar estatísticas:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const stats = [
     {
       title: "Alunos Ativos",
-      value: "47",
+      value: loading ? "..." : totalAlunos.toString(),
       change: "+12%",
       icon: Users,
       color: "text-primary",
     },
     {
-      title: "Treinos Esta Semana",
-      value: "156",
+      title: "Dietas Criadas",
+      value: loading ? "..." : totalDietas.toString(),
       change: "+8%",
       icon: Dumbbell,
       color: "text-success",

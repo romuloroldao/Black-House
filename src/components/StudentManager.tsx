@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -36,77 +37,71 @@ import {
   Users
 } from "lucide-react";
 
+interface Student {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  avatar?: string;
+  status: string;
+  plan: string;
+  goal?: string;
+  joinDate: string;
+  lastWorkout: string;
+  progress: number;
+  payment: string;
+  tags: string[];
+  nextPayment: string;
+  data_nascimento?: string;
+  peso?: number;
+}
+
 const StudentManager = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterGoal, setFilterGoal] = useState("all");
+  const [students, setStudents] = useState<Student[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const students = [
-    {
-      id: 1,
-      name: "Maria Silva",
-      email: "maria@email.com",
-      phone: "(11) 99999-9999",
-      avatar: "/api/placeholder/60/60",
-      status: "active",
-      plan: "Premium",
-      goal: "Emagrecimento",
-      joinDate: "15 Jan 2024",
-      lastWorkout: "Hoje",
-      progress: 85,
-      payment: "paid",
-      tags: ["Iniciante", "Motivada"],
-      nextPayment: "15 Fev 2024"
-    },
-    {
-      id: 2,
-      name: "João Santos",
-      email: "joao@email.com",
-      phone: "(11) 88888-8888",
-      avatar: "/api/placeholder/60/60",
-      status: "active",
-      plan: "Básico",
-      goal: "Hipertrofia",
-      joinDate: "22 Jan 2024",
-      lastWorkout: "Ontem",
-      progress: 92,
-      payment: "overdue",
-      tags: ["Avançado", "Dedicado"],
-      nextPayment: "20 Jan 2024"
-    },
-    {
-      id: 3,
-      name: "Ana Costa",
-      email: "ana@email.com",
-      phone: "(11) 77777-7777",
-      avatar: "/api/placeholder/60/60",
-      status: "inactive",
-      plan: "Premium",
-      goal: "Condicionamento",
-      joinDate: "08 Dez 2023",
-      lastWorkout: "3 dias atrás",
-      progress: 45,
-      payment: "paid",
-      tags: ["Intermediária"],
-      nextPayment: "08 Fev 2024"
-    },
-    {
-      id: 4,
-      name: "Pedro Lima",
-      email: "pedro@email.com",
-      phone: "(11) 66666-6666",
-      avatar: "/api/placeholder/60/60",
-      status: "active",
-      plan: "VIP",
-      goal: "Reabilitação",
-      joinDate: "30 Nov 2023",
-      lastWorkout: "Hoje",
-      progress: 78,
-      payment: "paid",
-      tags: ["Lesão", "Cuidado"],
-      nextPayment: "30 Jan 2024"
+  useEffect(() => {
+    carregarAlunos();
+  }, []);
+
+  const carregarAlunos = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('alunos')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const alunosFormatados: Student[] = data?.map(aluno => ({
+        id: aluno.id,
+        name: aluno.nome || 'Sem nome',
+        email: aluno.email,
+        phone: '(11) 99999-9999', // Placeholder - adicionar campo no banco se necessário
+        avatar: '/api/placeholder/60/60',
+        status: 'active', // Placeholder - adicionar campo no banco se necessário
+        plan: 'Básico', // Placeholder - adicionar campo no banco se necessário
+        goal: aluno.objetivo || 'Sem objetivo definido',
+        joinDate: new Date(aluno.created_at).toLocaleDateString('pt-BR'),
+        lastWorkout: 'Não registrado', // Placeholder - implementar quando houver treinos
+        progress: 0, // Placeholder - calcular baseado em treinos/dietas
+        payment: 'paid', // Placeholder - adicionar campo no banco se necessário
+        tags: [], // Placeholder - adicionar campo no banco se necessário
+        nextPayment: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR'),
+        data_nascimento: aluno.data_nascimento || undefined,
+        peso: aluno.peso || undefined
+      })) || [];
+
+      setStudents(alunosFormatados);
+    } catch (error) {
+      console.error('Erro ao carregar alunos:', error);
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -142,6 +137,21 @@ const StudentManager = () => {
     
     return matchesSearch && matchesStatus && matchesGoal;
   });
+
+  if (loading) {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="animate-pulse">
+          <div className="h-8 bg-muted rounded w-1/3 mb-4"></div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="h-64 bg-muted rounded"></div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6">
