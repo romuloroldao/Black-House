@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -32,58 +33,46 @@ const VideoGallery = () => {
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [showVideoForm, setShowVideoForm] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState(null);
+  const [videos, setVideos] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Mock data - seria substituído por dados do Supabase
-  const videos = [
-    {
-      id: 1,
-      title: "Técnica Perfeita do Supino Reto",
-      description: "Aprenda a execução correta do supino reto para maximizar ganhos e evitar lesões",
-      youtubeId: "dQw4w9WgXcQ",
-      thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg",
-      duration: "12:34",
-      category: "Técnica",
-      visibility: "active-students", // active-students, inactive-students, guests, everyone
-      tags: ["Peito", "Técnica", "Supino"],
-      uploadDate: "2024-01-15",
-      views: 234,
-      likes: 45,
-      instructor: "João Silva",
-      isFavorited: true
-    },
-    {
-      id: 2,
-      title: "HIIT Cardio - 20 Minutos Intensos",
-      description: "Treino cardio intervalado para queima máxima de calorias",
-      youtubeId: "dQw4w9WgXcQ",
-      thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg",
-      duration: "20:15",
-      category: "Cardio",
-      visibility: "everyone",
-      tags: ["HIIT", "Cardio", "Queima"],
-      uploadDate: "2024-01-14",
-      views: 456,
-      likes: 78,
-      instructor: "Maria Santos",
-      isFavorited: false
-    },
-    {
-      id: 3,
-      title: "Mobilidade e Alongamento Funcional",
-      description: "Rotina completa de mobilidade para melhorar flexibilidade",
-      youtubeId: "dQw4w9WgXcQ",
-      thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg",
-      duration: "15:42",
-      category: "Mobilidade",
-      visibility: "active-students",
-      tags: ["Mobilidade", "Alongamento", "Funcional"],
-      uploadDate: "2024-01-13",
-      views: 189,
-      likes: 32,
-      instructor: "João Silva",
-      isFavorited: true
+  useEffect(() => {
+    carregarVideos();
+  }, []);
+
+  const carregarVideos = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('videos')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const videosFormatados = data?.map(video => ({
+        id: video.id,
+        title: video.titulo,
+        description: video.descricao || '',
+        youtubeId: video.youtube_id,
+        thumbnail: `https://img.youtube.com/vi/${video.youtube_id}/maxresdefault.jpg`,
+        duration: video.duracao || '0:00',
+        category: video.categoria,
+        visibility: video.visibilidade,
+        tags: video.tags || [],
+        uploadDate: new Date(video.created_at).toISOString().split('T')[0],
+        views: video.views,
+        likes: video.likes,
+        instructor: video.instrutor || 'Instrutor',
+        isFavorited: false // TODO: implementar favoritos quando houver usuário
+      })) || [];
+
+      setVideos(videosFormatados);
+    } catch (error) {
+      console.error('Erro ao carregar vídeos:', error);
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
   const categories = [
     { id: "all", label: "Todos", count: videos.length },
@@ -235,8 +224,26 @@ const VideoGallery = () => {
       <VideoForm 
         video={selectedVideo}
         onBack={() => setShowVideoForm(false)}
-        onSave={() => setShowVideoForm(false)}
+        onSave={() => {
+          setShowVideoForm(false);
+          carregarVideos();
+        }}
       />
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="animate-pulse">
+          <div className="h-8 bg-muted rounded w-1/3 mb-4"></div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="h-96 bg-muted rounded"></div>
+            ))}
+          </div>
+        </div>
+      </div>
     );
   }
 

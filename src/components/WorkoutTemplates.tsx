@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -23,94 +24,45 @@ interface WorkoutTemplatesProps {
 const WorkoutTemplates = ({ onUseTemplate }: WorkoutTemplatesProps) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Mock templates - seria substituído por dados do Supabase
-  const templates = [
-    {
-      id: 1,
-      name: "Push Day Completo",
-      description: "Treino completo para peito, ombros e tríceps com foco em hipertrofia",
-      category: "Hipertrofia",
-      difficulty: "Intermediário",
-      duration: 75,
-      exercises: 9,
-      rating: 4.8,
-      uses: 142,
-      tags: ["Push", "Peito", "Ombros", "Tríceps"],
-      icon: TrendingUp,
-      color: "bg-blue-500"
-    },
-    {
-      id: 2,
-      name: "HIIT Fat Burn",
-      description: "Circuito de alta intensidade para máxima queima calórica",
-      category: "Cardio",
-      difficulty: "Avançado",
-      duration: 25,
-      exercises: 8,
-      rating: 4.9,
-      uses: 89,
-      tags: ["HIIT", "Cardio", "Queima", "Circuito"],
-      icon: Zap,
-      color: "bg-orange-500"
-    },
-    {
-      id: 3,
-      name: "Funcional Básico",
-      description: "Movimentos funcionais para iniciantes com foco em mobilidade",
-      category: "Funcional",
-      difficulty: "Iniciante",
-      duration: 40,
-      exercises: 12,
-      rating: 4.6,
-      uses: 203,
-      tags: ["Funcional", "Mobilidade", "Básico"],
-      icon: Activity,
-      color: "bg-green-500"
-    },
-    {
-      id: 4,
-      name: "Pull Day Power",
-      description: "Treino intenso para costas e bíceps com foco em força",
-      category: "Força",
-      difficulty: "Avançado",
-      duration: 80,
-      exercises: 8,
-      rating: 4.7,
-      uses: 76,
-      tags: ["Pull", "Costas", "Bíceps", "Força"],
-      icon: Target,
-      color: "bg-purple-500"
-    },
-    {
-      id: 5,
-      name: "Leg Day Hipertrofia",
-      description: "Treino completo de membros inferiores para volume muscular",
-      category: "Hipertrofia",
-      difficulty: "Intermediário",
-      duration: 90,
-      exercises: 10,
-      rating: 4.5,
-      uses: 158,
-      tags: ["Pernas", "Quadríceps", "Glúteos", "Volume"],
-      icon: TrendingUp,
-      color: "bg-red-500"
-    },
-    {
-      id: 6,
-      name: "Core & Stability",
-      description: "Fortalecimento do core e melhora da estabilidade corporal",
-      category: "Funcional",
-      difficulty: "Intermediário",
-      duration: 35,
-      exercises: 15,
-      rating: 4.4,
-      uses: 94,
-      tags: ["Core", "Estabilidade", "Abdomen"],
-      icon: Heart,
-      color: "bg-pink-500"
+  useEffect(() => {
+    carregarTemplates();
+  }, []);
+
+  const carregarTemplates = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('treinos')
+        .select('*')
+        .eq('is_template', true)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const templatesFormatados = data?.map(template => ({
+        id: template.id,
+        name: template.nome,
+        description: template.descricao || '',
+        category: template.categoria,
+        difficulty: template.dificuldade,
+        duration: template.duracao,
+        exercises: template.num_exercicios,
+        rating: 4.5, // TODO: implementar avaliações
+        uses: 0, // TODO: implementar contador de usos
+        tags: template.tags || [],
+        icon: TrendingUp,
+        color: 'bg-primary'
+      })) || [];
+
+      setTemplates(templatesFormatados);
+    } catch (error) {
+      console.error('Erro ao carregar templates:', error);
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
   const categories = [
     { id: "all", label: "Todos" },
@@ -151,6 +103,21 @@ const WorkoutTemplates = ({ onUseTemplate }: WorkoutTemplatesProps) => {
       />
     ));
   };
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="animate-pulse">
+          <div className="h-8 bg-muted rounded w-1/3 mb-4"></div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="h-64 bg-muted rounded"></div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

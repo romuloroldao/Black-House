@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -25,61 +26,47 @@ const LiveManager = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [showLiveForm, setShowLiveForm] = useState(false);
   const [selectedLive, setSelectedLive] = useState(null);
+  const [lives, setLives] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Mock data - seria substituído por dados do Supabase
-  const lives = [
-    {
-      id: 1,
-      title: "Live: Treino HIIT ao Vivo",
-      description: "Sessão de treino HIIT interativa com dicas em tempo real",
-      youtubeStreamKey: "xxxx-xxxx-xxxx-xxxx",
-      scheduledDate: "2024-01-20",
-      scheduledTime: "19:00",
-      duration: 60,
-      status: "scheduled", // scheduled, live, ended
-      visibility: "active-students",
-      registrations: 15,
-      maxParticipants: 50,
-      youtubeUrl: "https://youtube.com/live/abc123",
-      remindersEnabled: true,
-      autoRecord: true,
-      tags: ["HIIT", "Ao Vivo", "Interativo"]
-    },
-    {
-      id: 2,
-      title: "Q&A Nutrição e Treino",
-      description: "Sessão de perguntas e respostas sobre nutrição esportiva",
-      youtubeStreamKey: "yyyy-yyyy-yyyy-yyyy",
-      scheduledDate: "2024-01-18",
-      scheduledTime: "20:00",
-      duration: 45,
-      status: "live",
-      visibility: "everyone",
-      registrations: 28,
-      maxParticipants: 100,
-      youtubeUrl: "https://youtube.com/live/def456",
-      remindersEnabled: true,
-      autoRecord: true,
-      tags: ["Q&A", "Nutrição", "Dúvidas"]
-    },
-    {
-      id: 3,
-      title: "Aula de Mobilidade Matinal",
-      description: "Rotina de mobilidade para começar bem o dia",
-      youtubeStreamKey: "zzzz-zzzz-zzzz-zzzz",
-      scheduledDate: "2024-01-15",
-      scheduledTime: "07:00",
-      duration: 30,
-      status: "ended",
-      visibility: "active-students",
-      registrations: 22,
-      maxParticipants: 30,
-      youtubeUrl: "https://youtube.com/watch/ghi789",
-      remindersEnabled: false,
-      autoRecord: true,
-      tags: ["Mobilidade", "Matinal", "Bem-estar"]
+  useEffect(() => {
+    carregarLives();
+  }, []);
+
+  const carregarLives = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('lives')
+        .select('*')
+        .order('data_agendamento', { ascending: false });
+
+      if (error) throw error;
+
+      const livesFormatadas = data?.map(live => ({
+        id: live.id,
+        title: live.titulo,
+        description: live.descricao || '',
+        youtubeStreamKey: live.youtube_stream_key || '',
+        scheduledDate: live.data_agendamento,
+        scheduledTime: live.hora_agendamento,
+        duration: live.duracao,
+        status: live.status,
+        visibility: live.visibilidade,
+        registrations: live.num_inscricoes,
+        maxParticipants: live.max_participantes,
+        youtubeUrl: live.youtube_url || '',
+        remindersEnabled: live.lembretes_ativados,
+        autoRecord: live.auto_gravar,
+        tags: live.tags || []
+      })) || [];
+
+      setLives(livesFormatadas);
+    } catch (error) {
+      console.error('Erro ao carregar lives:', error);
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
   const statusLabels = {
     scheduled: { label: "Agendada", color: "bg-warning/10 text-warning border-warning/20", icon: Calendar },
@@ -243,8 +230,26 @@ const LiveManager = () => {
       <LiveForm 
         live={selectedLive}
         onBack={() => setShowLiveForm(false)}
-        onSave={() => setShowLiveForm(false)}
+        onSave={() => {
+          setShowLiveForm(false);
+          carregarLives();
+        }}
       />
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="animate-pulse">
+          <div className="h-8 bg-muted rounded w-1/3 mb-4"></div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="h-80 bg-muted rounded"></div>
+            ))}
+          </div>
+        </div>
+      </div>
     );
   }
 

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -26,49 +27,44 @@ const WorkoutManager = () => {
   const [activeView, setActiveView] = useState("list");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedWorkout, setSelectedWorkout] = useState(null);
+  const [workouts, setWorkouts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Mock data - seria substituído por dados do Supabase
-  const workouts = [
-    {
-      id: 1,
-      name: "Treino A - Peito e Tríceps",
-      description: "Foco em desenvolvimento do peitoral e fortalecimento dos tríceps",
-      duration: 60,
-      difficulty: "Intermediário",
-      exercises: 8,
-      studentsAssigned: 12,
-      category: "Hipertrofia",
-      lastModified: "2024-01-15",
-      isTemplate: false,
-      tags: ["Peito", "Tríceps", "Força"]
-    },
-    {
-      id: 2,
-      name: "HIIT Cardio Intenso",
-      description: "Treino intervalado de alta intensidade para queima de gordura",
-      duration: 30,
-      difficulty: "Avançado",
-      exercises: 6,
-      studentsAssigned: 8,
-      category: "Cardio",
-      lastModified: "2024-01-14",
-      isTemplate: true,
-      tags: ["HIIT", "Cardio", "Queima"]
-    },
-    {
-      id: 3,
-      name: "Funcional Iniciante",
-      description: "Treino funcional básico para iniciantes no mundo fitness",
-      duration: 45,
-      difficulty: "Iniciante",
-      exercises: 10,
-      studentsAssigned: 15,
-      category: "Funcional",
-      lastModified: "2024-01-13",
-      isTemplate: false,
-      tags: ["Funcional", "Básico", "Mobilidade"]
+  useEffect(() => {
+    carregarTreinos();
+  }, []);
+
+  const carregarTreinos = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('treinos')
+        .select('*')
+        .eq('is_template', false)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const treinosFormatados = data?.map(treino => ({
+        id: treino.id,
+        name: treino.nome,
+        description: treino.descricao || '',
+        duration: treino.duracao,
+        difficulty: treino.dificuldade,
+        exercises: treino.num_exercicios,
+        studentsAssigned: 0, // TODO: implementar quando houver relação com alunos
+        category: treino.categoria,
+        lastModified: new Date(treino.updated_at).toISOString().split('T')[0],
+        isTemplate: treino.is_template,
+        tags: treino.tags || []
+      })) || [];
+
+      setWorkouts(treinosFormatados);
+    } catch (error) {
+      console.error('Erro ao carregar treinos:', error);
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
   const filteredWorkouts = workouts.filter(workout =>
     workout.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -181,8 +177,26 @@ const WorkoutManager = () => {
       <WorkoutForm 
         workout={selectedWorkout}
         onBack={() => setActiveView("list")}
-        onSave={() => setActiveView("list")}
+        onSave={() => {
+          setActiveView("list");
+          carregarTreinos();
+        }}
       />
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="animate-pulse">
+          <div className="h-8 bg-muted rounded w-1/3 mb-4"></div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="h-64 bg-muted rounded"></div>
+            ))}
+          </div>
+        </div>
+      </div>
     );
   }
 
