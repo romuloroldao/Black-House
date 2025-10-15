@@ -166,6 +166,114 @@ export type Database = {
           },
         ]
       }
+      lives: {
+        Row: {
+          auto_gravar: boolean | null
+          coach_id: string | null
+          created_at: string
+          data_agendamento: string
+          descricao: string | null
+          duracao: number
+          hora_agendamento: string
+          id: string
+          lembretes_ativados: boolean | null
+          max_participantes: number | null
+          num_inscricoes: number | null
+          status: string
+          tags: string[] | null
+          titulo: string
+          updated_at: string
+          visibilidade: string
+          youtube_stream_key: string | null
+          youtube_url: string | null
+        }
+        Insert: {
+          auto_gravar?: boolean | null
+          coach_id?: string | null
+          created_at?: string
+          data_agendamento: string
+          descricao?: string | null
+          duracao?: number
+          hora_agendamento: string
+          id?: string
+          lembretes_ativados?: boolean | null
+          max_participantes?: number | null
+          num_inscricoes?: number | null
+          status: string
+          tags?: string[] | null
+          titulo: string
+          updated_at?: string
+          visibilidade: string
+          youtube_stream_key?: string | null
+          youtube_url?: string | null
+        }
+        Update: {
+          auto_gravar?: boolean | null
+          coach_id?: string | null
+          created_at?: string
+          data_agendamento?: string
+          descricao?: string | null
+          duracao?: number
+          hora_agendamento?: string
+          id?: string
+          lembretes_ativados?: boolean | null
+          max_participantes?: number | null
+          num_inscricoes?: number | null
+          status?: string
+          tags?: string[] | null
+          titulo?: string
+          updated_at?: string
+          visibilidade?: string
+          youtube_stream_key?: string | null
+          youtube_url?: string | null
+        }
+        Relationships: []
+      }
+      treinos: {
+        Row: {
+          categoria: string
+          coach_id: string | null
+          created_at: string
+          descricao: string | null
+          dificuldade: string
+          duracao: number
+          id: string
+          is_template: boolean | null
+          nome: string
+          num_exercicios: number | null
+          tags: string[] | null
+          updated_at: string
+        }
+        Insert: {
+          categoria: string
+          coach_id?: string | null
+          created_at?: string
+          descricao?: string | null
+          dificuldade: string
+          duracao?: number
+          id?: string
+          is_template?: boolean | null
+          nome: string
+          num_exercicios?: number | null
+          tags?: string[] | null
+          updated_at?: string
+        }
+        Update: {
+          categoria?: string
+          coach_id?: string | null
+          created_at?: string
+          descricao?: string | null
+          dificuldade?: string
+          duracao?: number
+          id?: string
+          is_template?: boolean | null
+          nome?: string
+          num_exercicios?: number | null
+          tags?: string[] | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -184,6 +292,57 @@ export type Database = {
           id?: string
           role?: Database["public"]["Enums"]["user_role"]
           user_id?: string
+        }
+        Relationships: []
+      }
+      videos: {
+        Row: {
+          categoria: string
+          coach_id: string | null
+          created_at: string
+          descricao: string | null
+          duracao: string | null
+          id: string
+          instrutor: string | null
+          likes: number | null
+          tags: string[] | null
+          titulo: string
+          updated_at: string
+          views: number | null
+          visibilidade: string
+          youtube_id: string
+        }
+        Insert: {
+          categoria: string
+          coach_id?: string | null
+          created_at?: string
+          descricao?: string | null
+          duracao?: string | null
+          id?: string
+          instrutor?: string | null
+          likes?: number | null
+          tags?: string[] | null
+          titulo: string
+          updated_at?: string
+          views?: number | null
+          visibilidade: string
+          youtube_id: string
+        }
+        Update: {
+          categoria?: string
+          coach_id?: string | null
+          created_at?: string
+          descricao?: string | null
+          duracao?: string | null
+          id?: string
+          instrutor?: string | null
+          likes?: number | null
+          tags?: string[] | null
+          titulo?: string
+          updated_at?: string
+          views?: number | null
+          visibilidade?: string
+          youtube_id?: string
         }
         Relationships: []
       }
