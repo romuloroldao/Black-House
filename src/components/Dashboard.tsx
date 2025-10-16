@@ -151,15 +151,6 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
     },
   ];
 
-  const recentActivities = recentStudents.map((student, index) => ({
-    id: student.id,
-    student: student.nome,
-    action: "foi adicionado(a) ao sistema",
-    time: formatTimeAgo(new Date(student.created_at)),
-    avatar: "",
-    type: "student"
-  }));
-
   const formatTimeAgo = (date: Date) => {
     const now = new Date();
     const diffInMs = now.getTime() - date.getTime();
@@ -175,6 +166,15 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
       return `há ${diffInDays} dias`;
     }
   };
+
+  const recentActivities = recentStudents.map((student, index) => ({
+    id: student.id,
+    student: student.nome,
+    action: "foi adicionado(a) ao sistema",
+    time: formatTimeAgo(new Date(student.created_at)),
+    avatar: "",
+    type: "student"
+  }));
 
   const upcomingTasks = [
     {
