@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,6 +29,7 @@ interface VideoFormProps {
 }
 
 const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
+  const { user } = useAuth();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
@@ -160,6 +162,7 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
         visibilidade: formData.visibility,
         tags: formData.tags,
         duracao: formData.duration,
+        coach_id: user?.id,
       };
 
       if (video?.id) {
