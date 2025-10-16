@@ -7,6 +7,7 @@ import WorkoutManager from "./WorkoutManager";
 import VideoGallery from "./VideoGallery";
 import NutritionInterface from "./NutritionInterface";
 import MessageManager from "./MessageManager";
+import AgendaManager from "./AgendaManager";
 
 const AppLayout = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -42,7 +43,7 @@ const AppLayout = () => {
       case "payments":
         return <div className="p-6"><h1 className="text-3xl font-bold">Pagamentos</h1><p className="text-muted-foreground">Gestão financeira em desenvolvimento...</p></div>;
       case "calendar":
-        return <div className="p-6"><h1 className="text-3xl font-bold">Agenda</h1><p className="text-muted-foreground">Calendário de compromissos em desenvolvimento...</p></div>;
+        return <AgendaManager />;
       case "lives":
         return <div className="p-6"><h1 className="text-3xl font-bold">Lives</h1><p className="text-muted-foreground">Transmissões ao vivo em desenvolvimento...</p></div>;
       case "analytics":

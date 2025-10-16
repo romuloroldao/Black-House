@@ -14,6 +14,62 @@ export type Database = {
   }
   public: {
     Tables: {
+      agenda_eventos: {
+        Row: {
+          aluno_id: string | null
+          coach_id: string
+          created_at: string | null
+          data_evento: string
+          descricao: string | null
+          hora_evento: string | null
+          id: string
+          notificacao_enviada: boolean | null
+          prioridade: string | null
+          status: string
+          tipo: string
+          titulo: string
+          updated_at: string | null
+        }
+        Insert: {
+          aluno_id?: string | null
+          coach_id: string
+          created_at?: string | null
+          data_evento: string
+          descricao?: string | null
+          hora_evento?: string | null
+          id?: string
+          notificacao_enviada?: boolean | null
+          prioridade?: string | null
+          status?: string
+          tipo: string
+          titulo: string
+          updated_at?: string | null
+        }
+        Update: {
+          aluno_id?: string | null
+          coach_id?: string
+          created_at?: string | null
+          data_evento?: string
+          descricao?: string | null
+          hora_evento?: string | null
+          id?: string
+          notificacao_enviada?: boolean | null
+          prioridade?: string | null
+          status?: string
+          tipo?: string
+          titulo?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agenda_eventos_aluno_id_fkey"
+            columns: ["aluno_id"]
+            isOneToOne: false
+            referencedRelation: "alunos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       alimentos: {
         Row: {
           carboidratos: number
