@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -47,6 +48,7 @@ interface DietCreatorProps {
 }
 
 const DietCreator = ({ dietaId }: DietCreatorProps) => {
+  const navigate = useNavigate();
   const [alimentos, setAlimentos] = useState<Alimento[]>([]);
   const [alunos, setAlunos] = useState<Aluno[]>([]);
   const [selectedAluno, setSelectedAluno] = useState<string>('');
@@ -342,8 +344,13 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
         description: dietaId ? "Dieta atualizada com sucesso" : "Dieta criada com sucesso"
       });
 
-      // Se não estamos editando, limpar formulário
-      if (!dietaId) {
+      // Se estamos editando, voltar para página do aluno
+      if (dietaId && selectedAluno) {
+        setTimeout(() => {
+          navigate(`/alunos/${selectedAluno}`);
+        }, 1000);
+      } else if (!dietaId) {
+        // Se criamos nova, limpar formulário
         setDietName('');
         setObjetivo('');
         setSelectedAluno('');
