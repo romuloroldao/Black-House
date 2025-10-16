@@ -55,23 +55,15 @@ const MessageManager = () => {
     if (!user) return;
 
     try {
-      console.log("Carregando alunos para user:", user.id);
-      
       const { data, error } = await supabase
         .from("alunos")
-        .select("id, nome, email, coach_id")
+        .select("id, nome, email")
+        .eq("coach_id", user.id)
         .order("nome");
-
-      console.log("Alunos retornados:", data);
-      console.log("Erro ao carregar alunos:", error);
 
       if (error) throw error;
       
-      // Filtrar alunos do coach logado
-      const alunosDoCoach = (data || []).filter(a => a.coach_id === user.id);
-      console.log("Alunos do coach:", alunosDoCoach);
-      
-      setAlunos(alunosDoCoach);
+      setAlunos(data || []);
     } catch (error) {
       console.error("Erro ao carregar alunos:", error);
       toast({
