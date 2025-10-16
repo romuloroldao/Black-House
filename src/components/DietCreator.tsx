@@ -42,7 +42,11 @@ interface Refeicao {
   itens: ItemRefeicao[];
 }
 
-const DietCreator = () => {
+interface DietCreatorProps {
+  dietaId?: string;
+}
+
+const DietCreator = ({ dietaId }: DietCreatorProps) => {
   const [alimentos, setAlimentos] = useState<Alimento[]>([]);
   const [alunos, setAlunos] = useState<Aluno[]>([]);
   const [selectedAluno, setSelectedAluno] = useState<string>('');
@@ -60,6 +64,12 @@ const DietCreator = () => {
     carregarDados();
   }, []);
 
+  useEffect(() => {
+    if (dietaId) {
+      carregarDietaExistente();
+    }
+  }, [dietaId]);
+
   const carregarDados = async () => {
     try {
       const [alimentosRes, alunosRes] = await Promise.all([
@@ -76,6 +86,66 @@ const DietCreator = () => {
       toast({
         variant: "destructive",
         title: "Erro ao carregar dados",
+        description: error instanceof Error ? error.message : 'Erro desconhecido'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const carregarDietaExistente = async () => {
+    if (!dietaId) return;
+    
+    try {
+      setLoading(true);
+
+      // Carregar dados da dieta
+      const { data: dieta, error: dietaError } = await supabase
+        .from('dietas')
+        .select('*, alunos(id, nome, email, objetivo)')
+        .eq('id', dietaId)
+        .single();
+
+      if (dietaError) throw dietaError;
+
+      // Carregar itens da dieta
+      const { data: itens, error: itensError } = await supabase
+        .from('itens_dieta')
+        .select('*, alimentos(*)')
+        .eq('dieta_id', dietaId);
+
+      if (itensError) throw itensError;
+
+      // Preencher os dados
+      setDietName(dieta.nome);
+      setObjetivo(dieta.objetivo || '');
+      setSelectedAluno(dieta.aluno_id);
+
+      // Reorganizar itens por refeição
+      const refeicoesPadrao = ['Café da Manhã', 'Almoço', 'Jantar'];
+      const novasRefeicoes = refeicoesPadrao.map(nomeRefeicao => {
+        const itensRefeicao = (itens || [])
+          .filter(item => item.refeicao === nomeRefeicao)
+          .map(item => ({
+            id: item.id,
+            alimento_id: item.alimento_id || 0,
+            quantidade: item.quantidade,
+            refeicao: nomeRefeicao,
+            alimento: item.alimentos as Alimento
+          }));
+
+        return {
+          nome: nomeRefeicao,
+          itens: itensRefeicao
+        };
+      });
+
+      setRefeicoes(novasRefeicoes);
+
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Erro ao carregar dieta",
         description: error instanceof Error ? error.message : 'Erro desconhecido'
       });
     } finally {
@@ -199,35 +269,60 @@ const DietCreator = () => {
   };
 
   const salvarDieta = async () => {
-    if (!selectedAluno || !dietName) {
-      toast({
-        variant: "destructive",
-        title: "Dados incompletos",
-        description: "Selecione um aluno e digite o nome da dieta"
-      });
-      return;
+    // Se estamos editando uma dieta existente, não precisa validar aluno/nome
+    if (!dietaId) {
+      if (!selectedAluno || !dietName) {
+        toast({
+          variant: "destructive",
+          title: "Dados incompletos",
+          description: "Selecione um aluno e digite o nome da dieta"
+        });
+        return;
+      }
     }
 
     try {
-      // Salvar dieta
-      const { data: dieta, error: dietaError } = await supabase
-        .from('dietas')
-        .insert({
-          nome: dietName,
-          objetivo: objetivo,
-          aluno_id: selectedAluno
-        })
-        .select()
-        .single();
+      let dietaIdAtual = dietaId;
 
-      if (dietaError) throw dietaError;
+      // Se não há dietaId, criar nova dieta
+      if (!dietaIdAtual) {
+        const { data: dieta, error: dietaError } = await supabase
+          .from('dietas')
+          .insert({
+            nome: dietName,
+            objetivo: objetivo,
+            aluno_id: selectedAluno
+          })
+          .select()
+          .single();
+
+        if (dietaError) throw dietaError;
+        dietaIdAtual = dieta.id;
+      } else {
+        // Atualizar dieta existente
+        const { error: updateError } = await supabase
+          .from('dietas')
+          .update({
+            nome: dietName,
+            objetivo: objetivo
+          })
+          .eq('id', dietaIdAtual);
+
+        if (updateError) throw updateError;
+
+        // Remover itens antigos
+        await supabase
+          .from('itens_dieta')
+          .delete()
+          .eq('dieta_id', dietaIdAtual);
+      }
 
       // Salvar itens da dieta
       const itensParaSalvar = refeicoes.flatMap(refeicao =>
         refeicao.itens
           .filter(item => item.alimento_id > 0)
           .map(item => ({
-            dieta_id: dieta.id,
+            dieta_id: dietaIdAtual,
             alimento_id: item.alimento_id,
             quantidade: item.quantidade,
             refeicao: refeicao.nome
@@ -244,18 +339,20 @@ const DietCreator = () => {
 
       toast({
         title: "Sucesso!",
-        description: "Dieta criada com sucesso"
+        description: dietaId ? "Dieta atualizada com sucesso" : "Dieta criada com sucesso"
       });
 
-      // Limpar formulário
-      setDietName('');
-      setObjetivo('');
-      setSelectedAluno('');
-      setRefeicoes([
-        { nome: 'Café da Manhã', itens: [] },
-        { nome: 'Almoço', itens: [] },
-        { nome: 'Jantar', itens: [] }
-      ]);
+      // Se não estamos editando, limpar formulário
+      if (!dietaId) {
+        setDietName('');
+        setObjetivo('');
+        setSelectedAluno('');
+        setRefeicoes([
+          { nome: 'Café da Manhã', itens: [] },
+          { nome: 'Almoço', itens: [] },
+          { nome: 'Jantar', itens: [] }
+        ]);
+      }
 
     } catch (error) {
       toast({
