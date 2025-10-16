@@ -246,6 +246,10 @@ const MessageManager = () => {
         .eq("id", conversaSelecionada.id);
 
       setNovaMensagem("");
+      
+      // Recarregar mensagens e conversas
+      await carregarMensagens(conversaSelecionada.id);
+      await carregarConversas();
     } catch (error) {
       console.error("Erro ao enviar mensagem:", error);
       toast({
