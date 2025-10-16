@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -26,6 +28,8 @@ interface VideoFormProps {
 }
 
 const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
     title: video?.title || "",
     description: video?.description || "",
@@ -134,10 +138,68 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
     });
   };
 
-  const handleSave = () => {
-    // Aqui faria a validação e salvaria no Supabase
-    console.log("Salvando vídeo:", formData);
-    onSave();
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+
+      if (!formData.title || !formData.youtubeId || !formData.category) {
+        toast({
+          title: "Erro",
+          description: "Título, URL do YouTube e categoria são obrigatórios",
+          variant: "destructive",
+        });
+        setSaving(false);
+        return;
+      }
+
+      const videoData = {
+        titulo: formData.title,
+        descricao: formData.description,
+        youtube_id: formData.youtubeId,
+        categoria: formData.category,
+        visibilidade: formData.visibility,
+        tags: formData.tags,
+        duracao: formData.duration,
+      };
+
+      if (video?.id) {
+        // Update existing video
+        const { error } = await supabase
+          .from('videos')
+          .update(videoData)
+          .eq('id', video.id);
+
+        if (error) throw error;
+
+        toast({
+          title: "Vídeo atualizado!",
+          description: "As alterações foram salvas com sucesso.",
+        });
+      } else {
+        // Create new video
+        const { error } = await supabase
+          .from('videos')
+          .insert([videoData]);
+
+        if (error) throw error;
+
+        toast({
+          title: "Vídeo adicionado!",
+          description: "O novo vídeo foi cadastrado com sucesso.",
+        });
+      }
+
+      onSave();
+    } catch (error) {
+      console.error('Erro ao salvar vídeo:', error);
+      toast({
+        title: "Erro ao salvar",
+        description: "Não foi possível salvar o vídeo. Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const selectedVisibility = visibilityOptions.find(opt => opt.value === formData.visibility);
@@ -158,12 +220,21 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={onBack}>
+          <Button variant="outline" onClick={onBack} disabled={saving}>
             Cancelar
           </Button>
-          <Button onClick={handleSave} className="shadow-glow">
-            <Save className="w-4 h-4 mr-2" />
-            Salvar Vídeo
+          <Button onClick={handleSave} className="shadow-glow" disabled={saving}>
+            {saving ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                Salvando...
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4 mr-2" />
+                Salvar Vídeo
+              </>
+            )}
           </Button>
         </div>
       </div>

@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -39,6 +41,8 @@ interface Exercise {
 }
 
 const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
     name: workout?.name || "",
     description: workout?.description || "",
@@ -127,10 +131,69 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
     });
   };
 
-  const handleSave = () => {
-    // Aqui faria a validação e salvaria no Supabase
-    console.log("Salvando treino:", { formData, exercises });
-    onSave();
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+
+      if (!formData.name || !formData.category || !formData.difficulty) {
+        toast({
+          title: "Erro",
+          description: "Nome, categoria e dificuldade são obrigatórios",
+          variant: "destructive",
+        });
+        setSaving(false);
+        return;
+      }
+
+      const treinoData = {
+        nome: formData.name,
+        descricao: formData.description,
+        categoria: formData.category,
+        dificuldade: formData.difficulty,
+        duracao: formData.duration,
+        is_template: formData.isTemplate,
+        tags: formData.tags,
+        num_exercicios: exercises.length,
+      };
+
+      if (workout?.id) {
+        // Update existing workout
+        const { error } = await supabase
+          .from('treinos')
+          .update(treinoData)
+          .eq('id', workout.id);
+
+        if (error) throw error;
+
+        toast({
+          title: "Treino atualizado!",
+          description: "As alterações foram salvas com sucesso.",
+        });
+      } else {
+        // Create new workout
+        const { error } = await supabase
+          .from('treinos')
+          .insert([treinoData]);
+
+        if (error) throw error;
+
+        toast({
+          title: "Treino criado!",
+          description: "O novo treino foi adicionado com sucesso.",
+        });
+      }
+
+      onSave();
+    } catch (error) {
+      console.error('Erro ao salvar treino:', error);
+      toast({
+        title: "Erro ao salvar",
+        description: "Não foi possível salvar o treino. Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -149,12 +212,21 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={onBack}>
+          <Button variant="outline" onClick={onBack} disabled={saving}>
             Cancelar
           </Button>
-          <Button onClick={handleSave} className="shadow-glow">
-            <Save className="w-4 h-4 mr-2" />
-            Salvar Treino
+          <Button onClick={handleSave} className="shadow-glow" disabled={saving}>
+            {saving ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                Salvando...
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4 mr-2" />
+                Salvar Treino
+              </>
+            )}
           </Button>
         </div>
       </div>

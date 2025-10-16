@@ -112,6 +112,10 @@ const VideoGallery = () => {
   };
 
   const handleDeleteVideo = async (videoId: string) => {
+    if (!confirm("Tem certeza que deseja deletar este vídeo?")) {
+      return;
+    }
+
     try {
       const { error } = await supabase
         .from('videos')

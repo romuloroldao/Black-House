@@ -207,6 +207,10 @@ const StudentManager = () => {
   };
 
   const handleDeleteStudent = async (studentId: string) => {
+    if (!confirm("Tem certeza que deseja deletar este aluno?")) {
+      return;
+    }
+
     try {
       const { error } = await supabase
         .from('alunos')

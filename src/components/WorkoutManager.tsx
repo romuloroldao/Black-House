@@ -94,6 +94,10 @@ const WorkoutManager = () => {
   };
 
   const handleDeleteWorkout = async (workoutId: string) => {
+    if (!confirm("Tem certeza que deseja deletar este treino?")) {
+      return;
+    }
+
     try {
       const { error } = await supabase
         .from('treinos')
