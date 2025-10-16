@@ -37,6 +37,7 @@ const VideoGallery = () => {
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [videos, setVideos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [videoToWatch, setVideoToWatch] = useState<any>(null);
 
   useEffect(() => {
     carregarVideos();
@@ -155,7 +156,7 @@ const VideoGallery = () => {
               className="w-full h-full object-cover"
             />
             <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-smooth">
-              <Button size="lg" className="rounded-full">
+              <Button size="lg" className="rounded-full" onClick={() => setVideoToWatch(video)}>
                 <Play className="w-6 h-6 mr-2" />
                 Assistir
               </Button>
@@ -284,9 +285,32 @@ const VideoGallery = () => {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <>
+      {/* Video Player Dialog */}
+      <Dialog open={!!videoToWatch} onOpenChange={() => setVideoToWatch(null)}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>{videoToWatch?.title}</DialogTitle>
+            <DialogDescription>{videoToWatch?.description}</DialogDescription>
+          </DialogHeader>
+          <div className="aspect-video w-full">
+            <iframe
+              width="100%"
+              height="100%"
+              src={`https://www.youtube.com/embed/${videoToWatch?.youtubeId}?autoplay=1`}
+              title={videoToWatch?.title}
+              frameBorder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+              className="rounded-lg"
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <div className="p-6 space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
             Galeria de Vídeos
@@ -427,7 +451,8 @@ const VideoGallery = () => {
           <LiveManager />
         </TabsContent>
       </Tabs>
-    </div>
+      </div>
+    </>
   );
 };
 
