@@ -247,8 +247,7 @@ const MessageManager = () => {
 
       setNovaMensagem("");
       
-      // Recarregar mensagens e conversas
-      await carregarMensagens(conversaSelecionada.id);
+      // Recarregar apenas a lista de conversas (realtime já adiciona a mensagem)
       await carregarConversas();
     } catch (error) {
       console.error("Erro ao enviar mensagem:", error);
