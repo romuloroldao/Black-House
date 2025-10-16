@@ -86,6 +86,48 @@ export type Database = {
         }
         Relationships: []
       }
+      alunos_treinos: {
+        Row: {
+          aluno_id: string
+          ativo: boolean | null
+          created_at: string | null
+          data_inicio: string
+          id: string
+          treino_id: string
+        }
+        Insert: {
+          aluno_id: string
+          ativo?: boolean | null
+          created_at?: string | null
+          data_inicio?: string
+          id?: string
+          treino_id: string
+        }
+        Update: {
+          aluno_id?: string
+          ativo?: boolean | null
+          created_at?: string | null
+          data_inicio?: string
+          id?: string
+          treino_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "alunos_treinos_aluno_id_fkey"
+            columns: ["aluno_id"]
+            isOneToOne: false
+            referencedRelation: "alunos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "alunos_treinos_treino_id_fkey"
+            columns: ["treino_id"]
+            isOneToOne: false
+            referencedRelation: "treinos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       dietas: {
         Row: {
           aluno_id: string
@@ -114,6 +156,73 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "dietas_aluno_id_fkey"
+            columns: ["aluno_id"]
+            isOneToOne: false
+            referencedRelation: "alunos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      feedbacks_alunos: {
+        Row: {
+          aluno_id: string
+          coach_id: string
+          created_at: string | null
+          feedback: string
+          id: string
+          updated_at: string | null
+        }
+        Insert: {
+          aluno_id: string
+          coach_id: string
+          created_at?: string | null
+          feedback: string
+          id?: string
+          updated_at?: string | null
+        }
+        Update: {
+          aluno_id?: string
+          coach_id?: string
+          created_at?: string | null
+          feedback?: string
+          id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "feedbacks_alunos_aluno_id_fkey"
+            columns: ["aluno_id"]
+            isOneToOne: false
+            referencedRelation: "alunos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fotos_alunos: {
+        Row: {
+          aluno_id: string
+          created_at: string | null
+          descricao: string | null
+          id: string
+          url: string
+        }
+        Insert: {
+          aluno_id: string
+          created_at?: string | null
+          descricao?: string | null
+          id?: string
+          url: string
+        }
+        Update: {
+          aluno_id?: string
+          created_at?: string | null
+          descricao?: string | null
+          id?: string
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fotos_alunos_aluno_id_fkey"
             columns: ["aluno_id"]
             isOneToOne: false
             referencedRelation: "alunos"

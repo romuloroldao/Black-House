@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -35,7 +36,8 @@ import {
   Edit,
   Trash2,
   UserPlus,
-  Users
+  Users,
+  Eye
 } from "lucide-react";
 
 interface Student {
@@ -59,6 +61,7 @@ interface Student {
 
 const StudentManager = () => {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterGoal, setFilterGoal] = useState("all");
@@ -494,9 +497,14 @@ const StudentManager = () => {
 
               {/* Action Buttons */}
               <div className="flex gap-2 pt-2">
-                <Button variant="outline" size="sm" className="flex-1">
-                  <MessageSquare className="w-4 h-4" />
-                  Chat
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="flex-1"
+                  onClick={() => navigate(`/alunos/${student.id}`)}
+                >
+                  <Eye className="w-4 h-4" />
+                  Ver detalhes
                 </Button>
                 <Button 
                   variant="outline" 
