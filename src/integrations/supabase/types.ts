@@ -184,6 +184,130 @@ export type Database = {
           },
         ]
       }
+      asaas_config: {
+        Row: {
+          coach_id: string
+          created_at: string
+          id: string
+          is_sandbox: boolean
+          updated_at: string
+          webhook_url: string | null
+        }
+        Insert: {
+          coach_id: string
+          created_at?: string
+          id?: string
+          is_sandbox?: boolean
+          updated_at?: string
+          webhook_url?: string | null
+        }
+        Update: {
+          coach_id?: string
+          created_at?: string
+          id?: string
+          is_sandbox?: boolean
+          updated_at?: string
+          webhook_url?: string | null
+        }
+        Relationships: []
+      }
+      asaas_customers: {
+        Row: {
+          aluno_id: string
+          asaas_customer_id: string
+          created_at: string
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          aluno_id: string
+          asaas_customer_id: string
+          created_at?: string
+          id?: string
+          updated_at?: string
+        }
+        Update: {
+          aluno_id?: string
+          asaas_customer_id?: string
+          created_at?: string
+          id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asaas_customers_aluno_id_fkey"
+            columns: ["aluno_id"]
+            isOneToOne: false
+            referencedRelation: "alunos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      asaas_payments: {
+        Row: {
+          aluno_id: string
+          asaas_customer_id: string
+          asaas_payment_id: string
+          bank_slip_url: string | null
+          billing_type: string
+          coach_id: string
+          created_at: string
+          description: string | null
+          due_date: string
+          id: string
+          invoice_url: string | null
+          pix_copy_paste: string | null
+          pix_qr_code: string | null
+          status: string
+          updated_at: string
+          value: number
+        }
+        Insert: {
+          aluno_id: string
+          asaas_customer_id: string
+          asaas_payment_id: string
+          bank_slip_url?: string | null
+          billing_type: string
+          coach_id: string
+          created_at?: string
+          description?: string | null
+          due_date: string
+          id?: string
+          invoice_url?: string | null
+          pix_copy_paste?: string | null
+          pix_qr_code?: string | null
+          status?: string
+          updated_at?: string
+          value: number
+        }
+        Update: {
+          aluno_id?: string
+          asaas_customer_id?: string
+          asaas_payment_id?: string
+          bank_slip_url?: string | null
+          billing_type?: string
+          coach_id?: string
+          created_at?: string
+          description?: string | null
+          due_date?: string
+          id?: string
+          invoice_url?: string | null
+          pix_copy_paste?: string | null
+          pix_qr_code?: string | null
+          status?: string
+          updated_at?: string
+          value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asaas_payments_aluno_id_fkey"
+            columns: ["aluno_id"]
+            isOneToOne: false
+            referencedRelation: "alunos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conversas: {
         Row: {
           aluno_id: string
