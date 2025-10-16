@@ -145,6 +145,19 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
         return;
       }
 
+      // Obter o ID do usuário autenticado
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        toast({
+          title: "Erro",
+          description: "Você precisa estar autenticado para salvar um treino.",
+          variant: "destructive",
+        });
+        setSaving(false);
+        return;
+      }
+
       const treinoData = {
         nome: formData.name,
         descricao: formData.description,
@@ -154,6 +167,7 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
         is_template: formData.isTemplate,
         tags: formData.tags,
         num_exercicios: exercises.length,
+        coach_id: user.id, // Adicionar coach_id para RLS
       };
 
       if (workout?.id) {
