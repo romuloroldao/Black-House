@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +25,7 @@ import WorkoutForm from "./WorkoutForm";
 import WorkoutTemplates from "./WorkoutTemplates";
 
 const WorkoutManager = () => {
+  const { toast } = useToast();
   const [activeView, setActiveView] = useState("list");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedWorkout, setSelectedWorkout] = useState(null);
@@ -91,6 +93,31 @@ const WorkoutManager = () => {
     setActiveView("form");
   };
 
+  const handleDeleteWorkout = async (workoutId: string) => {
+    try {
+      const { error } = await supabase
+        .from('treinos')
+        .delete()
+        .eq('id', workoutId);
+
+      if (error) throw error;
+
+      toast({
+        title: "Treino deletado!",
+        description: "O treino foi removido com sucesso.",
+      });
+
+      carregarTreinos();
+    } catch (error) {
+      console.error('Erro ao deletar treino:', error);
+      toast({
+        title: "Erro ao deletar",
+        description: "Não foi possível remover o treino.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const renderWorkoutCard = (workout: any) => (
     <Card key={workout.id} className="group hover:shadow-elevated transition-smooth">
       <CardHeader className="pb-3">
@@ -121,7 +148,12 @@ const WorkoutManager = () => {
             <Button variant="ghost" size="icon" className="h-8 w-8">
               <Copy className="w-4 h-4" />
             </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-destructive/10 hover:text-destructive">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => handleDeleteWorkout(workout.id)}
+            >
               <Trash2 className="w-4 h-4" />
             </Button>
           </div>
@@ -289,7 +321,9 @@ const WorkoutManager = () => {
                 <div className="flex items-center space-x-2">
                   <Calendar className="w-5 h-5 text-accent" />
                   <div>
-                    <p className="text-2xl font-bold">{Math.round(workouts.reduce((acc, w) => acc + w.duration, 0) / workouts.length)}</p>
+                    <p className="text-2xl font-bold">
+                      {workouts.length > 0 ? Math.round(workouts.reduce((acc, w) => acc + w.duration, 0) / workouts.length) : 0}
+                    </p>
                     <p className="text-xs text-muted-foreground">Duração Média</p>
                   </div>
                 </div>

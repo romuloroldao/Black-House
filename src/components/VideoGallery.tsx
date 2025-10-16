@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +29,7 @@ import VideoForm from "./VideoForm";
 import LiveManager from "./LiveManager";
 
 const VideoGallery = () => {
+  const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("videos");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
@@ -109,6 +111,31 @@ const VideoGallery = () => {
     setShowVideoForm(true);
   };
 
+  const handleDeleteVideo = async (videoId: string) => {
+    try {
+      const { error } = await supabase
+        .from('videos')
+        .delete()
+        .eq('id', videoId);
+
+      if (error) throw error;
+
+      toast({
+        title: "Vídeo deletado!",
+        description: "O vídeo foi removido com sucesso.",
+      });
+
+      carregarVideos();
+    } catch (error) {
+      console.error('Erro ao deletar vídeo:', error);
+      toast({
+        title: "Erro ao deletar",
+        description: "Não foi possível remover o vídeo.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const renderVideoCard = (video: any) => {
     const visibilityInfo = visibilityLabels[video.visibility as keyof typeof visibilityLabels];
     const VisibilityIcon = visibilityInfo.icon;
@@ -164,7 +191,12 @@ const VideoGallery = () => {
               <Button variant="ghost" size="icon" className="h-8 w-8">
                 <Share2 className="w-4 h-4" />
               </Button>
-              <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-destructive/10 hover:text-destructive">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => handleDeleteVideo(video.id)}
+              >
                 <Trash2 className="w-4 h-4" />
               </Button>
             </div>

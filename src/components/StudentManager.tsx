@@ -168,6 +168,31 @@ const StudentManager = () => {
     }
   };
 
+  const handleDeleteStudent = async (studentId: string) => {
+    try {
+      const { error } = await supabase
+        .from('alunos')
+        .delete()
+        .eq('id', studentId);
+
+      if (error) throw error;
+
+      toast({
+        title: "Aluno deletado!",
+        description: "O aluno foi removido com sucesso.",
+      });
+
+      carregarAlunos();
+    } catch (error) {
+      console.error('Erro ao deletar aluno:', error);
+      toast({
+        title: "Erro ao deletar",
+        description: "Não foi possível remover o aluno.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'active': return 'bg-success text-white';
@@ -418,9 +443,13 @@ const StudentManager = () => {
                   <Edit className="w-4 h-4" />
                   Editar
                 </Button>
-                <Button variant="premium" size="sm" className="flex-1">
-                  <Target className="w-4 h-4" />
-                  Treino
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="hover:bg-destructive/10 hover:text-destructive"
+                  onClick={() => handleDeleteStudent(student.id)}
+                >
+                  <Trash2 className="w-4 h-4" />
                 </Button>
               </div>
             </CardContent>
