@@ -542,12 +542,12 @@ const AgendaManager = () => {
 
               <div className="space-y-2">
                 <Label htmlFor="aluno_id">Aluno</Label>
-                <Select value={formData.aluno_id} onValueChange={(value) => setFormData({ ...formData, aluno_id: value })}>
+                <Select value={formData.aluno_id || "none"} onValueChange={(value) => setFormData({ ...formData, aluno_id: value === "none" ? "" : value })}>
                   <SelectTrigger>
                     <SelectValue placeholder="Selecione um aluno (opcional)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Nenhum aluno</SelectItem>
+                    <SelectItem value="none">Nenhum aluno</SelectItem>
                     {alunos.map(aluno => (
                       <SelectItem key={aluno.id} value={aluno.id}>
                         {aluno.nome}
