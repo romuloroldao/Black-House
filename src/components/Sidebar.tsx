@@ -1,6 +1,9 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
+import { useToast } from "@/hooks/use-toast";
 import {
   LayoutDashboard,
   Users,
@@ -24,6 +27,27 @@ interface SidebarProps {
 }
 
 const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
+  const { signOut } = useAuth();
+  const navigate = useNavigate();
+  const { toast } = useToast();
+
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      toast({
+        title: "Logout realizado",
+        description: "Até logo!",
+      });
+      navigate('/auth');
+    } catch (error) {
+      toast({
+        title: "Erro ao fazer logout",
+        description: "Tente novamente",
+        variant: "destructive",
+      });
+    }
+  };
+
   const navigationItems = [
     {
       id: "dashboard",
@@ -162,17 +186,32 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
 
         {/* Bottom Navigation */}
         <div className="space-y-1">
-          {bottomItems.map((item) => (
-            <Button
-              key={item.id}
-              variant="ghost"
-              className="w-full justify-start text-left"
-              onClick={() => onTabChange(item.id)}
-            >
-              <item.icon className="w-5 h-5" />
-              {item.label}
-            </Button>
-          ))}
+          {bottomItems.map((item) => {
+            if (item.id === 'logout') {
+              return (
+                <Button
+                  key={item.id}
+                  variant="ghost"
+                  className="w-full justify-start text-left text-destructive hover:text-destructive hover:bg-destructive/10"
+                  onClick={handleLogout}
+                >
+                  <item.icon className="w-5 h-5" />
+                  {item.label}
+                </Button>
+              );
+            }
+            return (
+              <Button
+                key={item.id}
+                variant="ghost"
+                className="w-full justify-start text-left"
+                onClick={() => onTabChange(item.id)}
+              >
+                <item.icon className="w-5 h-5" />
+                {item.label}
+              </Button>
+            );
+          })}
         </div>
       </div>
     </div>
