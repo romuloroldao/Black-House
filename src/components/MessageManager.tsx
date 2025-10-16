@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Send, MessageSquare, Search } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Send, MessageSquare, Search, Plus, UserPlus } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -29,6 +30,12 @@ interface Mensagem {
   created_at: string;
 }
 
+interface Aluno {
+  id: string;
+  nome: string;
+  email: string;
+}
+
 const MessageManager = () => {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -39,6 +46,27 @@ const MessageManager = () => {
   const [loading, setLoading] = useState(true);
   const [enviando, setEnviando] = useState(false);
   const [busca, setBusca] = useState("");
+  const [alunos, setAlunos] = useState<Aluno[]>([]);
+  const [isNovaConversaOpen, setIsNovaConversaOpen] = useState(false);
+  const [buscaAluno, setBuscaAluno] = useState("");
+
+  // Carregar alunos
+  const carregarAlunos = async () => {
+    if (!user) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("alunos")
+        .select("id, nome, email")
+        .eq("coach_id", user.id)
+        .order("nome");
+
+      if (error) throw error;
+      setAlunos(data || []);
+    } catch (error) {
+      console.error("Erro ao carregar alunos:", error);
+    }
+  };
 
   // Carregar conversas
   const carregarConversas = async () => {
@@ -66,7 +94,7 @@ const MessageManager = () => {
             .from("alunos")
             .select("nome")
             .eq("id", conversa.aluno_id)
-            .single();
+            .maybeSingle();
 
           // Contar mensagens não lidas
           const { count } = await supabase
@@ -121,6 +149,69 @@ const MessageManager = () => {
       }
     } catch (error) {
       console.error("Erro ao carregar mensagens:", error);
+    }
+  };
+
+  // Iniciar nova conversa
+  const iniciarNovaConversa = async (alunoId: string) => {
+    if (!user) return;
+
+    try {
+      // Verificar se já existe conversa
+      const { data: conversaExistente } = await supabase
+        .from("conversas")
+        .select("id")
+        .eq("coach_id", user.id)
+        .eq("aluno_id", alunoId)
+        .maybeSingle();
+
+      if (conversaExistente) {
+        // Se já existe, apenas selecionar
+        const conversa = conversas.find(c => c.id === conversaExistente.id);
+        if (conversa) {
+          setConversaSelecionada(conversa);
+        }
+      } else {
+        // Criar nova conversa
+        const { data, error } = await supabase
+          .from("conversas")
+          .insert({
+            coach_id: user.id,
+            aluno_id: alunoId,
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        toast({
+          title: "Conversa iniciada!",
+          description: "Agora você pode enviar mensagens",
+        });
+
+        // Recarregar conversas e selecionar a nova
+        await carregarConversas();
+        
+        // Buscar nome do aluno para a nova conversa
+        const aluno = alunos.find(a => a.id === alunoId);
+        if (data && aluno) {
+          setConversaSelecionada({
+            ...data,
+            aluno_nome: aluno.nome,
+            mensagens_nao_lidas: 0,
+          });
+        }
+      }
+
+      setIsNovaConversaOpen(false);
+      setBuscaAluno("");
+    } catch (error) {
+      console.error("Erro ao iniciar conversa:", error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível iniciar a conversa",
+        variant: "destructive",
+      });
     }
   };
 
@@ -187,6 +278,7 @@ const MessageManager = () => {
   }, [conversaSelecionada]);
 
   useEffect(() => {
+    carregarAlunos();
     carregarConversas();
   }, [user]);
 
@@ -198,6 +290,11 @@ const MessageManager = () => {
 
   const conversasFiltradas = conversas.filter((c) =>
     c.aluno_nome?.toLowerCase().includes(busca.toLowerCase())
+  );
+
+  const alunosFiltrados = alunos.filter((a) =>
+    a.nome.toLowerCase().includes(buscaAluno.toLowerCase()) &&
+    !conversas.some(c => c.aluno_id === a.id)
   );
 
   if (loading) {
@@ -213,14 +310,70 @@ const MessageManager = () => {
       {/* Lista de Conversas */}
       <Card className="lg:col-span-1">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <MessageSquare className="w-5 h-5" />
-            Conversas
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <MessageSquare className="w-5 h-5" />
+              Conversas
+            </CardTitle>
+            <Dialog open={isNovaConversaOpen} onOpenChange={setIsNovaConversaOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm" variant="outline">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Nova
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Iniciar Nova Conversa</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Buscar aluno..."
+                      value={buscaAluno}
+                      onChange={(e) => setBuscaAluno(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                  <ScrollArea className="h-[300px]">
+                    {alunosFiltrados.length === 0 ? (
+                      <div className="text-center text-muted-foreground py-8">
+                        {buscaAluno ? "Nenhum aluno encontrado" : "Todos os alunos já têm conversas"}
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {alunosFiltrados.map((aluno) => (
+                          <button
+                            key={aluno.id}
+                            onClick={() => iniciarNovaConversa(aluno.id)}
+                            className="w-full p-3 flex items-center gap-3 hover:bg-muted rounded-lg transition-colors"
+                          >
+                            <Avatar>
+                              <AvatarFallback>
+                                {aluno.nome.charAt(0)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="flex-1 text-left">
+                              <p className="font-medium">{aluno.nome}</p>
+                              <p className="text-sm text-muted-foreground">
+                                {aluno.email}
+                              </p>
+                            </div>
+                            <UserPlus className="w-4 h-4 text-muted-foreground" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
           <div className="relative mt-4">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
-              placeholder="Buscar aluno..."
+              placeholder="Buscar conversa..."
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
               className="pl-10"
