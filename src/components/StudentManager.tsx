@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useToast } from "@/hooks/use-toast";
 import {
   Select,
   SelectContent,
@@ -57,11 +58,24 @@ interface Student {
 }
 
 const StudentManager = () => {
+  const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterGoal, setFilterGoal] = useState("all");
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  
+  // Form states
+  const [newStudent, setNewStudent] = useState({
+    nome: "",
+    email: "",
+    telefone: "",
+    objetivo: "",
+    plano: "",
+    data_nascimento: "",
+    peso: ""
+  });
 
   useEffect(() => {
     carregarAlunos();
@@ -80,16 +94,16 @@ const StudentManager = () => {
         id: aluno.id,
         name: aluno.nome || 'Sem nome',
         email: aluno.email,
-        phone: '(11) 99999-9999', // Placeholder - adicionar campo no banco se necessário
+        phone: '(11) 99999-9999',
         avatar: '/api/placeholder/60/60',
-        status: 'active', // Placeholder - adicionar campo no banco se necessário
-        plan: 'Básico', // Placeholder - adicionar campo no banco se necessário
+        status: 'active',
+        plan: 'Básico',
         goal: aluno.objetivo || 'Sem objetivo definido',
         joinDate: new Date(aluno.created_at).toLocaleDateString('pt-BR'),
-        lastWorkout: 'Não registrado', // Placeholder - implementar quando houver treinos
-        progress: 0, // Placeholder - calcular baseado em treinos/dietas
-        payment: 'paid', // Placeholder - adicionar campo no banco se necessário
-        tags: [], // Placeholder - adicionar campo no banco se necessário
+        lastWorkout: 'Não registrado',
+        progress: 0,
+        payment: 'paid',
+        tags: [],
         nextPayment: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR'),
         data_nascimento: aluno.data_nascimento || undefined,
         peso: aluno.peso || undefined
@@ -100,6 +114,57 @@ const StudentManager = () => {
       console.error('Erro ao carregar alunos:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSaveStudent = async () => {
+    try {
+      if (!newStudent.nome || !newStudent.email) {
+        toast({
+          title: "Erro",
+          description: "Nome e email são obrigatórios",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const { error } = await supabase
+        .from('alunos')
+        .insert([{
+          nome: newStudent.nome,
+          email: newStudent.email,
+          objetivo: newStudent.objetivo || null,
+          data_nascimento: newStudent.data_nascimento || null,
+          peso: newStudent.peso ? parseInt(newStudent.peso) : null,
+        }]);
+
+      if (error) throw error;
+
+      toast({
+        title: "Sucesso!",
+        description: "Aluno adicionado com sucesso",
+      });
+
+      // Reset form
+      setNewStudent({
+        nome: "",
+        email: "",
+        telefone: "",
+        objetivo: "",
+        plano: "",
+        data_nascimento: "",
+        peso: ""
+      });
+      
+      setIsDialogOpen(false);
+      carregarAlunos();
+    } catch (error) {
+      console.error('Erro ao salvar aluno:', error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível adicionar o aluno",
+        variant: "destructive",
+      });
     }
   };
 
@@ -163,7 +228,7 @@ const StudentManager = () => {
             Gerencie todos os seus alunos em um só lugar
           </p>
         </div>
-        <Dialog>
+        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
             <Button variant="premium" size="lg">
               <UserPlus className="w-5 h-5" />
@@ -175,35 +240,52 @@ const StudentManager = () => {
               <DialogTitle>Adicionar Novo Aluno</DialogTitle>
             </DialogHeader>
             <div className="grid grid-cols-2 gap-4 py-4">
-              <Input placeholder="Nome completo" />
-              <Input placeholder="Email" type="email" />
-              <Input placeholder="Telefone" />
-              <Select>
+              <Input 
+                placeholder="Nome completo *" 
+                value={newStudent.nome}
+                onChange={(e) => setNewStudent({...newStudent, nome: e.target.value})}
+              />
+              <Input 
+                placeholder="Email *" 
+                type="email"
+                value={newStudent.email}
+                onChange={(e) => setNewStudent({...newStudent, email: e.target.value})}
+              />
+              <Select
+                value={newStudent.objetivo}
+                onValueChange={(value) => setNewStudent({...newStudent, objetivo: value})}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Objetivo" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="emagrecimento">Emagrecimento</SelectItem>
-                  <SelectItem value="hipertrofia">Hipertrofia</SelectItem>
-                  <SelectItem value="condicionamento">Condicionamento</SelectItem>
-                  <SelectItem value="reabilitacao">Reabilitação</SelectItem>
+                  <SelectItem value="Emagrecimento">Emagrecimento</SelectItem>
+                  <SelectItem value="Hipertrofia">Hipertrofia</SelectItem>
+                  <SelectItem value="Condicionamento">Condicionamento</SelectItem>
+                  <SelectItem value="Reabilitação">Reabilitação</SelectItem>
                 </SelectContent>
               </Select>
-              <Select>
-                <SelectTrigger>
-                  <SelectValue placeholder="Plano" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="basico">Básico</SelectItem>
-                  <SelectItem value="premium">Premium</SelectItem>
-                  <SelectItem value="vip">VIP</SelectItem>
-                </SelectContent>
-              </Select>
-              <Input placeholder="Data de nascimento" type="date" />
+              <Input 
+                placeholder="Peso (kg)" 
+                type="number"
+                value={newStudent.peso}
+                onChange={(e) => setNewStudent({...newStudent, peso: e.target.value})}
+              />
+              <Input 
+                placeholder="Data de nascimento" 
+                type="date"
+                value={newStudent.data_nascimento}
+                onChange={(e) => setNewStudent({...newStudent, data_nascimento: e.target.value})}
+                className="col-span-2"
+              />
             </div>
             <div className="flex justify-end gap-2">
-              <Button variant="outline">Cancelar</Button>
-              <Button variant="premium">Salvar Aluno</Button>
+              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button variant="premium" onClick={handleSaveStudent}>
+                Salvar Aluno
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
