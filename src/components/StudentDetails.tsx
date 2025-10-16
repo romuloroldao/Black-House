@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell } from "lucide-react";
+import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -338,6 +338,62 @@ export default function StudentDetails() {
     }
   };
 
+  const handleIniciarConversa = async () => {
+    if (!id) return;
+
+    try {
+      setSaving(true);
+
+      // Obter o ID do usuário autenticado (coach)
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        toast({
+          title: "Erro",
+          description: "Você precisa estar autenticado",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Verificar se já existe uma conversa
+      const { data: conversaExistente } = await supabase
+        .from("conversas")
+        .select("id")
+        .eq("coach_id", user.id)
+        .eq("aluno_id", id)
+        .single();
+
+      if (!conversaExistente) {
+        // Criar nova conversa
+        const { error } = await supabase
+          .from("conversas")
+          .insert({
+            coach_id: user.id,
+            aluno_id: id,
+          });
+
+        if (error) throw error;
+      }
+
+      // Redirecionar para mensagens
+      navigate("/?tab=messages");
+      
+      toast({
+        title: "Sucesso!",
+        description: "Redirecionando para mensagens...",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Erro ao iniciar conversa",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -373,6 +429,10 @@ export default function StudentDetails() {
             <h1 className="text-3xl font-bold">{student.nome}</h1>
             <p className="text-muted-foreground">{student.email}</p>
           </div>
+          <Button onClick={handleIniciarConversa} disabled={saving}>
+            <MessageSquare className="mr-2 h-4 w-4" />
+            Enviar Mensagem
+          </Button>
         </div>
       </div>
 

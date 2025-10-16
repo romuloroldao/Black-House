@@ -128,6 +128,36 @@ export type Database = {
           },
         ]
       }
+      conversas: {
+        Row: {
+          aluno_id: string
+          coach_id: string
+          created_at: string
+          id: string
+          ultima_mensagem: string | null
+          ultima_mensagem_em: string | null
+          updated_at: string
+        }
+        Insert: {
+          aluno_id: string
+          coach_id: string
+          created_at?: string
+          id?: string
+          ultima_mensagem?: string | null
+          ultima_mensagem_em?: string | null
+          updated_at?: string
+        }
+        Update: {
+          aluno_id?: string
+          coach_id?: string
+          created_at?: string
+          id?: string
+          ultima_mensagem?: string | null
+          ultima_mensagem_em?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       dietas: {
         Row: {
           aluno_id: string
@@ -337,6 +367,41 @@ export type Database = {
           youtube_url?: string | null
         }
         Relationships: []
+      }
+      mensagens: {
+        Row: {
+          conteudo: string
+          conversa_id: string
+          created_at: string
+          id: string
+          lida: boolean | null
+          remetente_id: string
+        }
+        Insert: {
+          conteudo: string
+          conversa_id: string
+          created_at?: string
+          id?: string
+          lida?: boolean | null
+          remetente_id: string
+        }
+        Update: {
+          conteudo?: string
+          conversa_id?: string
+          created_at?: string
+          id?: string
+          lida?: boolean | null
+          remetente_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mensagens_conversa_id_fkey"
+            columns: ["conversa_id"]
+            isOneToOne: false
+            referencedRelation: "conversas"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       treinos: {
         Row: {
