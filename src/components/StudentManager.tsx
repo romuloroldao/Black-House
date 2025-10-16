@@ -65,6 +65,7 @@ const StudentManager = () => {
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   
   // Form states
   const [newStudent, setNewStudent] = useState({
@@ -128,22 +129,44 @@ const StudentManager = () => {
         return;
       }
 
-      const { error } = await supabase
-        .from('alunos')
-        .insert([{
-          nome: newStudent.nome,
-          email: newStudent.email,
-          objetivo: newStudent.objetivo || null,
-          data_nascimento: newStudent.data_nascimento || null,
-          peso: newStudent.peso ? parseInt(newStudent.peso) : null,
-        }]);
+      if (editingStudent) {
+        // Update existing student
+        const { error } = await supabase
+          .from('alunos')
+          .update({
+            nome: newStudent.nome,
+            email: newStudent.email,
+            objetivo: newStudent.objetivo || null,
+            data_nascimento: newStudent.data_nascimento || null,
+            peso: newStudent.peso ? parseInt(newStudent.peso) : null,
+          })
+          .eq('id', editingStudent.id);
 
-      if (error) throw error;
+        if (error) throw error;
 
-      toast({
-        title: "Sucesso!",
-        description: "Aluno adicionado com sucesso",
-      });
+        toast({
+          title: "Sucesso!",
+          description: "Aluno atualizado com sucesso",
+        });
+      } else {
+        // Insert new student
+        const { error } = await supabase
+          .from('alunos')
+          .insert([{
+            nome: newStudent.nome,
+            email: newStudent.email,
+            objetivo: newStudent.objetivo || null,
+            data_nascimento: newStudent.data_nascimento || null,
+            peso: newStudent.peso ? parseInt(newStudent.peso) : null,
+          }]);
+
+        if (error) throw error;
+
+        toast({
+          title: "Sucesso!",
+          description: "Aluno adicionado com sucesso",
+        });
+      }
 
       // Reset form
       setNewStudent({
@@ -156,16 +179,31 @@ const StudentManager = () => {
         peso: ""
       });
       
+      setEditingStudent(null);
       setIsDialogOpen(false);
       carregarAlunos();
     } catch (error) {
       console.error('Erro ao salvar aluno:', error);
       toast({
         title: "Erro",
-        description: "Não foi possível adicionar o aluno",
+        description: editingStudent ? "Não foi possível atualizar o aluno" : "Não foi possível adicionar o aluno",
         variant: "destructive",
       });
     }
+  };
+
+  const handleEditStudent = (student: Student) => {
+    setEditingStudent(student);
+    setNewStudent({
+      nome: student.name,
+      email: student.email,
+      telefone: student.phone || "",
+      objetivo: student.goal || "",
+      plano: student.plan || "",
+      data_nascimento: student.data_nascimento || "",
+      peso: student.peso?.toString() || ""
+    });
+    setIsDialogOpen(true);
   };
 
   const handleDeleteStudent = async (studentId: string) => {
@@ -253,7 +291,21 @@ const StudentManager = () => {
             Gerencie todos os seus alunos em um só lugar
           </p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <Dialog open={isDialogOpen} onOpenChange={(open) => {
+          setIsDialogOpen(open);
+          if (!open) {
+            setEditingStudent(null);
+            setNewStudent({
+              nome: "",
+              email: "",
+              telefone: "",
+              objetivo: "",
+              plano: "",
+              data_nascimento: "",
+              peso: ""
+            });
+          }
+        }}>
           <DialogTrigger asChild>
             <Button variant="premium" size="lg">
               <UserPlus className="w-5 h-5" />
@@ -262,7 +314,7 @@ const StudentManager = () => {
           </DialogTrigger>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle>Adicionar Novo Aluno</DialogTitle>
+              <DialogTitle>{editingStudent ? "Editar Aluno" : "Adicionar Novo Aluno"}</DialogTitle>
             </DialogHeader>
             <div className="grid grid-cols-2 gap-4 py-4">
               <Input 
@@ -305,11 +357,14 @@ const StudentManager = () => {
               />
             </div>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+              <Button variant="outline" onClick={() => {
+                setIsDialogOpen(false);
+                setEditingStudent(null);
+              }}>
                 Cancelar
               </Button>
               <Button variant="premium" onClick={handleSaveStudent}>
-                Salvar Aluno
+                {editingStudent ? "Atualizar Aluno" : "Salvar Aluno"}
               </Button>
             </div>
           </DialogContent>
@@ -439,7 +494,12 @@ const StudentManager = () => {
                   <MessageSquare className="w-4 h-4" />
                   Chat
                 </Button>
-                <Button variant="outline" size="sm" className="flex-1">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="flex-1"
+                  onClick={() => handleEditStudent(student)}
+                >
                   <Edit className="w-4 h-4" />
                   Editar
                 </Button>
