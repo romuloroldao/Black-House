@@ -4,10 +4,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Edit, Loader2, Save } from "lucide-react";
+import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface Student {
   id: string;
@@ -62,10 +65,23 @@ export default function StudentDetails() {
   const [dieta, setDieta] = useState<Dieta | null>(null);
   const [fotos, setFotos] = useState<Foto[]>([]);
   const [selectedFoto, setSelectedFoto] = useState<string | null>(null);
+  
+  // Estados para atribuir treino
+  const [treinosDisponiveis, setTreinosDisponiveis] = useState<Treino[]>([]);
+  const [isAtribuirTreinoOpen, setIsAtribuirTreinoOpen] = useState(false);
+  const [treinoSelecionado, setTreinoSelecionado] = useState<string>("");
+  
+  // Estados para criar dieta
+  const [isCriarDietaOpen, setIsCriarDietaOpen] = useState(false);
+  const [novaDieta, setNovaDieta] = useState({
+    nome: "",
+    objetivo: "",
+  });
 
   useEffect(() => {
     if (id) {
       carregarDadosAluno();
+      carregarTreinosDisponiveis();
     }
   }, [id]);
 
@@ -168,8 +184,8 @@ export default function StudentDetails() {
     try {
       setSaving(true);
 
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Usuário não autenticado");
+      // Usar um coach_id temporário (pode ser substituído quando autenticação for implementada)
+      const coachId = "00000000-0000-0000-0000-000000000000";
 
       if (feedbackId) {
         // Atualizar feedback existente
@@ -185,7 +201,7 @@ export default function StudentDetails() {
           .from("feedbacks_alunos")
           .insert({
             aluno_id: id,
-            coach_id: user.id,
+            coach_id: coachId,
             feedback,
           })
           .select()
@@ -202,6 +218,118 @@ export default function StudentDetails() {
     } catch (error: any) {
       toast({
         title: "Erro ao salvar feedback",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const carregarTreinosDisponiveis = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("treinos")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      if (data) setTreinosDisponiveis(data);
+    } catch (error: any) {
+      console.error("Erro ao carregar treinos:", error);
+    }
+  };
+
+  const handleAtribuirTreino = async () => {
+    if (!treinoSelecionado) {
+      toast({
+        title: "Atenção",
+        description: "Selecione um treino antes de atribuir",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setSaving(true);
+
+      // Desativar treinos anteriores
+      await supabase
+        .from("alunos_treinos")
+        .update({ ativo: false })
+        .eq("aluno_id", id);
+
+      // Atribuir novo treino
+      const { error } = await supabase
+        .from("alunos_treinos")
+        .insert({
+          aluno_id: id,
+          treino_id: treinoSelecionado,
+          ativo: true,
+        });
+
+      if (error) throw error;
+
+      toast({
+        title: "Sucesso!",
+        description: "Treino atribuído com sucesso",
+      });
+
+      setIsAtribuirTreinoOpen(false);
+      setTreinoSelecionado("");
+      carregarDadosAluno();
+    } catch (error: any) {
+      toast({
+        title: "Erro ao atribuir treino",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCriarDieta = async () => {
+    if (!novaDieta.nome) {
+      toast({
+        title: "Atenção",
+        description: "Digite um nome para a dieta",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setSaving(true);
+
+      const { data, error } = await supabase
+        .from("dietas")
+        .insert({
+          nome: novaDieta.nome,
+          objetivo: novaDieta.objetivo || null,
+          aluno_id: id,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      toast({
+        title: "Sucesso!",
+        description: "Dieta criada com sucesso",
+      });
+
+      setIsCriarDietaOpen(false);
+      setNovaDieta({ nome: "", objetivo: "" });
+      carregarDadosAluno();
+      
+      // Redirecionar para a página de edição da dieta
+      if (data) {
+        navigate(`/dieta/${data.id}`);
+      }
+    } catch (error: any) {
+      toast({
+        title: "Erro ao criar dieta",
         description: error.message,
         variant: "destructive",
       });
@@ -317,15 +445,102 @@ export default function StudentDetails() {
                   <Badge variant="outline">{treino.dificuldade}</Badge>
                   <Badge variant="outline">{treino.duracao} min</Badge>
                 </div>
-                <Button className="w-full" variant="outline">
-                  <Edit className="mr-2 h-4 w-4" />
-                  Editar Treino
-                </Button>
+                <div className="flex gap-2">
+                  <Dialog open={isAtribuirTreinoOpen} onOpenChange={setIsAtribuirTreinoOpen}>
+                    <DialogTrigger asChild>
+                      <Button className="flex-1" variant="outline">
+                        <Dumbbell className="mr-2 h-4 w-4" />
+                        Alterar Treino
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Atribuir Treino</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                          <Label>Selecione um treino</Label>
+                          <Select value={treinoSelecionado} onValueChange={setTreinoSelecionado}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Escolha um treino..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {treinosDisponiveis.map((t) => (
+                                <SelectItem key={t.id} value={t.id}>
+                                  {t.nome} - {t.categoria} ({t.dificuldade})
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex gap-2 justify-end">
+                          <Button variant="outline" onClick={() => setIsAtribuirTreinoOpen(false)}>
+                            Cancelar
+                          </Button>
+                          <Button onClick={handleAtribuirTreino} disabled={saving}>
+                            {saving ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Atribuindo...
+                              </>
+                            ) : (
+                              "Atribuir"
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </div>
               </div>
             ) : (
               <div className="text-center py-8">
                 <p className="text-muted-foreground mb-4">Nenhum treino atribuído</p>
-                <Button variant="outline">Atribuir Treino</Button>
+                <Dialog open={isAtribuirTreinoOpen} onOpenChange={setIsAtribuirTreinoOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline">
+                      <Dumbbell className="mr-2 h-4 w-4" />
+                      Atribuir Treino
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Atribuir Treino</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                      <div className="space-y-2">
+                        <Label>Selecione um treino</Label>
+                        <Select value={treinoSelecionado} onValueChange={setTreinoSelecionado}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Escolha um treino..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {treinosDisponiveis.map((t) => (
+                              <SelectItem key={t.id} value={t.id}>
+                                {t.nome} - {t.categoria} ({t.dificuldade})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex gap-2 justify-end">
+                        <Button variant="outline" onClick={() => setIsAtribuirTreinoOpen(false)}>
+                          Cancelar
+                        </Button>
+                        <Button onClick={handleAtribuirTreino} disabled={saving}>
+                          {saving ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Atribuindo...
+                            </>
+                          ) : (
+                            "Atribuir"
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
               </div>
             )}
           </CardContent>
@@ -348,15 +563,126 @@ export default function StudentDetails() {
                     Criada em: {new Date(dieta.data_criacao).toLocaleDateString('pt-BR')}
                   </p>
                 </div>
-                <Button className="w-full" variant="outline" onClick={() => navigate(`/dieta/${dieta.id}`)}>
-                  <Edit className="mr-2 h-4 w-4" />
-                  Editar Dieta
-                </Button>
+                <div className="flex gap-2">
+                  <Button className="flex-1" variant="outline" onClick={() => navigate(`/dieta/${dieta.id}`)}>
+                    <Edit className="mr-2 h-4 w-4" />
+                    Editar Dieta
+                  </Button>
+                  <Dialog open={isCriarDietaOpen} onOpenChange={setIsCriarDietaOpen}>
+                    <DialogTrigger asChild>
+                      <Button className="flex-1" variant="outline">
+                        <Plus className="mr-2 h-4 w-4" />
+                        Nova Dieta
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Criar Nova Dieta</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                          <Label>Nome da Dieta *</Label>
+                          <Input
+                            placeholder="Ex: Dieta para Emagrecimento"
+                            value={novaDieta.nome}
+                            onChange={(e) => setNovaDieta({ ...novaDieta, nome: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Objetivo</Label>
+                          <Select
+                            value={novaDieta.objetivo}
+                            onValueChange={(value) => setNovaDieta({ ...novaDieta, objetivo: value })}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Selecione o objetivo..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Emagrecimento">Emagrecimento</SelectItem>
+                              <SelectItem value="Hipertrofia">Hipertrofia</SelectItem>
+                              <SelectItem value="Manutenção">Manutenção</SelectItem>
+                              <SelectItem value="Ganho de massa">Ganho de massa</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex gap-2 justify-end">
+                          <Button variant="outline" onClick={() => setIsCriarDietaOpen(false)}>
+                            Cancelar
+                          </Button>
+                          <Button onClick={handleCriarDieta} disabled={saving}>
+                            {saving ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Criando...
+                              </>
+                            ) : (
+                              "Criar Dieta"
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </div>
               </div>
             ) : (
               <div className="text-center py-8">
                 <p className="text-muted-foreground mb-4">Nenhuma dieta atribuída</p>
-                <Button variant="outline">Criar Dieta</Button>
+                <Dialog open={isCriarDietaOpen} onOpenChange={setIsCriarDietaOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Criar Dieta
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Criar Nova Dieta</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                      <div className="space-y-2">
+                        <Label>Nome da Dieta *</Label>
+                        <Input
+                          placeholder="Ex: Dieta para Emagrecimento"
+                          value={novaDieta.nome}
+                          onChange={(e) => setNovaDieta({ ...novaDieta, nome: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Objetivo</Label>
+                        <Select
+                          value={novaDieta.objetivo}
+                          onValueChange={(value) => setNovaDieta({ ...novaDieta, objetivo: value })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione o objetivo..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Emagrecimento">Emagrecimento</SelectItem>
+                            <SelectItem value="Hipertrofia">Hipertrofia</SelectItem>
+                            <SelectItem value="Manutenção">Manutenção</SelectItem>
+                            <SelectItem value="Ganho de massa">Ganho de massa</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex gap-2 justify-end">
+                        <Button variant="outline" onClick={() => setIsCriarDietaOpen(false)}>
+                          Cancelar
+                        </Button>
+                        <Button onClick={handleCriarDieta} disabled={saving}>
+                          {saving ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Criando...
+                            </>
+                          ) : (
+                            "Criar Dieta"
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
               </div>
             )}
           </CardContent>
