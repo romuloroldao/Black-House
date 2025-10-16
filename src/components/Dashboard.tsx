@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,35 +21,94 @@ import {
   Play,
   Heart,
   Award,
-  Target
+  Target,
+  Video
 } from "lucide-react";
 
-const Dashboard = () => {
-  const [totalAlunos, setTotalAlunos] = useState(0);
-  const [totalDietas, setTotalDietas] = useState(0);
+interface DashboardProps {
+  onTabChange?: (tab: string) => void;
+}
+
+const Dashboard = ({ onTabChange }: DashboardProps) => {
+  const { user } = useAuth();
+  const [stats, setStats] = useState({
+    totalAlunos: 0,
+    totalDietas: 0,
+    totalTreinos: 0,
+    totalVideos: 0,
+    mensagensNaoLidas: 0,
+  });
+  const [recentStudents, setRecentStudents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     carregarEstatisticas();
-  }, []);
+  }, [user]);
 
   const carregarEstatisticas = async () => {
+    if (!user) return;
+    
     try {
       // Carregar total de alunos
-      const { count: countAlunos, error: errorAlunos } = await supabase
+      const { count: countAlunos } = await supabase
         .from('alunos')
-        .select('*', { count: 'exact', head: true });
-
-      if (errorAlunos) throw errorAlunos;
-      setTotalAlunos(countAlunos || 0);
+        .select('*', { count: 'exact', head: true })
+        .eq('coach_id', user.id);
 
       // Carregar total de dietas
-      const { count: countDietas, error: errorDietas } = await supabase
+      const { count: countDietas } = await supabase
         .from('dietas')
         .select('*', { count: 'exact', head: true });
 
-      if (errorDietas) throw errorDietas;
-      setTotalDietas(countDietas || 0);
+      // Carregar total de treinos
+      const { count: countTreinos } = await supabase
+        .from('treinos')
+        .select('*', { count: 'exact', head: true })
+        .eq('coach_id', user.id);
+
+      // Carregar total de vídeos
+      const { count: countVideos } = await supabase
+        .from('videos')
+        .select('*', { count: 'exact', head: true })
+        .eq('coach_id', user.id);
+
+      // Carregar mensagens não lidas
+      const { data: conversas } = await supabase
+        .from('conversas')
+        .select('id')
+        .eq('coach_id', user.id);
+
+      let totalMensagensNaoLidas = 0;
+      if (conversas) {
+        for (const conversa of conversas) {
+          const { count } = await supabase
+            .from('mensagens')
+            .select('*', { count: 'exact', head: true })
+            .eq('conversa_id', conversa.id)
+            .eq('lida', false)
+            .neq('remetente_id', user.id);
+          
+          totalMensagensNaoLidas += count || 0;
+        }
+      }
+
+      // Carregar alunos recentes
+      const { data: alunosRecentes } = await supabase
+        .from('alunos')
+        .select('id, nome, email, created_at')
+        .eq('coach_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      setStats({
+        totalAlunos: countAlunos || 0,
+        totalDietas: countDietas || 0,
+        totalTreinos: countTreinos || 0,
+        totalVideos: countVideos || 0,
+        mensagensNaoLidas: totalMensagensNaoLidas,
+      });
+
+      setRecentStudents(alunosRecentes || []);
     } catch (error) {
       console.error('Erro ao carregar estatísticas:', error);
     } finally {
@@ -56,90 +116,87 @@ const Dashboard = () => {
     }
   };
 
-  const stats = [
+  const statsCards = [
     {
       title: "Alunos Ativos",
-      value: loading ? "..." : totalAlunos.toString(),
-      change: "+12%",
+      value: loading ? "..." : stats.totalAlunos.toString(),
+      change: stats.totalAlunos > 0 ? "+12%" : "0%",
       icon: Users,
       color: "text-primary",
+      onClick: () => onTabChange?.('students'),
     },
     {
-      title: "Dietas Criadas",
-      value: loading ? "..." : totalDietas.toString(),
-      change: "+8%",
+      title: "Treinos Criados",
+      value: loading ? "..." : stats.totalTreinos.toString(),
+      change: stats.totalTreinos > 0 ? "+8%" : "0%",
       icon: Dumbbell,
       color: "text-success",
+      onClick: () => onTabChange?.('workouts'),
     },
     {
       title: "Mensagens Pendentes",
-      value: "8",
-      change: "-3",
+      value: loading ? "..." : stats.mensagensNaoLidas.toString(),
+      change: stats.mensagensNaoLidas > 0 ? `${stats.mensagensNaoLidas}` : "0",
       icon: MessageSquare,
       color: "text-warning",
+      onClick: () => onTabChange?.('messages'),
     },
     {
-      title: "Faturamento Mensal",
-      value: "R$ 18.500",
-      change: "+23%",
-      icon: DollarSign,
+      title: "Vídeos Disponíveis",
+      value: loading ? "..." : stats.totalVideos.toString(),
+      change: stats.totalVideos > 0 ? "+5%" : "0%",
+      icon: Video,
       color: "text-primary",
+      onClick: () => onTabChange?.('videos'),
     },
   ];
 
-  const recentActivities = [
-    {
-      id: 1,
-      student: "Maria Silva",
-      action: "completou o treino",
-      time: "há 15 min",
-      avatar: "/api/placeholder/40/40",
-      type: "workout"
-    },
-    {
-      id: 2,
-      student: "João Santos",
-      action: "enviou uma dúvida",
-      time: "há 32 min",
-      avatar: "/api/placeholder/40/40",
-      type: "message"
-    },
-    {
-      id: 3,
-      student: "Ana Costa",
-      action: "fez check-in semanal",
-      time: "há 1h",
-      avatar: "/api/placeholder/40/40",
-      type: "checkin"
-    },
-    {
-      id: 4,
-      student: "Pedro Lima",
-      action: "atingiu meta de 30 dias",
-      time: "há 2h",
-      avatar: "/api/placeholder/40/40",
-      type: "achievement"
-    },
-  ];
+  const recentActivities = recentStudents.map((student, index) => ({
+    id: student.id,
+    student: student.nome,
+    action: "foi adicionado(a) ao sistema",
+    time: formatTimeAgo(new Date(student.created_at)),
+    avatar: "",
+    type: "student"
+  }));
+
+  const formatTimeAgo = (date: Date) => {
+    const now = new Date();
+    const diffInMs = now.getTime() - date.getTime();
+    const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
+    const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
+    const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+
+    if (diffInMinutes < 60) {
+      return `há ${diffInMinutes} min`;
+    } else if (diffInHours < 24) {
+      return `há ${diffInHours}h`;
+    } else {
+      return `há ${diffInDays} dias`;
+    }
+  };
 
   const upcomingTasks = [
     {
       id: 1,
-      title: "Reavaliação - Maria Silva",
-      time: "14:00",
-      type: "assessment"
+      title: `${stats.totalAlunos} alunos cadastrados`,
+      time: "Gerenciar",
+      type: "assessment",
+      onClick: () => onTabChange?.('students'),
     },
     {
       id: 2,
-      title: "Pagamento vencido - João Santos",
-      time: "Venceu ontem",
-      type: "payment"
+      title: `${stats.mensagensNaoLidas} mensagens não lidas`,
+      time: "Responder",
+      type: "message",
+      onClick: () => onTabChange?.('messages'),
     },
     {
       id: 3,
-      title: "Live de Nutrição",
-      time: "19:00",
-      type: "live"
+      title: `${stats.totalVideos} vídeos disponíveis`,
+      time: "Ver galeria",
+      type: "live",
+      onClick: () => onTabChange?.('videos'),
     }
   ];
 
@@ -149,15 +206,17 @@ const Dashboard = () => {
       case 'message': return <MessageSquare className="w-4 h-4 text-warning" />;
       case 'checkin': return <Target className="w-4 h-4 text-success" />;
       case 'achievement': return <Award className="w-4 h-4 text-primary" />;
+      case 'student': return <Users className="w-4 h-4 text-success" />;
       default: return <Users className="w-4 h-4" />;
     }
   };
 
   const getTaskIcon = (type: string) => {
     switch (type) {
-      case 'assessment': return <Calendar className="w-4 h-4 text-primary" />;
+      case 'assessment': return <Users className="w-4 h-4 text-primary" />;
       case 'payment': return <DollarSign className="w-4 h-4 text-destructive" />;
-      case 'live': return <Play className="w-4 h-4 text-success" />;
+      case 'live': return <Video className="w-4 h-4 text-success" />;
+      case 'message': return <MessageSquare className="w-4 h-4 text-warning" />;
       default: return <Bell className="w-4 h-4" />;
     }
   };
@@ -204,8 +263,12 @@ const Dashboard = () => {
 
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          {stats.map((stat, index) => (
-            <Card key={index} className="bg-gradient-card border-0 shadow-card hover:shadow-elevated transition-smooth">
+          {statsCards.map((stat, index) => (
+            <Card 
+              key={index} 
+              className="bg-gradient-card border-0 shadow-card hover:shadow-elevated transition-smooth cursor-pointer"
+              onClick={stat.onClick}
+            >
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
@@ -240,24 +303,31 @@ const Dashboard = () => {
                 </Button>
               </CardHeader>
               <CardContent className="space-y-4">
-                {recentActivities.map((activity) => (
-                  <div key={activity.id} className="flex items-center gap-4 p-3 rounded-lg hover:bg-muted/50 transition-smooth">
-                    <Avatar className="w-10 h-10">
-                      <AvatarImage src={activity.avatar} />
-                      <AvatarFallback>{activity.student.split(' ').map(n => n[0]).join('')}</AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1">
-                      <p className="text-sm">
-                        <span className="font-medium">{activity.student}</span>{' '}
-                        <span className="text-muted-foreground">{activity.action}</span>
-                      </p>
-                      <p className="text-xs text-muted-foreground">{activity.time}</p>
+                {recentActivities.length > 0 ? (
+                  recentActivities.map((activity) => (
+                    <div key={activity.id} className="flex items-center gap-4 p-3 rounded-lg hover:bg-muted/50 transition-smooth">
+                      <Avatar className="w-10 h-10">
+                        <AvatarImage src={activity.avatar} />
+                        <AvatarFallback>{activity.student.split(' ').map((n: string) => n[0]).join('')}</AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1">
+                        <p className="text-sm">
+                          <span className="font-medium">{activity.student}</span>{' '}
+                          <span className="text-muted-foreground">{activity.action}</span>
+                        </p>
+                        <p className="text-xs text-muted-foreground">{activity.time}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {getActivityIcon(activity.type)}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {getActivityIcon(activity.type)}
-                    </div>
+                  ))
+                ) : (
+                  <div className="text-center py-8">
+                    <Users className="w-12 h-12 mx-auto text-muted-foreground mb-2 opacity-50" />
+                    <p className="text-sm text-muted-foreground">Nenhuma atividade recente</p>
                   </div>
-                ))}
+                )}
               </CardContent>
             </Card>
           </div>
@@ -270,21 +340,38 @@ const Dashboard = () => {
                 <CardTitle className="text-lg">Ações Rápidas</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <Button variant="premium" className="w-full justify-start" size="lg">
+                <Button 
+                  variant="premium" 
+                  className="w-full justify-start" 
+                  size="lg"
+                  onClick={() => onTabChange?.('workouts')}
+                >
                   <Plus className="w-4 h-4" />
                   Novo Treino
                 </Button>
-                <Button variant="outline" className="w-full justify-start">
+                <Button 
+                  variant="outline" 
+                  className="w-full justify-start"
+                  onClick={() => onTabChange?.('students')}
+                >
                   <Users className="w-4 h-4" />
                   Adicionar Aluno
                 </Button>
-                <Button variant="outline" className="w-full justify-start">
+                <Button 
+                  variant="outline" 
+                  className="w-full justify-start"
+                  onClick={() => onTabChange?.('messages')}
+                >
                   <MessageSquare className="w-4 h-4" />
-                  Enviar Mensagem
+                  Ver Mensagens
                 </Button>
-                <Button variant="outline" className="w-full justify-start">
-                  <Play className="w-4 h-4" />
-                  Iniciar Live
+                <Button 
+                  variant="outline" 
+                  className="w-full justify-start"
+                  onClick={() => onTabChange?.('videos')}
+                >
+                  <Video className="w-4 h-4" />
+                  Galeria de Vídeos
                 </Button>
               </CardContent>
             </Card>
@@ -296,7 +383,11 @@ const Dashboard = () => {
               </CardHeader>
               <CardContent className="space-y-3">
                 {upcomingTasks.map((task) => (
-                  <div key={task.id} className="flex items-center gap-3 p-3 rounded-lg border border-border/50 hover:bg-muted/30 transition-smooth">
+                  <div 
+                    key={task.id} 
+                    className="flex items-center gap-3 p-3 rounded-lg border border-border/50 hover:bg-muted/30 transition-smooth cursor-pointer"
+                    onClick={task.onClick}
+                  >
                     {getTaskIcon(task.type)}
                     <div className="flex-1">
                       <p className="text-sm font-medium">{task.title}</p>
@@ -315,24 +406,24 @@ const Dashboard = () => {
               <CardContent className="space-y-4">
                 <div>
                   <div className="flex justify-between text-sm mb-2">
-                    <span>Meta de Treinos</span>
-                    <span>156/200</span>
+                    <span>Alunos Ativos</span>
+                    <span>{stats.totalAlunos}</span>
                   </div>
-                  <Progress value={78} className="h-2" />
+                  <Progress value={Math.min((stats.totalAlunos / 50) * 100, 100)} className="h-2" />
                 </div>
                 <div>
                   <div className="flex justify-between text-sm mb-2">
-                    <span>Novos Alunos</span>
-                    <span>12/15</span>
+                    <span>Treinos Criados</span>
+                    <span>{stats.totalTreinos}</span>
                   </div>
-                  <Progress value={80} className="h-2" />
+                  <Progress value={Math.min((stats.totalTreinos / 30) * 100, 100)} className="h-2" />
                 </div>
                 <div>
                   <div className="flex justify-between text-sm mb-2">
-                    <span>Retenção</span>
-                    <span>94%</span>
+                    <span>Vídeos</span>
+                    <span>{stats.totalVideos}</span>
                   </div>
-                  <Progress value={94} className="h-2" />
+                  <Progress value={Math.min((stats.totalVideos / 20) * 100, 100)} className="h-2" />
                 </div>
               </CardContent>
             </Card>

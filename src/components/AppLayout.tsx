@@ -28,7 +28,7 @@ const AppLayout = () => {
   const renderContent = () => {
     switch (activeTab) {
       case "dashboard":
-        return <Dashboard />;
+        return <Dashboard onTabChange={handleTabChange} />;
       case "students":
         return <StudentManager />;
       case "workouts":
@@ -50,7 +50,7 @@ const AppLayout = () => {
       case "settings":
         return <div className="p-6"><h1 className="text-3xl font-bold">Configurações</h1><p className="text-muted-foreground">Configurações do sistema em desenvolvimento...</p></div>;
       default:
-        return <Dashboard />;
+        return <Dashboard onTabChange={handleTabChange} />;
     }
   };
 
