@@ -10,6 +10,7 @@ import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 import StudentDetails from "./components/StudentDetails";
 import DietaPage from "./pages/DietaPage";
+import StudentPortal from "./pages/StudentPortal";
 
 const queryClient = new QueryClient();
 
@@ -23,6 +24,7 @@ const App = () => (
           <Routes>
             <Route path="/auth" element={<Auth />} />
             <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
+            <Route path="/aluno" element={<ProtectedRoute><StudentPortal /></ProtectedRoute>} />
             <Route path="/alunos/:id" element={<ProtectedRoute><StudentDetails /></ProtectedRoute>} />
             <Route path="/dieta/:id" element={<ProtectedRoute><DietaPage /></ProtectedRoute>} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
