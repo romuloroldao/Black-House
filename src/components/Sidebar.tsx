@@ -8,7 +8,6 @@ import {
   LayoutDashboard,
   Users,
   Dumbbell,
-  Play,
   UtensilsCrossed,
   MessageSquare,
   DollarSign,
@@ -18,7 +17,8 @@ import {
   Video,
   Bell,
   Star,
-  LogOut
+  LogOut,
+  CreditCard
 } from "lucide-react";
 
 interface SidebarProps {
@@ -86,6 +86,12 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       notifications: 8
     },
     {
+      id: "plans",
+      label: "Planos",
+      icon: CreditCard,
+      notifications: 0
+    },
+    {
       id: "payments",
       label: "Pagamentos",
       icon: DollarSign,
@@ -95,12 +101,6 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       id: "calendar",
       label: "Agenda",
       icon: Calendar,
-      notifications: 0
-    },
-    {
-      id: "lives",
-      label: "Lives",
-      icon: Play,
       notifications: 0
     },
     {

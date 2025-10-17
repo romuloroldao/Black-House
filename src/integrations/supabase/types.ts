@@ -592,6 +592,39 @@ export type Database = {
           },
         ]
       }
+      planos_pagamento: {
+        Row: {
+          ativo: boolean
+          coach_id: string
+          created_at: string
+          frequencia: string
+          id: string
+          nome: string
+          updated_at: string
+          valor: number
+        }
+        Insert: {
+          ativo?: boolean
+          coach_id: string
+          created_at?: string
+          frequencia: string
+          id?: string
+          nome: string
+          updated_at?: string
+          valor: number
+        }
+        Update: {
+          ativo?: boolean
+          coach_id?: string
+          created_at?: string
+          frequencia?: string
+          id?: string
+          nome?: string
+          updated_at?: string
+          valor?: number
+        }
+        Relationships: []
+      }
       treinos: {
         Row: {
           categoria: string

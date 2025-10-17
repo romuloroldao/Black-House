@@ -42,17 +42,27 @@ interface Payment {
   aluno_nome?: string;
 }
 
+interface Plan {
+  id: string;
+  nome: string;
+  valor: number;
+  frequencia: string;
+}
+
 const PaymentManager = () => {
   const { user } = useAuth();
   const { toast } = useToast();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [alunos, setAlunos] = useState<any[]>([]);
+  const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [usePlan, setUsePlan] = useState(false);
   
   const [formData, setFormData] = useState({
     aluno_id: "",
+    plan_id: "",
     value: "",
     description: "",
     billing_type: "PIX",
@@ -78,6 +88,17 @@ const PaymentManager = () => {
 
       if (alunosError) throw alunosError;
       setAlunos(alunosData || []);
+
+      // Carregar planos
+      const { data: plansData, error: plansError } = await supabase
+        .from("planos_pagamento")
+        .select("*")
+        .eq("coach_id", user?.id)
+        .eq("ativo", true)
+        .order("nome");
+
+      if (plansError) throw plansError;
+      setPlans(plansData || []);
 
       // Carregar pagamentos
       await loadPayments();
@@ -128,7 +149,7 @@ const PaymentManager = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.aluno_id || !formData.value || !formData.due_date) {
+    if (!formData.aluno_id || !formData.due_date) {
       toast({
         title: "Erro",
         description: "Preencha todos os campos obrigatórios",
@@ -137,14 +158,43 @@ const PaymentManager = () => {
       return;
     }
 
+    if (usePlan && !formData.plan_id) {
+      toast({
+        title: "Erro",
+        description: "Selecione um plano",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!usePlan && !formData.value) {
+      toast({
+        title: "Erro",
+        description: "Informe o valor da cobrança",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       setIsCreating(true);
+
+      let value = formData.value;
+      let description = formData.description;
+
+      if (usePlan && formData.plan_id) {
+        const selectedPlan = plans.find(p => p.id === formData.plan_id);
+        if (selectedPlan) {
+          value = selectedPlan.valor.toString();
+          description = description || selectedPlan.nome;
+        }
+      }
 
       const { data, error } = await supabase.functions.invoke('create-asaas-payment', {
         body: {
           alunoId: formData.aluno_id,
-          value: parseFloat(formData.value),
-          description: formData.description,
+          value: parseFloat(value),
+          description: description,
           billingType: formData.billing_type,
           dueDate: formData.due_date,
         },
@@ -175,11 +225,13 @@ const PaymentManager = () => {
   const resetForm = () => {
     setFormData({
       aluno_id: "",
+      plan_id: "",
       value: "",
       description: "",
       billing_type: "PIX",
       due_date: format(new Date(), "yyyy-MM-dd"),
     });
+    setUsePlan(false);
   };
 
   const copyToClipboard = (text: string) => {
@@ -390,18 +442,58 @@ const PaymentManager = () => {
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="value">Valor (R$) *</Label>
-                <Input
-                  id="value"
-                  type="number"
-                  step="0.01"
-                  value={formData.value}
-                  onChange={(e) => setFormData({ ...formData, value: e.target.value })}
-                  placeholder="0.00"
-                  required
+              <div className="col-span-2 flex items-center space-x-2 py-2">
+                <input
+                  type="checkbox"
+                  id="usePlan"
+                  checked={usePlan}
+                  onChange={(e) => {
+                    setUsePlan(e.target.checked);
+                    if (e.target.checked) {
+                      setFormData({ ...formData, value: "" });
+                    } else {
+                      setFormData({ ...formData, plan_id: "" });
+                    }
+                  }}
+                  className="h-4 w-4 rounded border-input"
                 />
+                <Label htmlFor="usePlan" className="cursor-pointer">
+                  Usar plano de pagamento
+                </Label>
               </div>
+
+              {usePlan ? (
+                <div className="col-span-2 space-y-2">
+                  <Label htmlFor="plan_id">Plano *</Label>
+                  <Select
+                    value={formData.plan_id}
+                    onValueChange={(value) => setFormData({ ...formData, plan_id: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione um plano" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {plans.map((plan) => (
+                        <SelectItem key={plan.id} value={plan.id}>
+                          {plan.nome} - R$ {plan.valor.toFixed(2)} ({plan.frequencia})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="value">Valor (R$) *</Label>
+                  <Input
+                    id="value"
+                    type="number"
+                    step="0.01"
+                    value={formData.value}
+                    onChange={(e) => setFormData({ ...formData, value: e.target.value })}
+                    placeholder="0.00"
+                  />
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label htmlFor="billing_type">Forma de Pagamento *</Label>

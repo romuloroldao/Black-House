@@ -9,6 +9,7 @@ import NutritionInterface from "./NutritionInterface";
 import MessageManager from "./MessageManager";
 import AgendaManager from "./AgendaManager";
 import PaymentManager from "./PaymentManager";
+import PlanManager from "./PlanManager";
 
 const AppLayout = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -41,12 +42,12 @@ const AppLayout = () => {
         return <NutritionInterface />;
       case "messages":
         return <div className="p-6"><MessageManager /></div>;
+      case "plans":
+        return <PlanManager />;
       case "payments":
         return <PaymentManager />;
       case "calendar":
         return <AgendaManager />;
-      case "lives":
-        return <div className="p-6"><h1 className="text-3xl font-bold">Lives</h1><p className="text-muted-foreground">Transmissões ao vivo em desenvolvimento...</p></div>;
       case "analytics":
         return <div className="p-6"><h1 className="text-3xl font-bold">Relatórios</h1><p className="text-muted-foreground">Analytics e relatórios em desenvolvimento...</p></div>;
       case "settings":
