@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
-import logoBlackHouse from "@/assets/logo-black-house.png";
+import logoWhite from "@/assets/logo-white.svg";
 import {
   LayoutDashboard,
   Users,
@@ -132,9 +132,9 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
         <div className="flex items-center gap-3">
           <div className="w-full flex flex-col items-center">
             <img 
-              src={logoBlackHouse} 
+              src={logoWhite} 
               alt="Black House" 
-              className="w-full h-auto max-w-[200px] mb-2"
+              className="w-full h-auto max-w-[180px] mb-2"
             />
             <p className="text-xs text-muted-foreground uppercase tracking-wider">
               Medicina Integrativa

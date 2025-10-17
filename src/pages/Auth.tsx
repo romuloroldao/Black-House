@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import logoBlackHouse from '@/assets/logo-black-house.png';
+import logoWhite from '@/assets/logo-white.svg';
 
 const Auth = () => {
   const navigate = useNavigate();
@@ -113,9 +113,9 @@ const Auth = () => {
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
             <img 
-              src={logoBlackHouse} 
+              src={logoWhite} 
               alt="Black House" 
-              className="h-20 w-auto"
+              className="h-24 w-auto"
             />
           </div>
           <CardTitle className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
