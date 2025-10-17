@@ -353,12 +353,12 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
         description: dietaId ? "Dieta atualizada com sucesso" : "Dieta criada com sucesso"
       });
 
-      // Se estamos editando, voltar para página do aluno
-      if (dietaId && selectedAluno) {
+      // Se estamos editando, voltar para a lista de dietas
+      if (dietaId) {
         setTimeout(() => {
-          navigate(`/alunos/${selectedAluno}`);
+          navigate('/?tab=nutrition');
         }, 1000);
-      } else if (!dietaId) {
+      } else {
         // Se criamos nova, limpar formulário
         setDietName('');
         setObjetivo('');

@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
-import { Calendar, Eye, Calculator, ChefHat } from 'lucide-react';
+import { Calendar, Eye, Calculator, ChefHat, Pencil, Trash2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { toast } from 'sonner';
 
 interface Dieta {
   id: string;
@@ -40,6 +43,7 @@ interface DietaCompleta extends Dieta {
 }
 
 const DietViewer = () => {
+  const navigate = useNavigate();
   const [dietas, setDietas] = useState<Dieta[]>([]);
   const [dietaSelecionada, setDietaSelecionada] = useState<DietaCompleta | null>(null);
   const [loading, setLoading] = useState(true);
@@ -193,6 +197,36 @@ const DietViewer = () => {
     }, { kcal: 0, proteinas: 0, carboidratos: 0, lipidios: 0 });
   };
 
+  const handleEditarDieta = (dietaId: string) => {
+    navigate(`/dieta/${dietaId}`);
+  };
+
+  const handleExcluirDieta = async (dietaId: string) => {
+    try {
+      // Primeiro excluir os itens da dieta
+      const { error: itensError } = await supabase
+        .from('itens_dieta')
+        .delete()
+        .eq('dieta_id', dietaId);
+
+      if (itensError) throw itensError;
+
+      // Depois excluir a dieta
+      const { error: dietaError } = await supabase
+        .from('dietas')
+        .delete()
+        .eq('id', dietaId);
+
+      if (dietaError) throw dietaError;
+
+      toast.success('Dieta excluída com sucesso!');
+      carregarDietas();
+    } catch (error) {
+      console.error('Erro ao excluir dieta:', error);
+      toast.error('Erro ao excluir dieta. Tente novamente.');
+    }
+  };
+
   const refeicoesPadrao = ['Café da Manhã', 'Lanche da Manhã', 'Almoço', 'Lanche da Tarde', 'Jantar', 'Ceia'];
 
   if (loading) {
@@ -242,11 +276,46 @@ const DietViewer = () => {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Calendar className="w-4 h-4" />
-                    {new Date(dieta.data_criacao).toLocaleDateString('pt-BR')}
-                  </div>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+                  <Calendar className="w-4 h-4" />
+                  {new Date(dieta.data_criacao).toLocaleDateString('pt-BR')}
+                </div>
+                
+                <div className="flex items-center justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleEditarDieta(dieta.id)}
+                  >
+                    <Pencil className="w-4 h-4 mr-2" />
+                    Editar
+                  </Button>
+                  
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Excluir
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Tem certeza que deseja excluir a dieta "{dieta.nome}"? Esta ação não pode ser desfeita.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => handleExcluirDieta(dieta.id)}>
+                          Excluir
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                   
                   <Dialog>
                     <DialogTrigger asChild>
