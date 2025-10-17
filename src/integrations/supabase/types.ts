@@ -875,6 +875,188 @@ export type Database = {
           },
         ]
       }
+      relatorio_feedbacks: {
+        Row: {
+          aluno_id: string
+          comentario: string
+          created_at: string
+          id: string
+          relatorio_id: string
+        }
+        Insert: {
+          aluno_id: string
+          comentario: string
+          created_at?: string
+          id?: string
+          relatorio_id: string
+        }
+        Update: {
+          aluno_id?: string
+          comentario?: string
+          created_at?: string
+          id?: string
+          relatorio_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "relatorio_feedbacks_aluno_id_fkey"
+            columns: ["aluno_id"]
+            isOneToOne: false
+            referencedRelation: "alunos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "relatorio_feedbacks_relatorio_id_fkey"
+            columns: ["relatorio_id"]
+            isOneToOne: false
+            referencedRelation: "relatorios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      relatorio_midias: {
+        Row: {
+          created_at: string
+          id: string
+          legenda: string | null
+          ordem: number | null
+          relatorio_id: string
+          tipo: string
+          url: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          legenda?: string | null
+          ordem?: number | null
+          relatorio_id: string
+          tipo: string
+          url: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          legenda?: string | null
+          ordem?: number | null
+          relatorio_id?: string
+          tipo?: string
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "relatorio_midias_relatorio_id_fkey"
+            columns: ["relatorio_id"]
+            isOneToOne: false
+            referencedRelation: "relatorios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      relatorio_templates: {
+        Row: {
+          ativo: boolean
+          campos: Json
+          coach_id: string
+          created_at: string
+          descricao: string | null
+          id: string
+          layout: Json
+          nome: string
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          campos?: Json
+          coach_id: string
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          layout?: Json
+          nome: string
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          campos?: Json
+          coach_id?: string
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          layout?: Json
+          nome?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      relatorios: {
+        Row: {
+          aluno_id: string
+          coach_id: string
+          created_at: string
+          dados: Json
+          enviado_em: string | null
+          id: string
+          metricas: Json | null
+          observacoes: string | null
+          periodo_fim: string
+          periodo_inicio: string
+          status: string
+          template_id: string | null
+          titulo: string
+          updated_at: string
+          visualizado_em: string | null
+        }
+        Insert: {
+          aluno_id: string
+          coach_id: string
+          created_at?: string
+          dados?: Json
+          enviado_em?: string | null
+          id?: string
+          metricas?: Json | null
+          observacoes?: string | null
+          periodo_fim: string
+          periodo_inicio: string
+          status?: string
+          template_id?: string | null
+          titulo: string
+          updated_at?: string
+          visualizado_em?: string | null
+        }
+        Update: {
+          aluno_id?: string
+          coach_id?: string
+          created_at?: string
+          dados?: Json
+          enviado_em?: string | null
+          id?: string
+          metricas?: Json | null
+          observacoes?: string | null
+          periodo_fim?: string
+          periodo_inicio?: string
+          status?: string
+          template_id?: string | null
+          titulo?: string
+          updated_at?: string
+          visualizado_em?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "relatorios_aluno_id_fkey"
+            columns: ["aluno_id"]
+            isOneToOne: false
+            referencedRelation: "alunos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "relatorios_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "relatorio_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       treinos: {
         Row: {
           categoria: string

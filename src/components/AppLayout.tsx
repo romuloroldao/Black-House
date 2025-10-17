@@ -14,6 +14,7 @@ import FinancialExceptionsManager from "./FinancialExceptionsManager";
 import ExpenseManager from "./ExpenseManager";
 import RecurringChargesConfig from "./RecurringChargesConfig";
 import FinancialDashboard from "./FinancialDashboard";
+import ReportManager from "./ReportManager";
 
 const AppLayout = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -60,8 +61,10 @@ const AppLayout = () => {
         return <FinancialDashboard />;
       case "calendar":
         return <AgendaManager />;
+      case "reports":
+        return <ReportManager />;
       case "analytics":
-        return <div className="p-6"><h1 className="text-3xl font-bold">Relatórios</h1><p className="text-muted-foreground">Analytics e relatórios em desenvolvimento...</p></div>;
+        return <div className="p-6"><h1 className="text-3xl font-bold">Análises</h1><p className="text-muted-foreground">Análises detalhadas em desenvolvimento...</p></div>;
       case "settings":
         return <div className="p-6"><h1 className="text-3xl font-bold">Configurações</h1><p className="text-muted-foreground">Configurações do sistema em desenvolvimento...</p></div>;
       default:

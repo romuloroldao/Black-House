@@ -9,6 +9,7 @@ import StudentChatView from "@/components/student/StudentChatView";
 import StudentProgressView from "@/components/student/StudentProgressView";
 import StudentFinancialView from "@/components/student/StudentFinancialView";
 import StudentProfileView from "@/components/student/StudentProfileView";
+import StudentReportsView from "@/components/student/StudentReportsView";
 
 const StudentPortal = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -31,6 +32,8 @@ const StudentPortal = () => {
         return <StudentVideosView />;
       case "chat":
         return <StudentChatView />;
+      case "reports":
+        return <StudentReportsView />;
       case "progress":
         return <StudentProgressView />;
       case "financial":

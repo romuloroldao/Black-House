@@ -1,4 +1,4 @@
-import { Home, Utensils, Dumbbell, Play, MessageSquare, TrendingUp, DollarSign, User, LogOut } from "lucide-react";
+import { Home, Utensils, Dumbbell, Play, MessageSquare, TrendingUp, DollarSign, User, LogOut, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -24,6 +24,7 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
     { id: "workouts", label: "Meus Treinos", icon: Dumbbell },
     { id: "videos", label: "Galeria de Vídeos", icon: Play },
     { id: "chat", label: "Chat", icon: MessageSquare },
+    { id: "reports", label: "Meus Relatórios", icon: FileText },
     { id: "progress", label: "Meu Progresso", icon: TrendingUp },
     { id: "financial", label: "Financeiro", icon: DollarSign },
     { id: "profile", label: "Meu Perfil", icon: User },

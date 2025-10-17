@@ -23,7 +23,8 @@ import {
   TrendingDown,
   AlertCircle,
   Wallet,
-  RefreshCw
+  RefreshCw,
+  FileText
 } from "lucide-react";
 
 interface SidebarProps {
@@ -133,8 +134,14 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       notifications: 0
     },
     {
+      id: "reports",
+      label: "Relatórios de Progresso",
+      icon: FileText,
+      notifications: 0
+    },
+    {
       id: "analytics",
-      label: "Relatórios",
+      label: "Análises",
       icon: Star,
       notifications: 0
     }
