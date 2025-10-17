@@ -10,6 +10,9 @@ import MessageManager from "./MessageManager";
 import AgendaManager from "./AgendaManager";
 import PaymentManager from "./PaymentManager";
 import PlanManager from "./PlanManager";
+import PaymentPlansConfig from "./PaymentPlansConfig";
+import FinancialExceptionsManager from "./FinancialExceptionsManager";
+import ExpenseManager from "./ExpenseManager";
 
 const AppLayout = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -46,6 +49,12 @@ const AppLayout = () => {
         return <PlanManager />;
       case "payments":
         return <PaymentManager />;
+      case "payment-plans":
+        return <div className="p-6"><PaymentPlansConfig /></div>;
+      case "exceptions":
+        return <div className="p-6"><FinancialExceptionsManager /></div>;
+      case "expenses":
+        return <div className="p-6"><ExpenseManager /></div>;
       case "calendar":
         return <AgendaManager />;
       case "analytics":

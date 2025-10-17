@@ -19,7 +19,10 @@ import {
   Bell,
   Star,
   LogOut,
-  CreditCard
+  CreditCard,
+  TrendingDown,
+  AlertCircle,
+  Wallet
 } from "lucide-react";
 
 interface SidebarProps {
@@ -97,6 +100,24 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       label: "Pagamentos",
       icon: DollarSign,
       notifications: 2
+    },
+    {
+      id: "payment-plans",
+      label: "Planos de Pagamento",
+      icon: Wallet,
+      notifications: 0
+    },
+    {
+      id: "exceptions",
+      label: "Exceções",
+      icon: AlertCircle,
+      notifications: 0
+    },
+    {
+      id: "expenses",
+      label: "Despesas",
+      icon: TrendingDown,
+      notifications: 0
     },
     {
       id: "calendar",

@@ -382,6 +382,57 @@ export type Database = {
           },
         ]
       }
+      expenses: {
+        Row: {
+          categoria: string
+          coach_id: string
+          created_at: string
+          data_pagamento: string | null
+          data_vencimento: string
+          descricao: string
+          forma_pagamento: string | null
+          frequencia_recorrencia: string | null
+          id: string
+          observacoes: string | null
+          recorrente: boolean | null
+          status: string
+          updated_at: string
+          valor: number
+        }
+        Insert: {
+          categoria: string
+          coach_id: string
+          created_at?: string
+          data_pagamento?: string | null
+          data_vencimento: string
+          descricao: string
+          forma_pagamento?: string | null
+          frequencia_recorrencia?: string | null
+          id?: string
+          observacoes?: string | null
+          recorrente?: boolean | null
+          status?: string
+          updated_at?: string
+          valor: number
+        }
+        Update: {
+          categoria?: string
+          coach_id?: string
+          created_at?: string
+          data_pagamento?: string | null
+          data_vencimento?: string
+          descricao?: string
+          forma_pagamento?: string | null
+          frequencia_recorrencia?: string | null
+          id?: string
+          observacoes?: string | null
+          recorrente?: boolean | null
+          status?: string
+          updated_at?: string
+          valor?: number
+        }
+        Relationships: []
+      }
       feedbacks_alunos: {
         Row: {
           aluno_id: string
@@ -410,6 +461,62 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "feedbacks_alunos_aluno_id_fkey"
+            columns: ["aluno_id"]
+            isOneToOne: false
+            referencedRelation: "alunos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      financial_exceptions: {
+        Row: {
+          aluno_id: string
+          ativo: boolean
+          coach_id: string
+          created_at: string
+          data_fim: string | null
+          data_inicio: string
+          id: string
+          motivo: string
+          observacoes: string | null
+          percentual_desconto: number | null
+          tipo: string
+          updated_at: string
+          valor_desconto: number | null
+        }
+        Insert: {
+          aluno_id: string
+          ativo?: boolean
+          coach_id: string
+          created_at?: string
+          data_fim?: string | null
+          data_inicio: string
+          id?: string
+          motivo: string
+          observacoes?: string | null
+          percentual_desconto?: number | null
+          tipo: string
+          updated_at?: string
+          valor_desconto?: number | null
+        }
+        Update: {
+          aluno_id?: string
+          ativo?: boolean
+          coach_id?: string
+          created_at?: string
+          data_fim?: string | null
+          data_inicio?: string
+          id?: string
+          motivo?: string
+          observacoes?: string | null
+          percentual_desconto?: number | null
+          tipo?: string
+          updated_at?: string
+          valor_desconto?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "financial_exceptions_aluno_id_fkey"
             columns: ["aluno_id"]
             isOneToOne: false
             referencedRelation: "alunos"
@@ -639,6 +746,45 @@ export type Database = {
           },
         ]
       }
+      payment_plans: {
+        Row: {
+          ativo: boolean
+          coach_id: string
+          created_at: string
+          descricao: string | null
+          dia_vencimento: number
+          frequencia: string
+          id: string
+          nome: string
+          updated_at: string
+          valor: number
+        }
+        Insert: {
+          ativo?: boolean
+          coach_id: string
+          created_at?: string
+          descricao?: string | null
+          dia_vencimento: number
+          frequencia: string
+          id?: string
+          nome: string
+          updated_at?: string
+          valor: number
+        }
+        Update: {
+          ativo?: boolean
+          coach_id?: string
+          created_at?: string
+          descricao?: string | null
+          dia_vencimento?: number
+          frequencia?: string
+          id?: string
+          nome?: string
+          updated_at?: string
+          valor?: number
+        }
+        Relationships: []
+      }
       planos_pagamento: {
         Row: {
           ativo: boolean
@@ -671,6 +817,63 @@ export type Database = {
           valor?: number
         }
         Relationships: []
+      }
+      recurring_charges_config: {
+        Row: {
+          aluno_id: string
+          ativo: boolean
+          coach_id: string
+          created_at: string
+          dia_vencimento_customizado: number | null
+          dias_antecedencia_lembrete: number | null
+          enviar_lembrete: boolean | null
+          id: string
+          payment_plan_id: string | null
+          updated_at: string
+          valor_customizado: number | null
+        }
+        Insert: {
+          aluno_id: string
+          ativo?: boolean
+          coach_id: string
+          created_at?: string
+          dia_vencimento_customizado?: number | null
+          dias_antecedencia_lembrete?: number | null
+          enviar_lembrete?: boolean | null
+          id?: string
+          payment_plan_id?: string | null
+          updated_at?: string
+          valor_customizado?: number | null
+        }
+        Update: {
+          aluno_id?: string
+          ativo?: boolean
+          coach_id?: string
+          created_at?: string
+          dia_vencimento_customizado?: number | null
+          dias_antecedencia_lembrete?: number | null
+          enviar_lembrete?: boolean | null
+          id?: string
+          payment_plan_id?: string | null
+          updated_at?: string
+          valor_customizado?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recurring_charges_config_aluno_id_fkey"
+            columns: ["aluno_id"]
+            isOneToOne: false
+            referencedRelation: "alunos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recurring_charges_config_payment_plan_id_fkey"
+            columns: ["payment_plan_id"]
+            isOneToOne: false
+            referencedRelation: "payment_plans"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       treinos: {
         Row: {
