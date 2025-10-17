@@ -17,22 +17,26 @@ const StudentFinancialView = () => {
   }, [user]);
 
   const loadFinancialData = async () => {
-    const { data: aluno } = await supabase
-      .from("alunos")
-      .select("*")
-      .eq("email", user?.email)
-      .single();
-
-    if (aluno) {
-      setAlunoData(aluno);
-
-      const { data: pagamentosData } = await supabase
-        .from("asaas_payments")
+    try {
+      const { data: aluno } = await supabase
+        .from("alunos")
         .select("*")
-        .eq("aluno_id", aluno.id)
-        .order("due_date", { ascending: false });
+        .eq("email", user?.email)
+        .maybeSingle();
 
-      setPagamentos(pagamentosData || []);
+      if (aluno) {
+        setAlunoData(aluno);
+
+        const { data: pagamentosData } = await supabase
+          .from("asaas_payments")
+          .select("*")
+          .eq("aluno_id", aluno.id)
+          .order("due_date", { ascending: false });
+
+        setPagamentos(pagamentosData || []);
+      }
+    } catch (error) {
+      console.error("Erro ao carregar dados financeiros:", error);
     }
   };
 

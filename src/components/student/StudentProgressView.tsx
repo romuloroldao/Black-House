@@ -18,22 +18,26 @@ const StudentProgressView = () => {
   }, [user]);
 
   const loadProgressData = async () => {
-    const { data: aluno } = await supabase
-      .from("alunos")
-      .select("id")
-      .eq("email", user?.email)
-      .single();
+    try {
+      const { data: aluno } = await supabase
+        .from("alunos")
+        .select("id")
+        .eq("email", user?.email)
+        .maybeSingle();
 
-    if (aluno) {
-      setAlunoId(aluno.id);
+      if (aluno) {
+        setAlunoId(aluno.id);
 
-      const { data: fotosData } = await supabase
-        .from("fotos_alunos")
-        .select("*")
-        .eq("aluno_id", aluno.id)
-        .order("created_at", { ascending: false });
+        const { data: fotosData } = await supabase
+          .from("fotos_alunos")
+          .select("*")
+          .eq("aluno_id", aluno.id)
+          .order("created_at", { ascending: false });
 
-      setFotos(fotosData || []);
+        setFotos(fotosData || []);
+      }
+    } catch (error) {
+      console.error("Erro ao carregar progresso:", error);
     }
   };
 

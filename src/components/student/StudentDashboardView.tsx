@@ -20,49 +20,58 @@ const StudentDashboardView = () => {
   }, [user]);
 
   const loadDashboardData = async () => {
-    // Carregar dados do aluno
-    const { data: aluno } = await supabase
-      .from("alunos")
-      .select("*")
-      .eq("email", user?.email)
-      .single();
+    try {
+      // Carregar dados do aluno
+      const { data: aluno, error: alunoError } = await supabase
+        .from("alunos")
+        .select("*")
+        .eq("email", user?.email)
+        .maybeSingle();
 
-    if (aluno) {
-      setAlunoData(aluno);
-
-      // Carregar treino atual
-      const { data: alunoTreino } = await supabase
-        .from("alunos_treinos")
-        .select("*, treinos(*)")
-        .eq("aluno_id", aluno.id)
-        .eq("ativo", true)
-        .single();
-
-      if (alunoTreino) {
-        setTreinoAtual(alunoTreino.treinos);
+      if (alunoError) {
+        console.error("Erro ao carregar aluno:", alunoError);
+        return;
       }
 
-      // Carregar dieta atual
-      const { data: dieta } = await supabase
-        .from("dietas")
-        .select("*")
-        .eq("aluno_id", aluno.id)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
+      if (aluno) {
+        setAlunoData(aluno);
 
-      setDietaAtual(dieta);
+        // Carregar treino atual
+        const { data: alunoTreino } = await supabase
+          .from("alunos_treinos")
+          .select("*, treinos(*)")
+          .eq("aluno_id", aluno.id)
+          .eq("ativo", true)
+          .maybeSingle();
 
-      // Carregar próximos eventos
-      const { data: eventos } = await supabase
-        .from("agenda_eventos")
-        .select("*")
-        .eq("aluno_id", aluno.id)
-        .gte("data_evento", new Date().toISOString().split("T")[0])
-        .order("data_evento", { ascending: true })
-        .limit(3);
+        if (alunoTreino) {
+          setTreinoAtual(alunoTreino.treinos);
+        }
 
-      setProximosEventos(eventos || []);
+        // Carregar dieta atual
+        const { data: dieta } = await supabase
+          .from("dietas")
+          .select("*")
+          .eq("aluno_id", aluno.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        setDietaAtual(dieta);
+
+        // Carregar próximos eventos
+        const { data: eventos } = await supabase
+          .from("agenda_eventos")
+          .select("*")
+          .eq("aluno_id", aluno.id)
+          .gte("data_evento", new Date().toISOString().split("T")[0])
+          .order("data_evento", { ascending: true })
+          .limit(3);
+
+        setProximosEventos(eventos || []);
+      }
+    } catch (error) {
+      console.error("Erro ao carregar dashboard:", error);
     }
   };
 

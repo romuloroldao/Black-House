@@ -794,6 +794,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_aluno_id_by_email: {
+        Args: { user_email?: string }
+        Returns: string
+      }
       get_user_role: {
         Args: { user_uuid?: string }
         Returns: Database["public"]["Enums"]["user_role"]

@@ -51,53 +51,57 @@ const StudentChatView = () => {
   };
 
   const loadChat = async () => {
-    const { data: aluno } = await supabase
-      .from("alunos")
-      .select("id, coach_id")
-      .eq("email", user?.email)
-      .single();
+    try {
+      const { data: aluno } = await supabase
+        .from("alunos")
+        .select("id, coach_id")
+        .eq("email", user?.email)
+        .maybeSingle();
 
-    if (aluno) {
-      // Buscar ou criar conversa
-      let { data: conversa } = await supabase
-        .from("conversas")
-        .select("*")
-        .eq("aluno_id", aluno.id)
-        .eq("coach_id", aluno.coach_id)
-        .single();
-
-      if (!conversa) {
-        const { data: novaConversa } = await supabase
+      if (aluno) {
+        // Buscar ou criar conversa
+        let { data: conversa } = await supabase
           .from("conversas")
-          .insert({
-            aluno_id: aluno.id,
-            coach_id: aluno.coach_id,
-          })
-          .select()
-          .single();
-        conversa = novaConversa;
-      }
-
-      if (conversa) {
-        setConversaId(conversa.id);
-
-        // Carregar mensagens
-        const { data: mensagensData } = await supabase
-          .from("mensagens")
           .select("*")
-          .eq("conversa_id", conversa.id)
-          .order("created_at", { ascending: true });
+          .eq("aluno_id", aluno.id)
+          .eq("coach_id", aluno.coach_id)
+          .maybeSingle();
 
-        setMensagens(mensagensData || []);
-        setTimeout(scrollToBottom, 100);
+        if (!conversa) {
+          const { data: novaConversa } = await supabase
+            .from("conversas")
+            .insert({
+              aluno_id: aluno.id,
+              coach_id: aluno.coach_id,
+            })
+            .select()
+            .maybeSingle();
+          conversa = novaConversa;
+        }
 
-        // Marcar mensagens como lidas
-        await supabase
-          .from("mensagens")
-          .update({ lida: true })
-          .eq("conversa_id", conversa.id)
-          .neq("remetente_id", user.id);
+        if (conversa) {
+          setConversaId(conversa.id);
+
+          // Carregar mensagens
+          const { data: mensagensData } = await supabase
+            .from("mensagens")
+            .select("*")
+            .eq("conversa_id", conversa.id)
+            .order("created_at", { ascending: true });
+
+          setMensagens(mensagensData || []);
+          setTimeout(scrollToBottom, 100);
+
+          // Marcar mensagens como lidas
+          await supabase
+            .from("mensagens")
+            .update({ lida: true })
+            .eq("conversa_id", conversa.id)
+            .neq("remetente_id", user.id);
+        }
       }
+    } catch (error) {
+      console.error("Erro ao carregar chat:", error);
     }
   };
 

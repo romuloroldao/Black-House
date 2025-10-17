@@ -18,31 +18,35 @@ const StudentDietView = () => {
   }, [user]);
 
   const loadDietData = async () => {
-    const { data: aluno } = await supabase
-      .from("alunos")
-      .select("id")
-      .eq("email", user?.email)
-      .single();
+    try {
+      const { data: aluno } = await supabase
+        .from("alunos")
+        .select("id")
+        .eq("email", user?.email)
+        .maybeSingle();
 
-    if (aluno) {
-      const { data: dietaData } = await supabase
-        .from("dietas")
-        .select("*")
-        .eq("aluno_id", aluno.id)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
+      if (aluno) {
+        const { data: dietaData } = await supabase
+          .from("dietas")
+          .select("*")
+          .eq("aluno_id", aluno.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-      if (dietaData) {
-        setDieta(dietaData);
+        if (dietaData) {
+          setDieta(dietaData);
 
-        const { data: itens } = await supabase
-          .from("itens_dieta")
-          .select("*, alimentos(*)")
-          .eq("dieta_id", dietaData.id);
+          const { data: itens } = await supabase
+            .from("itens_dieta")
+            .select("*, alimentos(*)")
+            .eq("dieta_id", dietaData.id);
 
-        setItensDieta(itens || []);
+          setItensDieta(itens || []);
+        }
       }
+    } catch (error) {
+      console.error("Erro ao carregar dieta:", error);
     }
   };
 

@@ -27,21 +27,25 @@ const StudentProfileView = () => {
   }, [user]);
 
   const loadProfileData = async () => {
-    const { data: aluno } = await supabase
-      .from("alunos")
-      .select("*")
-      .eq("email", user?.email)
-      .single();
+    try {
+      const { data: aluno } = await supabase
+        .from("alunos")
+        .select("*")
+        .eq("email", user?.email)
+        .maybeSingle();
 
-    if (aluno) {
-      setFormData({
-        nome: aluno.nome || "",
-        email: aluno.email || "",
-        telefone: aluno.telefone || "",
-        data_nascimento: aluno.data_nascimento || "",
-        peso: aluno.peso?.toString() || "",
-        objetivo: aluno.objetivo || "",
-      });
+      if (aluno) {
+        setFormData({
+          nome: aluno.nome || "",
+          email: aluno.email || "",
+          telefone: aluno.telefone || "",
+          data_nascimento: aluno.data_nascimento || "",
+          peso: aluno.peso?.toString() || "",
+          objetivo: aluno.objetivo || "",
+        });
+      }
+    } catch (error) {
+      console.error("Erro ao carregar perfil:", error);
     }
   };
 

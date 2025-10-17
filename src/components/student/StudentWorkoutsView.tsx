@@ -16,23 +16,27 @@ const StudentWorkoutsView = () => {
   }, [user]);
 
   const loadWorkoutData = async () => {
-    const { data: aluno } = await supabase
-      .from("alunos")
-      .select("id")
-      .eq("email", user?.email)
-      .single();
+    try {
+      const { data: aluno } = await supabase
+        .from("alunos")
+        .select("id")
+        .eq("email", user?.email)
+        .maybeSingle();
 
-    if (aluno) {
-      const { data: alunoTreino } = await supabase
-        .from("alunos_treinos")
-        .select("*, treinos(*)")
-        .eq("aluno_id", aluno.id)
-        .eq("ativo", true)
-        .single();
+      if (aluno) {
+        const { data: alunoTreino } = await supabase
+          .from("alunos_treinos")
+          .select("*, treinos(*)")
+          .eq("aluno_id", aluno.id)
+          .eq("ativo", true)
+          .maybeSingle();
 
-      if (alunoTreino) {
-        setTreino(alunoTreino.treinos);
+        if (alunoTreino) {
+          setTreino(alunoTreino.treinos);
+        }
       }
+    } catch (error) {
+      console.error("Erro ao carregar treino:", error);
     }
   };
 

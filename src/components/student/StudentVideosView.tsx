@@ -19,25 +19,29 @@ const StudentVideosView = () => {
   }, [user]);
 
   const loadVideos = async () => {
-    // Buscar coach_id do aluno
-    const { data: aluno } = await supabase
-      .from("alunos")
-      .select("coach_id")
-      .eq("email", user?.email)
-      .single();
+    try {
+      // Buscar coach_id do aluno
+      const { data: aluno } = await supabase
+        .from("alunos")
+        .select("coach_id")
+        .eq("email", user?.email)
+        .maybeSingle();
 
-    if (aluno?.coach_id) {
-      setCoachId(aluno.coach_id);
+      if (aluno?.coach_id) {
+        setCoachId(aluno.coach_id);
 
-      // Buscar vídeos do coach (visibilidade: todos ou alunos)
-      const { data: videosData } = await supabase
-        .from("videos")
-        .select("*")
-        .eq("coach_id", aluno.coach_id)
-        .in("visibilidade", ["todos", "alunos"])
-        .order("created_at", { ascending: false });
+        // Buscar vídeos do coach (visibilidade: todos ou alunos)
+        const { data: videosData } = await supabase
+          .from("videos")
+          .select("*")
+          .eq("coach_id", aluno.coach_id)
+          .in("visibilidade", ["todos", "alunos"])
+          .order("created_at", { ascending: false });
 
-      setVideos(videosData || []);
+        setVideos(videosData || []);
+      }
+    } catch (error) {
+      console.error("Erro ao carregar vídeos:", error);
     }
   };
 
