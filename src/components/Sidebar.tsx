@@ -91,9 +91,9 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       notifications: 8
     },
     {
-      id: "plans",
-      label: "Planos",
-      icon: CreditCard,
+      id: "payment-plans",
+      label: "Planos de Pagamento",
+      icon: Wallet,
       notifications: 0
     },
     {
@@ -101,12 +101,6 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       label: "Pagamentos",
       icon: DollarSign,
       notifications: 2
-    },
-    {
-      id: "payment-plans",
-      label: "Planos de Pagamento",
-      icon: Wallet,
-      notifications: 0
     },
     {
       id: "recurring-charges",

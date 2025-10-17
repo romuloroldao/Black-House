@@ -10,7 +10,6 @@ import MessageManager from "./MessageManager";
 import AgendaManager from "./AgendaManager";
 import PaymentManager from "./PaymentManager";
 import PlanManager from "./PlanManager";
-import PaymentPlansConfig from "./PaymentPlansConfig";
 import FinancialExceptionsManager from "./FinancialExceptionsManager";
 import ExpenseManager from "./ExpenseManager";
 import RecurringChargesConfig from "./RecurringChargesConfig";
@@ -46,12 +45,10 @@ const AppLayout = () => {
         return <NutritionInterface />;
       case "messages":
         return <div className="p-6"><MessageManager /></div>;
-      case "plans":
-        return <PlanManager />;
+      case "payment-plans":
+        return <div className="p-6"><PlanManager /></div>;
       case "payments":
         return <PaymentManager />;
-      case "payment-plans":
-        return <div className="p-6"><PaymentPlansConfig /></div>;
       case "exceptions":
         return <div className="p-6"><FinancialExceptionsManager /></div>;
       case "expenses":
