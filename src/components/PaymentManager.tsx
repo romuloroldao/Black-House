@@ -1,0 +1,462 @@
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { 
+  DollarSign,
+  Plus,
+  CreditCard,
+  Smartphone,
+  FileText,
+  CheckCircle2,
+  Clock,
+  XCircle,
+  Copy,
+  ExternalLink
+} from "lucide-react";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+
+interface Payment {
+  id: string;
+  aluno_id: string;
+  value: number;
+  description: string | null;
+  billing_type: string;
+  status: string;
+  due_date: string;
+  invoice_url: string | null;
+  bank_slip_url: string | null;
+  pix_qr_code: string | null;
+  pix_copy_paste: string | null;
+  created_at: string;
+  aluno_nome?: string;
+}
+
+const PaymentManager = () => {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [alunos, setAlunos] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  
+  const [formData, setFormData] = useState({
+    aluno_id: "",
+    value: "",
+    description: "",
+    billing_type: "PIX",
+    due_date: format(new Date(), "yyyy-MM-dd"),
+  });
+
+  useEffect(() => {
+    if (user) {
+      loadData();
+    }
+  }, [user]);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      
+      // Carregar alunos
+      const { data: alunosData, error: alunosError } = await supabase
+        .from("alunos")
+        .select("id, nome, email")
+        .eq("coach_id", user?.id)
+        .order("nome");
+
+      if (alunosError) throw alunosError;
+      setAlunos(alunosData || []);
+
+      // Carregar pagamentos
+      await loadPayments();
+    } catch (error) {
+      console.error("Erro ao carregar dados:", error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível carregar os dados",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadPayments = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("asaas_payments")
+        .select("*")
+        .eq("coach_id", user?.id)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      // Buscar nomes dos alunos
+      const paymentsWithNames = await Promise.all(
+        (data || []).map(async (payment) => {
+          const { data: alunoData } = await supabase
+            .from("alunos")
+            .select("nome")
+            .eq("id", payment.aluno_id)
+            .maybeSingle();
+
+          return {
+            ...payment,
+            aluno_nome: alunoData?.nome || "Aluno",
+          };
+        })
+      );
+
+      setPayments(paymentsWithNames);
+    } catch (error) {
+      console.error("Erro ao carregar pagamentos:", error);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!formData.aluno_id || !formData.value || !formData.due_date) {
+      toast({
+        title: "Erro",
+        description: "Preencha todos os campos obrigatórios",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setIsCreating(true);
+
+      const { data, error } = await supabase.functions.invoke('create-asaas-payment', {
+        body: {
+          alunoId: formData.aluno_id,
+          value: parseFloat(formData.value),
+          description: formData.description,
+          billingType: formData.billing_type,
+          dueDate: formData.due_date,
+        },
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Cobrança criada!",
+        description: "A cobrança foi criada com sucesso.",
+      });
+
+      setIsDialogOpen(false);
+      resetForm();
+      loadPayments();
+    } catch (error) {
+      console.error("Erro ao criar cobrança:", error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível criar a cobrança",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const resetForm = () => {
+    setFormData({
+      aluno_id: "",
+      value: "",
+      description: "",
+      billing_type: "PIX",
+      due_date: format(new Date(), "yyyy-MM-dd"),
+    });
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast({
+      title: "Copiado!",
+      description: "Código PIX copiado para a área de transferência",
+    });
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status.toUpperCase()) {
+      case "RECEIVED":
+      case "CONFIRMED":
+        return <CheckCircle2 className="w-4 h-4 text-success" />;
+      case "PENDING":
+        return <Clock className="w-4 h-4 text-warning" />;
+      case "OVERDUE":
+        return <XCircle className="w-4 h-4 text-destructive" />;
+      default:
+        return <Clock className="w-4 h-4 text-muted-foreground" />;
+    }
+  };
+
+  const getStatusLabel = (status: string) => {
+    const labels: Record<string, string> = {
+      PENDING: "Pendente",
+      RECEIVED: "Recebido",
+      CONFIRMED: "Confirmado",
+      OVERDUE: "Vencido",
+      REFUNDED: "Reembolsado",
+    };
+    return labels[status] || status;
+  };
+
+  const getBillingTypeIcon = (type: string) => {
+    switch (type) {
+      case "PIX":
+        return <Smartphone className="w-4 h-4" />;
+      case "BOLETO":
+        return <FileText className="w-4 h-4" />;
+      case "CREDIT_CARD":
+        return <CreditCard className="w-4 h-4" />;
+      default:
+        return <DollarSign className="w-4 h-4" />;
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+            Pagamentos
+          </h1>
+          <p className="text-muted-foreground">
+            Gerencie cobranças e pagamentos dos seus alunos
+          </p>
+        </div>
+        <Button onClick={() => setIsDialogOpen(true)} className="shadow-glow">
+          <Plus className="w-4 h-4 mr-2" />
+          Nova Cobrança
+        </Button>
+      </div>
+
+      {/* Lista de Pagamentos */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <DollarSign className="w-5 h-5" />
+            Cobranças
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ScrollArea className="h-[600px]">
+            {payments.length === 0 ? (
+              <div className="text-center py-12">
+                <DollarSign className="w-12 h-12 mx-auto text-muted-foreground mb-3 opacity-50" />
+                <p className="text-muted-foreground">Nenhuma cobrança criada</p>
+                <Button onClick={() => setIsDialogOpen(true)} variant="outline" className="mt-4">
+                  Criar Primeira Cobrança
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {payments.map((payment) => (
+                  <Card key={payment.id}>
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 space-y-2">
+                          <div className="flex items-center gap-2">
+                            {getStatusIcon(payment.status)}
+                            <h3 className="font-semibold">{payment.aluno_nome}</h3>
+                            <Badge variant="outline">
+                              R$ {payment.value.toFixed(2)}
+                            </Badge>
+                          </div>
+
+                          {payment.description && (
+                            <p className="text-sm text-muted-foreground">{payment.description}</p>
+                          )}
+
+                          <div className="flex flex-wrap gap-2 text-sm">
+                            <Badge variant="outline" className="gap-1">
+                              {getBillingTypeIcon(payment.billing_type)}
+                              {payment.billing_type}
+                            </Badge>
+
+                            <Badge 
+                              variant="outline"
+                              className={
+                                payment.status === "RECEIVED" || payment.status === "CONFIRMED"
+                                  ? "text-success"
+                                  : payment.status === "OVERDUE"
+                                  ? "text-destructive"
+                                  : ""
+                              }
+                            >
+                              {getStatusLabel(payment.status)}
+                            </Badge>
+
+                            <Badge variant="outline">
+                              Venc: {format(new Date(payment.due_date), "dd/MM/yyyy", { locale: ptBR })}
+                            </Badge>
+                          </div>
+
+                          {/* Links de pagamento */}
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {payment.invoice_url && (
+                              <Button 
+                                size="sm" 
+                                variant="outline"
+                                onClick={() => window.open(payment.invoice_url!, '_blank')}
+                              >
+                                <ExternalLink className="w-3 h-3 mr-1" />
+                                Fatura
+                              </Button>
+                            )}
+                            
+                            {payment.bank_slip_url && (
+                              <Button 
+                                size="sm" 
+                                variant="outline"
+                                onClick={() => window.open(payment.bank_slip_url!, '_blank')}
+                              >
+                                <FileText className="w-3 h-3 mr-1" />
+                                Boleto
+                              </Button>
+                            )}
+
+                            {payment.pix_copy_paste && (
+                              <Button 
+                                size="sm" 
+                                variant="outline"
+                                onClick={() => copyToClipboard(payment.pix_copy_paste!)}
+                              >
+                                <Copy className="w-3 h-3 mr-1" />
+                                Copiar PIX
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </CardContent>
+      </Card>
+
+      {/* Dialog para Criar Cobrança */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Nova Cobrança</DialogTitle>
+          </DialogHeader>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2 space-y-2">
+                <Label htmlFor="aluno_id">Aluno *</Label>
+                <Select 
+                  value={formData.aluno_id} 
+                  onValueChange={(value) => setFormData({ ...formData, aluno_id: value })}
+                  required
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um aluno" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {alunos.map(aluno => (
+                      <SelectItem key={aluno.id} value={aluno.id}>
+                        {aluno.nome}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="value">Valor (R$) *</Label>
+                <Input
+                  id="value"
+                  type="number"
+                  step="0.01"
+                  value={formData.value}
+                  onChange={(e) => setFormData({ ...formData, value: e.target.value })}
+                  placeholder="0.00"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="billing_type">Forma de Pagamento *</Label>
+                <Select 
+                  value={formData.billing_type} 
+                  onValueChange={(value) => setFormData({ ...formData, billing_type: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="PIX">PIX</SelectItem>
+                    <SelectItem value="BOLETO">Boleto</SelectItem>
+                    <SelectItem value="CREDIT_CARD">Cartão de Crédito</SelectItem>
+                    <SelectItem value="UNDEFINED">Cliente Escolhe</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="col-span-2 space-y-2">
+                <Label htmlFor="due_date">Data de Vencimento *</Label>
+                <Input
+                  id="due_date"
+                  type="date"
+                  value={formData.due_date}
+                  onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="col-span-2 space-y-2">
+                <Label htmlFor="description">Descrição</Label>
+                <Textarea
+                  id="description"
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  placeholder="Descreva a cobrança..."
+                  rows={3}
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={isCreating}>
+                {isCreating ? "Criando..." : "Criar Cobrança"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+export default PaymentManager;
