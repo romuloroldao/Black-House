@@ -70,6 +70,11 @@ export default function PlanManager() {
       return;
     }
 
+    if (parseFloat(formData.valor) < 5) {
+      toast.error("O valor mínimo para cobranças é R$ 5,00");
+      return;
+    }
+
     try {
       const planData = {
         nome: formData.nome,
@@ -245,14 +250,15 @@ export default function PlanManager() {
                   id="valor"
                   type="number"
                   step="0.01"
-                  min="0"
+                  min="5"
                   value={formData.valor}
                   onChange={(e) =>
                     setFormData({ ...formData, valor: e.target.value })
                   }
-                  placeholder="0.00"
+                  placeholder="5.00"
                   required
                 />
+                <p className="text-xs text-muted-foreground">Valor mínimo: R$ 5,00</p>
               </div>
 
               <div>

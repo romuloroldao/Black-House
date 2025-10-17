@@ -176,6 +176,15 @@ const PaymentManager = () => {
       return;
     }
 
+    if (!usePlan && parseFloat(formData.value) < 5) {
+      toast({
+        title: "Valor inválido",
+        description: "O valor mínimo para cobranças é R$ 5,00",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       setIsCreating(true);
 
@@ -488,10 +497,12 @@ const PaymentManager = () => {
                     id="value"
                     type="number"
                     step="0.01"
+                    min="5"
                     value={formData.value}
                     onChange={(e) => setFormData({ ...formData, value: e.target.value })}
-                    placeholder="0.00"
+                    placeholder="5.00"
                   />
+                  <p className="text-xs text-muted-foreground">Valor mínimo: R$ 5,00</p>
                 </div>
               )}
 
