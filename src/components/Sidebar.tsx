@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import logoBlackHouse from "@/assets/logo-black-house.png";
 import {
   LayoutDashboard,
   Users,
@@ -129,14 +130,15 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       {/* Logo */}
       <div className="p-6 border-b border-border">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-primary rounded-lg flex items-center justify-center">
-            <Dumbbell className="w-6 h-6 text-primary-foreground" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold bg-gradient-primary bg-clip-text text-transparent">
-              FitCoach Pro
-            </h1>
-            <p className="text-xs text-muted-foreground">Personal Trainer</p>
+          <div className="w-full flex flex-col items-center">
+            <img 
+              src={logoBlackHouse} 
+              alt="Black House" 
+              className="w-full h-auto max-w-[200px] mb-2"
+            />
+            <p className="text-xs text-muted-foreground uppercase tracking-wider">
+              Medicina Integrativa
+            </p>
           </div>
         </div>
       </div>

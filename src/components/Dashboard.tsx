@@ -229,9 +229,9 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
-                FitCoach Pro
+                Black House
               </h1>
-              <p className="text-muted-foreground">Dashboard do Personal Trainer</p>
+              <p className="text-muted-foreground">Medicina Integrativa</p>
             </div>
             <div className="flex items-center gap-4">
               <Button variant="outline" size="icon">

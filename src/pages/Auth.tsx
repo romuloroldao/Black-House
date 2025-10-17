@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Dumbbell } from 'lucide-react';
+import logoBlackHouse from '@/assets/logo-black-house.png';
 
 const Auth = () => {
   const navigate = useNavigate();
@@ -112,15 +112,17 @@ const Auth = () => {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
-            <div className="w-16 h-16 bg-gradient-primary rounded-2xl flex items-center justify-center shadow-glow">
-              <Dumbbell className="w-8 h-8 text-white" />
-            </div>
+            <img 
+              src={logoBlackHouse} 
+              alt="Black House" 
+              className="h-20 w-auto"
+            />
           </div>
           <CardTitle className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
-            FitCoach Pro
+            Black House
           </CardTitle>
           <CardDescription>
-            Sistema de gestão para personal trainers
+            Medicina Integrativa
           </CardDescription>
         </CardHeader>
         <CardContent>
