@@ -121,6 +121,12 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       notifications: 0
     },
     {
+      id: "financial-dashboard",
+      label: "Dashboard Financeiro",
+      icon: BarChart3,
+      notifications: 0
+    },
+    {
       id: "calendar",
       label: "Agenda",
       icon: Calendar,
@@ -129,7 +135,7 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
     {
       id: "analytics",
       label: "Relatórios",
-      icon: BarChart3,
+      icon: Star,
       notifications: 0
     }
   ];
