@@ -45,6 +45,7 @@ interface Student {
   name: string;
   email: string;
   phone?: string;
+  cpf_cnpj?: string;
   avatar?: string;
   status: string;
   plan: string;
@@ -99,15 +100,16 @@ const StudentManager = () => {
         id: aluno.id,
         name: aluno.nome || 'Sem nome',
         email: aluno.email,
-        phone: '(11) 99999-9999',
+        phone: aluno.telefone || undefined,
+        cpf_cnpj: aluno.cpf_cnpj || undefined,
         avatar: '/api/placeholder/60/60',
         status: 'active',
-        plan: 'Básico',
+        plan: aluno.plano || 'Básico',
         goal: aluno.objetivo || 'Sem objetivo definido',
         joinDate: new Date(aluno.created_at).toLocaleDateString('pt-BR'),
         lastWorkout: 'Não registrado',
         progress: 0,
-        payment: 'paid',
+        payment: aluno.cpf_cnpj ? 'paid' : 'pending',
         tags: [],
         nextPayment: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR'),
         data_nascimento: aluno.data_nascimento || undefined,
@@ -124,10 +126,10 @@ const StudentManager = () => {
 
   const handleSaveStudent = async () => {
     try {
-      if (!newStudent.nome || !newStudent.email) {
+      if (!newStudent.nome || !newStudent.email || !newStudent.cpf_cnpj) {
         toast({
-          title: "Erro",
-          description: "Nome e email são obrigatórios",
+          title: "Campos obrigatórios",
+          description: "Nome, Email e CPF/CNPJ são obrigatórios. O CPF/CNPJ é necessário para gerar cobranças.",
           variant: "destructive",
         });
         return;
@@ -140,8 +142,10 @@ const StudentManager = () => {
           .update({
             nome: newStudent.nome,
             email: newStudent.email,
-            cpf_cnpj: newStudent.cpf_cnpj || null,
+            cpf_cnpj: newStudent.cpf_cnpj,
+            telefone: newStudent.telefone || null,
             objetivo: newStudent.objetivo || null,
+            plano: newStudent.plano || null,
             data_nascimento: newStudent.data_nascimento || null,
             peso: newStudent.peso ? parseInt(newStudent.peso) : null,
           })
@@ -160,8 +164,10 @@ const StudentManager = () => {
           .insert([{
             nome: newStudent.nome,
             email: newStudent.email,
-            cpf_cnpj: newStudent.cpf_cnpj || null,
+            cpf_cnpj: newStudent.cpf_cnpj,
+            telefone: newStudent.telefone || null,
             objetivo: newStudent.objetivo || null,
+            plano: newStudent.plano || null,
             data_nascimento: newStudent.data_nascimento || null,
             peso: newStudent.peso ? parseInt(newStudent.peso) : null,
           }]);
@@ -205,7 +211,7 @@ const StudentManager = () => {
       nome: student.name,
       email: student.email,
       telefone: student.phone || "",
-      cpf_cnpj: (student as any).cpf_cnpj || "",
+      cpf_cnpj: student.cpf_cnpj || "",
       objetivo: student.goal || "",
       plano: student.plan || "",
       data_nascimento: student.data_nascimento || "",
@@ -328,6 +334,9 @@ const StudentManager = () => {
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>{editingStudent ? "Editar Aluno" : "Adicionar Novo Aluno"}</DialogTitle>
+              <p className="text-sm text-muted-foreground mt-2">
+                * Campos obrigatórios. O CPF/CNPJ é necessário para gerar cobranças via Asaas.
+              </p>
             </DialogHeader>
             <div className="grid grid-cols-2 gap-4 py-4">
               <Input 
@@ -365,6 +374,19 @@ const StudentManager = () => {
                   <SelectItem value="Reabilitação">Reabilitação</SelectItem>
                 </SelectContent>
               </Select>
+              <Select
+                value={newStudent.plano}
+                onValueChange={(value) => setNewStudent({...newStudent, plano: value})}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Plano" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Básico">Básico</SelectItem>
+                  <SelectItem value="Premium">Premium</SelectItem>
+                  <SelectItem value="VIP">VIP</SelectItem>
+                </SelectContent>
+              </Select>
               <Input 
                 placeholder="Peso (kg)" 
                 type="number"
@@ -376,7 +398,6 @@ const StudentManager = () => {
                 type="date"
                 value={newStudent.data_nascimento}
                 onChange={(e) => setNewStudent({...newStudent, data_nascimento: e.target.value})}
-                className="col-span-2"
               />
             </div>
             <div className="flex justify-end gap-2">

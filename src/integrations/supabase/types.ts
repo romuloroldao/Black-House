@@ -120,6 +120,8 @@ export type Database = {
           nome: string | null
           objetivo: string | null
           peso: number | null
+          plano: string | null
+          telefone: string | null
         }
         Insert: {
           coach_id?: string | null
@@ -131,6 +133,8 @@ export type Database = {
           nome?: string | null
           objetivo?: string | null
           peso?: number | null
+          plano?: string | null
+          telefone?: string | null
         }
         Update: {
           coach_id?: string | null
@@ -142,6 +146,8 @@ export type Database = {
           nome?: string | null
           objetivo?: string | null
           peso?: number | null
+          plano?: string | null
+          telefone?: string | null
         }
         Relationships: []
       }
