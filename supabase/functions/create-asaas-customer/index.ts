@@ -80,7 +80,7 @@ serve(async (req) => {
       body: JSON.stringify({
         name: aluno.nome,
         email: aluno.email,
-        cpfCnpj: aluno.cpf || undefined,
+        cpfCnpj: aluno.cpf_cnpj || undefined,
         phone: aluno.telefone || undefined,
       }),
     });

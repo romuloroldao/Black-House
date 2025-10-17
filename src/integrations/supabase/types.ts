@@ -112,6 +112,7 @@ export type Database = {
       alunos: {
         Row: {
           coach_id: string | null
+          cpf_cnpj: string | null
           created_at: string
           data_nascimento: string | null
           email: string
@@ -122,6 +123,7 @@ export type Database = {
         }
         Insert: {
           coach_id?: string | null
+          cpf_cnpj?: string | null
           created_at?: string
           data_nascimento?: string | null
           email?: string
@@ -132,6 +134,7 @@ export type Database = {
         }
         Update: {
           coach_id?: string | null
+          cpf_cnpj?: string | null
           created_at?: string
           data_nascimento?: string | null
           email?: string

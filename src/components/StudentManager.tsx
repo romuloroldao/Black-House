@@ -75,6 +75,7 @@ const StudentManager = () => {
     nome: "",
     email: "",
     telefone: "",
+    cpf_cnpj: "",
     objetivo: "",
     plano: "",
     data_nascimento: "",
@@ -139,6 +140,7 @@ const StudentManager = () => {
           .update({
             nome: newStudent.nome,
             email: newStudent.email,
+            cpf_cnpj: newStudent.cpf_cnpj || null,
             objetivo: newStudent.objetivo || null,
             data_nascimento: newStudent.data_nascimento || null,
             peso: newStudent.peso ? parseInt(newStudent.peso) : null,
@@ -158,6 +160,7 @@ const StudentManager = () => {
           .insert([{
             nome: newStudent.nome,
             email: newStudent.email,
+            cpf_cnpj: newStudent.cpf_cnpj || null,
             objetivo: newStudent.objetivo || null,
             data_nascimento: newStudent.data_nascimento || null,
             peso: newStudent.peso ? parseInt(newStudent.peso) : null,
@@ -176,6 +179,7 @@ const StudentManager = () => {
         nome: "",
         email: "",
         telefone: "",
+        cpf_cnpj: "",
         objetivo: "",
         plano: "",
         data_nascimento: "",
@@ -201,6 +205,7 @@ const StudentManager = () => {
       nome: student.name,
       email: student.email,
       telefone: student.phone || "",
+      cpf_cnpj: (student as any).cpf_cnpj || "",
       objetivo: student.goal || "",
       plano: student.plan || "",
       data_nascimento: student.data_nascimento || "",
@@ -301,11 +306,12 @@ const StudentManager = () => {
         <Dialog open={isDialogOpen} onOpenChange={(open) => {
           setIsDialogOpen(open);
           if (!open) {
-            setEditingStudent(null);
+          setEditingStudent(null);
             setNewStudent({
               nome: "",
               email: "",
               telefone: "",
+              cpf_cnpj: "",
               objetivo: "",
               plano: "",
               data_nascimento: "",
@@ -334,6 +340,16 @@ const StudentManager = () => {
                 type="email"
                 value={newStudent.email}
                 onChange={(e) => setNewStudent({...newStudent, email: e.target.value})}
+              />
+              <Input 
+                placeholder="Telefone" 
+                value={newStudent.telefone}
+                onChange={(e) => setNewStudent({...newStudent, telefone: e.target.value})}
+              />
+              <Input 
+                placeholder="CPF ou CNPJ *" 
+                value={newStudent.cpf_cnpj}
+                onChange={(e) => setNewStudent({...newStudent, cpf_cnpj: e.target.value})}
               />
               <Select
                 value={newStudent.objetivo}
