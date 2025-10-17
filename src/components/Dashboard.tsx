@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import SearchDialog from "./SearchDialog";
+import NotificationsPopover from "./NotificationsPopover";
 import { 
   Users, 
   Dumbbell, 
@@ -14,7 +16,6 @@ import {
   TrendingUp, 
   Calendar,
   Plus,
-  Bell,
   Search,
   Filter,
   MoreVertical,
@@ -31,6 +32,7 @@ interface DashboardProps {
 
 const Dashboard = ({ onTabChange }: DashboardProps) => {
   const { user } = useAuth();
+  const [searchOpen, setSearchOpen] = useState(false);
   const [stats, setStats] = useState({
     totalAlunos: 0,
     totalDietas: 0,
@@ -217,7 +219,7 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
       case 'payment': return <DollarSign className="w-4 h-4 text-destructive" />;
       case 'live': return <Video className="w-4 h-4 text-primary" />;
       case 'message': return <MessageSquare className="w-4 h-4 text-warning" />;
-      default: return <Bell className="w-4 h-4" />;
+      default: return <Calendar className="w-4 h-4" />;
     }
   };
 
@@ -234,15 +236,10 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
               <p className="text-muted-foreground">Medicina Integrativa</p>
             </div>
             <div className="flex items-center gap-4">
-              <Button variant="outline" size="icon">
+              <Button variant="outline" size="icon" onClick={() => setSearchOpen(true)}>
                 <Search className="w-4 h-4" />
               </Button>
-              <Button variant="outline" size="icon" className="relative">
-                <Bell className="w-4 h-4" />
-                <span className="absolute -top-1 -right-1 w-3 h-3 bg-destructive rounded-full text-xs flex items-center justify-center text-destructive-foreground">
-                  3
-                </span>
-              </Button>
+              <NotificationsPopover onNavigate={onTabChange} />
               <Avatar>
                 <AvatarImage src="/api/placeholder/40/40" />
                 <AvatarFallback>PT</AvatarFallback>
@@ -430,6 +427,13 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
           </div>
         </div>
       </div>
+
+      {/* Search Dialog */}
+      <SearchDialog 
+        open={searchOpen} 
+        onOpenChange={setSearchOpen}
+        onNavigate={onTabChange}
+      />
     </div>
   );
 };

@@ -592,6 +592,53 @@ export type Database = {
           },
         ]
       }
+      notificacoes: {
+        Row: {
+          aluno_id: string | null
+          coach_id: string
+          created_at: string
+          id: string
+          lida: boolean
+          link: string | null
+          mensagem: string
+          tipo: string
+          titulo: string
+          updated_at: string
+        }
+        Insert: {
+          aluno_id?: string | null
+          coach_id: string
+          created_at?: string
+          id?: string
+          lida?: boolean
+          link?: string | null
+          mensagem: string
+          tipo: string
+          titulo: string
+          updated_at?: string
+        }
+        Update: {
+          aluno_id?: string | null
+          coach_id?: string
+          created_at?: string
+          id?: string
+          lida?: boolean
+          link?: string | null
+          mensagem?: string
+          tipo?: string
+          titulo?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notificacoes_aluno_id_fkey"
+            columns: ["aluno_id"]
+            isOneToOne: false
+            referencedRelation: "alunos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       planos_pagamento: {
         Row: {
           ativo: boolean
