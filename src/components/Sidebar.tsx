@@ -22,7 +22,8 @@ import {
   CreditCard,
   TrendingDown,
   AlertCircle,
-  Wallet
+  Wallet,
+  RefreshCw
 } from "lucide-react";
 
 interface SidebarProps {
@@ -105,6 +106,12 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       id: "payment-plans",
       label: "Planos de Pagamento",
       icon: Wallet,
+      notifications: 0
+    },
+    {
+      id: "recurring-charges",
+      label: "Cobranças Recorrentes",
+      icon: RefreshCw,
       notifications: 0
     },
     {

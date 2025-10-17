@@ -13,6 +13,7 @@ import PlanManager from "./PlanManager";
 import PaymentPlansConfig from "./PaymentPlansConfig";
 import FinancialExceptionsManager from "./FinancialExceptionsManager";
 import ExpenseManager from "./ExpenseManager";
+import RecurringChargesConfig from "./RecurringChargesConfig";
 
 const AppLayout = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -55,6 +56,8 @@ const AppLayout = () => {
         return <div className="p-6"><FinancialExceptionsManager /></div>;
       case "expenses":
         return <div className="p-6"><ExpenseManager /></div>;
+      case "recurring-charges":
+        return <div className="p-6"><RecurringChargesConfig /></div>;
       case "calendar":
         return <AgendaManager />;
       case "analytics":

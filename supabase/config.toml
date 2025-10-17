@@ -8,3 +8,9 @@ verify_jwt = true
 
 [functions.asaas-webhook]
 verify_jwt = false
+
+[functions.generate-recurring-charges]
+verify_jwt = false
+
+[functions.send-payment-reminders]
+verify_jwt = false
