@@ -7,15 +7,17 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Calculator } from 'lucide-react';
 
 interface Alimento {
-  id: number;
+  id: string;
   nome: string;
-  quantidade: number;
-  kcal: number;
-  carboidratos: number;
-  proteinas: number;
-  lipidios: number;
-  origem: string;
-  grupo: string;
+  quantidade_referencia_g: number;
+  kcal_por_referencia: number;
+  cho_por_referencia: number;
+  ptn_por_referencia: number;
+  lip_por_referencia: number;
+  origem_ptn: string;
+  tipo_id: string;
+  autor?: string;
+  info_adicional?: string;
 }
 
 interface Substituto {
@@ -50,20 +52,27 @@ const NutritionManager = () => {
   }
 
   function calcularSubstituicoes(alimentoSelecionado: Alimento): Substituto[] {
-    // Determinar nutriente dominante baseado no grupo
-    let nutrienteDominante: keyof Pick<Alimento, 'proteinas' | 'carboidratos' | 'lipidios'> = 'proteinas';
+    // Determinar nutriente dominante baseado no tipo
+    let nutrienteDominante: keyof Pick<Alimento, 'ptn_por_referencia' | 'cho_por_referencia' | 'lip_por_referencia'> = 'ptn_por_referencia';
     
-    if (alimentoSelecionado.grupo === 'Carboidrato') nutrienteDominante = 'carboidratos';
-    if (alimentoSelecionado.grupo === 'Lipídio') nutrienteDominante = 'lipidios';
+    // Analisar qual macronutriente é dominante
+    const maxMacro = Math.max(
+      alimentoSelecionado.ptn_por_referencia,
+      alimentoSelecionado.cho_por_referencia,
+      alimentoSelecionado.lip_por_referencia
+    );
+    
+    if (maxMacro === alimentoSelecionado.cho_por_referencia) nutrienteDominante = 'cho_por_referencia';
+    else if (maxMacro === alimentoSelecionado.lip_por_referencia) nutrienteDominante = 'lip_por_referencia';
 
     const valorOriginal = alimentoSelecionado[nutrienteDominante];
-    const quantidadeOriginal = alimentoSelecionado.quantidade;
+    const quantidadeOriginal = alimentoSelecionado.quantidade_referencia_g;
 
     if (valorOriginal === 0) return [];
 
     return alimentos
       .filter(a => 
-        a.grupo === alimentoSelecionado.grupo && 
+        a.tipo_id === alimentoSelecionado.tipo_id && 
         a.nome !== alimentoSelecionado.nome &&
         a[nutrienteDominante] > 0
       )
@@ -73,23 +82,26 @@ const NutritionManager = () => {
         return {
           nome: sub.nome,
           quantidade: qtdEquivalente,
-          nutrienteDominante: nutrienteDominante === 'proteinas' ? 'Proteínas' : 
-                             nutrienteDominante === 'carboidratos' ? 'Carboidratos' : 'Lipídios'
+          nutrienteDominante: nutrienteDominante === 'ptn_por_referencia' ? 'Proteínas' : 
+                             nutrienteDominante === 'cho_por_referencia' ? 'Carboidratos' : 'Lipídios'
         };
       })
       .slice(0, 3); // Limitar a 3 substitutos
   }
 
-  function getNutrienteBadgeColor(grupo: string) {
-    switch (grupo) {
-      case 'Proteína':
-        return 'bg-primary/20 text-primary border-primary/30';
-      case 'Carboidrato':
-        return 'bg-warning/20 text-warning border-warning/30';
-      case 'Lipídio':
-        return 'bg-destructive/20 text-destructive border-destructive/30';
-      default:
-        return 'bg-muted text-muted-foreground';
+  function getNutrienteBadgeColor(alimento: Alimento) {
+    const maxMacro = Math.max(
+      alimento.ptn_por_referencia,
+      alimento.cho_por_referencia,
+      alimento.lip_por_referencia
+    );
+    
+    if (maxMacro === alimento.ptn_por_referencia) {
+      return 'bg-primary/20 text-primary border-primary/30';
+    } else if (maxMacro === alimento.cho_por_referencia) {
+      return 'bg-warning/20 text-warning border-warning/30';
+    } else {
+      return 'bg-destructive/20 text-destructive border-destructive/30';
     }
   }
 
@@ -157,16 +169,16 @@ const NutritionManager = () => {
                   </CardTitle>
                   <Badge 
                     variant="outline" 
-                    className={getNutrienteBadgeColor(alimento.grupo)}
+                    className={getNutrienteBadgeColor(alimento)}
                   >
-                    {alimento.grupo}
+                    {alimento.origem_ptn}
                   </Badge>
                 </div>
                 <div className="flex gap-4 text-sm text-muted-foreground">
-                  <span>{alimento.kcal} kcal</span>
-                  <span>{alimento.proteinas}g proteínas</span>
-                  <span>{alimento.carboidratos}g carb</span>
-                  <span>{alimento.lipidios}g lip</span>
+                  <span>{alimento.kcal_por_referencia} kcal</span>
+                  <span>{alimento.ptn_por_referencia}g proteínas</span>
+                  <span>{alimento.cho_por_referencia}g carb</span>
+                  <span>{alimento.lip_por_referencia}g lip</span>
                 </div>
               </CardHeader>
               

@@ -72,42 +72,56 @@ export type Database = {
       }
       alimentos: {
         Row: {
-          carboidratos: number
-          created_at: string
-          grupo: string
-          id: number
-          kcal: number
-          lipidios: number
+          autor: string | null
+          cho_por_referencia: number
+          created_at: string | null
+          id: string
+          info_adicional: string | null
+          kcal_por_referencia: number
+          lip_por_referencia: number
           nome: string
-          origem: string | null
-          proteinas: number
-          quantidade: number | null
+          origem_ptn: string
+          ptn_por_referencia: number
+          quantidade_referencia_g: number
+          tipo_id: string | null
         }
         Insert: {
-          carboidratos: number
-          created_at?: string
-          grupo?: string
-          id?: number
-          kcal: number
-          lipidios: number
-          nome?: string
-          origem?: string | null
-          proteinas: number
-          quantidade?: number | null
+          autor?: string | null
+          cho_por_referencia: number
+          created_at?: string | null
+          id?: string
+          info_adicional?: string | null
+          kcal_por_referencia: number
+          lip_por_referencia: number
+          nome: string
+          origem_ptn: string
+          ptn_por_referencia: number
+          quantidade_referencia_g?: number
+          tipo_id?: string | null
         }
         Update: {
-          carboidratos?: number
-          created_at?: string
-          grupo?: string
-          id?: number
-          kcal?: number
-          lipidios?: number
+          autor?: string | null
+          cho_por_referencia?: number
+          created_at?: string | null
+          id?: string
+          info_adicional?: string | null
+          kcal_por_referencia?: number
+          lip_por_referencia?: number
           nome?: string
-          origem?: string | null
-          proteinas?: number
-          quantidade?: number | null
+          origem_ptn?: string
+          ptn_por_referencia?: number
+          quantidade_referencia_g?: number
+          tipo_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "alimentos_novo_tipo_id_fkey"
+            columns: ["tipo_id"]
+            isOneToOne: false
+            referencedRelation: "tipos_alimentos"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       alunos: {
         Row: {
@@ -558,7 +572,7 @@ export type Database = {
       }
       itens_dieta: {
         Row: {
-          alimento_id: number | null
+          alimento_id: string | null
           created_at: string
           dia_semana: string | null
           dieta_id: string | null
@@ -567,7 +581,7 @@ export type Database = {
           refeicao: string
         }
         Insert: {
-          alimento_id?: number | null
+          alimento_id?: string | null
           created_at?: string
           dia_semana?: string | null
           dieta_id?: string | null
@@ -576,7 +590,7 @@ export type Database = {
           refeicao: string
         }
         Update: {
-          alimento_id?: number | null
+          alimento_id?: string | null
           created_at?: string
           dia_semana?: string | null
           dieta_id?: string | null
@@ -1057,6 +1071,24 @@ export type Database = {
           },
         ]
       }
+      tipos_alimentos: {
+        Row: {
+          created_at: string | null
+          id: string
+          nome_tipo: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          nome_tipo: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          nome_tipo?: string
+        }
+        Relationships: []
+      }
       treinos: {
         Row: {
           categoria: string
@@ -1179,6 +1211,17 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      calcular_nutrientes: {
+        Args: { alimento_id: string; quantidade_consumida_g: number }
+        Returns: {
+          cho: number
+          kcal: number
+          lip: number
+          nome_alimento: string
+          origem_ptn: string
+          ptn: number
+        }[]
+      }
       get_aluno_id_by_email: {
         Args: { user_email?: string }
         Returns: string

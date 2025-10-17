@@ -13,14 +13,17 @@ import { Plus, Trash2, Calculator, Users } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface Alimento {
-  id: number;
+  id: string;
   nome: string;
-  quantidade: number;
-  kcal: number;
-  carboidratos: number;
-  proteinas: number;
-  lipidios: number;
-  grupo: string;
+  quantidade_referencia_g: number;
+  kcal_por_referencia: number;
+  cho_por_referencia: number;
+  ptn_por_referencia: number;
+  lip_por_referencia: number;
+  origem_ptn: string;
+  tipo_id: string;
+  autor?: string;
+  info_adicional?: string;
 }
 
 interface Aluno {
@@ -32,7 +35,7 @@ interface Aluno {
 
 interface ItemRefeicao {
   id: string;
-  alimento_id: number;
+  alimento_id: string;
   quantidade: number;
   refeicao: string;
   alimento?: Alimento;
@@ -130,7 +133,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
           .filter(item => item.refeicao === nomeRefeicao)
           .map(item => ({
             id: item.id,
-            alimento_id: item.alimento_id || 0,
+            alimento_id: item.alimento_id || '',
             quantidade: item.quantidade,
             refeicao: nomeRefeicao,
             alimento: item.alimentos as Alimento
@@ -158,7 +161,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
   const adicionarItem = (refeicaoIndex: number) => {
     const novoItem: ItemRefeicao = {
       id: Math.random().toString(36).substr(2, 9),
-      alimento_id: 0,
+      alimento_id: '',
       quantidade: 100,
       refeicao: refeicoes[refeicaoIndex].nome
     };
@@ -204,7 +207,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
 
     // Se mudou o alimento, buscar os dados
     if (campo === 'alimento_id') {
-      const alimento = alimentos.find(a => a.id === Number(valor));
+      const alimento = alimentos.find(a => a.id === valor);
       if (alimento) {
         novasRefeicoes[refeicaoIndex].itens[itemIndex].alimento = alimento;
       }
@@ -217,17 +220,23 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
     if (!item.alimento) return [];
     
     const alimento = item.alimento;
-    let nutrienteDominante: keyof Pick<Alimento, 'proteinas' | 'carboidratos' | 'lipidios'> = 'proteinas';
+    let nutrienteDominante: keyof Pick<Alimento, 'ptn_por_referencia' | 'cho_por_referencia' | 'lip_por_referencia'> = 'ptn_por_referencia';
     
-    if (alimento.grupo === 'Carboidrato') nutrienteDominante = 'carboidratos';
-    if (alimento.grupo === 'Lipídio') nutrienteDominante = 'lipidios';
+    const maxMacro = Math.max(
+      alimento.ptn_por_referencia,
+      alimento.cho_por_referencia,
+      alimento.lip_por_referencia
+    );
+    
+    if (maxMacro === alimento.cho_por_referencia) nutrienteDominante = 'cho_por_referencia';
+    else if (maxMacro === alimento.lip_por_referencia) nutrienteDominante = 'lip_por_referencia';
 
     const valorOriginal = alimento[nutrienteDominante];
     if (valorOriginal === 0) return [];
 
     return alimentos
       .filter(a => 
-        a.grupo === alimento.grupo && 
+        a.tipo_id === alimento.tipo_id && 
         a.id !== alimento.id &&
         a[nutrienteDominante] > 0
       )
@@ -237,8 +246,8 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
         return {
           nome: sub.nome,
           quantidade: Math.round(qtdEquivalente * 10) / 10,
-          nutriente: nutrienteDominante === 'proteinas' ? 'Proteínas' : 
-                    nutrienteDominante === 'carboidratos' ? 'Carboidratos' : 'Lipídios'
+          nutriente: nutrienteDominante === 'ptn_por_referencia' ? 'Proteínas' : 
+                    nutrienteDominante === 'cho_por_referencia' ? 'Carboidratos' : 'Lipídios'
         };
       })
       .slice(0, 3);
@@ -248,12 +257,12 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
     return refeicao.itens.reduce((total, item) => {
       if (!item.alimento) return total;
       
-      const fator = item.quantidade / item.alimento.quantidade;
+      const fator = item.quantidade / item.alimento.quantidade_referencia_g;
       return {
-        kcal: total.kcal + (item.alimento.kcal * fator),
-        proteinas: total.proteinas + (item.alimento.proteinas * fator),
-        carboidratos: total.carboidratos + (item.alimento.carboidratos * fator),
-        lipidios: total.lipidios + (item.alimento.lipidios * fator)
+        kcal: total.kcal + (item.alimento.kcal_por_referencia * fator),
+        proteinas: total.proteinas + (item.alimento.ptn_por_referencia * fator),
+        carboidratos: total.carboidratos + (item.alimento.cho_por_referencia * fator),
+        lipidios: total.lipidios + (item.alimento.lip_por_referencia * fator)
       };
     }, { kcal: 0, proteinas: 0, carboidratos: 0, lipidios: 0 });
   };
@@ -322,7 +331,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
       // Salvar itens da dieta
       const itensParaSalvar = refeicoes.flatMap(refeicao =>
         refeicao.itens
-          .filter(item => item.alimento_id > 0)
+          .filter(item => item.alimento_id !== '')
           .map(item => ({
             dieta_id: dietaIdAtual,
             alimento_id: item.alimento_id,
@@ -518,12 +527,12 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
                         <Label>Alimento</Label>
                         <Combobox
                           options={alimentos.map(alimento => ({
-                            value: alimento.id.toString(),
+                            value: alimento.id,
                             label: alimento.nome,
-                            description: `${alimento.grupo} - ${alimento.kcal}kcal/100g`
+                            description: `${alimento.origem_ptn} - ${alimento.kcal_por_referencia}kcal/100g`
                           }))}
-                          value={item.alimento_id > 0 ? item.alimento_id.toString() : ''}
-                          onSelect={(value) => atualizarItem(refeicaoIndex, itemIndex, 'alimento_id', Number(value))}
+                          value={item.alimento_id}
+                          onSelect={(value) => atualizarItem(refeicaoIndex, itemIndex, 'alimento_id', value)}
                           placeholder="Selecione um alimento"
                           searchPlaceholder="Buscar alimento..."
                           emptyText="Nenhum alimento encontrado."
@@ -542,7 +551,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
                       <div className="space-y-2">
                         <Label>Calorias</Label>
                         <div className="flex items-center h-10 px-3 border rounded-md bg-muted">
-                          {item.alimento ? Math.round((item.alimento.kcal * item.quantidade) / item.alimento.quantidade) : 0}
+                          {item.alimento ? Math.round((item.alimento.kcal_por_referencia * item.quantidade) / item.alimento.quantidade_referencia_g) : 0}
                         </div>
                       </div>
 
