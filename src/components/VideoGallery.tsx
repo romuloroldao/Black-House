@@ -86,7 +86,7 @@ const VideoGallery = () => {
   ];
 
   const visibilityLabels = {
-    "active-students": { label: "Alunos Ativos", color: "bg-success/10 text-success border-success/20", icon: Users },
+    "active-students": { label: "Alunos Ativos", color: "bg-primary/10 text-primary border-primary/20", icon: Users },
     "inactive-students": { label: "Alunos Inativos", color: "bg-warning/10 text-warning border-warning/20", icon: Users },
     "guests": { label: "Convidados", color: "bg-accent/10 text-accent border-accent/20", icon: Eye },
     "everyone": { label: "Público", color: "bg-primary/10 text-primary border-primary/20", icon: Eye }
@@ -388,7 +388,7 @@ const VideoGallery = () => {
             <Card>
               <CardContent className="p-6">
                 <div className="flex items-center space-x-2">
-                  <Eye className="w-5 h-5 text-success" />
+                  <Eye className="w-5 h-5 text-primary" />
                   <div>
                     <p className="text-2xl font-bold">{videos.reduce((acc, v) => acc + v.views, 0)}</p>
                     <p className="text-xs text-muted-foreground">Total Visualizações</p>

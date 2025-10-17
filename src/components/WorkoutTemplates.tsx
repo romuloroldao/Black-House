@@ -84,7 +84,7 @@ const WorkoutTemplates = ({ onUseTemplate }: WorkoutTemplatesProps) => {
 
   const getDifficultyColor = (difficulty: string) => {
     switch (difficulty) {
-      case "Iniciante": return "bg-success/10 text-success border-success/20";
+      case "Iniciante": return "bg-primary/10 text-primary border-primary/20";
       case "Intermediário": return "bg-warning/10 text-warning border-warning/20";
       case "Avançado": return "bg-destructive/10 text-destructive border-destructive/20";
       default: return "bg-muted/10 text-muted-foreground border-muted/20";

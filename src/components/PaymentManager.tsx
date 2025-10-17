@@ -255,7 +255,7 @@ const PaymentManager = () => {
     switch (status.toUpperCase()) {
       case "RECEIVED":
       case "CONFIRMED":
-        return <CheckCircle2 className="w-4 h-4 text-success" />;
+        return <CheckCircle2 className="w-4 h-4 text-primary" />;
       case "PENDING":
         return <Clock className="w-4 h-4 text-warning" />;
       case "OVERDUE":
@@ -362,7 +362,7 @@ const PaymentManager = () => {
                               variant="outline"
                               className={
                                 payment.status === "RECEIVED" || payment.status === "CONFIRMED"
-                                  ? "text-success"
+                                  ? "text-primary"
                                   : payment.status === "OVERDUE"
                                   ? "text-destructive"
                                   : ""

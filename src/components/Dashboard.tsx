@@ -130,7 +130,7 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
       value: loading ? "..." : stats.totalTreinos.toString(),
       change: stats.totalTreinos > 0 ? "+8%" : "0%",
       icon: Dumbbell,
-      color: "text-success",
+      color: "text-primary",
       onClick: () => onTabChange?.('workouts'),
     },
     {
@@ -204,9 +204,9 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
     switch (type) {
       case 'workout': return <Dumbbell className="w-4 h-4 text-primary" />;
       case 'message': return <MessageSquare className="w-4 h-4 text-warning" />;
-      case 'checkin': return <Target className="w-4 h-4 text-success" />;
+      case 'checkin': return <Target className="w-4 h-4 text-primary" />;
       case 'achievement': return <Award className="w-4 h-4 text-primary" />;
-      case 'student': return <Users className="w-4 h-4 text-success" />;
+      case 'student': return <Users className="w-4 h-4 text-primary" />;
       default: return <Users className="w-4 h-4" />;
     }
   };
@@ -215,7 +215,7 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
     switch (type) {
       case 'assessment': return <Users className="w-4 h-4 text-primary" />;
       case 'payment': return <DollarSign className="w-4 h-4 text-destructive" />;
-      case 'live': return <Video className="w-4 h-4 text-success" />;
+      case 'live': return <Video className="w-4 h-4 text-primary" />;
       case 'message': return <MessageSquare className="w-4 h-4 text-warning" />;
       default: return <Bell className="w-4 h-4" />;
     }

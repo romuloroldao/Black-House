@@ -76,7 +76,7 @@ const WorkoutManager = () => {
 
   const getDifficultyColor = (difficulty: string) => {
     switch (difficulty) {
-      case "Iniciante": return "bg-success/10 text-success border-success/20";
+      case "Iniciante": return "bg-primary/10 text-primary border-primary/20";
       case "Intermediário": return "bg-warning/10 text-warning border-warning/20";
       case "Avançado": return "bg-destructive/10 text-destructive border-destructive/20";
       default: return "bg-muted/10 text-muted-foreground border-muted/20";
@@ -311,7 +311,7 @@ const WorkoutManager = () => {
             <Card>
               <CardContent className="p-6">
                 <div className="flex items-center space-x-2">
-                  <Users className="w-5 h-5 text-success" />
+                  <Users className="w-5 h-5 text-primary" />
                   <div>
                     <p className="text-2xl font-bold">{workouts.reduce((acc, w) => acc + w.studentsAssigned, 0)}</p>
                     <p className="text-xs text-muted-foreground">Atribuições</p>

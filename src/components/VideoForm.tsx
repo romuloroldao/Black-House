@@ -282,7 +282,7 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
                 )}
                 
                 {youtubeData && (
-                  <div className="flex items-center gap-2 text-sm text-success">
+                  <div className="flex items-center gap-2 text-sm text-primary">
                     <CheckCircle2 className="w-4 h-4" />
                     Vídeo importado com sucesso!
                   </div>

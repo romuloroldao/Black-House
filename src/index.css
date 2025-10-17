@@ -38,9 +38,9 @@ All colors MUST be HSL.
     --input: 0 0% 15%;
     --ring: 44 65% 53%;
 
-    --success: 142 76% 36%;
+    --success: 44 65% 53%;
     --warning: 45 93% 58%;
-    --info: 204 94% 94%;
+    --info: 44 65% 53%;
 
     --gradient-primary: linear-gradient(135deg, hsl(var(--primary-dark)), hsl(var(--primary)));
     --gradient-gold: linear-gradient(135deg, hsl(42 48% 45%), hsl(44 65% 53%), hsl(47 85% 65%));

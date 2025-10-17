@@ -251,7 +251,7 @@ const StudentManager = () => {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'active': return 'bg-success text-white';
+      case 'active': return 'bg-primary text-primary-foreground';
       case 'inactive': return 'bg-muted text-muted-foreground';
       default: return 'bg-muted text-muted-foreground';
     }
@@ -259,7 +259,7 @@ const StudentManager = () => {
 
   const getPaymentColor = (payment: string) => {
     switch (payment) {
-      case 'paid': return 'bg-success text-white';
+      case 'paid': return 'bg-primary text-primary-foreground';
       case 'overdue': return 'bg-destructive text-destructive-foreground';
       case 'pending': return 'bg-warning text-warning-foreground';
       default: return 'bg-muted text-muted-foreground';

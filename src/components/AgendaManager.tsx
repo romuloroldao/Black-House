@@ -278,7 +278,7 @@ const AgendaManager = () => {
 
   const tiposEvento = [
     { value: "retorno", label: "Retorno", color: "bg-primary" },
-    { value: "ajuste_dieta", label: "Ajuste de Dieta", color: "bg-success" },
+    { value: "ajuste_dieta", label: "Ajuste de Dieta", color: "bg-primary" },
     { value: "alteracao_treino", label: "Alteração de Treino", color: "bg-warning" },
     { value: "avaliacao", label: "Avaliação", color: "bg-accent" },
     { value: "outro", label: "Outro", color: "bg-muted" },
@@ -299,7 +299,7 @@ const AgendaManager = () => {
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case "concluido": return <CheckCircle2 className="w-4 h-4 text-success" />;
+      case "concluido": return <CheckCircle2 className="w-4 h-4 text-primary" />;
       case "cancelado": return <XCircle className="w-4 h-4 text-destructive" />;
       default: return <AlertCircle className="w-4 h-4 text-warning" />;
     }
