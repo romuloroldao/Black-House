@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare } from "lucide-react";
+import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -61,7 +61,7 @@ export default function StudentDetails() {
   const [student, setStudent] = useState<Student | null>(null);
   const [feedback, setFeedback] = useState("");
   const [feedbackId, setFeedbackId] = useState<string | null>(null);
-  const [treino, setTreino] = useState<Treino | null>(null);
+  const [treinos, setTreinos] = useState<Array<Treino & { alunoTreinoId: string }>>([]);
   const [dieta, setDieta] = useState<Dieta | null>(null);
   const [fotos, setFotos] = useState<Foto[]>([]);
   const [selectedFoto, setSelectedFoto] = useState<string | null>(null);
@@ -113,10 +113,11 @@ export default function StudentDetails() {
         setFeedbackId(feedbackData.id);
       }
 
-      // Carregar treino atual
-      const { data: treinoData } = await supabase
+      // Carregar todos os treinos ativos
+      const { data: treinosData } = await supabase
         .from("alunos_treinos")
         .select(`
+          id,
           treino_id,
           treinos (
             id,
@@ -129,12 +130,16 @@ export default function StudentDetails() {
         `)
         .eq("aluno_id", id)
         .eq("ativo", true)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .order("created_at", { ascending: false });
 
-      if (treinoData?.treinos) {
-        setTreino(treinoData.treinos as unknown as Treino);
+      if (treinosData) {
+        const treinosFormatados = treinosData
+          .filter((item: any) => item.treinos)
+          .map((item: any) => ({
+            ...item.treinos,
+            alunoTreinoId: item.id
+          }));
+        setTreinos(treinosFormatados);
       }
 
       // Carregar dieta atual
@@ -253,13 +258,7 @@ export default function StudentDetails() {
     try {
       setSaving(true);
 
-      // Desativar treinos anteriores
-      await supabase
-        .from("alunos_treinos")
-        .update({ ativo: false })
-        .eq("aluno_id", id);
-
-      // Atribuir novo treino
+      // Atribuir novo treino (não desativar os anteriores)
       const { error } = await supabase
         .from("alunos_treinos")
         .insert({
@@ -281,6 +280,38 @@ export default function StudentDetails() {
     } catch (error: any) {
       toast({
         title: "Erro ao atribuir treino",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRemoverTreino = async (alunoTreinoId: string, treinoNome: string) => {
+    if (!confirm(`Tem certeza que deseja remover o treino "${treinoNome}"?`)) {
+      return;
+    }
+
+    try {
+      setSaving(true);
+
+      const { error } = await supabase
+        .from("alunos_treinos")
+        .delete()
+        .eq("id", alunoTreinoId);
+
+      if (error) throw error;
+
+      toast({
+        title: "Sucesso!",
+        description: "Treino removido com sucesso",
+      });
+
+      carregarDadosAluno();
+    } catch (error: any) {
+      toast({
+        title: "Erro ao remover treino",
         description: error.message,
         variant: "destructive",
       });
@@ -488,119 +519,94 @@ export default function StudentDetails() {
           </CardContent>
         </Card>
 
-        {/* Treino Atual */}
-        <Card>
+        {/* Treinos */}
+        <Card className="md:col-span-2">
           <CardHeader>
-            <CardTitle>Treino Atual</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle>Treinos Ativos</CardTitle>
+              <Dialog open={isAtribuirTreinoOpen} onOpenChange={setIsAtribuirTreinoOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Plus className="mr-2 h-4 w-4" />
+                    Adicionar Treino
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Atribuir Treino</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                      <Label>Selecione um treino</Label>
+                      <Select value={treinoSelecionado} onValueChange={setTreinoSelecionado}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Escolha um treino..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {treinosDisponiveis.map((t) => (
+                            <SelectItem key={t.id} value={t.id}>
+                              {t.nome} - {t.categoria} ({t.dificuldade})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex gap-2 justify-end">
+                      <Button variant="outline" onClick={() => setIsAtribuirTreinoOpen(false)}>
+                        Cancelar
+                      </Button>
+                      <Button onClick={handleAtribuirTreino} disabled={saving}>
+                        {saving ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Atribuindo...
+                          </>
+                        ) : (
+                          "Atribuir"
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
           </CardHeader>
           <CardContent>
-            {treino ? (
-              <div className="space-y-4">
-                <div>
-                  <h3 className="font-semibold text-lg">{treino.nome}</h3>
-                  <p className="text-sm text-muted-foreground">{treino.descricao}</p>
-                </div>
-                <div className="flex gap-2 flex-wrap">
-                  <Badge variant="outline">{treino.categoria}</Badge>
-                  <Badge variant="outline">{treino.dificuldade}</Badge>
-                  <Badge variant="outline">{treino.duracao} min</Badge>
-                </div>
-                <div className="flex gap-2">
-                  <Dialog open={isAtribuirTreinoOpen} onOpenChange={setIsAtribuirTreinoOpen}>
-                    <DialogTrigger asChild>
-                      <Button className="flex-1" variant="outline">
-                        <Dumbbell className="mr-2 h-4 w-4" />
-                        Alterar Treino
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Atribuir Treino</DialogTitle>
-                      </DialogHeader>
-                      <div className="space-y-4 py-4">
-                        <div className="space-y-2">
-                          <Label>Selecione um treino</Label>
-                          <Select value={treinoSelecionado} onValueChange={setTreinoSelecionado}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Escolha um treino..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {treinosDisponiveis.map((t) => (
-                                <SelectItem key={t.id} value={t.id}>
-                                  {t.nome} - {t.categoria} ({t.dificuldade})
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="flex gap-2 justify-end">
-                          <Button variant="outline" onClick={() => setIsAtribuirTreinoOpen(false)}>
-                            Cancelar
-                          </Button>
-                          <Button onClick={handleAtribuirTreino} disabled={saving}>
-                            {saving ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Atribuindo...
-                              </>
-                            ) : (
-                              "Atribuir"
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                    </DialogContent>
-                  </Dialog>
-                </div>
+            {treinos.length > 0 ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                {treinos.map((treino) => (
+                  <div key={treino.id} className="p-4 border border-border rounded-lg space-y-3">
+                    <div>
+                      <h3 className="font-semibold text-lg">{treino.nome}</h3>
+                      <p className="text-sm text-muted-foreground">{treino.descricao}</p>
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                      <Badge variant="outline">{treino.categoria}</Badge>
+                      <Badge variant="outline">{treino.dificuldade}</Badge>
+                      <Badge variant="outline">{treino.duracao} min</Badge>
+                    </div>
+                    <Button 
+                      variant="destructive" 
+                      size="sm" 
+                      className="w-full"
+                      onClick={() => handleRemoverTreino(treino.alunoTreinoId, treino.nome)}
+                      disabled={saving}
+                    >
+                      {saving ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Removendo...
+                        </>
+                      ) : (
+                        "Remover Treino"
+                      )}
+                    </Button>
+                  </div>
+                ))}
               </div>
             ) : (
               <div className="text-center py-8">
-                <p className="text-muted-foreground mb-4">Nenhum treino atribuído</p>
-                <Dialog open={isAtribuirTreinoOpen} onOpenChange={setIsAtribuirTreinoOpen}>
-                  <DialogTrigger asChild>
-                    <Button variant="outline">
-                      <Dumbbell className="mr-2 h-4 w-4" />
-                      Atribuir Treino
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Atribuir Treino</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
-                      <div className="space-y-2">
-                        <Label>Selecione um treino</Label>
-                        <Select value={treinoSelecionado} onValueChange={setTreinoSelecionado}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Escolha um treino..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {treinosDisponiveis.map((t) => (
-                              <SelectItem key={t.id} value={t.id}>
-                                {t.nome} - {t.categoria} ({t.dificuldade})
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="flex gap-2 justify-end">
-                        <Button variant="outline" onClick={() => setIsAtribuirTreinoOpen(false)}>
-                          Cancelar
-                        </Button>
-                        <Button onClick={handleAtribuirTreino} disabled={saving}>
-                          {saving ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Atribuindo...
-                            </>
-                          ) : (
-                            "Atribuir"
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
+                <p className="text-muted-foreground">Nenhum treino atribuído</p>
               </div>
             )}
           </CardContent>
