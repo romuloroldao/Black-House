@@ -34,11 +34,20 @@ interface Feedback {
   created_at: string;
 }
 
+interface ReportMedia {
+  id: string;
+  url: string;
+  tipo: string;
+  legenda: string | null;
+  ordem: number;
+}
+
 const StudentReportsView = () => {
   const { user } = useAuth();
   const [reports, setReports] = useState<Report[]>([]);
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
   const [feedbacks, setFeedbacks] = useState<Feedback[]>([]);
+  const [reportMedia, setReportMedia] = useState<ReportMedia[]>([]);
   const [newFeedback, setNewFeedback] = useState("");
   const [loading, setLoading] = useState(true);
   const [alunoId, setAlunoId] = useState<string | null>(null);
@@ -107,6 +116,21 @@ const StudentReportsView = () => {
     }
   };
 
+  const loadReportMedia = async (reportId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("relatorio_midias")
+        .select("*")
+        .eq("relatorio_id", reportId)
+        .order("ordem");
+
+      if (error) throw error;
+      setReportMedia(data || []);
+    } catch (error: any) {
+      toast.error("Erro ao carregar mídias: " + error.message);
+    }
+  };
+
   const handleSubmitFeedback = async () => {
     if (!selectedReport || !newFeedback.trim() || !alunoId) return;
 
@@ -130,6 +154,7 @@ const StudentReportsView = () => {
   const openReport = (report: Report) => {
     setSelectedReport(report);
     loadFeedbacks(report.id);
+    loadReportMedia(report.id);
   };
 
   return (
@@ -245,6 +270,30 @@ const StudentReportsView = () => {
                     </CardHeader>
                     <CardContent>
                       <p className="whitespace-pre-wrap">{selectedReport.observacoes}</p>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {reportMedia.length > 0 && (
+                  <Card className="mt-4">
+                    <CardHeader>
+                      <CardTitle className="text-lg">Fotos Anexadas</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        {reportMedia.map((media) => (
+                          <div key={media.id} className="space-y-2">
+                            <img
+                              src={media.url}
+                              alt={media.legenda || "Foto do relatório"}
+                              className="w-full h-48 object-cover rounded-lg shadow-card"
+                            />
+                            {media.legenda && (
+                              <p className="text-sm text-muted-foreground">{media.legenda}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </CardContent>
                   </Card>
                 )}

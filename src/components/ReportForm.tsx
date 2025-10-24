@@ -16,9 +16,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { CalendarIcon, Plus, Trash2 } from "lucide-react";
+import { CalendarIcon, Plus, Trash2, Image } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface ReportFormProps {
   reportId?: string | null;
@@ -38,10 +39,19 @@ interface MetricField {
   valor: string;
 }
 
+interface AlunoPhoto {
+  id: string;
+  url: string;
+  descricao: string | null;
+  created_at: string;
+}
+
 const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [alunos, setAlunos] = useState<Aluno[]>([]);
+  const [alunoPhotos, setAlunoPhotos] = useState<AlunoPhoto[]>([]);
+  const [selectedPhotos, setSelectedPhotos] = useState<string[]>([]);
   
   const [formData, setFormData] = useState({
     titulo: "",
@@ -64,6 +74,12 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
     }
   }, [reportId]);
 
+  useEffect(() => {
+    if (formData.aluno_id) {
+      loadAlunoPhotos();
+    }
+  }, [formData.aluno_id]);
+
   const loadAlunos = async () => {
     try {
       const { data, error } = await supabase
@@ -76,6 +92,23 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
       setAlunos(data || []);
     } catch (error: any) {
       toast.error("Erro ao carregar alunos: " + error.message);
+    }
+  };
+
+  const loadAlunoPhotos = async () => {
+    if (!formData.aluno_id) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("fotos_alunos")
+        .select("*")
+        .eq("aluno_id", formData.aluno_id)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setAlunoPhotos(data || []);
+    } catch (error: any) {
+      toast.error("Erro ao carregar fotos: " + error.message);
     }
   };
 
@@ -109,6 +142,16 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
           setMetrics(loadedMetrics);
         }
       }
+
+      // Load selected photos
+      const { data: midias } = await supabase
+        .from("relatorio_midias")
+        .select("url")
+        .eq("relatorio_id", reportId);
+
+      if (midias) {
+        setSelectedPhotos(midias.map(m => m.url));
+      }
     } catch (error: any) {
       toast.error("Erro ao carregar relatório: " + error.message);
     }
@@ -128,6 +171,14 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
   const updateMetric = (id: string, field: "nome" | "valor", value: string) => {
     setMetrics(
       metrics.map((m) => (m.id === id ? { ...m, [field]: value } : m))
+    );
+  };
+
+  const togglePhotoSelection = (photoUrl: string) => {
+    setSelectedPhotos(prev =>
+      prev.includes(photoUrl)
+        ? prev.filter(url => url !== photoUrl)
+        : [...prev, photoUrl]
     );
   };
 
@@ -158,6 +209,8 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
         metricas: metricsObj,
       };
 
+      let currentReportId = reportId;
+
       if (reportId) {
         const { error } = await supabase
           .from("relatorios")
@@ -165,16 +218,41 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
           .eq("id", reportId);
 
         if (error) throw error;
-        toast.success("Relatório atualizado com sucesso!");
+
+        // Delete existing photos and re-insert selected ones
+        await supabase
+          .from("relatorio_midias")
+          .delete()
+          .eq("relatorio_id", reportId);
       } else {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from("relatorios")
-          .insert(reportData);
+          .insert(reportData)
+          .select()
+          .single();
 
         if (error) throw error;
-        toast.success("Relatório criado com sucesso!");
+        currentReportId = data.id;
       }
 
+      // Insert selected photos
+      if (selectedPhotos.length > 0 && currentReportId) {
+        const photoData = selectedPhotos.map((url, index) => ({
+          relatorio_id: currentReportId,
+          tipo: "imagem",
+          url: url,
+          ordem: index,
+          legenda: alunoPhotos.find(p => p.url === url)?.descricao || null,
+        }));
+
+        const { error: photoError } = await supabase
+          .from("relatorio_midias")
+          .insert(photoData);
+
+        if (photoError) throw photoError;
+      }
+
+      toast.success(reportId ? "Relatório atualizado com sucesso!" : "Relatório criado com sucesso!");
       onSuccess();
     } catch (error: any) {
       toast.error("Erro ao salvar relatório: " + error.message);
@@ -318,6 +396,55 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
           rows={6}
         />
       </div>
+
+      {formData.aluno_id && alunoPhotos.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Image className="h-5 w-5" />
+              Anexar Fotos do Aluno ({selectedPhotos.length} selecionadas)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {alunoPhotos.map((photo) => (
+                <div
+                  key={photo.id}
+                  className="relative group cursor-pointer"
+                  onClick={() => togglePhotoSelection(photo.url)}
+                >
+                  <div className={`relative rounded-lg overflow-hidden border-2 transition-all ${
+                    selectedPhotos.includes(photo.url)
+                      ? "border-primary shadow-lg"
+                      : "border-border hover:border-primary/50"
+                  }`}>
+                    <img
+                      src={photo.url}
+                      alt={photo.descricao || "Foto do aluno"}
+                      className="w-full h-32 object-cover"
+                    />
+                    <div className="absolute top-2 right-2">
+                      <Checkbox
+                        checked={selectedPhotos.includes(photo.url)}
+                        onCheckedChange={() => togglePhotoSelection(photo.url)}
+                        className="bg-background"
+                      />
+                    </div>
+                  </div>
+                  {photo.descricao && (
+                    <p className="text-xs text-muted-foreground mt-1 truncate">
+                      {photo.descricao}
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    {format(new Date(photo.created_at), "dd/MM/yyyy", { locale: ptBR })}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="flex gap-2 justify-end">
         <Button type="button" variant="outline" onClick={onCancel}>
