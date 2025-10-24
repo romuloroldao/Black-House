@@ -122,7 +122,7 @@ const Auth = () => {
             Black House
           </CardTitle>
           <CardDescription>
-            Medicina Integrativa
+            saúde integrativa & performance
           </CardDescription>
         </CardHeader>
         <CardContent>

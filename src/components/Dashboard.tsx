@@ -233,7 +233,7 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
               <h1 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
                 Black House
               </h1>
-              <p className="text-muted-foreground">Medicina Integrativa</p>
+              <p className="text-muted-foreground">saúde integrativa & performance</p>
             </div>
             <div className="flex items-center gap-4">
               <Button variant="outline" size="icon" onClick={() => setSearchOpen(true)}>

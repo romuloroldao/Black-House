@@ -172,7 +172,7 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
               className="w-full h-auto max-w-[180px] mb-2"
             />
             <p className="text-xs text-muted-foreground uppercase tracking-wider">
-              Medicina Integrativa
+              saúde integrativa & performance
             </p>
           </div>
         </div>
