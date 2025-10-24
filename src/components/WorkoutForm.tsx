@@ -445,7 +445,7 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
                     </div>
 
                     <div className="space-y-2">
-                      <Label>Carga</Label>
+                      <Label>T.E.P</Label>
                       <Input
                         placeholder="Ex: 60kg"
                         value={exercise.weight}
