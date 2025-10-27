@@ -407,40 +407,46 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {alunoPhotos.map((photo) => (
-                <div
-                  key={photo.id}
-                  className="relative group cursor-pointer"
-                  onClick={() => togglePhotoSelection(photo.url)}
-                >
-                  <div className={`relative rounded-lg overflow-hidden border-2 transition-all ${
-                    selectedPhotos.includes(photo.url)
-                      ? "border-primary shadow-lg"
-                      : "border-border hover:border-primary/50"
-                  }`}>
-                    <img
-                      src={photo.url}
-                      alt={photo.descricao || "Foto do aluno"}
-                      className="w-full h-32 object-cover"
-                    />
-                    <div className="absolute top-2 right-2">
-                      <Checkbox
-                        checked={selectedPhotos.includes(photo.url)}
-                        onCheckedChange={() => togglePhotoSelection(photo.url)}
-                        className="bg-background"
+              {alunoPhotos.map((photo) => {
+                const isSelected = selectedPhotos.includes(photo.url);
+                return (
+                  <div
+                    key={photo.id}
+                    className="relative group cursor-pointer"
+                    onClick={() => togglePhotoSelection(photo.url)}
+                  >
+                    <div className={`relative rounded-lg overflow-hidden border-2 transition-all ${
+                      isSelected
+                        ? "border-primary shadow-lg"
+                        : "border-border hover:border-primary/50"
+                    }`}>
+                      <img
+                        src={photo.url}
+                        alt={photo.descricao || "Foto do aluno"}
+                        className="w-full h-32 object-cover"
                       />
+                      <div 
+                        className="absolute top-2 right-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Checkbox
+                          checked={isSelected}
+                          onCheckedChange={() => togglePhotoSelection(photo.url)}
+                          className="bg-background"
+                        />
+                      </div>
                     </div>
-                  </div>
-                  {photo.descricao && (
-                    <p className="text-xs text-muted-foreground mt-1 truncate">
-                      {photo.descricao}
+                    {photo.descricao && (
+                      <p className="text-xs text-muted-foreground mt-1 truncate">
+                        {photo.descricao}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      {format(new Date(photo.created_at), "dd/MM/yyyy", { locale: ptBR })}
                     </p>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    {format(new Date(photo.created_at), "dd/MM/yyyy", { locale: ptBR })}
-                  </p>
-                </div>
-              ))}
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
