@@ -239,7 +239,7 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
       if (selectedPhotos.length > 0 && currentReportId) {
         const photoData = selectedPhotos.map((url, index) => ({
           relatorio_id: currentReportId,
-          tipo: "imagem",
+          tipo: "foto",
           url: url,
           ordem: index,
           legenda: alunoPhotos.find(p => p.url === url)?.descricao || null,
