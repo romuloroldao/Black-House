@@ -167,6 +167,16 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
         is_template: formData.isTemplate,
         tags: formData.tags,
         num_exercicios: exercises.length,
+        exercicios: exercises.map(ex => ({
+          nome: ex.name,
+          series: ex.sets,
+          repeticoes: ex.reps,
+          peso: ex.weight,
+          descanso: ex.rest,
+          observacoes: ex.notes,
+          video_url: ex.videoUrl,
+          ordem: ex.order
+        })),
         coach_id: user.id, // Adicionar coach_id para RLS
       };
 

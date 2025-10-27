@@ -30,12 +30,12 @@ const StudentVideosView = () => {
       if (aluno?.coach_id) {
         setCoachId(aluno.coach_id);
 
-        // Buscar vídeos do coach (visibilidade: todos ou alunos)
+        // Buscar vídeos do coach (visibilidade: públicos ou para alunos)
         const { data: videosData } = await supabase
           .from("videos")
           .select("*")
           .eq("coach_id", aluno.coach_id)
-          .in("visibilidade", ["todos", "alunos"])
+          .in("visibilidade", ["everyone", "active-students", "inactive-students", "todos", "alunos"])
           .order("created_at", { ascending: false });
 
         setVideos(videosData || []);

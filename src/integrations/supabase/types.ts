@@ -1097,6 +1097,7 @@ export type Database = {
           descricao: string | null
           dificuldade: string
           duracao: number
+          exercicios: Json | null
           id: string
           is_template: boolean | null
           nome: string
@@ -1111,6 +1112,7 @@ export type Database = {
           descricao?: string | null
           dificuldade: string
           duracao?: number
+          exercicios?: Json | null
           id?: string
           is_template?: boolean | null
           nome: string
@@ -1125,6 +1127,7 @@ export type Database = {
           descricao?: string | null
           dificuldade?: string
           duracao?: number
+          exercicios?: Json | null
           id?: string
           is_template?: boolean | null
           nome?: string

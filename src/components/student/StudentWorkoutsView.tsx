@@ -1,14 +1,18 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Dumbbell, Clock, Target } from "lucide-react";
+import { Dumbbell, Clock, Target, ChevronDown, Play, Weight } from "lucide-react";
 
 const StudentWorkoutsView = () => {
   const { user } = useAuth();
   const [treinos, setTreinos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedWorkouts, setExpandedWorkouts] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (user) {
@@ -69,6 +73,18 @@ const StudentWorkoutsView = () => {
     );
   }
 
+  const toggleWorkout = (treinoId: string) => {
+    setExpandedWorkouts(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(treinoId)) {
+        newSet.delete(treinoId);
+      } else {
+        newSet.add(treinoId);
+      }
+      return newSet;
+    });
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -79,70 +95,166 @@ const StudentWorkoutsView = () => {
       </div>
 
       <div className="grid gap-6">
-        {treinos.map((treino, idx) => (
-          <Card key={idx} className="shadow-card border-primary/20">
-            <CardHeader>
-              <div className="flex items-start justify-between">
+        {treinos.map((treino, idx) => {
+          const isExpanded = expandedWorkouts.has(treino.id);
+          const exercicios = treino.exercicios || [];
+          
+          return (
+            <Card key={idx} className="shadow-card border-primary/20">
+              <CardHeader>
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <CardTitle className="text-2xl">{treino.nome}</CardTitle>
+                    <p className="text-muted-foreground mt-2">{treino.descricao}</p>
+                  </div>
+                  <Badge variant="premium" className="ml-4">Ativo</Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="flex items-center gap-3 p-4 rounded-lg bg-muted/50">
+                    <Target className="h-8 w-8 text-primary" />
+                    <div>
+                      <div className="text-sm text-muted-foreground">Categoria</div>
+                      <div className="font-semibold">{treino.categoria}</div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 p-4 rounded-lg bg-muted/50">
+                    <Dumbbell className="h-8 w-8 text-primary" />
+                    <div>
+                      <div className="text-sm text-muted-foreground">Dificuldade</div>
+                      <div className="font-semibold">{treino.dificuldade}</div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 p-4 rounded-lg bg-muted/50">
+                    <Clock className="h-8 w-8 text-primary" />
+                    <div>
+                      <div className="text-sm text-muted-foreground">Duração</div>
+                      <div className="font-semibold">{treino.duracao} min</div>
+                    </div>
+                  </div>
+                </div>
+
+                {treino.tags && treino.tags.length > 0 && (
+                  <div>
+                    <h3 className="font-semibold mb-3">Tags</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {treino.tags.map((tag: string, index: number) => (
+                        <Badge key={index} variant="outline">
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <Separator />
+
+                {/* Exercícios */}
                 <div>
-                  <CardTitle className="text-2xl">{treino.nome}</CardTitle>
-                  <p className="text-muted-foreground mt-2">{treino.descricao}</p>
-                </div>
-                <Badge variant="premium" className="ml-4">Ativo</Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="grid gap-4 md:grid-cols-3">
-                <div className="flex items-center gap-3 p-4 rounded-lg bg-muted/50">
-                  <Target className="h-8 w-8 text-primary" />
-                  <div>
-                    <div className="text-sm text-muted-foreground">Categoria</div>
-                    <div className="font-semibold">{treino.categoria}</div>
-                  </div>
+                  <Collapsible open={isExpanded} onOpenChange={() => toggleWorkout(treino.id)}>
+                    <CollapsibleTrigger asChild>
+                      <Button variant="outline" className="w-full justify-between">
+                        <div className="flex items-center gap-2">
+                          <Dumbbell className="h-4 w-4" />
+                          <span>
+                            Ver Exercícios {exercicios.length > 0 && `(${exercicios.length})`}
+                          </span>
+                        </div>
+                        <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                      </Button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-4 space-y-4">
+                      {exercicios.length === 0 ? (
+                        <p className="text-center text-muted-foreground py-8">
+                          Nenhum exercício cadastrado neste treino
+                        </p>
+                      ) : (
+                        exercicios.map((exercicio: any, exIdx: number) => (
+                          <Card key={exIdx} className="border-primary/10">
+                            <CardContent className="p-4">
+                              <div className="flex items-start justify-between mb-3">
+                                <div>
+                                  <h4 className="font-semibold text-lg flex items-center gap-2">
+                                    <span className="text-primary">#{exIdx + 1}</span>
+                                    {exercicio.nome}
+                                  </h4>
+                                  {exercicio.observacoes && (
+                                    <p className="text-sm text-muted-foreground mt-1">
+                                      {exercicio.observacoes}
+                                    </p>
+                                  )}
+                                </div>
+                                {exercicio.video_url && (
+                                  <Button 
+                                    variant="ghost" 
+                                    size="icon"
+                                    onClick={() => window.open(exercicio.video_url, '_blank')}
+                                  >
+                                    <Play className="h-4 w-4" />
+                                  </Button>
+                                )}
+                              </div>
+                              
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
+                                  <Target className="h-4 w-4 text-primary" />
+                                  <div>
+                                    <div className="text-xs text-muted-foreground">Séries</div>
+                                    <div className="font-semibold">{exercicio.series}</div>
+                                  </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
+                                  <Dumbbell className="h-4 w-4 text-primary" />
+                                  <div>
+                                    <div className="text-xs text-muted-foreground">Repetições</div>
+                                    <div className="font-semibold">{exercicio.repeticoes}</div>
+                                  </div>
+                                </div>
+                                
+                                {exercicio.peso && (
+                                  <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
+                                    <Weight className="h-4 w-4 text-primary" />
+                                    <div>
+                                      <div className="text-xs text-muted-foreground">T.E.P</div>
+                                      <div className="font-semibold">{exercicio.peso}</div>
+                                    </div>
+                                  </div>
+                                )}
+                                
+                                <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
+                                  <Clock className="h-4 w-4 text-primary" />
+                                  <div>
+                                    <div className="text-xs text-muted-foreground">Descanso</div>
+                                    <div className="font-semibold">{exercicio.descanso}</div>
+                                  </div>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))
+                      )}
+                    </CollapsibleContent>
+                  </Collapsible>
                 </div>
 
-                <div className="flex items-center gap-3 p-4 rounded-lg bg-muted/50">
-                  <Dumbbell className="h-8 w-8 text-primary" />
-                  <div>
-                    <div className="text-sm text-muted-foreground">Dificuldade</div>
-                    <div className="font-semibold">{treino.dificuldade}</div>
-                  </div>
+                <div className="p-4 rounded-lg bg-gradient-premium border border-primary/30">
+                  <h3 className="font-semibold mb-2 flex items-center gap-2">
+                    <Target className="h-5 w-5 text-primary" />
+                    Instruções
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    Siga este treino conforme orientado pelo seu coach. Mantenha a consistência e foco nos exercícios.
+                    Em caso de dúvidas, entre em contato através do chat.
+                  </p>
                 </div>
-
-                <div className="flex items-center gap-3 p-4 rounded-lg bg-muted/50">
-                  <Clock className="h-8 w-8 text-primary" />
-                  <div>
-                    <div className="text-sm text-muted-foreground">Duração</div>
-                    <div className="font-semibold">{treino.duracao} min</div>
-                  </div>
-                </div>
-              </div>
-
-              {treino.tags && treino.tags.length > 0 && (
-                <div>
-                  <h3 className="font-semibold mb-3">Tags</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {treino.tags.map((tag: string, index: number) => (
-                      <Badge key={index} variant="outline">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="p-4 rounded-lg bg-gradient-premium border border-primary/30">
-                <h3 className="font-semibold mb-2 flex items-center gap-2">
-                  <Target className="h-5 w-5 text-primary" />
-                  Instruções
-                </h3>
-                <p className="text-sm text-muted-foreground">
-                  Siga este treino conforme orientado pelo seu coach. Mantenha a consistência e foco nos exercícios.
-                  Em caso de dúvidas, entre em contato através do chat.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
     </div>
   );
