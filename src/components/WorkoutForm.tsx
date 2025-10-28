@@ -457,7 +457,7 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
                     <div className="space-y-2">
                       <Label>T.E.P</Label>
                       <Input
-                        placeholder="Ex: 60kg"
+                        placeholder="de 01 a 10"
                         value={exercise.weight}
                         onChange={(e) => updateExercise(exercise.id, 'weight', e.target.value)}
                       />
