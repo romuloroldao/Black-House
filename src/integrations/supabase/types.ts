@@ -340,6 +340,88 @@ export type Database = {
           },
         ]
       }
+      avisos: {
+        Row: {
+          anexo_url: string | null
+          coach_id: string
+          created_at: string
+          id: string
+          mensagem: string
+          tipo: string
+          titulo: string
+        }
+        Insert: {
+          anexo_url?: string | null
+          coach_id: string
+          created_at?: string
+          id?: string
+          mensagem: string
+          tipo?: string
+          titulo: string
+        }
+        Update: {
+          anexo_url?: string | null
+          coach_id?: string
+          created_at?: string
+          id?: string
+          mensagem?: string
+          tipo?: string
+          titulo?: string
+        }
+        Relationships: []
+      }
+      avisos_destinatarios: {
+        Row: {
+          aluno_id: string | null
+          aviso_id: string
+          created_at: string
+          id: string
+          lido: boolean
+          lido_em: string | null
+          turma_id: string | null
+        }
+        Insert: {
+          aluno_id?: string | null
+          aviso_id: string
+          created_at?: string
+          id?: string
+          lido?: boolean
+          lido_em?: string | null
+          turma_id?: string | null
+        }
+        Update: {
+          aluno_id?: string | null
+          aviso_id?: string
+          created_at?: string
+          id?: string
+          lido?: boolean
+          lido_em?: string | null
+          turma_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "avisos_destinatarios_aluno_id_fkey"
+            columns: ["aluno_id"]
+            isOneToOne: false
+            referencedRelation: "alunos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "avisos_destinatarios_aviso_id_fkey"
+            columns: ["aviso_id"]
+            isOneToOne: false
+            referencedRelation: "avisos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "avisos_destinatarios_turma_id_fkey"
+            columns: ["turma_id"]
+            isOneToOne: false
+            referencedRelation: "turmas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conversas: {
         Row: {
           aluno_id: string
@@ -401,6 +483,104 @@ export type Database = {
             columns: ["aluno_id"]
             isOneToOne: false
             referencedRelation: "alunos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      eventos: {
+        Row: {
+          coach_id: string
+          created_at: string
+          data_inicio: string
+          descricao: string | null
+          duracao_minutos: number
+          hora_inicio: string
+          id: string
+          link_online: string | null
+          recorrencia: string
+          recorrencia_config: Json | null
+          status: string
+          titulo: string
+          turma_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          coach_id: string
+          created_at?: string
+          data_inicio: string
+          descricao?: string | null
+          duracao_minutos?: number
+          hora_inicio: string
+          id?: string
+          link_online?: string | null
+          recorrencia?: string
+          recorrencia_config?: Json | null
+          status?: string
+          titulo: string
+          turma_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          coach_id?: string
+          created_at?: string
+          data_inicio?: string
+          descricao?: string | null
+          duracao_minutos?: number
+          hora_inicio?: string
+          id?: string
+          link_online?: string | null
+          recorrencia?: string
+          recorrencia_config?: Json | null
+          status?: string
+          titulo?: string
+          turma_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "eventos_turma_id_fkey"
+            columns: ["turma_id"]
+            isOneToOne: false
+            referencedRelation: "turmas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      eventos_participantes: {
+        Row: {
+          aluno_id: string
+          confirmado: boolean | null
+          created_at: string
+          evento_id: string
+          id: string
+        }
+        Insert: {
+          aluno_id: string
+          confirmado?: boolean | null
+          created_at?: string
+          evento_id: string
+          id?: string
+        }
+        Update: {
+          aluno_id?: string
+          confirmado?: boolean | null
+          created_at?: string
+          evento_id?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "eventos_participantes_aluno_id_fkey"
+            columns: ["aluno_id"]
+            isOneToOne: false
+            referencedRelation: "alunos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "eventos_participantes_evento_id_fkey"
+            columns: ["evento_id"]
+            isOneToOne: false
+            referencedRelation: "eventos"
             referencedColumns: ["id"]
           },
         ]
@@ -620,6 +800,51 @@ export type Database = {
             columns: ["dieta_id"]
             isOneToOne: false
             referencedRelation: "dietas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      lembretes_eventos: {
+        Row: {
+          aluno_id: string
+          created_at: string
+          enviado: boolean
+          enviado_em: string | null
+          evento_id: string
+          id: string
+          tipo_lembrete: string
+        }
+        Insert: {
+          aluno_id: string
+          created_at?: string
+          enviado?: boolean
+          enviado_em?: string | null
+          evento_id: string
+          id?: string
+          tipo_lembrete: string
+        }
+        Update: {
+          aluno_id?: string
+          created_at?: string
+          enviado?: boolean
+          enviado_em?: string | null
+          evento_id?: string
+          id?: string
+          tipo_lembrete?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lembretes_eventos_aluno_id_fkey"
+            columns: ["aluno_id"]
+            isOneToOne: false
+            referencedRelation: "alunos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lembretes_eventos_evento_id_fkey"
+            columns: ["evento_id"]
+            isOneToOne: false
+            referencedRelation: "eventos"
             referencedColumns: ["id"]
           },
         ]
@@ -1145,6 +1370,75 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      turmas: {
+        Row: {
+          ativo: boolean
+          coach_id: string
+          cor: string | null
+          created_at: string
+          descricao: string | null
+          id: string
+          nome: string
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          coach_id: string
+          cor?: string | null
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          nome: string
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          coach_id?: string
+          cor?: string | null
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          nome?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      turmas_alunos: {
+        Row: {
+          aluno_id: string
+          created_at: string
+          id: string
+          turma_id: string
+        }
+        Insert: {
+          aluno_id: string
+          created_at?: string
+          id?: string
+          turma_id: string
+        }
+        Update: {
+          aluno_id?: string
+          created_at?: string
+          id?: string
+          turma_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "turmas_alunos_aluno_id_fkey"
+            columns: ["aluno_id"]
+            isOneToOne: false
+            referencedRelation: "alunos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "turmas_alunos_turma_id_fkey"
+            columns: ["turma_id"]
+            isOneToOne: false
+            referencedRelation: "turmas"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_roles: {
         Row: {

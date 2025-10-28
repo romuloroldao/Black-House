@@ -15,6 +15,9 @@ import ExpenseManager from "./ExpenseManager";
 import RecurringChargesConfig from "./RecurringChargesConfig";
 import FinancialDashboard from "./FinancialDashboard";
 import ReportManager from "./ReportManager";
+import { ClassGroupManager } from "./ClassGroupManager";
+import { AnnouncementManager } from "./AnnouncementManager";
+import { EventsCalendar } from "./EventsCalendar";
 
 const AppLayout = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -63,6 +66,12 @@ const AppLayout = () => {
         return <AgendaManager />;
       case "reports":
         return <ReportManager />;
+      case "classes":
+        return <div className="p-6"><ClassGroupManager /></div>;
+      case "announcements":
+        return <div className="p-6"><AnnouncementManager /></div>;
+      case "events":
+        return <div className="p-6"><EventsCalendar /></div>;
       case "analytics":
         return <div className="p-6"><h1 className="text-3xl font-bold">Análises</h1><p className="text-muted-foreground">Análises detalhadas em desenvolvimento...</p></div>;
       case "settings":

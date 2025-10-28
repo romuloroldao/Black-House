@@ -24,7 +24,10 @@ import {
   AlertCircle,
   Wallet,
   RefreshCw,
-  FileText
+  FileText,
+  UsersRound,
+  Megaphone,
+  CalendarDays
 } from "lucide-react";
 
 interface SidebarProps {
@@ -137,6 +140,24 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       id: "reports",
       label: "Relatórios de Progresso",
       icon: FileText,
+      notifications: 0
+    },
+    {
+      id: "classes",
+      label: "Turmas",
+      icon: UsersRound,
+      notifications: 0
+    },
+    {
+      id: "announcements",
+      label: "Avisos em Massa",
+      icon: Megaphone,
+      notifications: 0
+    },
+    {
+      id: "events",
+      label: "Eventos",
+      icon: CalendarDays,
       notifications: 0
     },
     {

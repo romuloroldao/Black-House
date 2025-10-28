@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.check-workout-expirations]
 verify_jwt = false
+
+[functions.send-event-reminders]
+verify_jwt = false
