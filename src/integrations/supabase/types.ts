@@ -170,24 +170,33 @@ export type Database = {
           aluno_id: string
           ativo: boolean | null
           created_at: string | null
+          data_expiracao: string | null
           data_inicio: string
+          dias_antecedencia_notificacao: number | null
           id: string
+          notificacao_expiracao_enviada: boolean | null
           treino_id: string
         }
         Insert: {
           aluno_id: string
           ativo?: boolean | null
           created_at?: string | null
+          data_expiracao?: string | null
           data_inicio?: string
+          dias_antecedencia_notificacao?: number | null
           id?: string
+          notificacao_expiracao_enviada?: boolean | null
           treino_id: string
         }
         Update: {
           aluno_id?: string
           ativo?: boolean | null
           created_at?: string | null
+          data_expiracao?: string | null
           data_inicio?: string
+          dias_antecedencia_notificacao?: number | null
           id?: string
+          notificacao_expiracao_enviada?: boolean | null
           treino_id?: string
         }
         Relationships: [

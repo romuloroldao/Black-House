@@ -32,13 +32,21 @@ const StudentWorkoutsView = () => {
       if (aluno) {
         const { data: alunosTreinos } = await supabase
           .from("alunos_treinos")
-          .select("*, treinos(*)")
+          .select(`
+            *,
+            treinos(*)
+          `)
           .eq("aluno_id", aluno.id)
           .eq("ativo", true)
           .order("data_inicio", { ascending: false });
 
         if (alunosTreinos) {
-          setTreinos(alunosTreinos.map((at: any) => at.treinos));
+          const treinosComExpiracao = alunosTreinos.map((at: any) => ({
+            ...at.treinos,
+            dataExpiracao: at.data_expiracao,
+            diasAntecedenciaNotificacao: at.dias_antecedencia_notificacao
+          }));
+          setTreinos(treinosComExpiracao);
         }
       }
     } catch (error) {
@@ -99,6 +107,13 @@ const StudentWorkoutsView = () => {
           const isExpanded = expandedWorkouts.has(treino.id);
           const exercicios = treino.exercicios || [];
           
+          // Calcular dias restantes até expiração
+          const hoje = new Date();
+          const dataExpiracao = treino.dataExpiracao ? new Date(treino.dataExpiracao) : null;
+          const diasRestantes = dataExpiracao 
+            ? Math.ceil((dataExpiracao.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24))
+            : null;
+          
           return (
             <Card key={idx} className="shadow-card border-primary/20">
               <CardHeader>
@@ -107,7 +122,20 @@ const StudentWorkoutsView = () => {
                     <CardTitle className="text-2xl">{treino.nome}</CardTitle>
                     <p className="text-muted-foreground mt-2">{treino.descricao}</p>
                   </div>
-                  <Badge variant="premium" className="ml-4">Ativo</Badge>
+                  <div className="flex gap-2 ml-4">
+                    <Badge variant="premium">Ativo</Badge>
+                    {diasRestantes !== null && (
+                      <Badge 
+                        variant={diasRestantes <= 7 ? "destructive" : "secondary"}
+                        className={diasRestantes <= 7 ? "bg-destructive/10 text-destructive border-destructive/20" : ""}
+                      >
+                        {diasRestantes > 0 
+                          ? `${diasRestantes} ${diasRestantes === 1 ? 'dia' : 'dias'} restante${diasRestantes === 1 ? '' : 's'}`
+                          : 'Expirado'
+                        }
+                      </Badge>
+                    )}
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-6">

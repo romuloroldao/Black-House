@@ -35,6 +35,9 @@ interface Treino {
   categoria: string;
   dificuldade: string;
   duracao: number;
+  alunoTreinoId?: string;
+  dataExpiracao?: string | null;
+  diasAntecedenciaNotificacao?: number | null;
 }
 
 interface Dieta {
@@ -70,6 +73,8 @@ export default function StudentDetails() {
   const [treinosDisponiveis, setTreinosDisponiveis] = useState<Treino[]>([]);
   const [isAtribuirTreinoOpen, setIsAtribuirTreinoOpen] = useState(false);
   const [treinoSelecionado, setTreinoSelecionado] = useState<string>("");
+  const [diasValidade, setDiasValidade] = useState<string>("45");
+  const [diasAntecedenciaNotif, setDiasAntecedenciaNotif] = useState<string>("7");
   
   // Estados para criar dieta
   const [isCriarDietaOpen, setIsCriarDietaOpen] = useState(false);
@@ -119,6 +124,8 @@ export default function StudentDetails() {
         .select(`
           id,
           treino_id,
+          data_expiracao,
+          dias_antecedencia_notificacao,
           treinos (
             id,
             nome,
@@ -137,7 +144,9 @@ export default function StudentDetails() {
           .filter((item: any) => item.treinos)
           .map((item: any) => ({
             ...item.treinos,
-            alunoTreinoId: item.id
+            alunoTreinoId: item.id,
+            dataExpiracao: item.data_expiracao,
+            diasAntecedenciaNotificacao: item.dias_antecedencia_notificacao
           }));
         setTreinos(treinosFormatados);
       }
@@ -258,13 +267,23 @@ export default function StudentDetails() {
     try {
       setSaving(true);
 
-      // Atribuir novo treino (não desativar os anteriores)
+      // Calcular data de expiração
+      let dataExpiracao = null;
+      if (diasValidade && parseInt(diasValidade) > 0) {
+        dataExpiracao = new Date();
+        dataExpiracao.setDate(dataExpiracao.getDate() + parseInt(diasValidade));
+      }
+
+      // Atribuir novo treino com validade
       const { error } = await supabase
         .from("alunos_treinos")
         .insert({
           aluno_id: id,
           treino_id: treinoSelecionado,
           ativo: true,
+          data_expiracao: dataExpiracao?.toISOString().split('T')[0],
+          dias_antecedencia_notificacao: diasAntecedenciaNotif ? parseInt(diasAntecedenciaNotif) : 7,
+          notificacao_expiracao_enviada: false,
         });
 
       if (error) throw error;
@@ -276,6 +295,8 @@ export default function StudentDetails() {
 
       setIsAtribuirTreinoOpen(false);
       setTreinoSelecionado("");
+      setDiasValidade("45");
+      setDiasAntecedenciaNotif("7");
       carregarDadosAluno();
     } catch (error: any) {
       toast({
@@ -551,6 +572,34 @@ export default function StudentDetails() {
                         </SelectContent>
                       </Select>
                     </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dias-validade">Validade (dias)</Label>
+                      <Input
+                        id="dias-validade"
+                        type="number"
+                        placeholder="Ex: 45"
+                        value={diasValidade}
+                        onChange={(e) => setDiasValidade(e.target.value)}
+                        min="1"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Deixe vazio para treino sem data de expiração
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dias-antecedencia">Notificar com antecedência (dias)</Label>
+                      <Input
+                        id="dias-antecedencia"
+                        type="number"
+                        placeholder="Ex: 7"
+                        value={diasAntecedenciaNotif}
+                        onChange={(e) => setDiasAntecedenciaNotif(e.target.value)}
+                        min="1"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Você e o aluno receberão notificação neste prazo antes da expiração
+                      </p>
+                    </div>
                     <div className="flex gap-2 justify-end">
                       <Button variant="outline" onClick={() => setIsAtribuirTreinoOpen(false)}>
                         Cancelar
@@ -574,35 +623,57 @@ export default function StudentDetails() {
           <CardContent>
             {treinos.length > 0 ? (
               <div className="grid gap-4 md:grid-cols-2">
-                {treinos.map((treino) => (
-                  <div key={treino.id} className="p-4 border border-border rounded-lg space-y-3">
-                    <div>
-                      <h3 className="font-semibold text-lg">{treino.nome}</h3>
-                      <p className="text-sm text-muted-foreground">{treino.descricao}</p>
+                {treinos.map((treino) => {
+                  const hoje = new Date();
+                  const dataExpiracao = treino.dataExpiracao ? new Date(treino.dataExpiracao) : null;
+                  const diasRestantes = dataExpiracao 
+                    ? Math.ceil((dataExpiracao.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24))
+                    : null;
+                  
+                  return (
+                    <div key={treino.id} className="p-4 border border-border rounded-lg space-y-3">
+                      <div>
+                        <h3 className="font-semibold text-lg">{treino.nome}</h3>
+                        <p className="text-sm text-muted-foreground">{treino.descricao}</p>
+                      </div>
+                      <div className="flex gap-2 flex-wrap">
+                        <Badge variant="outline">{treino.categoria}</Badge>
+                        <Badge variant="outline">{treino.dificuldade}</Badge>
+                        <Badge variant="outline">{treino.duracao} min</Badge>
+                        {diasRestantes !== null && (
+                          <Badge 
+                            variant={diasRestantes <= 7 ? "destructive" : "secondary"}
+                            className={diasRestantes <= 7 ? "bg-destructive/10 text-destructive border-destructive/20" : ""}
+                          >
+                            {diasRestantes > 0 
+                              ? `Expira em ${diasRestantes} ${diasRestantes === 1 ? 'dia' : 'dias'}`
+                              : 'Expirado'
+                            }
+                          </Badge>
+                        )}
+                      </div>
+                      <Button 
+                        variant="destructive" 
+                        size="sm" 
+                        className="w-full"
+                        onClick={() => handleRemoverTreino(treino.alunoTreinoId, treino.nome)}
+                        disabled={saving}
+                      >
+                        {saving ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Removendo...
+                          </>
+                        ) : (
+                          <>
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Remover Treino
+                          </>
+                        )}
+                      </Button>
                     </div>
-                    <div className="flex gap-2 flex-wrap">
-                      <Badge variant="outline">{treino.categoria}</Badge>
-                      <Badge variant="outline">{treino.dificuldade}</Badge>
-                      <Badge variant="outline">{treino.duracao} min</Badge>
-                    </div>
-                    <Button 
-                      variant="destructive" 
-                      size="sm" 
-                      className="w-full"
-                      onClick={() => handleRemoverTreino(treino.alunoTreinoId, treino.nome)}
-                      disabled={saving}
-                    >
-                      {saving ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Removendo...
-                        </>
-                      ) : (
-                        "Remover Treino"
-                      )}
-                    </Button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="text-center py-8">
