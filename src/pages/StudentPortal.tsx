@@ -10,6 +10,8 @@ import StudentProgressView from "@/components/student/StudentProgressView";
 import StudentFinancialView from "@/components/student/StudentFinancialView";
 import StudentProfileView from "@/components/student/StudentProfileView";
 import StudentReportsView from "@/components/student/StudentReportsView";
+import StudentMessagesView from "@/components/student/StudentMessagesView";
+import NotificationsPopover from "@/components/NotificationsPopover";
 
 const StudentPortal = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -32,6 +34,8 @@ const StudentPortal = () => {
         return <StudentVideosView />;
       case "chat":
         return <StudentChatView />;
+      case "messages":
+        return <StudentMessagesView />;
       case "reports":
         return <StudentReportsView />;
       case "progress":
@@ -49,6 +53,9 @@ const StudentPortal = () => {
     <div className="flex min-h-screen w-full bg-background">
       <StudentSidebar activeTab={activeTab} onTabChange={handleTabChange} />
       <main className="flex-1 p-6 lg:p-8">
+        <div className="flex justify-end mb-4">
+          <NotificationsPopover onNavigate={handleTabChange} />
+        </div>
         {renderContent()}
       </main>
     </div>

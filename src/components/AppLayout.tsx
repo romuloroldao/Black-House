@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import Sidebar from "./Sidebar";
+import NotificationsPopover from "./NotificationsPopover";
 import Dashboard from "./Dashboard";
 import StudentManager from "./StudentManager";
 import WorkoutManager from "./WorkoutManager";
@@ -85,6 +86,9 @@ const AppLayout = () => {
     <div className="flex h-screen bg-background">
       <Sidebar activeTab={activeTab} onTabChange={handleTabChange} />
       <main className="flex-1 overflow-auto">
+        <div className="flex justify-end p-4">
+          <NotificationsPopover onNavigate={handleTabChange} />
+        </div>
         {renderContent()}
       </main>
     </div>
