@@ -83,10 +83,10 @@ const AppLayout = () => {
   };
 
   return (
-    <div className="flex h-screen bg-background">
+    <div className="flex h-screen bg-background overflow-hidden">
       <Sidebar activeTab={activeTab} onTabChange={handleTabChange} />
       <main className="flex-1 overflow-auto">
-        <div className="flex justify-end p-4">
+        <div className="flex justify-end p-4 md:pr-4 pr-4 pl-16 md:pl-4">
           <NotificationsPopover onNavigate={handleTabChange} />
         </div>
         {renderContent()}

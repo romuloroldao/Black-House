@@ -1,5 +1,7 @@
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -27,7 +29,8 @@ import {
   FileText,
   UsersRound,
   Megaphone,
-  CalendarDays
+  CalendarDays,
+  Menu
 } from "lucide-react";
 
 interface SidebarProps {
@@ -39,6 +42,15 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
   const { signOut } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -181,10 +193,17 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
     }
   ];
 
-  return (
-    <div className="w-64 h-screen bg-gradient-card border-r border-border flex flex-col shadow-elevated">
+  const handleTabChange = (tab: string) => {
+    onTabChange(tab);
+    if (isMobile) {
+      setMobileMenuOpen(false);
+    }
+  };
+
+  const SidebarContent = () => (
+    <div className="h-full bg-gradient-card flex flex-col">
       {/* Logo */}
-      <div className="p-6 border-b border-border">
+      <div className="p-6 border-b border-border flex-shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-full flex flex-col items-center">
             <img 
@@ -200,7 +219,7 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 p-4 space-y-2">
+      <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
         {navigationItems.map((item) => (
           <Button
             key={item.id}
@@ -211,7 +230,7 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
                 ? "bg-gradient-primary text-primary-foreground shadow-glow" 
                 : "hover:bg-muted/50"
             )}
-            onClick={() => onTabChange(item.id)}
+            onClick={() => handleTabChange(item.id)}
           >
             <item.icon className="w-5 h-5" />
             <span className="flex-1">{item.label}</span>
@@ -228,7 +247,7 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       </nav>
 
       {/* Premium Badge */}
-      <div className="p-4 border-t border-border">
+      <div className="p-4 border-t border-border flex-shrink-0">
         <div className="bg-gradient-primary/10 border border-primary/20 rounded-lg p-4 mb-4">
           <div className="flex items-center gap-2 mb-2">
             <Star className="w-4 h-4 text-primary" />
@@ -263,7 +282,7 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
                 key={item.id}
                 variant="ghost"
                 className="w-full justify-start text-left"
-                onClick={() => onTabChange(item.id)}
+                onClick={() => handleTabChange(item.id)}
               >
                 <item.icon className="w-5 h-5" />
                 {item.label}
@@ -272,6 +291,33 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
           })}
         </div>
       </div>
+    </div>
+  );
+
+  if (isMobile) {
+    return (
+      <>
+        <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+          <SheetTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="fixed top-4 left-4 z-50 md:hidden"
+            >
+              <Menu className="w-6 h-6" />
+            </Button>
+          </SheetTrigger>
+          <SheetContent side="left" className="p-0 w-64">
+            <SidebarContent />
+          </SheetContent>
+        </Sheet>
+      </>
+    );
+  }
+
+  return (
+    <div className="w-64 h-full bg-gradient-card border-r border-border flex flex-col shadow-elevated">
+      <SidebarContent />
     </div>
   );
 };
