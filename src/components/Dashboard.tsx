@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import SearchDialog from "./SearchDialog";
-import NotificationsPopover from "./NotificationsPopover";
 import { 
   Users, 
   Dumbbell, 
@@ -16,11 +15,7 @@ import {
   TrendingUp, 
   Calendar,
   Plus,
-  Search,
-  Filter,
   MoreVertical,
-  Play,
-  Heart,
   Award,
   Target,
   Video
@@ -224,32 +219,8 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <div className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
-                Black House
-              </h1>
-              <p className="text-muted-foreground">saúde integrativa & performance</p>
-            </div>
-            <div className="flex items-center gap-4">
-              <Button variant="outline" size="icon" onClick={() => setSearchOpen(true)}>
-                <Search className="w-4 h-4" />
-              </Button>
-              <NotificationsPopover onNavigate={onTabChange} />
-              <Avatar>
-                <AvatarImage src="/api/placeholder/40/40" />
-                <AvatarFallback>PT</AvatarFallback>
-              </Avatar>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-6 py-8">
+    <div className="min-h-screen bg-background p-6">
+      <div className="max-w-7xl mx-auto">
         {/* Welcome Section */}
         <div className="mb-8">
           <h2 className="text-2xl font-semibold mb-2">Bem-vindo de volta! 👋</h2>
