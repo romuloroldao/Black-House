@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -219,32 +220,34 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-        {navigationItems.map((item) => (
-          <Button
-            key={item.id}
-            variant={activeTab === item.id ? "premium" : "ghost"}
-            className={cn(
-              "w-full justify-start text-left font-medium transition-smooth",
-              activeTab === item.id 
-                ? "bg-gradient-primary text-primary-foreground shadow-glow" 
-                : "hover:bg-muted/50"
-            )}
-            onClick={() => handleTabChange(item.id)}
-          >
-            <item.icon className="w-5 h-5" />
-            <span className="flex-1">{item.label}</span>
-            {item.notifications > 0 && (
-              <Badge 
-                variant="destructive" 
-                className="h-5 w-5 p-0 flex items-center justify-center text-xs"
-              >
-                {item.notifications}
-              </Badge>
-            )}
-          </Button>
-        ))}
-      </nav>
+      <ScrollArea className="flex-1">
+        <nav className="p-4 space-y-2">
+          {navigationItems.map((item) => (
+            <Button
+              key={item.id}
+              variant={activeTab === item.id ? "premium" : "ghost"}
+              className={cn(
+                "w-full justify-start text-left font-medium transition-smooth",
+                activeTab === item.id 
+                  ? "bg-gradient-primary text-primary-foreground shadow-glow" 
+                  : "hover:bg-muted/50"
+              )}
+              onClick={() => handleTabChange(item.id)}
+            >
+              <item.icon className="w-5 h-5" />
+              <span className="flex-1">{item.label}</span>
+              {item.notifications > 0 && (
+                <Badge 
+                  variant="destructive" 
+                  className="h-5 w-5 p-0 flex items-center justify-center text-xs"
+                >
+                  {item.notifications}
+                </Badge>
+              )}
+            </Button>
+          ))}
+        </nav>
+      </ScrollArea>
 
       {/* Premium Badge */}
       <div className="p-4 border-t border-border flex-shrink-0">

@@ -1,6 +1,7 @@
 import { Home, Utensils, Dumbbell, Play, MessageSquare, TrendingUp, DollarSign, User, LogOut, FileText, Megaphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
@@ -108,28 +109,30 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
         <img src={logoWhite} alt="Black House" className="h-12 w-auto" />
       </div>
 
-      <nav className="flex-1 p-4 space-y-2">
-        {menuItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeTab === item.id;
-          return (
-            <Button
-              key={item.id}
-              variant={isActive ? "default" : "ghost"}
-              className="w-full justify-start relative"
-              onClick={() => onTabChange(item.id)}
-            >
-              <Icon className="mr-3 h-4 w-4" />
-              {item.label}
-              {item.badge && item.badge > 0 && (
-                <Badge variant="destructive" className="ml-auto">
-                  {item.badge}
-                </Badge>
-              )}
-            </Button>
-          );
-        })}
-      </nav>
+      <ScrollArea className="flex-1">
+        <nav className="p-4 space-y-2">
+          {menuItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <Button
+                key={item.id}
+                variant={isActive ? "default" : "ghost"}
+                className="w-full justify-start relative"
+                onClick={() => onTabChange(item.id)}
+              >
+                <Icon className="mr-3 h-4 w-4" />
+                {item.label}
+                {item.badge && item.badge > 0 && (
+                  <Badge variant="destructive" className="ml-auto">
+                    {item.badge}
+                  </Badge>
+                )}
+              </Button>
+            );
+          })}
+        </nav>
+      </ScrollArea>
 
       <div className="p-4 border-t border-border">
         <Button
