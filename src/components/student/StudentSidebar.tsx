@@ -2,6 +2,7 @@ import { Home, Utensils, Dumbbell, Play, MessageSquare, TrendingUp, DollarSign, 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
@@ -111,26 +112,34 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
 
       <ScrollArea className="flex-1">
         <nav className="p-4 space-y-2">
-          {menuItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <Button
-                key={item.id}
-                variant={isActive ? "default" : "ghost"}
-                className="w-full justify-start relative"
-                onClick={() => onTabChange(item.id)}
-              >
-                <Icon className="mr-3 h-4 w-4" />
-                {item.label}
-                {item.badge && item.badge > 0 && (
-                  <Badge variant="destructive" className="ml-auto">
-                    {item.badge}
-                  </Badge>
-                )}
-              </Button>
-            );
-          })}
+          <TooltipProvider delayDuration={0}>
+            {menuItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <Tooltip key={item.id}>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={isActive ? "default" : "ghost"}
+                      className="w-full justify-start relative"
+                      onClick={() => onTabChange(item.id)}
+                    >
+                      <Icon className="mr-3 h-4 w-4" />
+                      {item.label}
+                      {item.badge && item.badge > 0 && (
+                        <Badge variant="destructive" className="ml-auto">
+                          {item.badge}
+                        </Badge>
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" className="md:hidden">
+                    <p>{item.label}</p>
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </TooltipProvider>
         </nav>
       </ScrollArea>
 
