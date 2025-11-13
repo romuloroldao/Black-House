@@ -105,7 +105,7 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
   ];
 
   return (
-    <aside className="w-64 bg-card border-r border-border flex flex-col">
+    <aside className="w-64 bg-card border-r border-border flex flex-col transition-all duration-300 ease-in-out">
       <div className="p-6 border-b border-border">
         <img src={logoWhite} alt="Black House" className="h-12 w-auto" />
       </div>
@@ -121,7 +121,7 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
                   <TooltipTrigger asChild>
                     <Button
                       variant={isActive ? "default" : "ghost"}
-                      className="w-full justify-start relative"
+                      className="w-full justify-start relative transition-all duration-200 ease-in-out"
                       onClick={() => onTabChange(item.id)}
                     >
                       <Icon className="mr-3 h-4 w-4" />
