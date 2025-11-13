@@ -203,7 +203,7 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
   };
 
   const SidebarContent = () => (
-    <div className="h-full bg-gradient-card flex flex-col">
+    <div className="h-full bg-gradient-card flex flex-col transition-all duration-300 ease-in-out">
       {/* Logo */}
       <div className="p-6 border-b border-border flex-shrink-0">
         <div className="flex items-center gap-3">
@@ -230,10 +230,10 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
                   <Button
                     variant={activeTab === item.id ? "premium" : "ghost"}
                     className={cn(
-                      "w-full justify-start text-left font-medium transition-smooth",
+                      "w-full justify-start text-left font-medium transition-all duration-300 ease-in-out",
                       activeTab === item.id 
-                        ? "bg-gradient-primary text-primary-foreground shadow-glow" 
-                        : "hover:bg-muted/50"
+                        ? "bg-gradient-primary text-primary-foreground shadow-glow scale-105" 
+                        : "hover:bg-muted/50 hover:scale-102"
                     )}
                     onClick={() => handleTabChange(item.id)}
                   >
@@ -314,12 +314,12 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
             <Button
               variant="ghost"
               size="icon"
-              className="fixed top-4 left-4 z-50 md:hidden"
+              className="fixed top-4 left-4 z-50 md:hidden transition-transform hover:scale-110 duration-200"
             >
               <Menu className="w-6 h-6" />
             </Button>
           </SheetTrigger>
-          <SheetContent side="left" className="p-0 w-64">
+          <SheetContent side="left" className="p-0 w-64 transition-all duration-300 ease-in-out">
             <SidebarContent />
           </SheetContent>
         </Sheet>
@@ -328,7 +328,7 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
   }
 
   return (
-    <div className="w-64 h-full bg-gradient-card border-r border-border flex flex-col shadow-elevated">
+    <div className="w-64 h-full bg-gradient-card border-r border-border flex flex-col shadow-elevated transition-all duration-300 ease-in-out">
       <SidebarContent />
     </div>
   );
