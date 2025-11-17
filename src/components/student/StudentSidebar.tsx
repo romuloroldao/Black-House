@@ -9,6 +9,7 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import logoWhite from "@/assets/logo-white.svg";
 import { useToast } from "@/hooks/use-toast";
+import MessagesPopover from "./MessagesPopover";
 
 interface StudentSidebarProps {
   activeTab: string;
@@ -204,8 +205,9 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
 
   return (
     <aside className="w-64 bg-card border-r border-border flex flex-col transition-all duration-300 ease-in-out">
-      <div className="p-6 border-b border-border">
+      <div className="p-6 border-b border-border flex items-center justify-between">
         <img src={logoWhite} alt="Black House" className="h-12 w-auto" />
+        <MessagesPopover unreadCount={unreadMessages} onCountChange={setUnreadMessages} />
       </div>
 
       <ScrollArea className="flex-1">
