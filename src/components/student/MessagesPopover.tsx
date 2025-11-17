@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Bell, Check, Trash2, X } from "lucide-react";
+import { Bell, Check, Trash2, X, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -8,6 +8,14 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -31,12 +39,14 @@ const MessagesPopover = ({ unreadCount, onCountChange }: MessagesPopoverProps) =
   const { toast } = useToast();
   const [messages, setMessages] = useState<Message[]>([]);
   const [open, setOpen] = useState(false);
+  const [sortOrder, setSortOrder] = useState<"desc" | "asc">("desc");
+  const [statusFilter, setStatusFilter] = useState<"all" | "unread" | "read">("all");
 
   useEffect(() => {
     if (user && open) {
       loadMessages();
     }
-  }, [user, open]);
+  }, [user, open, sortOrder, statusFilter]);
 
   useEffect(() => {
     if (!user) return;
@@ -80,13 +90,23 @@ const MessagesPopover = ({ unreadCount, onCountChange }: MessagesPopoverProps) =
 
     if (!conversaData) return;
 
-    const { data } = await supabase
+    let query = supabase
       .from("mensagens")
       .select("*")
       .eq("conversa_id", conversaData.id)
-      .neq("remetente_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(10);
+      .neq("remetente_id", user.id);
+
+    // Apply status filter
+    if (statusFilter === "unread") {
+      query = query.eq("lida", false);
+    } else if (statusFilter === "read") {
+      query = query.eq("lida", true);
+    }
+
+    // Apply sort order
+    query = query.order("created_at", { ascending: sortOrder === "asc" }).limit(20);
+
+    const { data } = await query;
 
     if (data) {
       setMessages(data);
@@ -177,19 +197,42 @@ const MessagesPopover = ({ unreadCount, onCountChange }: MessagesPopoverProps) =
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-80 p-0" align="end">
-        <div className="flex items-center justify-between p-4 border-b">
-          <h3 className="font-semibold">Mensagens do Chat</h3>
-          {unreadCount > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={markAllAsRead}
-              className="h-8 text-xs"
-            >
-              Marcar todas como lidas
-            </Button>
-          )}
+      <PopoverContent className="w-96 p-0" align="end">
+        <div className="p-4 border-b space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold">Mensagens do Chat</h3>
+            {unreadCount > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={markAllAsRead}
+                className="h-8 text-xs"
+              >
+                Marcar todas como lidas
+              </Button>
+            )}
+          </div>
+          
+          {/* Filters */}
+          <div className="flex items-center gap-2">
+            <Select value={sortOrder} onValueChange={(value: "desc" | "asc") => setSortOrder(value)}>
+              <SelectTrigger className="h-9 w-[140px]">
+                <SelectValue placeholder="Ordenar por" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="desc">Mais recentes</SelectItem>
+                <SelectItem value="asc">Mais antigas</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Tabs value={statusFilter} onValueChange={(value: "all" | "unread" | "read") => setStatusFilter(value)} className="flex-1">
+              <TabsList className="grid w-full grid-cols-3 h-9">
+                <TabsTrigger value="all" className="text-xs">Todas</TabsTrigger>
+                <TabsTrigger value="unread" className="text-xs">Não lidas</TabsTrigger>
+                <TabsTrigger value="read" className="text-xs">Lidas</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
         </div>
         <ScrollArea className="h-[400px]">
           {messages.length === 0 ? (
