@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 import logoWhite from "@/assets/logo-white.svg";
 import {
   LayoutDashboard,
@@ -41,11 +42,16 @@ interface SidebarProps {
 }
 
 const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
-  const { signOut } = useAuth();
+  const { signOut, user } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [isMobile, setIsMobile] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [notificationCounts, setNotificationCounts] = useState<Record<string, number>>({
+    students: 0,
+    messages: 0,
+    payments: 0,
+  });
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -53,6 +59,102 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
+  useEffect(() => {
+    if (user) {
+      loadNotifications();
+
+      // Subscribe to real-time updates
+      const messagesChannel = supabase
+        .channel('sidebar-messages-changes')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'mensagens' },
+          () => loadNotifications()
+        )
+        .subscribe();
+
+      const paymentsChannel = supabase
+        .channel('sidebar-payments-changes')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'asaas_payments' },
+          () => loadNotifications()
+        )
+        .subscribe();
+
+      const studentsChannel = supabase
+        .channel('sidebar-students-changes')
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'alunos' },
+          () => loadNotifications()
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(messagesChannel);
+        supabase.removeChannel(paymentsChannel);
+        supabase.removeChannel(studentsChannel);
+      };
+    }
+  }, [user]);
+
+  const loadNotifications = async () => {
+    if (!user) return;
+
+    const counts: Record<string, number> = {
+      students: 0,
+      messages: 0,
+      payments: 0,
+    };
+
+    // Count new students (created in last 7 days)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const { count: newStudents } = await supabase
+      .from('alunos')
+      .select('*', { count: 'exact', head: true })
+      .eq('coach_id', user.id)
+      .gte('created_at', sevenDaysAgo.toISOString());
+    counts.students = newStudents || 0;
+
+    // Count unread messages in all conversations
+    const { data: conversas } = await supabase
+      .from('conversas')
+      .select('id')
+      .eq('coach_id', user.id);
+
+    if (conversas) {
+      const conversaIds = conversas.map(c => c.id);
+      if (conversaIds.length > 0) {
+        const { count: unreadMessages } = await supabase
+          .from('mensagens')
+          .select('*', { count: 'exact', head: true })
+          .in('conversa_id', conversaIds)
+          .eq('lida', false)
+          .neq('remetente_id', user.id);
+        counts.messages = unreadMessages || 0;
+      }
+    }
+
+    // Count pending payments
+    const { count: pendingPayments } = await supabase
+      .from('asaas_payments')
+      .select('*', { count: 'exact', head: true })
+      .eq('coach_id', user.id)
+      .in('status', ['PENDING', 'OVERDUE']);
+    counts.payments = pendingPayments || 0;
+
+    setNotificationCounts(counts);
+  };
+
+  const clearNotifications = (tabId: string) => {
+    setNotificationCounts(prev => ({
+      ...prev,
+      [tabId]: 0,
+    }));
+  };
 
   const handleLogout = async () => {
     try {
@@ -71,84 +173,75 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
     }
   };
 
+  const getNotificationCount = (itemId: string) => {
+    return notificationCounts[itemId] || 0;
+  };
+
   const navigationItems = [
     {
       id: "dashboard",
       label: "Dashboard",
       icon: LayoutDashboard,
-      notifications: 0
     },
     {
       id: "students",
       label: "Alunos",
       icon: Users,
-      notifications: 3
     },
     {
       id: "workouts",
       label: "Treinos",
       icon: Dumbbell,
-      notifications: 0
     },
     {
       id: "videos",
       label: "Galeria de Vídeos",
       icon: Video,
-      notifications: 0
     },
     {
       id: "nutrition",
       label: "Nutrição",
       icon: UtensilsCrossed,
-      notifications: 0
     },
     {
       id: "messages",
       label: "Mensagens",
       icon: MessageSquare,
-      notifications: 8
     },
     {
       id: "payment-plans",
       label: "Planos de Pagamento",
       icon: Wallet,
-      notifications: 0
     },
     {
       id: "payments",
       label: "Pagamentos",
       icon: DollarSign,
-      notifications: 2
     },
     {
       id: "recurring-charges",
       label: "Cobranças Recorrentes",
       icon: RefreshCw,
-      notifications: 0
     },
     {
       id: "exceptions",
       label: "Exceções",
       icon: AlertCircle,
-      notifications: 0
     },
     {
       id: "expenses",
       label: "Despesas",
       icon: TrendingDown,
-      notifications: 0
     },
     {
       id: "financial-dashboard",
       label: "Dashboard Financeiro",
       icon: BarChart3,
-      notifications: 0
     },
     {
       id: "calendar",
       label: "Agenda",
       icon: Calendar,
-      notifications: 0
     },
     {
       id: "reports",
@@ -160,25 +253,21 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       id: "classes",
       label: "Turmas",
       icon: UsersRound,
-      notifications: 0
     },
     {
       id: "announcements",
       label: "Avisos em Massa",
       icon: Megaphone,
-      notifications: 0
     },
     {
       id: "events",
       label: "Eventos",
       icon: CalendarDays,
-      notifications: 0
     },
     {
       id: "analytics",
       label: "Análises",
       icon: Star,
-      notifications: 0
     }
   ];
 
@@ -196,6 +285,11 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
   ];
 
   const handleTabChange = (tab: string) => {
+    // Clear notifications for this tab
+    if (notificationCounts[tab] > 0) {
+      clearNotifications(tab);
+    }
+    
     onTabChange(tab);
     if (isMobile) {
       setMobileMenuOpen(false);
@@ -239,12 +333,12 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
                   >
                     <item.icon className="w-5 h-5" />
                     <span className="flex-1">{item.label}</span>
-                    {item.notifications > 0 && (
+                    {getNotificationCount(item.id) > 0 && (
                       <Badge 
                         variant="destructive" 
-                        className="h-5 w-5 p-0 flex items-center justify-center text-xs"
+                        className="h-5 w-5 p-0 flex items-center justify-center text-xs animate-in fade-in duration-300"
                       >
-                        {item.notifications}
+                        {getNotificationCount(item.id)}
                       </Badge>
                     )}
                   </Button>
