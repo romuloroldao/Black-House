@@ -211,7 +211,10 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
       .eq("lida", false)
       .neq("remetente_id", user.id);
 
-    loadUnreadMessages();
+    // Clear badge immediately for better UX
+    setUnreadMessages(0);
+    // Then reload to confirm
+    setTimeout(() => loadUnreadMessages(), 100);
   };
 
   const markAnnouncementsAsRead = async () => {
@@ -248,7 +251,10 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
         .eq("lido", false);
     }
 
-    loadUnreadCount();
+    // Clear badge immediately for better UX
+    setUnreadCount(0);
+    // Then reload to confirm
+    setTimeout(() => loadUnreadCount(), 100);
   };
 
   const handleTabChange = (tab: string) => {
