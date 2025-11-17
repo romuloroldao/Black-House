@@ -185,6 +185,83 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
     setUnreadMessages(newCount);
   };
 
+  const markChatMessagesAsRead = async () => {
+    if (!user) return;
+
+    const { data: alunoData } = await supabase
+      .from("alunos")
+      .select("id")
+      .eq("email", user.email)
+      .single();
+
+    if (!alunoData) return;
+
+    const { data: conversaData } = await supabase
+      .from("conversas")
+      .select("id")
+      .eq("aluno_id", alunoData.id)
+      .single();
+
+    if (!conversaData) return;
+
+    await supabase
+      .from("mensagens")
+      .update({ lida: true })
+      .eq("conversa_id", conversaData.id)
+      .eq("lida", false)
+      .neq("remetente_id", user.id);
+
+    loadUnreadMessages();
+  };
+
+  const markAnnouncementsAsRead = async () => {
+    if (!user) return;
+
+    const { data: alunoData } = await supabase
+      .from("alunos")
+      .select("id")
+      .eq("email", user.email)
+      .single();
+
+    if (!alunoData) return;
+
+    const { data: turmasAluno } = await supabase
+      .from("turmas_alunos")
+      .select("turma_id")
+      .eq("aluno_id", alunoData.id);
+
+    const turmaIds = turmasAluno?.map(t => t.turma_id) || [];
+
+    // Mark individual messages as read
+    await supabase
+      .from("avisos_destinatarios")
+      .update({ lido: true, lido_em: new Date().toISOString() })
+      .eq("aluno_id", alunoData.id)
+      .eq("lido", false);
+
+    // Mark class messages as read
+    if (turmaIds.length > 0) {
+      await supabase
+        .from("avisos_destinatarios")
+        .update({ lido: true, lido_em: new Date().toISOString() })
+        .in("turma_id", turmaIds)
+        .eq("lido", false);
+    }
+
+    loadUnreadCount();
+  };
+
+  const handleTabChange = (tab: string) => {
+    onTabChange(tab);
+    
+    // Mark messages as read when user opens the respective tab
+    if (tab === "chat" && unreadMessages > 0) {
+      markChatMessagesAsRead();
+    } else if (tab === "messages" && unreadCount > 0) {
+      markAnnouncementsAsRead();
+    }
+  };
+
   const handleLogout = async () => {
     await signOut();
     navigate("/auth");
@@ -222,7 +299,7 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
                     <Button
                       variant={isActive ? "default" : "ghost"}
                       className="w-full justify-start relative transition-all duration-200 ease-in-out"
-                      onClick={() => onTabChange(item.id)}
+                      onClick={() => handleTabChange(item.id)}
                     >
                       <Icon className="mr-3 h-4 w-4" />
                       {item.label}
