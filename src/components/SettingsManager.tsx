@@ -15,8 +15,16 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { User, Bell, Key, Palette } from "lucide-react";
+import { User, Bell, Key, Palette, Eye, EyeOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 const SettingsManager = () => {
   const { user } = useAuth();
@@ -37,6 +45,17 @@ const SettingsManager = () => {
     workoutExpirations: true,
     newMessages: true,
     eventReminders: true,
+  });
+
+  // Password change dialog state
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [passwordData, setPasswordData] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
   });
 
   useEffect(() => {
@@ -113,6 +132,46 @@ const SettingsManager = () => {
       }
     } catch (error: any) {
       toast.error("Erro ao atualizar Asaas: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    // Validações
+    if (!passwordData.currentPassword || !passwordData.newPassword || !passwordData.confirmPassword) {
+      toast.error("Preencha todos os campos");
+      return;
+    }
+
+    if (passwordData.newPassword.length < 6) {
+      toast.error("A nova senha deve ter pelo menos 6 caracteres");
+      return;
+    }
+
+    if (passwordData.newPassword !== passwordData.confirmPassword) {
+      toast.error("As senhas não correspondem");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Atualizar senha
+      const { error } = await supabase.auth.updateUser({
+        password: passwordData.newPassword,
+      });
+
+      if (error) throw error;
+
+      toast.success("Senha alterada com sucesso!");
+      setPasswordDialogOpen(false);
+      setPasswordData({
+        currentPassword: "",
+        newPassword: "",
+        confirmPassword: "",
+      });
+    } catch (error: any) {
+      toast.error("Erro ao alterar senha: " + error.message);
     } finally {
       setLoading(false);
     }
@@ -217,7 +276,9 @@ const SettingsManager = () => {
                     Atualize sua senha regularmente
                   </p>
                 </div>
-                <Button variant="outline">Alterar</Button>
+                <Button variant="outline" onClick={() => setPasswordDialogOpen(true)}>
+                  Alterar
+                </Button>
               </div>
             </CardContent>
           </Card>
@@ -403,6 +464,121 @@ const SettingsManager = () => {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={passwordDialogOpen} onOpenChange={setPasswordDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Alterar Senha</DialogTitle>
+            <DialogDescription>
+              Digite sua senha atual e escolha uma nova senha. A senha deve ter pelo menos 6 caracteres.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="currentPassword">Senha Atual</Label>
+              <div className="relative">
+                <Input
+                  id="currentPassword"
+                  type={showCurrentPassword ? "text" : "password"}
+                  value={passwordData.currentPassword}
+                  onChange={(e) =>
+                    setPasswordData({ ...passwordData, currentPassword: e.target.value })
+                  }
+                  placeholder="Digite sua senha atual"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                >
+                  {showCurrentPassword ? (
+                    <EyeOff className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <Eye className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="newPassword">Nova Senha</Label>
+              <div className="relative">
+                <Input
+                  id="newPassword"
+                  type={showNewPassword ? "text" : "password"}
+                  value={passwordData.newPassword}
+                  onChange={(e) =>
+                    setPasswordData({ ...passwordData, newPassword: e.target.value })
+                  }
+                  placeholder="Digite sua nova senha"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowNewPassword(!showNewPassword)}
+                >
+                  {showNewPassword ? (
+                    <EyeOff className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <Eye className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="confirmPassword">Confirmar Nova Senha</Label>
+              <div className="relative">
+                <Input
+                  id="confirmPassword"
+                  type={showConfirmPassword ? "text" : "password"}
+                  value={passwordData.confirmPassword}
+                  onChange={(e) =>
+                    setPasswordData({ ...passwordData, confirmPassword: e.target.value })
+                  }
+                  placeholder="Confirme sua nova senha"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                >
+                  {showConfirmPassword ? (
+                    <EyeOff className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <Eye className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setPasswordDialogOpen(false);
+                setPasswordData({
+                  currentPassword: "",
+                  newPassword: "",
+                  confirmPassword: "",
+                });
+              }}
+              disabled={loading}
+            >
+              Cancelar
+            </Button>
+            <Button onClick={handleChangePassword} disabled={loading}>
+              {loading ? "Alterando..." : "Alterar Senha"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
