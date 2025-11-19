@@ -91,7 +91,7 @@ const PaymentManager = () => {
 
       // Carregar planos
       const { data: plansData, error: plansError } = await supabase
-        .from("planos_pagamento")
+        .from("payment_plans")
         .select("*")
         .eq("coach_id", user?.id)
         .eq("ativo", true)

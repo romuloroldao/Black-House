@@ -15,6 +15,7 @@ import FinancialExceptionsManager from "./FinancialExceptionsManager";
 import ExpenseManager from "./ExpenseManager";
 import RecurringChargesConfig from "./RecurringChargesConfig";
 import FinancialDashboard from "./FinancialDashboard";
+import PaymentStatusTracker from "./PaymentStatusTracker";
 import ReportManager from "./ReportManager";
 import { ClassGroupManager } from "./ClassGroupManager";
 import { AnnouncementManager } from "./AnnouncementManager";
@@ -64,6 +65,8 @@ const AppLayout = () => {
         return <div className="p-6"><RecurringChargesConfig /></div>;
       case "financial-dashboard":
         return <FinancialDashboard />;
+      case "payments-tracker":
+        return <div className="p-6"><PaymentStatusTracker /></div>;
       case "calendar":
         return <AgendaManager />;
       case "reports":
