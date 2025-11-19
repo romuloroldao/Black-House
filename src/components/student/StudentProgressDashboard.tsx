@@ -39,32 +39,42 @@ interface CheckinData {
   nao_cumpriu_porque: string;
 }
 
-export default function StudentProgressDashboard() {
+interface StudentProgressDashboardProps {
+  studentId?: string; // ID do aluno (usado quando o professor está visualizando)
+}
+
+export default function StudentProgressDashboard({ studentId }: StudentProgressDashboardProps = {}) {
   const [checkins, setCheckins] = useState<CheckinData[]>([]);
   const [loading, setLoading] = useState(true);
   const [periodFilter, setPeriodFilter] = useState<string>("30");
 
   useEffect(() => {
     loadCheckins();
-  }, []);
+  }, [studentId]);
 
   const loadCheckins = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      let alunoId = studentId;
 
-      const { data: aluno } = await supabase
-        .from("alunos")
-        .select("id")
-        .eq("email", user.email)
-        .single();
+      // Se não foi passado studentId, buscar pelo usuário logado (modo aluno)
+      if (!alunoId) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
 
-      if (!aluno) return;
+        const { data: aluno } = await supabase
+          .from("alunos")
+          .select("id")
+          .eq("email", user.email)
+          .single();
+
+        if (!aluno) return;
+        alunoId = aluno.id;
+      }
 
       const { data, error } = await supabase
         .from("weekly_checkins")
         .select("*")
-        .eq("aluno_id", aluno.id)
+        .eq("aluno_id", alunoId)
         .order("created_at", { ascending: false });
 
       if (error) throw error;

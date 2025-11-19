@@ -11,6 +11,7 @@ import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare, Trash2 }
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import StudentProgressDashboard from "./student/StudentProgressDashboard";
 
 interface Student {
   id: string;
@@ -859,6 +860,19 @@ export default function StudentDetails() {
               <p>Nenhuma foto disponível</p>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Dashboard de Progresso do Aluno */}
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Dashboard de Progresso</CardTitle>
+          <CardDescription>
+            Análise detalhada do progresso através dos check-ins semanais
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <StudentProgressDashboard studentId={id} />
         </CardContent>
       </Card>
 
