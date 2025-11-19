@@ -3,11 +3,12 @@ import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare, Trash2 } from "lucide-react";
+import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare, Trash2, User, Utensils, TrendingUp, Activity } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -489,63 +490,131 @@ export default function StudentDetails() {
         </div>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* Dados Básicos */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Informações Básicas</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <div>
-              <span className="font-semibold">Data de Nascimento: </span>
-              <span>{student.data_nascimento ? new Date(student.data_nascimento).toLocaleDateString('pt-BR') : "Não informado"}</span>
-            </div>
-            <div>
-              <span className="font-semibold">Peso: </span>
-              <span>{student.peso ? `${student.peso} kg` : "Não informado"}</span>
-            </div>
-            <div>
-              <span className="font-semibold">Objetivo: </span>
-              <span>{student.objetivo || "Não informado"}</span>
-            </div>
-          </CardContent>
-        </Card>
+      <Tabs defaultValue="overview" className="w-full">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="overview" className="flex items-center gap-2">
+            <User className="h-4 w-4" />
+            Visão Geral
+          </TabsTrigger>
+          <TabsTrigger value="training" className="flex items-center gap-2">
+            <Dumbbell className="h-4 w-4" />
+            Treinos
+          </TabsTrigger>
+          <TabsTrigger value="nutrition" className="flex items-center gap-2">
+            <Utensils className="h-4 w-4" />
+            Nutrição
+          </TabsTrigger>
+          <TabsTrigger value="progress" className="flex items-center gap-2">
+            <TrendingUp className="h-4 w-4" />
+            Progresso
+          </TabsTrigger>
+        </TabsList>
 
-        {/* Feedback */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Feedback do Professor</CardTitle>
-            <CardDescription>Adicione observações e feedbacks personalizados</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Textarea
-              placeholder="Digite seu feedback aqui..."
-              value={feedback}
-              onChange={(e) => setFeedback(e.target.value)}
-              rows={5}
-              className="resize-none"
-            />
-            <Button onClick={handleSaveFeedback} disabled={saving} className="w-full">
-              {saving ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Salvando...
-                </>
-              ) : (
-                <>
-                  <Save className="mr-2 h-4 w-4" />
-                  Salvar Feedback
-                </>
-              )}
-            </Button>
-          </CardContent>
-        </Card>
+        {/* TAB: Visão Geral */}
+        <TabsContent value="overview" className="space-y-6 mt-6">
+          <div className="grid gap-6 md:grid-cols-2">
+            {/* Dados Básicos */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Informações Básicas</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div>
+                  <span className="font-semibold">Data de Nascimento: </span>
+                  <span>{student.data_nascimento ? new Date(student.data_nascimento).toLocaleDateString('pt-BR') : "Não informado"}</span>
+                </div>
+                <div>
+                  <span className="font-semibold">Peso: </span>
+                  <span>{student.peso ? `${student.peso} kg` : "Não informado"}</span>
+                </div>
+                <div>
+                  <span className="font-semibold">Objetivo: </span>
+                  <span>{student.objetivo || "Não informado"}</span>
+                </div>
+                <div>
+                  <span className="font-semibold">Aluno desde: </span>
+                  <span>{new Date(student.created_at).toLocaleDateString('pt-BR')}</span>
+                </div>
+              </CardContent>
+            </Card>
 
-        {/* Treinos */}
-        <Card className="md:col-span-2">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>Treinos Ativos</CardTitle>
+            {/* Feedback */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Feedback do Professor</CardTitle>
+                <CardDescription>Adicione observações e feedbacks personalizados</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <Textarea
+                  placeholder="Digite seu feedback aqui..."
+                  value={feedback}
+                  onChange={(e) => setFeedback(e.target.value)}
+                  rows={5}
+                  className="resize-none"
+                />
+                <Button onClick={handleSaveFeedback} disabled={saving} className="w-full">
+                  {saving ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Salvando...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="mr-2 h-4 w-4" />
+                      Salvar Feedback
+                    </>
+                  )}
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Resumo Rápido */}
+          <div className="grid gap-4 md:grid-cols-3">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium">Treinos Ativos</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{treinos.length}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {treinos.length === 1 ? 'treino atribuído' : 'treinos atribuídos'}
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium">Plano Nutricional</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{dieta ? '1' : '0'}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {dieta ? 'dieta ativa' : 'nenhuma dieta'}
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium">Fotos de Progresso</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{fotos.length}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {fotos.length === 1 ? 'foto enviada' : 'fotos enviadas'}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* TAB: Treinos */}
+        <TabsContent value="training" className="space-y-6 mt-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>Treinos Ativos</CardTitle>
               <Dialog open={isAtribuirTreinoOpen} onOpenChange={setIsAtribuirTreinoOpen}>
                 <DialogTrigger asChild>
                   <Button variant="outline" size="sm">
@@ -825,56 +894,60 @@ export default function StudentDetails() {
             )}
           </CardContent>
         </Card>
-      </div>
+        </TabsContent>
 
-      {/* Fotos do Aluno */}
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle>Galeria de Fotos</CardTitle>
-          <CardDescription>Progresso visual do aluno</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {fotos.length > 0 ? (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {fotos.map((foto) => (
-                <div
-                  key={foto.id}
-                  className="relative aspect-square rounded-lg overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
-                  onClick={() => setSelectedFoto(foto.url)}
-                >
-                  <img
-                    src={foto.url}
-                    alt={foto.descricao || "Foto do aluno"}
-                    className="w-full h-full object-cover"
-                  />
-                  {foto.descricao && (
-                    <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs p-2">
-                      {foto.descricao}
+        {/* TAB: Progresso */}
+        <TabsContent value="progress" className="space-y-6 mt-6">
+          {/* Fotos do Aluno */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Galeria de Fotos</CardTitle>
+              <CardDescription>Progresso visual do aluno</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {fotos.length > 0 ? (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {fotos.map((foto) => (
+                    <div
+                      key={foto.id}
+                      className="relative aspect-square rounded-lg overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
+                      onClick={() => setSelectedFoto(foto.url)}
+                    >
+                      <img
+                        src={foto.url}
+                        alt={foto.descricao || "Foto do aluno"}
+                        className="w-full h-full object-cover"
+                      />
+                      {foto.descricao && (
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs p-2">
+                          {foto.descricao}
+                        </div>
+                      )}
                     </div>
-                  )}
+                  ))}
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-8 text-muted-foreground">
-              <p>Nenhuma foto disponível</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <p>Nenhuma foto disponível</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
-      {/* Dashboard de Progresso do Aluno */}
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle>Dashboard de Progresso</CardTitle>
-          <CardDescription>
-            Análise detalhada do progresso através dos check-ins semanais
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <StudentProgressDashboard studentId={id} />
-        </CardContent>
-      </Card>
+          {/* Dashboard de Progresso do Aluno */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Dashboard de Progresso</CardTitle>
+              <CardDescription>
+                Análise detalhada do progresso através dos check-ins semanais
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <StudentProgressDashboard studentId={id} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* Dialog para ampliar foto */}
       <Dialog open={!!selectedFoto} onOpenChange={() => setSelectedFoto(null)}>
