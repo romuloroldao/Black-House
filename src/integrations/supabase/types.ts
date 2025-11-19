@@ -422,6 +422,41 @@ export type Database = {
           },
         ]
       }
+      checkin_reminders: {
+        Row: {
+          aluno_id: string
+          ativo: boolean | null
+          created_at: string | null
+          id: string
+          proximo_lembrete: string
+          ultima_notificacao: string | null
+        }
+        Insert: {
+          aluno_id: string
+          ativo?: boolean | null
+          created_at?: string | null
+          id?: string
+          proximo_lembrete: string
+          ultima_notificacao?: string | null
+        }
+        Update: {
+          aluno_id?: string
+          ativo?: boolean | null
+          created_at?: string | null
+          id?: string
+          proximo_lembrete?: string
+          ultima_notificacao?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "checkin_reminders_aluno_id_fkey"
+            columns: ["aluno_id"]
+            isOneToOne: false
+            referencedRelation: "alunos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conversas: {
         Row: {
           aluno_id: string
@@ -1511,6 +1546,110 @@ export type Database = {
           youtube_id?: string
         }
         Relationships: []
+      }
+      weekly_checkins: {
+        Row: {
+          acordou_noite: string | null
+          aluno_id: string
+          apetite: string
+          autoestima: number
+          beliscou_fora_plano: string
+          convivio_familiar: string
+          convivio_trabalho: string
+          created_at: string | null
+          desafiou_treinos: boolean
+          dificuldade_adormecer: boolean
+          estresse_semana: boolean
+          exposicao_sol: boolean
+          fez_cardio: boolean
+          formato_fezes: string
+          glicemia: string | null
+          higiene_sono: boolean
+          id: string
+          ingeriu_agua_minima: boolean
+          lida_desafios: string
+          media_evacuacoes: string
+          media_horas_sono: string
+          nao_cumpriu_porque: string | null
+          postura_problemas: string
+          pressao_arterial: string | null
+          recursos_hormonais: string
+          seguiu_plano_nota: number
+          seguiu_suplementacao: boolean
+          status: string | null
+          treinou_todas_sessoes: boolean
+        }
+        Insert: {
+          acordou_noite?: string | null
+          aluno_id: string
+          apetite: string
+          autoestima: number
+          beliscou_fora_plano: string
+          convivio_familiar: string
+          convivio_trabalho: string
+          created_at?: string | null
+          desafiou_treinos: boolean
+          dificuldade_adormecer: boolean
+          estresse_semana: boolean
+          exposicao_sol: boolean
+          fez_cardio: boolean
+          formato_fezes: string
+          glicemia?: string | null
+          higiene_sono: boolean
+          id?: string
+          ingeriu_agua_minima: boolean
+          lida_desafios: string
+          media_evacuacoes: string
+          media_horas_sono: string
+          nao_cumpriu_porque?: string | null
+          postura_problemas: string
+          pressao_arterial?: string | null
+          recursos_hormonais: string
+          seguiu_plano_nota: number
+          seguiu_suplementacao: boolean
+          status?: string | null
+          treinou_todas_sessoes: boolean
+        }
+        Update: {
+          acordou_noite?: string | null
+          aluno_id?: string
+          apetite?: string
+          autoestima?: number
+          beliscou_fora_plano?: string
+          convivio_familiar?: string
+          convivio_trabalho?: string
+          created_at?: string | null
+          desafiou_treinos?: boolean
+          dificuldade_adormecer?: boolean
+          estresse_semana?: boolean
+          exposicao_sol?: boolean
+          fez_cardio?: boolean
+          formato_fezes?: string
+          glicemia?: string | null
+          higiene_sono?: boolean
+          id?: string
+          ingeriu_agua_minima?: boolean
+          lida_desafios?: string
+          media_evacuacoes?: string
+          media_horas_sono?: string
+          nao_cumpriu_porque?: string | null
+          postura_problemas?: string
+          pressao_arterial?: string | null
+          recursos_hormonais?: string
+          seguiu_plano_nota?: number
+          seguiu_suplementacao?: boolean
+          status?: string | null
+          treinou_todas_sessoes?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "weekly_checkins_aluno_id_fkey"
+            columns: ["aluno_id"]
+            isOneToOne: false
+            referencedRelation: "alunos"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

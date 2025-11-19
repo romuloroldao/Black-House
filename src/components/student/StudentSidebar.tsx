@@ -1,4 +1,4 @@
-import { Home, Utensils, Dumbbell, Play, MessageSquare, TrendingUp, DollarSign, User, LogOut, FileText, Megaphone } from "lucide-react";
+import { Home, Utensils, Dumbbell, Play, MessageSquare, TrendingUp, DollarSign, User, LogOut, FileText, Megaphone, ClipboardCheck, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -281,7 +281,9 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
     { id: "chat", label: "Chat", icon: MessageSquare, badge: unreadMessages },
     { id: "messages", label: "Mensagens do Coach", icon: Megaphone, badge: unreadCount },
     { id: "reports", label: "Meus Relatórios", icon: FileText },
+    { id: "checkin", label: "Check-in Semanal", icon: ClipboardCheck },
     { id: "progress", label: "Meu Progresso", icon: TrendingUp },
+    { id: "progress-dashboard", label: "Dashboard Progresso", icon: BarChart3 },
     { id: "financial", label: "Financeiro", icon: DollarSign },
     { id: "profile", label: "Meu Perfil", icon: User },
   ];

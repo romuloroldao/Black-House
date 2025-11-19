@@ -11,6 +11,8 @@ import StudentFinancialView from "@/components/student/StudentFinancialView";
 import StudentProfileView from "@/components/student/StudentProfileView";
 import StudentReportsView from "@/components/student/StudentReportsView";
 import StudentMessagesView from "@/components/student/StudentMessagesView";
+import StudentWeeklyCheckin from "@/components/student/StudentWeeklyCheckin";
+import StudentProgressDashboard from "@/components/student/StudentProgressDashboard";
 import NotificationsPopover from "@/components/NotificationsPopover";
 
 const StudentPortal = () => {
@@ -44,6 +46,10 @@ const StudentPortal = () => {
         return <StudentFinancialView />;
       case "profile":
         return <StudentProfileView />;
+      case "checkin":
+        return <StudentWeeklyCheckin />;
+      case "progress-dashboard":
+        return <StudentProgressDashboard />;
       default:
         return <StudentDashboardView />;
     }
