@@ -300,19 +300,13 @@ const PaymentManager = () => {
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
-            Pagamentos
-          </h1>
-          <p className="text-muted-foreground">
-            Gerencie cobranças e pagamentos dos seus alunos
-          </p>
-        </div>
-        <Button onClick={() => setIsDialogOpen(true)} className="shadow-glow">
-          <Plus className="w-4 h-4 mr-2" />
-          Nova Cobrança
-        </Button>
+      <div>
+        <h1 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+          Pagamentos
+        </h1>
+        <p className="text-muted-foreground">
+          Gerencie cobranças e pagamentos dos seus alunos
+        </p>
       </div>
 
       {/* Lista de Pagamentos */}
@@ -329,9 +323,6 @@ const PaymentManager = () => {
               <div className="text-center py-12">
                 <DollarSign className="w-12 h-12 mx-auto text-muted-foreground mb-3 opacity-50" />
                 <p className="text-muted-foreground">Nenhuma cobrança criada</p>
-                <Button onClick={() => setIsDialogOpen(true)} variant="outline" className="mt-4">
-                  Criar Primeira Cobrança
-                </Button>
               </div>
             ) : (
               <div className="space-y-3">
