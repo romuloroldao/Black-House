@@ -48,8 +48,6 @@ const StudentPortal = () => {
         return <StudentProfileView />;
       case "checkin":
         return <StudentWeeklyCheckin />;
-      case "progress-dashboard":
-        return <StudentProgressDashboard />;
       default:
         return <StudentDashboardView />;
     }
