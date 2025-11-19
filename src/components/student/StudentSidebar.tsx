@@ -283,7 +283,6 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
     { id: "reports", label: "Meus Relatórios", icon: FileText },
     { id: "checkin", label: "Check-in Semanal", icon: ClipboardCheck },
     { id: "progress", label: "Meu Progresso", icon: TrendingUp },
-    { id: "progress-dashboard", label: "Dashboard Progresso", icon: BarChart3 },
     { id: "financial", label: "Financeiro", icon: DollarSign },
     { id: "profile", label: "Meu Perfil", icon: User },
   ];
