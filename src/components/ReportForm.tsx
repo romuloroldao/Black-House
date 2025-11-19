@@ -16,10 +16,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { CalendarIcon, Plus, Trash2, Image } from "lucide-react";
+import { CalendarIcon, Image } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Checkbox } from "@/components/ui/checkbox";
+import StudentProgressDashboard from "@/components/student/StudentProgressDashboard";
 
 interface ReportFormProps {
   reportId?: string | null;
@@ -31,12 +32,6 @@ interface Aluno {
   id: string;
   nome: string;
   email: string;
-}
-
-interface MetricField {
-  id: string;
-  nome: string;
-  valor: string;
 }
 
 interface AlunoPhoto {
@@ -60,12 +55,6 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
     periodo_fim: new Date(),
     observacoes: "",
   });
-
-  const [metrics, setMetrics] = useState<MetricField[]>([
-    { id: "1", nome: "Frequência (%)", valor: "" },
-    { id: "2", nome: "Evolução Técnica (1-10)", valor: "" },
-    { id: "3", nome: "Engajamento (1-10)", valor: "" },
-  ]);
 
   useEffect(() => {
     loadAlunos();
@@ -132,17 +121,6 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
         observacoes: data.observacoes || "",
       });
 
-      if (data.metricas) {
-        const loadedMetrics = Object.entries(data.metricas).map(([nome, valor], index) => ({
-          id: String(index + 1),
-          nome,
-          valor: String(valor),
-        }));
-        if (loadedMetrics.length > 0) {
-          setMetrics(loadedMetrics);
-        }
-      }
-
       // Load selected photos
       const { data: midias } = await supabase
         .from("relatorio_midias")
@@ -155,23 +133,6 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
     } catch (error: any) {
       toast.error("Erro ao carregar relatório: " + error.message);
     }
-  };
-
-  const addMetric = () => {
-    setMetrics([
-      ...metrics,
-      { id: String(Date.now()), nome: "", valor: "" },
-    ]);
-  };
-
-  const removeMetric = (id: string) => {
-    setMetrics(metrics.filter((m) => m.id !== id));
-  };
-
-  const updateMetric = (id: string, field: "nome" | "valor", value: string) => {
-    setMetrics(
-      metrics.map((m) => (m.id === id ? { ...m, [field]: value } : m))
-    );
   };
 
   const togglePhotoSelection = (photoUrl: string) => {
@@ -192,13 +153,6 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
         return;
       }
 
-      const metricsObj = metrics.reduce((acc, metric) => {
-        if (metric.nome && metric.valor) {
-          acc[metric.nome] = metric.valor;
-        }
-        return acc;
-      }, {} as Record<string, string>);
-
       const reportData = {
         coach_id: user?.id,
         titulo: formData.titulo,
@@ -206,7 +160,6 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
         periodo_inicio: format(formData.periodo_inicio, "yyyy-MM-dd"),
         periodo_fim: format(formData.periodo_fim, "yyyy-MM-dd"),
         observacoes: formData.observacoes,
-        metricas: metricsObj,
       };
 
       let currentReportId = reportId;
@@ -346,43 +299,17 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>Métricas de Desempenho</CardTitle>
-            <Button type="button" size="sm" variant="outline" onClick={addMetric}>
-              <Plus className="h-4 w-4 mr-2" />
-              Adicionar Métrica
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {metrics.map((metric) => (
-            <div key={metric.id} className="flex gap-2">
-              <Input
-                placeholder="Nome da métrica"
-                value={metric.nome}
-                onChange={(e) => updateMetric(metric.id, "nome", e.target.value)}
-                className="flex-1"
-              />
-              <Input
-                placeholder="Valor"
-                value={metric.valor}
-                onChange={(e) => updateMetric(metric.id, "valor", e.target.value)}
-                className="w-32"
-              />
-              <Button
-                type="button"
-                size="icon"
-                variant="destructive"
-                onClick={() => removeMetric(metric.id)}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+      {/* Dashboard de Progresso */}
+      {formData.aluno_id && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Progresso do Aluno</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <StudentProgressDashboard studentId={formData.aluno_id} />
+          </CardContent>
+        </Card>
+      )}
 
       <div>
         <Label htmlFor="observacoes">Observações e Feedback</Label>
