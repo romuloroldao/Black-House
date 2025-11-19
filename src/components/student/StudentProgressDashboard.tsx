@@ -3,7 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { Badge } from "@/components/ui/badge";
-import { format } from "date-fns";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { format, subDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { 
   TrendingUp, 
@@ -41,6 +42,7 @@ interface CheckinData {
 export default function StudentProgressDashboard() {
   const [checkins, setCheckins] = useState<CheckinData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [periodFilter, setPeriodFilter] = useState<string>("30");
 
   useEffect(() => {
     loadCheckins();
@@ -63,8 +65,7 @@ export default function StudentProgressDashboard() {
         .from("weekly_checkins")
         .select("*")
         .eq("aluno_id", aluno.id)
-        .order("created_at", { ascending: false })
-        .limit(8);
+        .order("created_at", { ascending: false });
 
       if (error) throw error;
       setCheckins(data || []);
@@ -74,6 +75,17 @@ export default function StudentProgressDashboard() {
       setLoading(false);
     }
   };
+
+  const getFilteredCheckins = () => {
+    if (periodFilter === "all") return checkins;
+    
+    const daysToFilter = parseInt(periodFilter);
+    const cutoffDate = subDays(new Date(), daysToFilter);
+    
+    return checkins.filter(c => new Date(c.created_at) >= cutoffDate);
+  };
+
+  const filteredCheckins = getFilteredCheckins();
 
   if (loading) {
     return <div>Carregando dados...</div>;
@@ -91,10 +103,38 @@ export default function StudentProgressDashboard() {
     );
   }
 
-  const latestCheckin = checkins[0];
+  if (filteredCheckins.length === 0) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-2xl font-bold">Dashboard de Progresso</h2>
+          <Select value={periodFilter} onValueChange={setPeriodFilter}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Selecione o período" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="7">Últimos 7 dias</SelectItem>
+              <SelectItem value="30">Últimos 30 dias</SelectItem>
+              <SelectItem value="90">Últimos 90 dias</SelectItem>
+              <SelectItem value="all">Todo o período</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-center text-muted-foreground">
+              Nenhum check-in encontrado neste período.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const latestCheckin = filteredCheckins[0];
   
   // Preparar dados para gráficos
-  const chartData = checkins.reverse().map((c) => ({
+  const chartData = [...filteredCheckins].reverse().map((c) => ({
     semana: format(new Date(c.created_at), "dd/MM", { locale: ptBR }),
     adesao: c.seguiu_plano_nota,
     autoestima: c.autoestima,
@@ -159,11 +199,24 @@ export default function StudentProgressDashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-3xl font-bold tracking-tight">Dashboard de Progresso</h2>
-        <p className="text-muted-foreground mt-2">
-          Acompanhe sua evolução semanal
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight">Dashboard de Progresso</h2>
+          <p className="text-muted-foreground mt-2">
+            {filteredCheckins.length} check-in{filteredCheckins.length !== 1 ? 's' : ''} no período selecionado
+          </p>
+        </div>
+        <Select value={periodFilter} onValueChange={setPeriodFilter}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Selecione o período" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="7">Últimos 7 dias</SelectItem>
+            <SelectItem value="30">Últimos 30 dias</SelectItem>
+            <SelectItem value="90">Últimos 90 dias</SelectItem>
+            <SelectItem value="all">Todo o período</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Resumo do último check-in */}
