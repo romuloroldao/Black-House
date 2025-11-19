@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.send-event-reminders]
 verify_jwt = false
+
+[functions.send-checkin-reminders]
+verify_jwt = false
