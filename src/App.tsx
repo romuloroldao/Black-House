@@ -11,6 +11,7 @@ import NotFound from "./pages/NotFound";
 import StudentDetails from "./components/StudentDetails";
 import DietaPage from "./pages/DietaPage";
 import StudentPortal from "./pages/StudentPortal";
+import ReportViewPage from "./pages/ReportViewPage";
 
 const queryClient = new QueryClient();
 
@@ -27,6 +28,7 @@ const App = () => (
             <Route path="/aluno" element={<ProtectedRoute><StudentPortal /></ProtectedRoute>} />
             <Route path="/alunos/:id" element={<ProtectedRoute><StudentDetails /></ProtectedRoute>} />
             <Route path="/dieta/:id" element={<ProtectedRoute><DietaPage /></ProtectedRoute>} />
+            <Route path="/report/:id" element={<ProtectedRoute><ReportViewPage /></ProtectedRoute>} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

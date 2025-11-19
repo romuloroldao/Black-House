@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Plus, Search, Send, Eye, Edit, Trash2, TrendingUp } from "lucide-react";
+import { FileText, Plus, Search, Send, Eye, Edit, Trash2, TrendingUp, Download } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -40,6 +40,7 @@ const ReportManager = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedReport, setSelectedReport] = useState<string | null>(null);
+  const [previewReportId, setPreviewReportId] = useState<string | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [stats, setStats] = useState({
     total: 0,
@@ -267,6 +268,14 @@ const ReportManager = () => {
                     )}
                   </div>
                   <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => window.open(`/report/${report.id}`, '_blank')}
+                      title="Ver relatório com dashboard (para impressão/PDF)"
+                    >
+                      <Download className="h-4 w-4" />
+                    </Button>
                     {report.status === "rascunho" && (
                       <Button
                         size="sm"
