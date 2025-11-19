@@ -225,6 +225,32 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
     }
   };
 
+  const handleRemoveRecurring = async () => {
+    try {
+      if (!configCobranca) return;
+
+      const { error } = await supabase
+        .from("recurring_charges_config")
+        .update({ ativo: false })
+        .eq("id", configCobranca.id);
+
+      if (error) throw error;
+
+      toast({
+        title: "Sucesso",
+        description: "Cobrança recorrente removida",
+      });
+      
+      loadFinancialData();
+    } catch (error: any) {
+      toast({
+        title: "Erro",
+        description: "Erro ao remover cobrança recorrente",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleDeleteException = async (id: string) => {
     try {
       const { error } = await supabase
@@ -283,14 +309,28 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
             <CreditCard className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {configCobranca?.payment_plans?.nome || "Nenhum"}
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-2xl font-bold">
+                  {configCobranca?.ativo ? configCobranca?.payment_plans?.nome : "Nenhum"}
+                </div>
+                {configCobranca?.ativo && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    R$ {configCobranca.valor_customizado || configCobranca.payment_plans?.valor} / {configCobranca.payment_plans?.frequencia}
+                  </p>
+                )}
+              </div>
+              {configCobranca?.ativo && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleRemoveRecurring}
+                  className="text-destructive hover:text-destructive"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
             </div>
-            {configCobranca && (
-              <p className="text-xs text-muted-foreground mt-1">
-                R$ {configCobranca.valor_customizado || configCobranca.payment_plans?.valor} / {configCobranca.payment_plans?.frequencia}
-              </p>
-            )}
           </CardContent>
         </Card>
 
