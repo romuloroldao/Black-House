@@ -258,16 +258,6 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       id: "announcements",
       label: "Avisos em Massa",
       icon: Megaphone,
-    },
-    {
-      id: "events",
-      label: "Eventos",
-      icon: CalendarDays,
-    },
-    {
-      id: "analytics",
-      label: "Análises",
-      icon: Star,
     }
   ];
 
