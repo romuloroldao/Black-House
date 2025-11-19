@@ -8,11 +8,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare, Trash2, User, Utensils, TrendingUp, Activity } from "lucide-react";
+import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare, Trash2, User, Utensils, TrendingUp, Activity, Wallet } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import StudentProgressDashboard from "./student/StudentProgressDashboard";
+import StudentFinancialManagement from "./student/StudentFinancialManagement";
 
 interface Student {
   id: string;
@@ -491,7 +492,7 @@ export default function StudentDetails() {
       </div>
 
       <Tabs defaultValue="overview" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="overview" className="flex items-center gap-2">
             <User className="h-4 w-4" />
             Visão Geral
@@ -507,6 +508,10 @@ export default function StudentDetails() {
           <TabsTrigger value="progress" className="flex items-center gap-2">
             <TrendingUp className="h-4 w-4" />
             Progresso
+          </TabsTrigger>
+          <TabsTrigger value="financial" className="flex items-center gap-2">
+            <Wallet className="h-4 w-4" />
+            Financeiro
           </TabsTrigger>
         </TabsList>
 
@@ -946,6 +951,14 @@ export default function StudentDetails() {
               <StudentProgressDashboard studentId={id} />
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* TAB: Financeiro */}
+        <TabsContent value="financial" className="mt-6">
+          <StudentFinancialManagement 
+            studentId={id!} 
+            studentName={student?.nome || "Aluno"} 
+          />
         </TabsContent>
       </Tabs>
 
