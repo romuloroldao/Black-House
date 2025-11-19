@@ -684,6 +684,147 @@ export default function StudentProgressDashboard() {
         </CardContent>
       </Card>
 
+      {/* Indicadores de Consistência */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Taxa de Consistência dos Hábitos</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Percentual de cumprimento no período selecionado
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {/* Treino Completo */}
+            {(() => {
+              const consistency = (calculateAverage(filteredCheckins, 'treino') * 100);
+              const isGood = consistency >= 75;
+              const isMedium = consistency >= 50 && consistency < 75;
+              
+              return (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Activity className="h-4 w-4 text-green-600" />
+                      <span className="text-sm font-medium">Treino Completo</span>
+                    </div>
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <span className={`text-3xl font-bold ${isGood ? 'text-green-600' : isMedium ? 'text-yellow-600' : 'text-red-600'}`}>
+                      {consistency.toFixed(0)}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-muted rounded-full h-2">
+                    <div 
+                      className={`h-2 rounded-full transition-all ${isGood ? 'bg-green-600' : isMedium ? 'bg-yellow-600' : 'bg-red-600'}`}
+                      style={{ width: `${consistency}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {Math.round(filteredCheckins.length * (consistency / 100))} de {filteredCheckins.length} semanas
+                  </p>
+                </div>
+              );
+            })()}
+
+            {/* Cardio Realizado */}
+            {(() => {
+              const consistency = (calculateAverage(filteredCheckins, 'cardio') * 100);
+              const isGood = consistency >= 75;
+              const isMedium = consistency >= 50 && consistency < 75;
+              
+              return (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Heart className="h-4 w-4 text-blue-600" />
+                      <span className="text-sm font-medium">Cardio Realizado</span>
+                    </div>
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <span className={`text-3xl font-bold ${isGood ? 'text-green-600' : isMedium ? 'text-yellow-600' : 'text-red-600'}`}>
+                      {consistency.toFixed(0)}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-muted rounded-full h-2">
+                    <div 
+                      className={`h-2 rounded-full transition-all ${isGood ? 'bg-green-600' : isMedium ? 'bg-yellow-600' : 'bg-red-600'}`}
+                      style={{ width: `${consistency}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {Math.round(filteredCheckins.length * (consistency / 100))} de {filteredCheckins.length} semanas
+                  </p>
+                </div>
+              );
+            })()}
+
+            {/* Água Adequada */}
+            {(() => {
+              const consistency = (calculateAverage(filteredCheckins, 'agua') * 100);
+              const isGood = consistency >= 75;
+              const isMedium = consistency >= 50 && consistency < 75;
+              
+              return (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Droplets className="h-4 w-4 text-cyan-600" />
+                      <span className="text-sm font-medium">Água Adequada</span>
+                    </div>
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <span className={`text-3xl font-bold ${isGood ? 'text-green-600' : isMedium ? 'text-yellow-600' : 'text-red-600'}`}>
+                      {consistency.toFixed(0)}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-muted rounded-full h-2">
+                    <div 
+                      className={`h-2 rounded-full transition-all ${isGood ? 'bg-green-600' : isMedium ? 'bg-yellow-600' : 'bg-red-600'}`}
+                      style={{ width: `${consistency}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {Math.round(filteredCheckins.length * (consistency / 100))} de {filteredCheckins.length} semanas
+                  </p>
+                </div>
+              );
+            })()}
+
+            {/* Exposição ao Sol */}
+            {(() => {
+              const consistency = (calculateAverage(filteredCheckins, 'sol') * 100);
+              const isGood = consistency >= 75;
+              const isMedium = consistency >= 50 && consistency < 75;
+              
+              return (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Sun className="h-4 w-4 text-amber-600" />
+                      <span className="text-sm font-medium">Exposição ao Sol</span>
+                    </div>
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <span className={`text-3xl font-bold ${isGood ? 'text-green-600' : isMedium ? 'text-yellow-600' : 'text-red-600'}`}>
+                      {consistency.toFixed(0)}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-muted rounded-full h-2">
+                    <div 
+                      className={`h-2 rounded-full transition-all ${isGood ? 'bg-green-600' : isMedium ? 'bg-yellow-600' : 'bg-red-600'}`}
+                      style={{ width: `${consistency}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {Math.round(filteredCheckins.length * (consistency / 100))} de {filteredCheckins.length} semanas
+                  </p>
+                </div>
+              );
+            })()}
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Gráfico de sono */}
       <Card>
         <CardHeader>
