@@ -1475,6 +1475,36 @@ export type Database = {
           },
         ]
       }
+      twilio_config: {
+        Row: {
+          account_sid: string | null
+          auth_token: string | null
+          coach_id: string
+          created_at: string | null
+          id: string
+          updated_at: string | null
+          whatsapp_from: string | null
+        }
+        Insert: {
+          account_sid?: string | null
+          auth_token?: string | null
+          coach_id: string
+          created_at?: string | null
+          id?: string
+          updated_at?: string | null
+          whatsapp_from?: string | null
+        }
+        Update: {
+          account_sid?: string | null
+          auth_token?: string | null
+          coach_id?: string
+          created_at?: string | null
+          id?: string
+          updated_at?: string | null
+          whatsapp_from?: string | null
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
