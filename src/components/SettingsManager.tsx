@@ -30,6 +30,7 @@ const SettingsManager = () => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [asaasConfig, setAsaasConfig] = useState<any>(null);
+  const [twilioConfig, setTwilioConfig] = useState<any>(null);
   
   // Profile state
   const [profileData, setProfileData] = useState({
@@ -60,6 +61,7 @@ const SettingsManager = () => {
 
   useEffect(() => {
     loadAsaasConfig();
+    loadTwilioConfig();
   }, [user]);
 
   const loadAsaasConfig = async () => {
@@ -79,6 +81,26 @@ const SettingsManager = () => {
       setAsaasConfig(data);
     } catch (error) {
       console.error("Erro ao carregar configurações Asaas:", error);
+    }
+  };
+
+  const loadTwilioConfig = async () => {
+    if (!user) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("twilio_config")
+        .select("*")
+        .eq("coach_id", user.id)
+        .single();
+
+      if (error && error.code !== "PGRST116") {
+        throw error;
+      }
+
+      setTwilioConfig(data);
+    } catch (error) {
+      console.error("Erro ao carregar configurações Twilio:", error);
     }
   };
 
@@ -132,6 +154,49 @@ const SettingsManager = () => {
       }
     } catch (error: any) {
       toast.error("Erro ao atualizar Asaas: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveTwilioConfig = async (accountSid: string, authToken: string, whatsappFrom: string) => {
+    setLoading(true);
+    try {
+      if (twilioConfig) {
+        // Update existing config
+        const { error } = await supabase
+          .from("twilio_config")
+          .update({
+            account_sid: accountSid,
+            auth_token: authToken,
+            whatsapp_from: whatsappFrom,
+          })
+          .eq("id", twilioConfig.id);
+
+        if (error) throw error;
+
+        toast.success("Configuração Twilio atualizada!");
+      } else {
+        // Create new config
+        const { error } = await supabase
+          .from("twilio_config")
+          .insert([
+            {
+              coach_id: user?.id,
+              account_sid: accountSid,
+              auth_token: authToken,
+              whatsapp_from: whatsappFrom,
+            },
+          ]);
+
+        if (error) throw error;
+
+        toast.success("Configuração Twilio criada!");
+      }
+
+      await loadTwilioConfig();
+    } catch (error: any) {
+      toast.error("Erro ao salvar configuração Twilio: " + error.message);
     } finally {
       setLoading(false);
     }
@@ -432,6 +497,70 @@ const SettingsManager = () => {
                   </div>
                 </>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Key className="h-5 w-5" />
+                Twilio - WhatsApp
+              </CardTitle>
+              <CardDescription>
+                Configure sua integração com Twilio para enviar lembretes via WhatsApp
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="twilio-account-sid">Account SID</Label>
+                <Input
+                  id="twilio-account-sid"
+                  placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                  defaultValue={twilioConfig?.account_sid || ""}
+                  onChange={(e) => {
+                    const accountSid = e.target.value;
+                    setTwilioConfig((prev: any) => ({ ...prev, account_sid: accountSid }));
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="twilio-auth-token">Auth Token</Label>
+                <Input
+                  id="twilio-auth-token"
+                  type="password"
+                  placeholder="••••••••••••••••••••••••••••••••"
+                  defaultValue={twilioConfig?.auth_token || ""}
+                  onChange={(e) => {
+                    const authToken = e.target.value;
+                    setTwilioConfig((prev: any) => ({ ...prev, auth_token: authToken }));
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="twilio-whatsapp-from">WhatsApp Number (From)</Label>
+                <Input
+                  id="twilio-whatsapp-from"
+                  placeholder="whatsapp:+14155238886"
+                  defaultValue={twilioConfig?.whatsapp_from || ""}
+                  onChange={(e) => {
+                    const whatsappFrom = e.target.value;
+                    setTwilioConfig((prev: any) => ({ ...prev, whatsapp_from: whatsappFrom }));
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Formato: whatsapp:+[código do país][número]
+                </p>
+              </div>
+              <Button
+                onClick={() => handleSaveTwilioConfig(
+                  twilioConfig?.account_sid || "",
+                  twilioConfig?.auth_token || "",
+                  twilioConfig?.whatsapp_from || ""
+                )}
+                disabled={loading}
+              >
+                Salvar Configurações Twilio
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>
