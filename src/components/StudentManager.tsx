@@ -70,6 +70,7 @@ const StudentManager = () => {
   const [loading, setLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
+  const [paymentPlans, setPaymentPlans] = useState<Array<{ id: string; nome: string }>>([]);
   
   // Form states
   const [newStudent, setNewStudent] = useState({
@@ -85,7 +86,23 @@ const StudentManager = () => {
 
   useEffect(() => {
     carregarAlunos();
+    carregarPlanos();
   }, []);
+
+  const carregarPlanos = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('payment_plans')
+        .select('id, nome')
+        .eq('ativo', true)
+        .order('nome', { ascending: true });
+
+      if (error) throw error;
+      setPaymentPlans(data || []);
+    } catch (error) {
+      console.error('Erro ao carregar planos:', error);
+    }
+  };
 
   const carregarAlunos = async () => {
     try {
@@ -267,12 +284,8 @@ const StudentManager = () => {
   };
 
   const getPlanColor = (plan: string) => {
-    switch (plan) {
-      case 'VIP': return 'bg-primary text-primary-foreground';
-      case 'Premium': return 'bg-primary/80 text-primary-foreground';
-      case 'Básico': return 'bg-secondary text-secondary-foreground';
-      default: return 'bg-muted text-muted-foreground';
-    }
+    // Retorna uma cor padrão para todos os planos
+    return 'bg-primary/80 text-primary-foreground';
   };
 
   const filteredStudents = students.filter(student => {
@@ -382,9 +395,17 @@ const StudentManager = () => {
                   <SelectValue placeholder="Plano" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Básico">Básico</SelectItem>
-                  <SelectItem value="Premium">Premium</SelectItem>
-                  <SelectItem value="VIP">VIP</SelectItem>
+                  {paymentPlans.length > 0 ? (
+                    paymentPlans.map((plano) => (
+                      <SelectItem key={plano.id} value={plano.nome}>
+                        {plano.nome}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <SelectItem value="Nenhum" disabled>
+                      Nenhum plano cadastrado
+                    </SelectItem>
+                  )}
                 </SelectContent>
               </Select>
               <Input 
