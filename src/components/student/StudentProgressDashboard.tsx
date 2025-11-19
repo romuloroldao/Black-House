@@ -603,19 +603,82 @@ export default function StudentProgressDashboard() {
       <Card>
         <CardHeader>
           <CardTitle>Hábitos Semanais</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Acompanhamento dos principais hábitos ao longo do tempo
+          </p>
         </CardHeader>
         <CardContent>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="semana" />
-              <YAxis domain={[0, 1]} />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="treino" fill="hsl(var(--chart-1))" name="Treino Completo" />
-              <Bar dataKey="cardio" fill="hsl(var(--chart-2))" name="Cardio" />
-              <Bar dataKey="agua" fill="hsl(var(--chart-3))" name="Água" />
-              <Bar dataKey="sol" fill="hsl(var(--chart-4))" name="Sol" />
+          <ResponsiveContainer width="100%" height={400}>
+            <BarChart 
+              data={chartData}
+              margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+              <XAxis 
+                dataKey="semana" 
+                angle={-45}
+                textAnchor="end"
+                height={80}
+                tick={{ fontSize: 12 }}
+              />
+              <YAxis 
+                domain={[0, 1]}
+                ticks={[0, 0.5, 1]}
+                tickFormatter={(value) => value === 1 ? "Sim" : value === 0 ? "Não" : ""}
+                tick={{ fontSize: 12 }}
+              />
+              <Tooltip 
+                content={({ active, payload, label }) => {
+                  if (active && payload && payload.length) {
+                    return (
+                      <div className="bg-background border rounded-lg p-3 shadow-lg">
+                        <p className="font-semibold mb-2">{label}</p>
+                        {payload.map((entry: any, index: number) => (
+                          <div key={index} className="flex items-center gap-2 text-sm">
+                            <div 
+                              className="w-3 h-3 rounded-full" 
+                              style={{ backgroundColor: entry.color }}
+                            />
+                            <span>{entry.name}:</span>
+                            <span className="font-semibold">
+                              {entry.value === 1 ? "✓ Sim" : "✗ Não"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+              />
+              <Legend 
+                wrapperStyle={{ paddingTop: "20px" }}
+                iconType="circle"
+              />
+              <Bar 
+                dataKey="treino" 
+                fill="#10b981" 
+                name="Treino Completo"
+                radius={[4, 4, 0, 0]}
+              />
+              <Bar 
+                dataKey="cardio" 
+                fill="#3b82f6" 
+                name="Cardio Realizado"
+                radius={[4, 4, 0, 0]}
+              />
+              <Bar 
+                dataKey="agua" 
+                fill="#06b6d4" 
+                name="Água Adequada"
+                radius={[4, 4, 0, 0]}
+              />
+              <Bar 
+                dataKey="sol" 
+                fill="#f59e0b" 
+                name="Exposição ao Sol"
+                radius={[4, 4, 0, 0]}
+              />
             </BarChart>
           </ResponsiveContainer>
         </CardContent>
