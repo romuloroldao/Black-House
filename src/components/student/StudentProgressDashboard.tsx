@@ -85,7 +85,45 @@ export default function StudentProgressDashboard() {
     return checkins.filter(c => new Date(c.created_at) >= cutoffDate);
   };
 
+  const getPreviousPeriodCheckins = () => {
+    if (periodFilter === "all") return [];
+    
+    const daysToFilter = parseInt(periodFilter);
+    const currentPeriodStart = subDays(new Date(), daysToFilter);
+    const previousPeriodStart = subDays(currentPeriodStart, daysToFilter);
+    
+    return checkins.filter(c => {
+      const date = new Date(c.created_at);
+      return date >= previousPeriodStart && date < currentPeriodStart;
+    });
+  };
+
+  const calculateAverage = (checkinsData: CheckinData[], metric: string): number => {
+    if (checkinsData.length === 0) return 0;
+    
+    const sum = checkinsData.reduce((acc, c) => {
+      if (metric === 'adesao') return acc + c.seguiu_plano_nota;
+      if (metric === 'autoestima') return acc + c.autoestima;
+      if (metric === 'treino') return acc + (c.treinou_todas_sessoes ? 1 : 0);
+      if (metric === 'cardio') return acc + (c.fez_cardio ? 1 : 0);
+      if (metric === 'agua') return acc + (c.ingeriu_agua_minima ? 1 : 0);
+      if (metric === 'sono') {
+        const sonoMap: { [key: string]: number } = { "4-5": 4.5, "5-6": 5.5, "6-8": 7 };
+        return acc + (sonoMap[c.media_horas_sono] || 0);
+      }
+      return acc;
+    }, 0);
+    
+    return sum / checkinsData.length;
+  };
+
+  const calculatePercentageChange = (current: number, previous: number): number => {
+    if (previous === 0) return current > 0 ? 100 : 0;
+    return ((current - previous) / previous) * 100;
+  };
+
   const filteredCheckins = getFilteredCheckins();
+  const previousPeriodCheckins = getPreviousPeriodCheckins();
 
   if (loading) {
     return <div>Carregando dados...</div>;
@@ -218,6 +256,216 @@ export default function StudentProgressDashboard() {
           </SelectContent>
         </Select>
       </div>
+
+      {/* Comparação entre Períodos */}
+      {periodFilter !== "all" && previousPeriodCheckins.length > 0 && (
+        <Card className="border-primary/20">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="h-5 w-5" />
+              Comparação de Períodos
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Período atual vs período anterior (mesmo intervalo de tempo)
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {/* Adesão ao Plano */}
+              {(() => {
+                const currentAvg = calculateAverage(filteredCheckins, 'adesao');
+                const previousAvg = calculateAverage(previousPeriodCheckins, 'adesao');
+                const change = calculatePercentageChange(currentAvg, previousAvg);
+                const isPositive = change >= 0;
+                
+                return (
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Apple className="h-4 w-4 text-muted-foreground" />
+                          <p className="text-sm font-medium">Adesão ao Plano</p>
+                        </div>
+                        <div className={`flex items-center gap-1 text-sm font-bold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
+                          {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                          {Math.abs(change).toFixed(1)}%
+                        </div>
+                      </div>
+                      <div className="mt-2 flex items-baseline gap-2">
+                        <span className="text-2xl font-bold">{currentAvg.toFixed(1)}</span>
+                        <span className="text-sm text-muted-foreground">de 5</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Anterior: {previousAvg.toFixed(1)}
+                      </p>
+                    </CardContent>
+                  </Card>
+                );
+              })()}
+
+              {/* Autoestima */}
+              {(() => {
+                const currentAvg = calculateAverage(filteredCheckins, 'autoestima');
+                const previousAvg = calculateAverage(previousPeriodCheckins, 'autoestima');
+                const change = calculatePercentageChange(currentAvg, previousAvg);
+                const isPositive = change >= 0;
+                
+                return (
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Heart className="h-4 w-4 text-muted-foreground" />
+                          <p className="text-sm font-medium">Autoestima</p>
+                        </div>
+                        <div className={`flex items-center gap-1 text-sm font-bold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
+                          {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                          {Math.abs(change).toFixed(1)}%
+                        </div>
+                      </div>
+                      <div className="mt-2 flex items-baseline gap-2">
+                        <span className="text-2xl font-bold">{currentAvg.toFixed(1)}</span>
+                        <span className="text-sm text-muted-foreground">de 5</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Anterior: {previousAvg.toFixed(1)}
+                      </p>
+                    </CardContent>
+                  </Card>
+                );
+              })()}
+
+              {/* Frequência de Treino */}
+              {(() => {
+                const currentAvg = calculateAverage(filteredCheckins, 'treino') * 100;
+                const previousAvg = calculateAverage(previousPeriodCheckins, 'treino') * 100;
+                const change = calculatePercentageChange(currentAvg, previousAvg);
+                const isPositive = change >= 0;
+                
+                return (
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Activity className="h-4 w-4 text-muted-foreground" />
+                          <p className="text-sm font-medium">Treino Completo</p>
+                        </div>
+                        <div className={`flex items-center gap-1 text-sm font-bold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
+                          {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                          {Math.abs(change).toFixed(1)}%
+                        </div>
+                      </div>
+                      <div className="mt-2 flex items-baseline gap-2">
+                        <span className="text-2xl font-bold">{currentAvg.toFixed(0)}%</span>
+                        <span className="text-sm text-muted-foreground">das semanas</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Anterior: {previousAvg.toFixed(0)}%
+                      </p>
+                    </CardContent>
+                  </Card>
+                );
+              })()}
+
+              {/* Hidratação */}
+              {(() => {
+                const currentAvg = calculateAverage(filteredCheckins, 'agua') * 100;
+                const previousAvg = calculateAverage(previousPeriodCheckins, 'agua') * 100;
+                const change = calculatePercentageChange(currentAvg, previousAvg);
+                const isPositive = change >= 0;
+                
+                return (
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Droplets className="h-4 w-4 text-muted-foreground" />
+                          <p className="text-sm font-medium">Hidratação</p>
+                        </div>
+                        <div className={`flex items-center gap-1 text-sm font-bold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
+                          {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                          {Math.abs(change).toFixed(1)}%
+                        </div>
+                      </div>
+                      <div className="mt-2 flex items-baseline gap-2">
+                        <span className="text-2xl font-bold">{currentAvg.toFixed(0)}%</span>
+                        <span className="text-sm text-muted-foreground">adequada</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Anterior: {previousAvg.toFixed(0)}%
+                      </p>
+                    </CardContent>
+                  </Card>
+                );
+              })()}
+
+              {/* Qualidade do Sono */}
+              {(() => {
+                const currentAvg = calculateAverage(filteredCheckins, 'sono');
+                const previousAvg = calculateAverage(previousPeriodCheckins, 'sono');
+                const change = calculatePercentageChange(currentAvg, previousAvg);
+                const isPositive = change >= 0;
+                
+                return (
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Moon className="h-4 w-4 text-muted-foreground" />
+                          <p className="text-sm font-medium">Horas de Sono</p>
+                        </div>
+                        <div className={`flex items-center gap-1 text-sm font-bold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
+                          {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                          {Math.abs(change).toFixed(1)}%
+                        </div>
+                      </div>
+                      <div className="mt-2 flex items-baseline gap-2">
+                        <span className="text-2xl font-bold">{currentAvg.toFixed(1)}h</span>
+                        <span className="text-sm text-muted-foreground">média</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Anterior: {previousAvg.toFixed(1)}h
+                      </p>
+                    </CardContent>
+                  </Card>
+                );
+              })()}
+
+              {/* Cardio */}
+              {(() => {
+                const currentAvg = calculateAverage(filteredCheckins, 'cardio') * 100;
+                const previousAvg = calculateAverage(previousPeriodCheckins, 'cardio') * 100;
+                const change = calculatePercentageChange(currentAvg, previousAvg);
+                const isPositive = change >= 0;
+                
+                return (
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Heart className="h-4 w-4 text-muted-foreground" />
+                          <p className="text-sm font-medium">Cardio</p>
+                        </div>
+                        <div className={`flex items-center gap-1 text-sm font-bold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
+                          {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                          {Math.abs(change).toFixed(1)}%
+                        </div>
+                      </div>
+                      <div className="mt-2 flex items-baseline gap-2">
+                        <span className="text-2xl font-bold">{currentAvg.toFixed(0)}%</span>
+                        <span className="text-sm text-muted-foreground">realizado</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Anterior: {previousAvg.toFixed(0)}%
+                      </p>
+                    </CardContent>
+                  </Card>
+                );
+              })()}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Resumo do último check-in */}
       <div className="grid gap-4 md:grid-cols-2">
