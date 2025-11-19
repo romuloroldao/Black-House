@@ -152,6 +152,19 @@ const StudentManager = () => {
         return;
       }
 
+      // Get current user (coach)
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast({
+          title: "Erro de autenticação",
+          description: "Usuário não autenticado",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      let alunoId = editingStudent?.id;
+
       if (editingStudent) {
         // Update existing student
         const { error } = await supabase
@@ -176,7 +189,7 @@ const StudentManager = () => {
         });
       } else {
         // Insert new student
-        const { error } = await supabase
+        const { data: insertedData, error } = await supabase
           .from('alunos')
           .insert([{
             nome: newStudent.nome,
@@ -187,14 +200,65 @@ const StudentManager = () => {
             plano: newStudent.plano || null,
             data_nascimento: newStudent.data_nascimento || null,
             peso: newStudent.peso ? parseInt(newStudent.peso) : null,
-          }]);
+          }])
+          .select()
+          .single();
 
         if (error) throw error;
+        alunoId = insertedData?.id;
 
         toast({
           title: "Sucesso!",
           description: "Aluno adicionado com sucesso",
         });
+      }
+
+      // Se o aluno tem um plano associado, criar configuração de cobrança recorrente
+      if (newStudent.plano && alunoId) {
+        // Verificar se já existe configuração de cobrança para este aluno
+        const { data: existingConfig } = await supabase
+          .from('recurring_charges_config')
+          .select('id')
+          .eq('aluno_id', alunoId)
+          .maybeSingle();
+
+        if (!existingConfig) {
+          // Criar configuração de cobrança recorrente
+          const { error: configError } = await supabase
+            .from('recurring_charges_config')
+            .insert({
+              aluno_id: alunoId,
+              payment_plan_id: newStudent.plano,
+              coach_id: user.id,
+              ativo: true,
+            });
+
+          if (configError) {
+            console.error('Erro ao criar configuração de cobrança:', configError);
+            toast({
+              title: "Atenção",
+              description: "Aluno salvo, mas houve erro ao criar configuração de cobrança automática",
+              variant: "destructive",
+            });
+          } else {
+            toast({
+              title: "Cobrança configurada!",
+              description: "Cobrança recorrente ativada para este aluno",
+            });
+          }
+        } else if (editingStudent) {
+          // Atualizar configuração existente se o plano mudou
+          const { error: updateError } = await supabase
+            .from('recurring_charges_config')
+            .update({
+              payment_plan_id: newStudent.plano,
+            })
+            .eq('aluno_id', alunoId);
+
+          if (updateError) {
+            console.error('Erro ao atualizar configuração de cobrança:', updateError);
+          }
+        }
       }
 
       // Reset form
