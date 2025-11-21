@@ -91,9 +91,14 @@ const StudentManager = () => {
 
   const carregarPlanos = async () => {
     try {
+      // Get current user to filter only their plans
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
       const { data, error } = await supabase
         .from('payment_plans')
         .select('id, nome')
+        .eq('coach_id', user.id)
         .eq('ativo', true)
         .order('nome', { ascending: true });
 
@@ -106,9 +111,14 @@ const StudentManager = () => {
 
   const carregarAlunos = async () => {
     try {
+      // Get current user to filter only their students
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
       const { data, error } = await supabase
         .from('alunos')
         .select('*')
+        .eq('coach_id', user.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -166,7 +176,7 @@ const StudentManager = () => {
       let alunoId = editingStudent?.id;
 
       if (editingStudent) {
-        // Update existing student
+        // Update existing student - always update coach_id
         const { error } = await supabase
           .from('alunos')
           .update({
@@ -178,6 +188,7 @@ const StudentManager = () => {
             plano: newStudent.plano || null,
             data_nascimento: newStudent.data_nascimento || null,
             peso: newStudent.peso ? parseInt(newStudent.peso) : null,
+            coach_id: user.id, // Always update coach_id
           })
           .eq('id', editingStudent.id);
 
@@ -200,6 +211,7 @@ const StudentManager = () => {
             plano: newStudent.plano || null,
             data_nascimento: newStudent.data_nascimento || null,
             peso: newStudent.peso ? parseInt(newStudent.peso) : null,
+            coach_id: user.id, // Set coach_id for new students
           }])
           .select()
           .single();
@@ -288,13 +300,30 @@ const StudentManager = () => {
 
   const handleEditStudent = (student: Student) => {
     setEditingStudent(student);
+    
+    // Find plan ID - student.plan might be either the plan ID or plan name
+    let planId = "";
+    if (student.plan) {
+      // Try to find plan by ID first
+      const planById = paymentPlans.find(p => p.id === student.plan);
+      if (planById) {
+        planId = planById.id;
+      } else {
+        // If not found, try to find by name
+        const planByName = paymentPlans.find(p => p.nome === student.plan);
+        if (planByName) {
+          planId = planByName.id;
+        }
+      }
+    }
+    
     setNewStudent({
       nome: student.name,
       email: student.email,
       telefone: student.phone || "",
       cpf_cnpj: student.cpf_cnpj || "",
       objetivo: student.goal || "",
-      plano: student.plan || "",
+      plano: planId,
       data_nascimento: student.data_nascimento || "",
       peso: student.peso?.toString() || ""
     });
@@ -461,7 +490,7 @@ const StudentManager = () => {
                 <SelectContent>
                   {paymentPlans.length > 0 ? (
                     paymentPlans.map((plano) => (
-                      <SelectItem key={plano.id} value={plano.nome}>
+                      <SelectItem key={plano.id} value={plano.id}>
                         {plano.nome}
                       </SelectItem>
                     ))
