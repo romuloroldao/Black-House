@@ -21,6 +21,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { 
   Search, 
   Filter, 
@@ -37,7 +38,8 @@ import {
   Trash2,
   UserPlus,
   Users,
-  Eye
+  Eye,
+  Link2
 } from "lucide-react";
 
 interface Student {
@@ -71,6 +73,7 @@ const StudentManager = () => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [paymentPlans, setPaymentPlans] = useState<Array<{ id: string; nome: string }>>([]);
+  const [coachEmail, setCoachEmail] = useState<string>("");
   
   // Form states
   const [newStudent, setNewStudent] = useState({
@@ -87,7 +90,18 @@ const StudentManager = () => {
   useEffect(() => {
     carregarAlunos();
     carregarPlanos();
+    carregarCoach();
   }, []);
+
+  const carregarCoach = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      setCoachEmail(user.email || "");
+    } catch (error) {
+      console.error('Erro ao carregar coach:', error);
+    }
+  };
 
   const carregarPlanos = async () => {
     try {
@@ -444,6 +458,15 @@ const StudentManager = () => {
                 * Campos obrigatórios. O CPF/CNPJ é necessário para gerar cobranças via Asaas.
               </p>
             </DialogHeader>
+            
+            {/* Coach Link Badge */}
+            <Alert className="border-primary/20 bg-primary/5">
+              <Link2 className="h-4 w-4 text-primary" />
+              <AlertDescription className="text-sm">
+                <span className="font-medium">Vínculo automático:</span> Este aluno será vinculado à sua conta ({coachEmail})
+              </AlertDescription>
+            </Alert>
+
             <div className="grid grid-cols-2 gap-4 py-4">
               <Input 
                 placeholder="Nome completo *" 
