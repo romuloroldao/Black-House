@@ -3,12 +3,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import logoWhite from "@/assets/logo-white.svg";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 import MessagesPopover from "./MessagesPopover";
 
 interface StudentSidebarProps {
@@ -25,12 +27,16 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
   const [animateBadge, setAnimateBadge] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const previousUnreadRef = useRef(0);
+  const [studentName, setStudentName] = useState<string>("");
+  const [studentAvatar, setStudentAvatar] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState(true);
 
   useEffect(() => {
     // Initialize audio for notifications
     audioRef.current = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZURE');
     
     if (user) {
+      loadStudentProfile();
       loadUnreadCount();
       loadUnreadMessages();
       
@@ -99,12 +105,73 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
         )
         .subscribe();
 
+      // Presence channel for online status
+      const presenceChannel = supabase.channel('student-presence');
+      
+      presenceChannel
+        .on('presence', { event: 'sync' }, () => {
+          setIsOnline(true);
+        })
+        .subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') {
+            await presenceChannel.track({
+              user_id: user.id,
+              online_at: new Date().toISOString(),
+            });
+          }
+        });
+
+      // Handle visibility change to update presence
+      const handleVisibilityChange = async () => {
+        if (document.hidden) {
+          await presenceChannel.untrack();
+          setIsOnline(false);
+        } else {
+          await presenceChannel.track({
+            user_id: user.id,
+            online_at: new Date().toISOString(),
+          });
+          setIsOnline(true);
+        }
+      };
+
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
       return () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
         supabase.removeChannel(avisosChannel);
         supabase.removeChannel(mensagensChannel);
+        supabase.removeChannel(presenceChannel);
       };
     }
   }, [user, toast]);
+
+  const loadStudentProfile = async () => {
+    if (!user) return;
+
+    // Get user metadata from auth
+    const { data: userData } = await supabase.auth.getUser();
+    if (userData?.user) {
+      const metadata = userData.user.user_metadata;
+      const avatarUrl = metadata?.avatar_url || null;
+      setStudentAvatar(avatarUrl);
+    }
+
+    // Get student name from alunos table
+    const { data: alunoData } = await supabase
+      .from("alunos")
+      .select("nome")
+      .eq("email", user.email)
+      .single();
+
+    if (alunoData?.nome) {
+      const firstName = alunoData.nome.split(' ')[0];
+      setStudentName(firstName);
+    } else {
+      const fallbackName = user.email?.split('@')[0] || 'Aluno';
+      setStudentName(fallbackName);
+    }
+  };
 
   const loadUnreadCount = async () => {
     if (!user) return;
@@ -331,6 +398,25 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
       </ScrollArea>
 
       <div className="p-4 border-t border-border">
+        <div className="flex items-center gap-3 mb-4 p-2 rounded-lg hover:bg-muted/50 transition-colors">
+          <div className="relative">
+            <Avatar className="h-10 w-10">
+              <AvatarImage src={studentAvatar || undefined} alt={studentName} />
+              <AvatarFallback className="bg-primary/10 text-primary font-medium">
+                {studentName.charAt(0).toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+            <div 
+              className={cn(
+                "absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-background transition-colors",
+                isOnline ? "bg-green-500" : "bg-muted-foreground"
+              )}
+              title={isOnline ? "Online" : "Offline"}
+            />
+          </div>
+          <span className="text-sm font-medium text-foreground">{studentName}</span>
+        </div>
+
         <Button
           variant="outline"
           className="w-full justify-start"
