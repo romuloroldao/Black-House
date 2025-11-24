@@ -1,15 +1,29 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Utensils } from "lucide-react";
+import { Utensils, Replace, Pill } from "lucide-react";
+import FoodSubstitutionDialog from "@/components/nutrition/FoodSubstitutionDialog";
 
 const StudentDietView = () => {
   const { user } = useAuth();
   const [dieta, setDieta] = useState<any>(null);
   const [itensDieta, setItensDieta] = useState<any[]>([]);
+  const [farmacos, setFarmacos] = useState<any[]>([]);
+  const [todosAlimentos, setTodosAlimentos] = useState<any[]>([]);
+  const [substitutionDialog, setSubstitutionDialog] = useState<{
+    open: boolean;
+    alimentoAtual: any;
+    quantidadeAtual: number;
+    itemId: string;
+  }>({
+    open: false,
+    alimentoAtual: null,
+    quantidadeAtual: 0,
+    itemId: ''
+  });
 
   useEffect(() => {
     if (user) {
@@ -19,6 +33,14 @@ const StudentDietView = () => {
 
   const loadDietData = async () => {
     try {
+      // Carregar todos os alimentos para substituições
+      const { data: alimentosData } = await supabase
+        .from("alimentos")
+        .select("*")
+        .order("nome");
+      
+      setTodosAlimentos(alimentosData || []);
+
       const { data: aluno } = await supabase
         .from("alunos")
         .select("id")
@@ -37,23 +59,24 @@ const StudentDietView = () => {
         if (dietaData) {
           setDieta(dietaData);
 
-          const { data: itens } = await supabase
-            .from("itens_dieta")
-            .select("*, alimentos(*)")
-            .eq("dieta_id", dietaData.id);
+          const [{ data: itens }, { data: farmacosData }] = await Promise.all([
+            supabase
+              .from("itens_dieta")
+              .select("*, alimentos(*)")
+              .eq("dieta_id", dietaData.id),
+            supabase
+              .from("dieta_farmacos")
+              .select("*")
+              .eq("dieta_id", dietaData.id)
+          ]);
 
           setItensDieta(itens || []);
+          setFarmacos(farmacosData || []);
         }
       }
     } catch (error) {
       console.error("Erro ao carregar dieta:", error);
     }
-  };
-
-  const diasSemana = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
-  
-  const getItensPorDia = (dia: string) => {
-    return itensDieta.filter(item => item.dia_semana === dia);
   };
 
   const agruparPorRefeicao = (itens: any[]) => {
@@ -68,20 +91,44 @@ const StudentDietView = () => {
   };
 
   const calcularMacros = (itens: any[]) => {
-    let totalCalorias = 0;
-    let totalProteinas = 0;
-    let totalCarboidratos = 0;
-    let totalLipidios = 0;
+    return itens.reduce((total, item) => {
+      if (!item.alimentos) return total;
+      
+      const fator = item.quantidade / item.alimentos.quantidade_referencia_g;
+      return {
+        totalCalorias: total.totalCalorias + (item.alimentos.kcal_por_referencia * fator),
+        totalProteinas: total.totalProteinas + (item.alimentos.ptn_por_referencia * fator),
+        totalCarboidratos: total.totalCarboidratos + (item.alimentos.cho_por_referencia * fator),
+        totalLipidios: total.totalLipidios + (item.alimentos.lip_por_referencia * fator)
+      };
+    }, { totalCalorias: 0, totalProteinas: 0, totalCarboidratos: 0, totalLipidios: 0 });
+  };
 
-    itens.forEach(item => {
-      const fator = item.quantidade / 100;
-      totalCalorias += item.alimentos.kcal * fator;
-      totalProteinas += item.alimentos.proteinas * fator;
-      totalCarboidratos += item.alimentos.carboidratos * fator;
-      totalLipidios += item.alimentos.lipidios * fator;
+  const handleVerSubstitutos = (item: any) => {
+    setSubstitutionDialog({
+      open: true,
+      alimentoAtual: item.alimentos,
+      quantidadeAtual: item.quantidade,
+      itemId: item.id
     });
+  };
 
-    return { totalCalorias, totalProteinas, totalCarboidratos, totalLipidios };
+  const handleSubstituir = async (novoAlimentoId: string, novaQuantidade: number) => {
+    // Aqui você pode implementar a lógica de salvar a substituição no banco se quiser
+    // Por enquanto, vamos apenas atualizar localmente
+    const novosItens = itensDieta.map(item => {
+      if (item.id === substitutionDialog.itemId) {
+        const novoAlimento = todosAlimentos.find(a => a.id === novoAlimentoId);
+        return {
+          ...item,
+          alimento_id: novoAlimentoId,
+          quantidade: novaQuantidade,
+          alimentos: novoAlimento
+        };
+      }
+      return item;
+    });
+    setItensDieta(novosItens);
   };
 
   if (!dieta) {
@@ -98,6 +145,9 @@ const StudentDietView = () => {
     );
   }
 
+  const refeicoes = agruparPorRefeicao(itensDieta);
+  const macros = calcularMacros(itensDieta);
+
   return (
     <div className="space-y-6">
       <div>
@@ -105,7 +155,7 @@ const StudentDietView = () => {
         <p className="text-muted-foreground">{dieta.nome}</p>
       </div>
 
-      <Card className="shadow-card">
+      <Card>
         <CardHeader>
           <CardTitle>Informações da Dieta</CardTitle>
         </CardHeader>
@@ -125,99 +175,126 @@ const StudentDietView = () => {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="Segunda" className="w-full">
-        <TabsList className="grid w-full grid-cols-7">
-          {diasSemana.map(dia => (
-            <TabsTrigger key={dia} value={dia}>
-              {dia.substring(0, 3)}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+      {/* Resumo Nutricional */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Resumo Nutricional Total</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+            <div>
+              <div className="text-2xl font-bold text-primary">
+                {Math.round(macros.totalCalorias)}
+              </div>
+              <div className="text-sm text-muted-foreground">Calorias</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-primary">
+                {Math.round(macros.totalProteinas)}g
+              </div>
+              <div className="text-sm text-muted-foreground">Proteínas</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-warning">
+                {Math.round(macros.totalCarboidratos)}g
+              </div>
+              <div className="text-sm text-muted-foreground">Carboidratos</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-destructive">
+                {Math.round(macros.totalLipidios)}g
+              </div>
+              <div className="text-sm text-muted-foreground">Gorduras</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
-        {diasSemana.map(dia => {
-          const itens = getItensPorDia(dia);
-          const refeicoes = agruparPorRefeicao(itens);
-          const macros = calcularMacros(itens);
+      {/* Fármacos */}
+      {farmacos.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Pill className="h-5 w-5 text-primary" />
+              Fármacos e Suplementos
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {farmacos.map((farmaco) => (
+                <div key={farmaco.id} className="border rounded-lg p-4 space-y-2">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="font-semibold text-lg">{farmaco.nome}</div>
+                      <div className="text-muted-foreground">{farmaco.dosagem}</div>
+                    </div>
+                  </div>
+                  {farmaco.observacao && (
+                    <div className="text-sm text-muted-foreground bg-muted/50 p-2 rounded">
+                      {farmaco.observacao}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
-          return (
-            <TabsContent key={dia} value={dia} className="space-y-4">
-              {itens.length === 0 ? (
-                <Card className="shadow-card">
-                  <CardContent className="p-6 text-center text-muted-foreground">
-                    Nenhuma refeição planejada para este dia
-                  </CardContent>
-                </Card>
-              ) : (
-                <>
-                  <Card className="shadow-card">
-                    <CardHeader>
-                      <CardTitle className="text-lg">Resumo Diário</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="grid grid-cols-4 gap-4 text-center">
-                        <div>
-                          <div className="text-2xl font-bold text-primary">
-                            {Math.round(macros.totalCalorias)}
-                          </div>
-                          <div className="text-sm text-muted-foreground">Calorias</div>
-                        </div>
-                        <div>
-                          <div className="text-2xl font-bold">
-                            {Math.round(macros.totalProteinas)}g
-                          </div>
-                          <div className="text-sm text-muted-foreground">Proteínas</div>
-                        </div>
-                        <div>
-                          <div className="text-2xl font-bold">
-                            {Math.round(macros.totalCarboidratos)}g
-                          </div>
-                          <div className="text-sm text-muted-foreground">Carboidratos</div>
-                        </div>
-                        <div>
-                          <div className="text-2xl font-bold">
-                            {Math.round(macros.totalLipidios)}g
-                          </div>
-                          <div className="text-sm text-muted-foreground">Gorduras</div>
+      {/* Refeições */}
+      <div className="space-y-4">
+        {Object.entries(refeicoes).map(([refeicao, itensRefeicao]) => (
+          <Card key={refeicao}>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Utensils className="h-5 w-5 text-primary" />
+                {refeicao}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {itensRefeicao.map((item: any) => {
+                  const fator = item.quantidade / item.alimentos.quantidade_referencia_g;
+                  const calorias = Math.round(item.alimentos.kcal_por_referencia * fator);
+                  
+                  return (
+                    <div key={item.id} className="flex items-center justify-between p-4 rounded-lg border bg-card">
+                      <div className="flex-1">
+                        <div className="font-medium text-lg">{item.alimentos.nome}</div>
+                        <div className="text-sm text-muted-foreground mt-1">
+                          {item.quantidade}g
                         </div>
                       </div>
-                    </CardContent>
-                  </Card>
+                      <div className="flex items-center gap-3">
+                        <Badge variant="outline" className="text-sm">
+                          {calorias} kcal
+                        </Badge>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleVerSubstitutos(item)}
+                        >
+                          <Replace className="w-4 h-4 mr-2" />
+                          Ver Substitutos
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
 
-                  {Object.entries(refeicoes).map(([refeicao, itensRefeicao]) => (
-                    <Card key={refeicao} className="shadow-card">
-                      <CardHeader>
-                        <CardTitle className="text-lg flex items-center gap-2">
-                          <Utensils className="h-5 w-5 text-primary" />
-                          {refeicao}
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="space-y-3">
-                          {itensRefeicao.map(item => (
-                            <div key={item.id} className="flex items-start justify-between p-3 rounded-lg bg-muted/50">
-                              <div className="flex-1">
-                                <div className="font-medium">{item.alimentos.nome}</div>
-                                <div className="text-sm text-muted-foreground">
-                                  {item.quantidade}g
-                                </div>
-                              </div>
-                              <div className="text-right">
-                                <Badge variant="outline">
-                                  {Math.round((item.alimentos.kcal * item.quantidade) / 100)} kcal
-                                </Badge>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </>
-              )}
-            </TabsContent>
-          );
-        })}
-      </Tabs>
+      <FoodSubstitutionDialog
+        open={substitutionDialog.open}
+        onOpenChange={(open) => setSubstitutionDialog({ ...substitutionDialog, open })}
+        alimentoAtual={substitutionDialog.alimentoAtual}
+        quantidadeAtual={substitutionDialog.quantidadeAtual}
+        alimentosDisponiveis={todosAlimentos}
+        onSubstituir={handleSubstituir}
+      />
     </div>
   );
 };
