@@ -52,8 +52,11 @@ export default function FoodManager() {
   });
 
   useEffect(() => {
-    carregarDados();
-    carregarUsuario();
+    const inicializar = async () => {
+      await carregarUsuario();
+      await carregarDados();
+    };
+    inicializar();
   }, []);
 
   const carregarUsuario = async () => {
