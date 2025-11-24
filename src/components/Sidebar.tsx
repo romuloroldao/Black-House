@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -52,6 +53,8 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
     messages: 0,
     payments: 0,
   });
+  const [coachName, setCoachName] = useState<string>("");
+  const [coachAvatar, setCoachAvatar] = useState<string | null>(null);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -62,6 +65,7 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
 
   useEffect(() => {
     if (user) {
+      loadCoachProfile();
       loadNotifications();
 
       // Subscribe to real-time updates
@@ -99,6 +103,20 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       };
     }
   }, [user]);
+
+  const loadCoachProfile = async () => {
+    if (!user) return;
+
+    // Get user metadata
+    const { data: userData } = await supabase.auth.getUser();
+    if (userData?.user) {
+      const metadata = userData.user.user_metadata;
+      const fullName = metadata?.full_name || metadata?.name || user.email?.split('@')[0] || 'Coach';
+      const firstName = fullName.split(' ')[0];
+      setCoachName(firstName);
+      setCoachAvatar(metadata?.avatar_url || null);
+    }
+  };
 
   const loadNotifications = async () => {
     if (!user) return;
@@ -347,19 +365,16 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
         </nav>
       </ScrollArea>
 
-      {/* Premium Badge */}
+      {/* Coach Profile */}
       <div className="p-4 border-t border-border flex-shrink-0">
-        <div className="bg-gradient-primary/10 border border-primary/20 rounded-lg p-4 mb-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Star className="w-4 h-4 text-primary" />
-            <span className="text-sm font-medium text-primary">Plano Premium</span>
-          </div>
-          <p className="text-xs text-muted-foreground mb-3">
-            Você tem acesso a todas as funcionalidades!
-          </p>
-          <Button variant="outline" size="sm" className="w-full">
-            Gerenciar Plano
-          </Button>
+        <div className="flex items-center gap-3 mb-4 p-2 rounded-lg hover:bg-muted/50 transition-colors">
+          <Avatar className="h-10 w-10">
+            <AvatarImage src={coachAvatar || undefined} alt={coachName} />
+            <AvatarFallback className="bg-primary/10 text-primary font-medium">
+              {coachName.charAt(0).toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
+          <span className="text-sm font-medium text-foreground">{coachName}</span>
         </div>
 
         {/* Bottom Navigation */}
