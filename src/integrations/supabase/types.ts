@@ -487,6 +487,41 @@ export type Database = {
         }
         Relationships: []
       }
+      dieta_farmacos: {
+        Row: {
+          created_at: string
+          dieta_id: string
+          dosagem: string
+          id: string
+          nome: string
+          observacao: string | null
+        }
+        Insert: {
+          created_at?: string
+          dieta_id: string
+          dosagem: string
+          id?: string
+          nome: string
+          observacao?: string | null
+        }
+        Update: {
+          created_at?: string
+          dieta_id?: string
+          dosagem?: string
+          id?: string
+          nome?: string
+          observacao?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dieta_farmacos_dieta_id_fkey"
+            columns: ["dieta_id"]
+            isOneToOne: false
+            referencedRelation: "dietas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       dietas: {
         Row: {
           aluno_id: string
