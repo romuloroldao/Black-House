@@ -388,7 +388,7 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
                     >
                       <Icon className="mr-3 h-4 w-4" />
                       {item.label}
-                      {item.badge && item.badge > 0 && (
+                      {item.badge !== undefined && item.badge > 0 && (
                         <Badge 
                           variant="destructive" 
                           className={`ml-auto ${animateBadge && item.id === 'chat' ? 'animate-bounce' : ''}`}
