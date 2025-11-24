@@ -757,7 +757,10 @@ export default function StudentDetails() {
             )}
           </CardContent>
         </Card>
+        </TabsContent>
 
+        {/* TAB: Nutrição */}
+        <TabsContent value="nutrition" className="space-y-6 mt-6">
         {/* Dieta Atual */}
         <Card>
           <CardHeader>
