@@ -30,6 +30,7 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
   const [studentName, setStudentName] = useState<string>("");
   const [studentAvatar, setStudentAvatar] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(true);
+  const isMarkingAsReadRef = useRef(false);
 
   useEffect(() => {
     // Initialize audio for notifications
@@ -51,7 +52,10 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
             table: 'avisos_destinatarios'
           },
           () => {
-            loadUnreadCount();
+            // Only reload if we're not currently marking messages as read
+            if (!isMarkingAsReadRef.current) {
+              loadUnreadCount();
+            }
           }
         )
         .subscribe();
@@ -255,6 +259,9 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
   const markChatMessagesAsRead = async () => {
     if (!user) return;
 
+    // Clear badge immediately for better UX
+    setUnreadMessages(0);
+
     const { data: alunoData } = await supabase
       .from("alunos")
       .select("id")
@@ -277,15 +284,16 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
       .eq("conversa_id", conversaData.id)
       .eq("lida", false)
       .neq("remetente_id", user.id);
-
-    // Clear badge immediately for better UX
-    setUnreadMessages(0);
-    // Then reload to confirm
-    setTimeout(() => loadUnreadMessages(), 100);
   };
 
   const markAnnouncementsAsRead = async () => {
     if (!user) return;
+
+    // Set flag to prevent real-time subscription from reloading
+    isMarkingAsReadRef.current = true;
+    
+    // Clear badge immediately for better UX
+    setUnreadCount(0);
 
     const { data: alunoData } = await supabase
       .from("alunos")
@@ -293,7 +301,10 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
       .eq("email", user.email)
       .single();
 
-    if (!alunoData) return;
+    if (!alunoData) {
+      isMarkingAsReadRef.current = false;
+      return;
+    }
 
     const { data: turmasAluno } = await supabase
       .from("turmas_alunos")
@@ -318,10 +329,10 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
         .eq("lido", false);
     }
 
-    // Clear badge immediately for better UX
-    setUnreadCount(0);
-    // Then reload to confirm
-    setTimeout(() => loadUnreadCount(), 100);
+    // Wait a bit for database to propagate changes, then allow real-time updates again
+    setTimeout(() => {
+      isMarkingAsReadRef.current = false;
+    }, 500);
   };
 
   const handleTabChange = (tab: string) => {
