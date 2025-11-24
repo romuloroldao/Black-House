@@ -9,7 +9,8 @@ import { Combobox } from '@/components/ui/combobox';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Plus, Trash2, Calculator, Users } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import { Plus, Trash2, Calculator, Users, Pill } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface Alimento {
@@ -46,6 +47,13 @@ interface Refeicao {
   itens: ItemRefeicao[];
 }
 
+interface Farmaco {
+  id: string;
+  nome: string;
+  dosagem: string;
+  observacao: string;
+}
+
 interface DietCreatorProps {
   dietaId?: string;
 }
@@ -62,6 +70,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
     { nome: 'Almoço', itens: [] },
     { nome: 'Jantar', itens: [] }
   ]);
+  const [farmacos, setFarmacos] = useState<Farmaco[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
@@ -113,13 +122,20 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
 
       if (dietaError) throw dietaError;
 
-      // Carregar itens da dieta
-      const { data: itens, error: itensError } = await supabase
-        .from('itens_dieta')
-        .select('*, alimentos(*)')
-        .eq('dieta_id', dietaId);
+      // Carregar itens da dieta e fármacos
+      const [{ data: itens, error: itensError }, { data: farmacosData, error: farmacosError }] = await Promise.all([
+        supabase
+          .from('itens_dieta')
+          .select('*, alimentos(*)')
+          .eq('dieta_id', dietaId),
+        supabase
+          .from('dieta_farmacos')
+          .select('*')
+          .eq('dieta_id', dietaId)
+      ]);
 
       if (itensError) throw itensError;
+      if (farmacosError) throw farmacosError;
 
       // Preencher os dados
       setDietName(dieta.nome);
@@ -146,6 +162,16 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
       });
 
       setRefeicoes(novasRefeicoes);
+
+      // Carregar fármacos
+      if (farmacosData) {
+        setFarmacos(farmacosData.map(f => ({
+          id: f.id,
+          nome: f.nome,
+          dosagem: f.dosagem,
+          observacao: f.observacao || ''
+        })));
+      }
 
     } catch (error) {
       toast({
@@ -196,6 +222,29 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
     const novasRefeicoes = [...refeicoes];
     novasRefeicoes[refeicaoIndex].nome = novoNome;
     setRefeicoes(novasRefeicoes);
+  };
+
+  const adicionarFarmaco = () => {
+    const novoFarmaco: Farmaco = {
+      id: Math.random().toString(36).substr(2, 9),
+      nome: '',
+      dosagem: '',
+      observacao: ''
+    };
+    setFarmacos([...farmacos, novoFarmaco]);
+  };
+
+  const removerFarmaco = (farmacoIndex: number) => {
+    setFarmacos(farmacos.filter((_, index) => index !== farmacoIndex));
+  };
+
+  const atualizarFarmaco = (farmacoIndex: number, campo: keyof Farmaco, valor: string) => {
+    const novosFarmacos = [...farmacos];
+    novosFarmacos[farmacoIndex] = {
+      ...novosFarmacos[farmacoIndex],
+      [campo]: valor
+    };
+    setFarmacos(novosFarmacos);
   };
 
   const atualizarItem = (refeicaoIndex: number, itemIndex: number, campo: keyof ItemRefeicao, valor: any) => {
@@ -321,11 +370,11 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
 
         if (updateError) throw updateError;
 
-        // Remover itens antigos
-        await supabase
-          .from('itens_dieta')
-          .delete()
-          .eq('dieta_id', dietaIdAtual);
+        // Remover itens e fármacos antigos
+        await Promise.all([
+          supabase.from('itens_dieta').delete().eq('dieta_id', dietaIdAtual),
+          supabase.from('dieta_farmacos').delete().eq('dieta_id', dietaIdAtual)
+        ]);
       }
 
       // Salvar itens da dieta
@@ -348,6 +397,24 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
         if (itensError) throw itensError;
       }
 
+      // Salvar fármacos
+      const farmacosParaSalvar = farmacos
+        .filter(f => f.nome.trim() !== '' && f.dosagem.trim() !== '')
+        .map(f => ({
+          dieta_id: dietaIdAtual,
+          nome: f.nome,
+          dosagem: f.dosagem,
+          observacao: f.observacao || null
+        }));
+
+      if (farmacosParaSalvar.length > 0) {
+        const { error: farmacosError } = await supabase
+          .from('dieta_farmacos')
+          .insert(farmacosParaSalvar);
+
+        if (farmacosError) throw farmacosError;
+      }
+
       toast({
         title: "Sucesso!",
         description: dietaId ? "Dieta atualizada com sucesso" : "Dieta criada com sucesso"
@@ -368,6 +435,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
           { nome: 'Almoço', itens: [] },
           { nome: 'Jantar', itens: [] }
         ]);
+        setFarmacos([]);
       }
 
     } catch (error) {
@@ -476,6 +544,80 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
               <div className="text-sm text-muted-foreground">Lipídios</div>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Fármacos */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Pill className="w-5 h-5" />
+            Fármacos e Suplementos
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {farmacos.length === 0 ? (
+            <Alert>
+              <AlertDescription>
+                Nenhum fármaco adicionado ainda. Clique no botão abaixo para adicionar.
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <div className="space-y-3">
+              {farmacos.map((farmaco, index) => (
+                <div key={farmaco.id} className="border rounded-lg p-4 space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="space-y-2">
+                      <Label>Nome</Label>
+                      <Input
+                        value={farmaco.nome}
+                        onChange={(e) => atualizarFarmaco(index, 'nome', e.target.value)}
+                        placeholder="Ex: Vitamina D3"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Dosagem</Label>
+                      <Input
+                        value={farmaco.dosagem}
+                        onChange={(e) => atualizarFarmaco(index, 'dosagem', e.target.value)}
+                        placeholder="Ex: 2000 UI/dia"
+                      />
+                    </div>
+
+                    <div className="flex items-end">
+                      <Button
+                        variant="destructive"
+                        size="icon"
+                        onClick={() => removerFarmaco(index)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Observação</Label>
+                    <Textarea
+                      value={farmaco.observacao}
+                      onChange={(e) => atualizarFarmaco(index, 'observacao', e.target.value)}
+                      placeholder="Ex: Tomar pela manhã junto com o café"
+                      rows={2}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <Button
+            variant="outline"
+            onClick={adicionarFarmaco}
+            className="w-full"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Adicionar Fármaco
+          </Button>
         </CardContent>
       </Card>
 
