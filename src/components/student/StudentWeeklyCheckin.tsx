@@ -86,7 +86,7 @@ export default function StudentWeeklyCheckin() {
 
       if (error) throw error;
 
-      toast.success("Check-in semanal enviado com sucesso!");
+      toast.success("Check-in enviado com sucesso! Seu coach já pode visualizar suas respostas.");
       
       // Reset form
       setFormData({
@@ -117,7 +117,20 @@ export default function StudentWeeklyCheckin() {
         nao_cumpriu_porque: "",
       });
     } catch (error: any) {
-      toast.error(error.message || "Erro ao enviar check-in");
+      console.error("Erro ao enviar check-in:", error);
+      
+      // Mensagens amigáveis para erros comuns
+      let mensagemErro = "Não foi possível enviar o check-in. Por favor, tente novamente.";
+      
+      if (error.message?.includes("apetite") || error.code === "23514") {
+        mensagemErro = "Por favor, preencha todos os campos obrigatórios antes de enviar.";
+      } else if (error.message?.includes("Usuário não autenticado")) {
+        mensagemErro = "Sua sessão expirou. Por favor, faça login novamente.";
+      } else if (error.message?.includes("Aluno não encontrado")) {
+        mensagemErro = "Perfil não encontrado. Entre em contato com seu coach.";
+      }
+      
+      toast.error(mensagemErro);
     } finally {
       setLoading(false);
     }
