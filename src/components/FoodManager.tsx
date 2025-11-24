@@ -8,8 +8,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
-import { Plus, Search, Edit, Trash2, Apple } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Apple, AlertCircle, Calculator } from "lucide-react";
 
 interface TipoAlimento {
   id: string;
@@ -64,6 +65,43 @@ export default function FoodManager() {
     setCurrentUserId(user?.id || null);
   };
 
+  // Calcula calorias baseado nos macros (CHO: 4kcal/g, PTN: 4kcal/g, LIP: 9kcal/g)
+  const calcularCaloriasDosMacros = () => {
+    const cho = parseFloat(formData.cho_por_referencia) || 0;
+    const ptn = parseFloat(formData.ptn_por_referencia) || 0;
+    const lip = parseFloat(formData.lip_por_referencia) || 0;
+    
+    return (cho * 4) + (ptn * 4) + (lip * 9);
+  };
+
+  // Verifica se há inconsistência entre calorias informadas e calculadas
+  const verificarInconsistencia = () => {
+    const kcalInformada = parseFloat(formData.kcal_por_referencia) || 0;
+    const kcalCalculada = calcularCaloriasDosMacros();
+    
+    if (kcalInformada === 0 || kcalCalculada === 0) return null;
+    
+    const diferenca = Math.abs(kcalInformada - kcalCalculada);
+    const percentualDiferenca = (diferenca / kcalCalculada) * 100;
+    
+    // Considera inconsistente se a diferença for maior que 10%
+    if (percentualDiferenca > 10) {
+      return {
+        diferenca: diferenca.toFixed(1),
+        percentual: percentualDiferenca.toFixed(1),
+        kcalCalculada: kcalCalculada.toFixed(1)
+      };
+    }
+    
+    return null;
+  };
+
+  const ajustarCaloriasAutomaticamente = () => {
+    const kcalCalculada = calcularCaloriasDosMacros();
+    setFormData({ ...formData, kcal_por_referencia: kcalCalculada.toFixed(1) });
+    toast.success("Calorias ajustadas automaticamente!");
+  };
+
   const carregarDados = async () => {
     setLoading(true);
     try {
@@ -106,6 +144,15 @@ export default function FoodManager() {
       if (!formData.nome || !formData.tipo_id) {
         toast.error("Preencha os campos obrigatórios");
         return;
+      }
+
+      // Verificar inconsistência e avisar
+      const inconsistencia = verificarInconsistencia();
+      if (inconsistencia) {
+        const confirmar = confirm(
+          `Atenção: As calorias informadas (${formData.kcal_por_referencia} kcal) diferem das calculadas (${inconsistencia.kcalCalculada} kcal) em ${inconsistencia.percentual}%.\n\nDeseja continuar mesmo assim?`
+        );
+        if (!confirmar) return;
       }
 
       const { data: { user } } = await supabase.auth.getUser();
@@ -289,7 +336,32 @@ export default function FoodManager() {
               </div>
 
               <div className="border-t pt-4">
-                <h4 className="font-semibold mb-3">Informações Nutricionais</h4>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-semibold">Informações Nutricionais</h4>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={ajustarCaloriasAutomaticamente}
+                    className="gap-2"
+                  >
+                    <Calculator className="w-4 h-4" />
+                    Auto-calcular calorias
+                  </Button>
+                </div>
+                
+                {verificarInconsistencia() && (
+                  <Alert className="mb-4 border-amber-500/50 bg-amber-500/10">
+                    <AlertCircle className="h-4 w-4 text-amber-600" />
+                    <AlertDescription className="text-sm text-amber-800">
+                      <strong>Inconsistência detectada:</strong> As calorias informadas (
+                      {formData.kcal_por_referencia} kcal) diferem das calculadas pelos macros (
+                      {verificarInconsistencia()?.kcalCalculada} kcal) em{" "}
+                      {verificarInconsistencia()?.percentual}%. Clique em "Auto-calcular" para ajustar.
+                    </AlertDescription>
+                  </Alert>
+                )}
+                
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="kcal">Calorias (kcal)</Label>
@@ -300,6 +372,9 @@ export default function FoodManager() {
                       value={formData.kcal_por_referencia}
                       onChange={(e) => setFormData({ ...formData, kcal_por_referencia: e.target.value })}
                     />
+                    <p className="text-xs text-muted-foreground">
+                      Baseado nos macros: {calcularCaloriasDosMacros().toFixed(1)} kcal
+                    </p>
                   </div>
 
                   <div className="space-y-2">
