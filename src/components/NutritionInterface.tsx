@@ -11,7 +11,7 @@ const NutritionInterface = () => {
       <Tabs defaultValue="foods" className="w-full">
         <div className="border-b bg-card">
           <div className="container mx-auto px-4">
-            <TabsList className="h-14 bg-transparent">
+            <TabsList className="h-14 bg-transparent w-full justify-start">
               <TabsTrigger value="foods" className="flex items-center gap-2 px-6 py-3">
                 <Apple className="w-4 h-4" />
                 Lista de Alimentos
