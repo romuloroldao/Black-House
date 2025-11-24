@@ -55,6 +55,7 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
   });
   const [coachName, setCoachName] = useState<string>("");
   const [coachAvatar, setCoachAvatar] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState(true);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -96,10 +97,44 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
         )
         .subscribe();
 
+      // Presence channel for online status
+      const presenceChannel = supabase.channel('coach-presence');
+      
+      presenceChannel
+        .on('presence', { event: 'sync' }, () => {
+          setIsOnline(true);
+        })
+        .subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') {
+            await presenceChannel.track({
+              user_id: user.id,
+              online_at: new Date().toISOString(),
+            });
+          }
+        });
+
+      // Handle visibility change to update presence
+      const handleVisibilityChange = async () => {
+        if (document.hidden) {
+          await presenceChannel.untrack();
+          setIsOnline(false);
+        } else {
+          await presenceChannel.track({
+            user_id: user.id,
+            online_at: new Date().toISOString(),
+          });
+          setIsOnline(true);
+        }
+      };
+
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
       return () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
         supabase.removeChannel(messagesChannel);
         supabase.removeChannel(paymentsChannel);
         supabase.removeChannel(studentsChannel);
+        supabase.removeChannel(presenceChannel);
       };
     }
   }, [user]);
@@ -368,12 +403,21 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       {/* Coach Profile */}
       <div className="p-4 border-t border-border flex-shrink-0">
         <div className="flex items-center gap-3 mb-4 p-2 rounded-lg hover:bg-muted/50 transition-colors">
-          <Avatar className="h-10 w-10">
-            <AvatarImage src={coachAvatar || undefined} alt={coachName} />
-            <AvatarFallback className="bg-primary/10 text-primary font-medium">
-              {coachName.charAt(0).toUpperCase()}
-            </AvatarFallback>
-          </Avatar>
+          <div className="relative">
+            <Avatar className="h-10 w-10">
+              <AvatarImage src={coachAvatar || undefined} alt={coachName} />
+              <AvatarFallback className="bg-primary/10 text-primary font-medium">
+                {coachName.charAt(0).toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+            <div 
+              className={cn(
+                "absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-background transition-colors",
+                isOnline ? "bg-green-500" : "bg-muted-foreground"
+              )}
+              title={isOnline ? "Online" : "Offline"}
+            />
+          </div>
           <span className="text-sm font-medium text-foreground">{coachName}</span>
         </div>
 
