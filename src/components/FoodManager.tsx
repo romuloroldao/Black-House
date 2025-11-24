@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
-import { Plus, Search, Edit, Trash2, Apple, AlertCircle, Calculator } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Apple, AlertCircle, Calculator, Upload, Download } from "lucide-react";
 
 interface TipoAlimento {
   id: string;
@@ -39,6 +39,9 @@ export default function FoodManager() {
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const [formData, setFormData] = useState({
     nome: "",
@@ -100,6 +103,111 @@ export default function FoodManager() {
     const kcalCalculada = calcularCaloriasDosMacros();
     setFormData({ ...formData, kcal_por_referencia: kcalCalculada.toFixed(1) });
     toast.success("Calorias ajustadas automaticamente!");
+  };
+
+  const downloadTemplate = () => {
+    const csvContent = `nome,categoria,quantidade_referencia_g,kcal_por_referencia,cho_por_referencia,ptn_por_referencia,lip_por_referencia,origem_ptn,info_adicional
+Frango grelhado,Proteínas,100,165,0,31,3.6,animal,Rico em proteína magra
+Arroz branco cozido,Carboidratos,100,130,28,2.7,0.3,vegetal,Fonte de energia
+Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'template_alimentos.csv';
+    link.click();
+    toast.success("Template baixado com sucesso!");
+  };
+
+  const handleImportFile = async () => {
+    if (!importFile) {
+      toast.error("Selecione um arquivo CSV");
+      return;
+    }
+
+    setImporting(true);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast.error("Você precisa estar autenticado");
+        return;
+      }
+
+      const text = await importFile.text();
+      const lines = text.split('\n').filter(line => line.trim());
+      
+      if (lines.length < 2) {
+        toast.error("Arquivo vazio ou inválido");
+        return;
+      }
+
+      // Pular primeira linha (cabeçalho)
+      const dataLines = lines.slice(1);
+      const alimentosParaInserir = [];
+      let erros = 0;
+
+      for (const line of dataLines) {
+        const values = line.split(',').map(v => v.trim());
+        
+        if (values.length < 8) {
+          erros++;
+          continue;
+        }
+
+        const [nome, categoriaNome, qtdRef, kcal, cho, ptn, lip, origem, info] = values;
+
+        // Encontrar tipo_id pela categoria
+        const tipo = tipos.find(t => 
+          t.nome_tipo.toLowerCase() === categoriaNome.toLowerCase()
+        );
+
+        if (!tipo) {
+          console.warn(`Categoria não encontrada: ${categoriaNome}`);
+          erros++;
+          continue;
+        }
+
+        alimentosParaInserir.push({
+          nome,
+          tipo_id: tipo.id,
+          quantidade_referencia_g: parseFloat(qtdRef) || 100,
+          kcal_por_referencia: parseFloat(kcal) || 0,
+          cho_por_referencia: parseFloat(cho) || 0,
+          ptn_por_referencia: parseFloat(ptn) || 0,
+          lip_por_referencia: parseFloat(lip) || 0,
+          origem_ptn: origem.toLowerCase(),
+          info_adicional: info || null,
+          autor: user.id,
+        });
+      }
+
+      if (alimentosParaInserir.length === 0) {
+        toast.error("Nenhum alimento válido encontrado no arquivo");
+        return;
+      }
+
+      // Inserir em lote
+      const { error } = await supabase
+        .from("alimentos")
+        .insert(alimentosParaInserir);
+
+      if (error) throw error;
+
+      toast.success(
+        `${alimentosParaInserir.length} alimento(s) importado(s) com sucesso!` +
+        (erros > 0 ? ` (${erros} linha(s) com erro)` : '')
+      );
+
+      setIsImportDialogOpen(false);
+      setImportFile(null);
+      carregarDados();
+    } catch (error: any) {
+      console.error("Erro ao importar:", error);
+      toast.error(error.message || "Erro ao importar alimentos");
+    } finally {
+      setImporting(false);
+    }
   };
 
   const carregarDados = async () => {
@@ -253,16 +361,102 @@ export default function FoodManager() {
           </p>
         </div>
         
-        <Dialog open={isDialogOpen} onOpenChange={(open) => {
-          setIsDialogOpen(open);
-          if (!open) resetForm();
-        }}>
-          <DialogTrigger asChild>
-            <Button className="gap-2">
-              <Plus className="w-4 h-4" />
-              Novo Alimento
-            </Button>
-          </DialogTrigger>
+        <div className="flex gap-2">
+          <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" className="gap-2">
+                <Upload className="w-4 h-4" />
+                Importar CSV
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Importar Alimentos em Massa</DialogTitle>
+                <DialogDescription>
+                  Faça upload de um arquivo CSV com múltiplos alimentos
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4 py-4">
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    <strong>Formato do CSV:</strong> O arquivo deve conter as colunas: nome, categoria, 
+                    quantidade_referencia_g, kcal_por_referencia, cho_por_referencia, ptn_por_referencia, 
+                    lip_por_referencia, origem_ptn, info_adicional
+                  </AlertDescription>
+                </Alert>
+
+                <div className="space-y-2">
+                  <Label>Baixar Template</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={downloadTemplate}
+                    className="w-full gap-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    Baixar template CSV de exemplo
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Use este template como referência para formatar seus dados
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="csv-file">Selecionar Arquivo CSV</Label>
+                  <Input
+                    id="csv-file"
+                    type="file"
+                    accept=".csv"
+                    onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                  />
+                  {importFile && (
+                    <p className="text-sm text-muted-foreground">
+                      Arquivo selecionado: {importFile.name}
+                    </p>
+                  )}
+                </div>
+
+                <Alert className="border-amber-500/50 bg-amber-500/10">
+                  <AlertCircle className="h-4 w-4 text-amber-600" />
+                  <AlertDescription className="text-sm text-amber-800">
+                    <strong>Categorias disponíveis:</strong> Certifique-se que as categorias no CSV 
+                    correspondem às categorias existentes no sistema.
+                  </AlertDescription>
+                </Alert>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => {
+                    setIsImportDialogOpen(false);
+                    setImportFile(null);
+                  }}
+                >
+                  Cancelar
+                </Button>
+                <Button 
+                  onClick={handleImportFile}
+                  disabled={!importFile || importing}
+                >
+                  {importing ? "Importando..." : "Importar Alimentos"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        
+          <Dialog open={isDialogOpen} onOpenChange={(open) => {
+            setIsDialogOpen(open);
+            if (!open) resetForm();
+          }}>
+            <DialogTrigger asChild>
+              <Button className="gap-2">
+                <Plus className="w-4 h-4" />
+                Novo Alimento
+              </Button>
+            </DialogTrigger>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>
@@ -434,6 +628,7 @@ export default function FoodManager() {
             </div>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       <div className="mb-6">
