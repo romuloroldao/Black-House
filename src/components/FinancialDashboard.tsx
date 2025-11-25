@@ -3,9 +3,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { DollarSign, TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
+import { DollarSign, TrendingUp, TrendingDown, AlertCircle, Users, CheckCircle, XCircle, Clock } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 
 interface PaymentData {
   id: string;
@@ -33,10 +34,33 @@ interface MonthlyData {
   lucro: number;
 }
 
+interface StudentPayment {
+  id: string;
+  nome: string;
+  email: string;
+  pendingCount: number;
+  overdueCount: number;
+  totalPaid: number;
+  lastPaymentDate: string | null;
+}
+
+interface Payment {
+  id: string;
+  aluno_id: string;
+  value: number;
+  status: string;
+  due_date: string;
+  description: string;
+  alunos?: { nome: string; email: string };
+}
+
 export default function FinancialDashboard() {
   const { user } = useAuth();
   const [payments, setPayments] = useState<PaymentData[]>([]);
   const [expenses, setExpenses] = useState<ExpenseData[]>([]);
+  const [studentPayments, setStudentPayments] = useState<StudentPayment[]>([]);
+  const [allPayments, setAllPayments] = useState<Payment[]>([]);
+  const [searchFilter, setSearchFilter] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -76,10 +100,86 @@ export default function FinancialDashboard() {
 
       setPayments(paymentsData || []);
       setExpenses(expensesData || []);
+      
+      // Carregar dados dos alunos para o tracker
+      await loadPaymentData();
     } catch (error) {
       console.error("Error loading financial data:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadPaymentData = async () => {
+    try {
+      // Buscar todos os alunos do coach
+      const { data: alunos, error: alunosError } = await supabase
+        .from("alunos")
+        .select("id, nome, email")
+        .eq("coach_id", user?.id);
+
+      if (alunosError) throw alunosError;
+
+      // Buscar todos os pagamentos
+      const { data: payments, error: paymentsError } = await supabase
+        .from("asaas_payments")
+        .select(`
+          id,
+          aluno_id,
+          value,
+          status,
+          due_date,
+          description,
+          alunos:aluno_id(nome, email)
+        `)
+        .eq("coach_id", user?.id)
+        .order("due_date", { ascending: false });
+
+      if (paymentsError) throw paymentsError;
+
+      setAllPayments(payments || []);
+
+      // Processar dados dos alunos
+      const studentPaymentsMap = new Map<string, StudentPayment>();
+
+      alunos?.forEach((aluno) => {
+        studentPaymentsMap.set(aluno.id, {
+          id: aluno.id,
+          nome: aluno.nome || "Sem nome",
+          email: aluno.email,
+          pendingCount: 0,
+          overdueCount: 0,
+          totalPaid: 0,
+          lastPaymentDate: null,
+        });
+      });
+
+      const today = new Date();
+      payments?.forEach((payment) => {
+        const student = studentPaymentsMap.get(payment.aluno_id);
+        if (student) {
+          if (payment.status === "RECEIVED") {
+            student.totalPaid += Number(payment.value);
+            if (
+              !student.lastPaymentDate ||
+              new Date(payment.due_date) > new Date(student.lastPaymentDate)
+            ) {
+              student.lastPaymentDate = payment.due_date;
+            }
+          } else if (payment.status === "PENDING") {
+            const dueDate = new Date(payment.due_date);
+            if (dueDate < today) {
+              student.overdueCount++;
+            } else {
+              student.pendingCount++;
+            }
+          }
+        }
+      });
+
+      setStudentPayments(Array.from(studentPaymentsMap.values()));
+    } catch (error) {
+      console.error("Erro ao carregar dados de pagamentos:", error);
     }
   };
 
@@ -185,6 +285,65 @@ export default function FinancialDashboard() {
   const monthlyData = getMonthlyData();
   const categoryData = getCategoryData();
 
+  const getStatusBadge = (student: StudentPayment) => {
+    if (student.overdueCount > 0) {
+      return <Badge variant="destructive">Atrasado</Badge>;
+    } else if (student.pendingCount > 0) {
+      return <Badge variant="secondary">Pendente</Badge>;
+    } else if (student.totalPaid > 0) {
+      return <Badge variant="default">Em Dia</Badge>;
+    }
+    return <Badge variant="outline">Sem Pagamentos</Badge>;
+  };
+
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    }).format(value);
+  };
+
+  const filterStudents = (filter: string) => {
+    let filtered = studentPayments;
+
+    if (filter === "overdue") {
+      filtered = filtered.filter((s) => s.overdueCount > 0);
+    } else if (filter === "pending") {
+      filtered = filtered.filter((s) => s.pendingCount > 0 && s.overdueCount === 0);
+    } else if (filter === "on-time") {
+      filtered = filtered.filter(
+        (s) => s.overdueCount === 0 && s.pendingCount === 0 && s.totalPaid > 0
+      );
+    }
+
+    if (searchFilter) {
+      filtered = filtered.filter(
+        (s) =>
+          s.nome.toLowerCase().includes(searchFilter.toLowerCase()) ||
+          s.email.toLowerCase().includes(searchFilter.toLowerCase())
+      );
+    }
+
+    return filtered;
+  };
+
+  const getPaymentHistory = () => {
+    return allPayments
+      .map((payment) => ({
+        ...payment,
+        studentName: payment.alunos?.nome || "Desconhecido",
+      }))
+      .sort((a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime());
+  };
+
+  const studentsWithOverdue = studentPayments.filter((s) => s.overdueCount > 0).length;
+  const studentsWithPending = studentPayments.filter(
+    (s) => s.pendingCount > 0 && s.overdueCount === 0
+  ).length;
+  const studentsOnTime = studentPayments.filter(
+    (s) => s.overdueCount === 0 && s.pendingCount === 0 && s.totalPaid > 0
+  ).length;
+
   const COLORS = ["hsl(var(--primary))", "hsl(var(--secondary))", "hsl(var(--accent))", "hsl(var(--muted))"];
 
   return (
@@ -267,12 +426,195 @@ export default function FinancialDashboard() {
         </Card>
       </div>
 
-      {/* Gráficos */}
-      <Tabs defaultValue="timeline" className="space-y-4">
+      {/* Tabs de Visualização */}
+      <Tabs defaultValue="students" className="space-y-4">
         <TabsList>
+          <TabsTrigger value="students">Status dos Alunos</TabsTrigger>
           <TabsTrigger value="timeline">Linha do Tempo</TabsTrigger>
           <TabsTrigger value="categories">Categorias</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="students" className="space-y-4">
+          {/* Métricas de Alunos */}
+          <div className="grid gap-4 md:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total de Alunos</CardTitle>
+                <Users className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{studentPayments.length}</div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Atrasados</CardTitle>
+                <XCircle className="h-4 w-4 text-destructive" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-destructive">
+                  {studentsWithOverdue}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Pendentes</CardTitle>
+                <Clock className="h-4 w-4 text-secondary" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-secondary">
+                  {studentsWithPending}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Em Dia</CardTitle>
+                <CheckCircle className="h-4 w-4 text-primary" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-primary">
+                  {studentsOnTime}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Filtro de Busca */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Filtrar Alunos</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Input
+                placeholder="Buscar por nome ou email..."
+                value={searchFilter}
+                onChange={(e) => setSearchFilter(e.target.value)}
+              />
+            </CardContent>
+          </Card>
+
+          {/* Tabs de Status */}
+          <Tabs defaultValue="all" className="space-y-4">
+            <TabsList className="grid w-full grid-cols-5">
+              <TabsTrigger value="all">Todos ({studentPayments.length})</TabsTrigger>
+              <TabsTrigger value="overdue">
+                Atrasados ({studentsWithOverdue})
+              </TabsTrigger>
+              <TabsTrigger value="pending">
+                Pendentes ({studentsWithPending})
+              </TabsTrigger>
+              <TabsTrigger value="on-time">Em Dia ({studentsOnTime})</TabsTrigger>
+              <TabsTrigger value="history">Histórico</TabsTrigger>
+            </TabsList>
+
+            {["all", "overdue", "pending", "on-time"].map((tab) => (
+              <TabsContent key={tab} value={tab}>
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="space-y-4">
+                      {filterStudents(tab).map((student) => (
+                        <div
+                          key={student.id}
+                          className="flex items-center justify-between border-b pb-4 last:border-0"
+                        >
+                          <div className="space-y-1">
+                            <p className="font-medium">{student.nome}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {student.email}
+                            </p>
+                            <div className="flex gap-4 text-sm">
+                              {student.overdueCount > 0 && (
+                                <span className="text-destructive">
+                                  {student.overdueCount} atrasado(s)
+                                </span>
+                              )}
+                              {student.pendingCount > 0 && (
+                                <span className="text-secondary">
+                                  {student.pendingCount} pendente(s)
+                                </span>
+                              )}
+                              {student.totalPaid > 0 && (
+                                <span className="text-muted-foreground">
+                                  Total pago: {formatCurrency(student.totalPaid)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            {getStatusBadge(student)}
+                            {student.lastPaymentDate && (
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Último pgto:{" "}
+                                {new Date(student.lastPaymentDate).toLocaleDateString(
+                                  "pt-BR"
+                                )}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      {filterStudents(tab).length === 0 && (
+                        <p className="text-center text-muted-foreground py-8">
+                          Nenhum aluno encontrado
+                        </p>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            ))}
+
+            <TabsContent value="history">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Histórico de Pagamentos</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    {getPaymentHistory().slice(0, 20).map((payment) => (
+                      <div
+                        key={payment.id}
+                        className="flex items-center justify-between border-b pb-4 last:border-0"
+                      >
+                        <div>
+                          <p className="font-medium">{payment.studentName}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {payment.description}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Vencimento:{" "}
+                            {new Date(payment.due_date).toLocaleDateString("pt-BR")}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-bold">
+                            {formatCurrency(Number(payment.value))}
+                          </p>
+                          <Badge
+                            variant={
+                              payment.status === "RECEIVED"
+                                ? "default"
+                                : payment.status === "PENDING"
+                                ? "secondary"
+                                : "destructive"
+                            }
+                          >
+                            {payment.status}
+                          </Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
+        </TabsContent>
 
         <TabsContent value="timeline" className="space-y-4">
           <Card>
