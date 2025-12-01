@@ -10,7 +10,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
-import { Plus, Search, Edit, Trash2, Apple, AlertCircle, Calculator, Upload, Download } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Apple, AlertCircle, Calculator, Upload, Download, FileSpreadsheet } from "lucide-react";
+import * as XLSX from 'xlsx';
 
 interface TipoAlimento {
   id: string;
@@ -42,6 +43,8 @@ export default function FoodManager() {
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
+  const [importPreview, setImportPreview] = useState<any[]>([]);
+  const [showPreview, setShowPreview] = useState(false);
 
   const [formData, setFormData] = useState({
     nome: "",
@@ -119,9 +122,150 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
     toast.success("Template baixado com sucesso!");
   };
 
+  // Determinar tipo automaticamente
+  const determinarTipo = (nome: string, proteina: number, carboidrato: number, gordura: number): string => {
+    const nomeLower = nome.toLowerCase();
+    
+    // Proteínas
+    if (nomeLower.includes('carne') || nomeLower.includes('frango') || nomeLower.includes('peixe') || 
+        nomeLower.includes('atum') || nomeLower.includes('salmão') || nomeLower.includes('camarão') ||
+        nomeLower.includes('ovo') || nomeLower.includes('peru') || nomeLower.includes('feijão') || proteina > 15) {
+      return 'Proteínas';
+    }
+    
+    // Laticínios
+    if (nomeLower.includes('leite') || nomeLower.includes('queijo') || nomeLower.includes('iogurte') || 
+        nomeLower.includes('requeijão') || nomeLower.includes('manteiga')) {
+      return 'Laticínios' ;
+    }
+    
+    // Lipídios
+    if (nomeLower.includes('óleo') || nomeLower.includes('azeite') || nomeLower.includes('margarina') || 
+        nomeLower.includes('castanha') || nomeLower.includes('amendoim') || nomeLower.includes('abacate') || gordura > 30) {
+      return 'Lipídeos';
+    }
+    
+    // Carboidratos (default)
+    return 'Carboidratos';
+  };
+
+  // Determinar origem da proteína
+  const determinarOrigemProteina = (nome: string): string => {
+    const nomeLower = nome.toLowerCase();
+    
+    const animal = ['carne', 'frango', 'peixe', 'atum', 'salmão', 'camarão', 'ovo', 'leite', 'queijo', 'peru', 'bacon'];
+    const vegetal = ['feijão', 'lentilha', 'soja', 'arroz', 'batata', 'aveia', 'granola'];
+    
+    for (const palavra of animal) {
+      if (nomeLower.includes(palavra)) return 'Animal';
+    }
+    
+    for (const palavra of vegetal) {
+      if (nomeLower.includes(palavra)) return 'Vegetal';
+    }
+    
+    return 'Mista';
+  };
+
+  const processarArquivo = async (file: File) => {
+    try {
+      if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+        // Processar Excel
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer);
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        
+        const processed = [];
+        for (let i = 1; i < jsonData.length; i++) {
+          const row: any = jsonData[i];
+          if (!row[0] || row[0].toString().trim() === '') continue;
+          
+          const nome = row[0]?.toString().trim();
+          const proteina = parseFloat(row[3]) || 0;
+          const carboidrato = parseFloat(row[4]) || 0;
+          const gordura = parseFloat(row[5]) || 0;
+          const calorias = parseFloat(row[2]) || 0;
+          const fibra = parseFloat(row[6]) || null;
+          
+          if (!nome || calorias === 0) continue;
+          
+          const tipoNome = determinarTipo(nome, proteina, carboidrato, gordura);
+          const tipo = tipos.find(t => t.nome_tipo === tipoNome);
+          
+          processed.push({
+            nome,
+            tipo_id: tipo?.id || tipos[0]?.id,
+            tipo_nome: tipoNome,
+            quantidade_referencia_g: 100,
+            kcal_por_referencia: calorias,
+            cho_por_referencia: carboidrato,
+            ptn_por_referencia: proteina,
+            lip_por_referencia: gordura,
+            origem_ptn: determinarOrigemProteina(nome),
+            info_adicional: fibra ? `Fibra: ${fibra}g | Fonte: TACO` : 'Fonte: TACO'
+          });
+        }
+        
+        return processed;
+      } else {
+        // Processar CSV (mantém lógica existente)
+        const text = await file.text();
+        const lines = text.split('\n').filter(line => line.trim());
+        const processed = [];
+        
+        for (let i = 1; i < lines.length; i++) {
+          const values = lines[i].split(',').map(v => v.trim());
+          if (values.length < 8) continue;
+          
+          const [nome, categoriaNome, qtdRef, kcal, cho, ptn, lip, origem, info] = values;
+          const tipo = tipos.find(t => t.nome_tipo.toLowerCase() === categoriaNome.toLowerCase());
+          
+          if (!tipo) continue;
+          
+          processed.push({
+            nome,
+            tipo_id: tipo.id,
+            tipo_nome: tipo.nome_tipo,
+            quantidade_referencia_g: parseFloat(qtdRef) || 100,
+            kcal_por_referencia: parseFloat(kcal) || 0,
+            cho_por_referencia: parseFloat(cho) || 0,
+            ptn_por_referencia: parseFloat(ptn) || 0,
+            lip_por_referencia: parseFloat(lip) || 0,
+            origem_ptn: origem || 'Mista',
+            info_adicional: info || null
+          });
+        }
+        
+        return processed;
+      }
+    } catch (error) {
+      console.error('Erro ao processar arquivo:', error);
+      throw error;
+    }
+  };
+
+  const handleFileSelect = async (file: File | null) => {
+    setImportFile(file);
+    setShowPreview(false);
+    setImportPreview([]);
+    
+    if (!file) return;
+    
+    try {
+      const processed = await processarArquivo(file);
+      setImportPreview(processed);
+      setShowPreview(true);
+      toast.success(`${processed.length} alimentos prontos para importar`);
+    } catch (error) {
+      toast.error("Erro ao processar arquivo");
+      console.error(error);
+    }
+  };
+
   const handleImportFile = async () => {
-    if (!importFile) {
-      toast.error("Selecione um arquivo CSV");
+    if (importPreview.length === 0) {
+      toast.error("Nenhum alimento para importar");
       return;
     }
 
@@ -134,73 +278,34 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
         return;
       }
 
-      const text = await importFile.text();
-      const lines = text.split('\n').filter(line => line.trim());
+      const alimentosParaInserir = importPreview.map(item => ({
+        ...item,
+        autor: user.id,
+        tipo_nome: undefined // Remove campo temporário
+      }));
+
+      // Inserir em lotes de 50
+      const batchSize = 50;
+      let importados = 0;
       
-      if (lines.length < 2) {
-        toast.error("Arquivo vazio ou inválido");
-        return;
-      }
+      for (let i = 0; i < alimentosParaInserir.length; i += batchSize) {
+        const batch = alimentosParaInserir.slice(i, i + batchSize);
+        const { error } = await supabase
+          .from("alimentos")
+          .upsert(batch, { onConflict: 'nome', ignoreDuplicates: false });
 
-      // Pular primeira linha (cabeçalho)
-      const dataLines = lines.slice(1);
-      const alimentosParaInserir = [];
-      let erros = 0;
-
-      for (const line of dataLines) {
-        const values = line.split(',').map(v => v.trim());
-        
-        if (values.length < 8) {
-          erros++;
-          continue;
+        if (error) {
+          console.error('Erro no lote:', error);
+        } else {
+          importados += batch.length;
         }
-
-        const [nome, categoriaNome, qtdRef, kcal, cho, ptn, lip, origem, info] = values;
-
-        // Encontrar tipo_id pela categoria
-        const tipo = tipos.find(t => 
-          t.nome_tipo.toLowerCase() === categoriaNome.toLowerCase()
-        );
-
-        if (!tipo) {
-          console.warn(`Categoria não encontrada: ${categoriaNome}`);
-          erros++;
-          continue;
-        }
-
-        alimentosParaInserir.push({
-          nome,
-          tipo_id: tipo.id,
-          quantidade_referencia_g: parseFloat(qtdRef) || 100,
-          kcal_por_referencia: parseFloat(kcal) || 0,
-          cho_por_referencia: parseFloat(cho) || 0,
-          ptn_por_referencia: parseFloat(ptn) || 0,
-          lip_por_referencia: parseFloat(lip) || 0,
-          origem_ptn: origem.toLowerCase(),
-          info_adicional: info || null,
-          autor: user.id,
-        });
       }
 
-      if (alimentosParaInserir.length === 0) {
-        toast.error("Nenhum alimento válido encontrado no arquivo");
-        return;
-      }
-
-      // Inserir em lote
-      const { error } = await supabase
-        .from("alimentos")
-        .insert(alimentosParaInserir);
-
-      if (error) throw error;
-
-      toast.success(
-        `${alimentosParaInserir.length} alimento(s) importado(s) com sucesso!` +
-        (erros > 0 ? ` (${erros} linha(s) com erro)` : '')
-      );
-
+      toast.success(`${importados} alimentos importados com sucesso!`);
       setIsImportDialogOpen(false);
       setImportFile(null);
+      setImportPreview([]);
+      setShowPreview(false);
       carregarDados();
     } catch (error: any) {
       console.error("Erro ao importar:", error);
@@ -369,60 +474,87 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
                 Importar CSV
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl">
+            <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>Importar Alimentos em Massa</DialogTitle>
+                <DialogTitle className="flex items-center gap-2">
+                  <FileSpreadsheet className="w-5 h-5" />
+                  Importar Alimentos
+                </DialogTitle>
                 <DialogDescription>
-                  Faça upload de um arquivo CSV com múltiplos alimentos
+                  Importe alimentos em massa de arquivos Excel (TACO) ou CSV
                 </DialogDescription>
               </DialogHeader>
 
               <div className="space-y-4 py-4">
-                <Alert>
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>
-                    <strong>Formato do CSV:</strong> O arquivo deve conter as colunas: nome, categoria, 
-                    quantidade_referencia_g, kcal_por_referencia, cho_por_referencia, ptn_por_referencia, 
-                    lip_por_referencia, origem_ptn, info_adicional
-                  </AlertDescription>
-                </Alert>
-
-                <div className="space-y-2">
-                  <Label>Baixar Template</Label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={downloadTemplate}
-                    className="w-full gap-2"
-                  >
-                    <Download className="w-4 h-4" />
-                    Baixar template CSV de exemplo
-                  </Button>
-                  <p className="text-xs text-muted-foreground">
-                    Use este template como referência para formatar seus dados
-                  </p>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label>Formatos suportados:</Label>
+                    <div className="flex gap-2">
+                      <Badge variant="outline">.xlsx</Badge>
+                      <Badge variant="outline">.xls</Badge>
+                      <Badge variant="outline">.csv</Badge>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="csv-file">Selecionar Arquivo CSV</Label>
+                  <Label htmlFor="file">Selecionar Arquivo</Label>
                   <Input
-                    id="csv-file"
+                    id="file"
                     type="file"
-                    accept=".csv"
-                    onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                    accept=".csv,.xlsx,.xls"
+                    onChange={(e) => handleFileSelect(e.target.files?.[0] || null)}
                   />
                   {importFile && (
-                    <p className="text-sm text-muted-foreground">
-                      Arquivo selecionado: {importFile.name}
+                    <p className="text-sm text-muted-foreground flex items-center gap-2">
+                      <FileSpreadsheet className="w-4 h-4" />
+                      {importFile.name}
                     </p>
                   )}
                 </div>
 
-                <Alert className="border-amber-500/50 bg-amber-500/10">
-                  <AlertCircle className="h-4 w-4 text-amber-600" />
-                  <AlertDescription className="text-sm text-amber-800">
-                    <strong>Categorias disponíveis:</strong> Certifique-se que as categorias no CSV 
-                    correspondem às categorias existentes no sistema.
+                {showPreview && importPreview.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Preview (primeiros 5 alimentos)</Label>
+                    <div className="border rounded-lg max-h-60 overflow-y-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted sticky top-0">
+                          <tr>
+                            <th className="text-left p-2 font-medium">Nome</th>
+                            <th className="text-left p-2 font-medium">Tipo</th>
+                            <th className="text-right p-2 font-medium">Kcal</th>
+                            <th className="text-right p-2 font-medium">PTN</th>
+                            <th className="text-right p-2 font-medium">CHO</th>
+                            <th className="text-right p-2 font-medium">LIP</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importPreview.slice(0, 5).map((item, idx) => (
+                            <tr key={idx} className="border-t">
+                              <td className="p-2">{item.nome}</td>
+                              <td className="p-2">
+                                <Badge variant="outline" className="text-xs">{item.tipo_nome}</Badge>
+                              </td>
+                              <td className="p-2 text-right">{item.kcal_por_referencia}</td>
+                              <td className="p-2 text-right">{item.ptn_por_referencia}g</td>
+                              <td className="p-2 text-right">{item.cho_por_referencia}g</td>
+                              <td className="p-2 text-right">{item.lip_por_referencia}g</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Total: {importPreview.length} alimentos serão importados
+                    </p>
+                  </div>
+                )}
+
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription className="text-sm">
+                    <strong>Processamento automático TACO:</strong> O sistema detectará automaticamente 
+                    o tipo e origem da proteína de cada alimento. Arquivos Excel da TACO são processados automaticamente.
                   </AlertDescription>
                 </Alert>
               </div>
@@ -433,15 +565,17 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
                   onClick={() => {
                     setIsImportDialogOpen(false);
                     setImportFile(null);
+                    setImportPreview([]);
+                    setShowPreview(false);
                   }}
                 >
                   Cancelar
                 </Button>
                 <Button 
                   onClick={handleImportFile}
-                  disabled={!importFile || importing}
+                  disabled={!showPreview || importPreview.length === 0 || importing}
                 >
-                  {importing ? "Importando..." : "Importar Alimentos"}
+                  {importing ? "Importando..." : `Importar ${importPreview.length} Alimentos`}
                 </Button>
               </div>
             </DialogContent>
