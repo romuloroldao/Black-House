@@ -39,8 +39,10 @@ import {
   UserPlus,
   Users,
   Eye,
-  Link2
+  Link2,
+  Upload
 } from "lucide-react";
+import StudentImporter from "./StudentImporter";
 
 interface Student {
   id: string;
@@ -71,6 +73,7 @@ const StudentManager = () => {
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [paymentPlans, setPaymentPlans] = useState<Array<{ id: string; nome: string }>>([]);
   const [coachEmail, setCoachEmail] = useState<string>("");
@@ -429,28 +432,43 @@ const StudentManager = () => {
             Gerencie todos os seus alunos em um só lugar
           </p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={(open) => {
-          setIsDialogOpen(open);
-          if (!open) {
-          setEditingStudent(null);
-            setNewStudent({
-              nome: "",
-              email: "",
-              telefone: "",
-              cpf_cnpj: "",
-              objetivo: "",
-              plano: "",
-              data_nascimento: "",
-              peso: ""
-            });
-          }
-        }}>
-          <DialogTrigger asChild>
-            <Button variant="premium" size="lg">
-              <UserPlus className="w-5 h-5" />
-              Novo Aluno
-            </Button>
-          </DialogTrigger>
+        <div className="flex gap-2">
+          {/* Import Dialog */}
+          <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="lg">
+                <Upload className="w-5 h-5 mr-2" />
+                Importar
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+              <StudentImporter />
+            </DialogContent>
+          </Dialog>
+
+          {/* Add Student Dialog */}
+          <Dialog open={isDialogOpen} onOpenChange={(open) => {
+            setIsDialogOpen(open);
+            if (!open) {
+            setEditingStudent(null);
+              setNewStudent({
+                nome: "",
+                email: "",
+                telefone: "",
+                cpf_cnpj: "",
+                objetivo: "",
+                plano: "",
+                data_nascimento: "",
+                peso: ""
+              });
+            }
+          }}>
+            <DialogTrigger asChild>
+              <Button variant="premium" size="lg">
+                <UserPlus className="w-5 h-5 mr-2" />
+                Novo Aluno
+              </Button>
+            </DialogTrigger>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>{editingStudent ? "Editar Aluno" : "Adicionar Novo Aluno"}</DialogTitle>
@@ -550,6 +568,7 @@ const StudentManager = () => {
             </div>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Filters */}
