@@ -442,7 +442,10 @@ const StudentManager = () => {
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-              <StudentImporter />
+              <StudentImporter 
+                onClose={() => setIsImportDialogOpen(false)}
+                onImportComplete={() => carregarAlunos()}
+              />
             </DialogContent>
           </Dialog>
 
