@@ -126,26 +126,48 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
   const determinarTipo = (nome: string, proteina: number, carboidrato: number, gordura: number): string => {
     const nomeLower = nome.toLowerCase();
     
-    // Proteínas
-    if (nomeLower.includes('carne') || nomeLower.includes('frango') || nomeLower.includes('peixe') || 
-        nomeLower.includes('atum') || nomeLower.includes('salmão') || nomeLower.includes('camarão') ||
-        nomeLower.includes('ovo') || nomeLower.includes('peru') || nomeLower.includes('feijão') || proteina > 15) {
-      return 'Proteínas';
+    // Frutas
+    const frutas = ['banana', 'maçã', 'laranja', 'limão', 'manga', 'mamão', 'melão', 'melancia', 'uva', 
+                    'morango', 'abacaxi', 'pêra', 'pêssego', 'ameixa', 'acerola', 'kiwi', 'goiaba',
+                    'maracujá', 'tangerina', 'mexerica', 'graviola', 'jabuticaba', 'jaca', 'caju'];
+    if (frutas.some(f => nomeLower.includes(f))) {
+      return 'Frutas';
+    }
+    
+    // Vegetais e Legumes
+    const vegetais = ['alface', 'brócolis', 'couve', 'espinafre', 'repolho', 'rúcula', 'agrião', 
+                      'tomate', 'cenoura', 'beterraba', 'pepino', 'cebola', 'alho', 'pimentão',
+                      'abobrinha', 'berinjela', 'quiabo', 'vagem', 'chuchu', 'jiló', 'palmito',
+                      'abóbora', 'acelga', 'chicória', 'almeirão'];
+    if (vegetais.some(v => nomeLower.includes(v))) {
+      return 'Vegetais';
     }
     
     // Laticínios
-    if (nomeLower.includes('leite') || nomeLower.includes('queijo') || nomeLower.includes('iogurte') || 
-        nomeLower.includes('requeijão') || nomeLower.includes('manteiga')) {
-      return 'Laticínios' ;
+    const laticinios = ['leite', 'queijo', 'iogurte', 'requeijão', 'manteiga', 'creme de leite',
+                        'ricota', 'mussarela', 'cottage', 'petit suisse', 'doce de leite'];
+    if (laticinios.some(l => nomeLower.includes(l))) {
+      return 'Laticínios';
     }
     
-    // Lipídios
-    if (nomeLower.includes('óleo') || nomeLower.includes('azeite') || nomeLower.includes('margarina') || 
-        nomeLower.includes('castanha') || nomeLower.includes('amendoim') || nomeLower.includes('abacate') || gordura > 30) {
+    // Proteínas (carnes, peixes, ovos)
+    const proteinas = ['carne', 'frango', 'peixe', 'atum', 'salmão', 'camarão', 'sardinha', 
+                       'ovo', 'peru', 'lingüiça', 'linguiça', 'hambúrguer', 'bacon', 'presunto',
+                       'salame', 'fígado', 'coração', 'moela', 'lombo', 'filé', 'peito',
+                       'coxa', 'sobrecoxa', 'acém', 'patinho', 'alcatra', 'picanha', 'costela',
+                       'lagarto', 'maminha', 'cupim', 'músculo', 'whey'];
+    if (proteinas.some(p => nomeLower.includes(p)) || (proteina > 15 && carboidrato < 10)) {
+      return 'Proteínas';
+    }
+    
+    // Lipídios (gorduras, óleos, oleaginosas)
+    const lipidios = ['óleo', 'azeite', 'margarina', 'castanha', 'amendoim', 'abacate',
+                      'gergelim', 'linhaça', 'amêndoa', 'coco', 'pasta de amendoim'];
+    if (lipidios.some(l => nomeLower.includes(l)) || gordura > 40) {
       return 'Lipídeos';
     }
     
-    // Carboidratos (default)
+    // Carboidratos (default - pães, arroz, massas, tubérculos)
     return 'Carboidratos';
   };
 
