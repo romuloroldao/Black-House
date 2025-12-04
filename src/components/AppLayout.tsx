@@ -12,7 +12,6 @@ import AgendaManager from "./AgendaManager";
 import PlanManager from "./PlanManager";
 import FinancialExceptionsManager from "./FinancialExceptionsManager";
 import ExpenseManager from "./ExpenseManager";
-import RecurringChargesConfig from "./RecurringChargesConfig";
 import FinancialDashboard from "./FinancialDashboard";
 import PaymentStatusTracker from "./PaymentStatusTracker";
 import ReportManager from "./ReportManager";
@@ -58,8 +57,6 @@ const AppLayout = () => {
         return <div className="p-6"><FinancialExceptionsManager /></div>;
       case "expenses":
         return <div className="p-6"><ExpenseManager /></div>;
-      case "recurring-charges":
-        return <div className="p-6"><RecurringChargesConfig /></div>;
       case "financial-dashboard":
         return <FinancialDashboard />;
       case "payments-tracker":

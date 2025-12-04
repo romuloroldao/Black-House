@@ -272,11 +272,6 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       icon: CreditCard,
     },
     {
-      id: "recurring-charges",
-      label: "Cobranças Recorrentes",
-      icon: RefreshCw,
-    },
-    {
       id: "exceptions",
       label: "Exceções",
       icon: AlertCircle,
