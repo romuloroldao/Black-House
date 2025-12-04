@@ -180,6 +180,19 @@ const StudentManager = () => {
         return;
       }
 
+      // Validar dia de cobrança
+      if (newStudent.dia_cobranca) {
+        const dia = parseInt(newStudent.dia_cobranca);
+        if (isNaN(dia) || dia < 1 || dia > 31) {
+          toast({
+            title: "Dia de cobrança inválido",
+            description: "O dia de cobrança deve ser um número entre 1 e 31.",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
       // Get current user (coach)
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
