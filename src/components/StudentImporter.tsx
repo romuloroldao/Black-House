@@ -297,6 +297,44 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           return null;
         };
 
+        // Map meal names to standard names
+        const mapRefeicaoName = (nome: string): string => {
+          const nomeNormalizado = nome.toLowerCase().trim();
+          
+          // Direct mappings
+          const mappings: Record<string, string> = {
+            'refeição 1': 'Café da Manhã',
+            'refeicao 1': 'Café da Manhã',
+            'ref 1': 'Café da Manhã',
+            'refeição 2': 'Lanche da Manhã',
+            'refeicao 2': 'Lanche da Manhã',
+            'ref 2': 'Lanche da Manhã',
+            'refeição 3': 'Almoço',
+            'refeicao 3': 'Almoço',
+            'ref 3': 'Almoço',
+            'refeição 4': 'Lanche da Tarde',
+            'refeicao 4': 'Lanche da Tarde',
+            'ref 4': 'Lanche da Tarde',
+            'refeição 5': 'Jantar',
+            'refeicao 5': 'Jantar',
+            'ref 5': 'Jantar',
+            'refeição 6': 'Ceia',
+            'refeicao 6': 'Ceia',
+            'ref 6': 'Ceia',
+            'café da manhã': 'Café da Manhã',
+            'cafe da manha': 'Café da Manhã',
+            'lanche da manhã': 'Lanche da Manhã',
+            'lanche da manha': 'Lanche da Manhã',
+            'almoço': 'Almoço',
+            'almoco': 'Almoço',
+            'lanche da tarde': 'Lanche da Tarde',
+            'jantar': 'Jantar',
+            'ceia': 'Ceia',
+          };
+          
+          return mappings[nomeNormalizado] || nome;
+        };
+
         // Import diet items (refeicoes)
         const itensToInsert: Array<{
           dieta_id: string;
@@ -306,6 +344,8 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
         }> = [];
 
         for (const refeicao of editableData.dieta.refeicoes) {
+          const refeicaoNome = mapRefeicaoName(refeicao.nome);
+          
           for (const alimento of refeicao.alimentos) {
             if (!alimento.nome.trim()) continue;
             
@@ -319,7 +359,7 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                 dieta_id: dieta.id,
                 alimento_id: alimentoId,
                 quantidade: quantidade,
-                refeicao: refeicao.nome
+                refeicao: refeicaoNome
               });
             }
           }
