@@ -38,6 +38,9 @@ export default function FoodManager() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingFood, setEditingFood] = useState<Alimento | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
@@ -514,9 +517,27 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
     }
   };
 
-  const filteredAlimentos = alimentos.filter((alimento) =>
-    alimento.nome.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredAlimentos = alimentos.filter((alimento) => {
+    const matchesSearch = alimento.nome.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesCategory = selectedCategory === "all" || alimento.tipo_id === selectedCategory;
+    return matchesSearch && matchesCategory;
+  });
+
+  // Paginação
+  const totalPages = Math.ceil(filteredAlimentos.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedAlimentos = filteredAlimentos.slice(startIndex, startIndex + itemsPerPage);
+
+  // Reset página quando filtro muda
+  const handleSearchChange = (value: string) => {
+    setSearchTerm(value);
+    setCurrentPage(1);
+  };
+
+  const handleCategoryChange = (value: string) => {
+    setSelectedCategory(value);
+    setCurrentPage(1);
+  };
 
   const getTipoNome = (tipoId: string | null) => {
     const tipo = tipos.find((t) => t.id === tipoId);
@@ -836,15 +857,33 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
       </div>
 
       <div className="sticky top-0 z-10 bg-background pb-4 pt-2 -mt-2 border-b mb-4">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-          <Input
-            placeholder="Buscar alimento..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10"
-          />
+        <div className="flex gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+            <Input
+              placeholder="Buscar alimento..."
+              value={searchTerm}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+          <Select value={selectedCategory} onValueChange={handleCategoryChange}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Categoria" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas categorias</SelectItem>
+              {tipos.map((tipo) => (
+                <SelectItem key={tipo.id} value={tipo.id}>
+                  {tipo.nome_tipo}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
+        <p className="text-xs text-muted-foreground mt-2">
+          {filteredAlimentos.length} alimentos encontrados
+        </p>
       </div>
 
       {loading ? (
@@ -853,7 +892,7 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
         </div>
       ) : (
         <div className="grid gap-4">
-          {filteredAlimentos.map((alimento) => {
+          {paginatedAlimentos.map((alimento) => {
             const isAutor = alimento.autor === currentUserId;
             
             return (
@@ -930,16 +969,66 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
             );
           })}
 
-          {filteredAlimentos.length === 0 && (
+          {paginatedAlimentos.length === 0 && (
             <Card>
               <CardContent className="py-12 text-center">
                 <p className="text-muted-foreground">
-                  {searchTerm
-                    ? "Nenhum alimento encontrado com esse nome"
+                  {searchTerm || selectedCategory !== "all"
+                    ? "Nenhum alimento encontrado com os filtros aplicados"
                     : "Nenhum alimento cadastrado"}
                 </p>
               </CardContent>
             </Card>
+          )}
+
+          {/* Paginação */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between pt-4 border-t">
+              <p className="text-sm text-muted-foreground">
+                Página {currentPage} de {totalPages}
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                >
+                  Anterior
+                </Button>
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  let pageNum;
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (currentPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (currentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = currentPage - 2 + i;
+                  }
+                  return (
+                    <Button
+                      key={pageNum}
+                      variant={currentPage === pageNum ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setCurrentPage(pageNum)}
+                      className="w-9"
+                    >
+                      {pageNum}
+                    </Button>
+                  );
+                })}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  Próxima
+                </Button>
+              </div>
+            </div>
           )}
         </div>
       )}
