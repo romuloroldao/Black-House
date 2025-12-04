@@ -192,43 +192,58 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
   const processarArquivo = async (file: File) => {
     try {
       if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
-        // Processar Excel
+        // Processar Excel - TODAS as abas
         const buffer = await file.arrayBuffer();
         const workbook = XLSX.read(buffer);
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
         
-        const processed = [];
-        for (let i = 1; i < jsonData.length; i++) {
-          const row: any = jsonData[i];
-          if (!row[0] || row[0].toString().trim() === '') continue;
+        const processed: any[] = [];
+        const nomesProcessados = new Set<string>();
+        
+        // Iterar por TODAS as abas do Excel
+        for (const sheetName of workbook.SheetNames) {
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
           
-          const nome = row[0]?.toString().trim();
-          const proteina = parseFloat(row[3]) || 0;
-          const carboidrato = parseFloat(row[4]) || 0;
-          const gordura = parseFloat(row[5]) || 0;
-          const calorias = parseFloat(row[2]) || 0;
-          const fibra = parseFloat(row[6]) || null;
+          console.log(`Processando aba: ${sheetName} com ${jsonData.length} linhas`);
           
-          if (!nome || calorias === 0) continue;
-          
-          const tipoNome = determinarTipo(nome, proteina, carboidrato, gordura);
-          const tipo = tipos.find(t => t.nome_tipo === tipoNome);
-          
-          processed.push({
-            nome,
-            tipo_id: tipo?.id || tipos[0]?.id,
-            tipo_nome: tipoNome,
-            quantidade_referencia_g: 100,
-            kcal_por_referencia: calorias,
-            cho_por_referencia: carboidrato,
-            ptn_por_referencia: proteina,
-            lip_por_referencia: gordura,
-            origem_ptn: determinarOrigemProteina(nome),
-            info_adicional: fibra ? `Fibra: ${fibra}g | Fonte: TACO` : 'Fonte: TACO'
-          });
+          for (let i = 1; i < jsonData.length; i++) {
+            const row = jsonData[i];
+            if (!row || !row[0] || row[0].toString().trim() === '') continue;
+            
+            const nome = row[0]?.toString().trim();
+            
+            // Evitar duplicatas
+            if (nomesProcessados.has(nome.toLowerCase())) continue;
+            nomesProcessados.add(nome.toLowerCase());
+            
+            const proteina = parseFloat(row[3]) || 0;
+            const carboidrato = parseFloat(row[4]) || 0;
+            const gordura = parseFloat(row[5]) || 0;
+            const calorias = parseFloat(row[2]) || 0;
+            const fibra = parseFloat(row[6]) || null;
+            
+            // Aceitar alimentos mesmo com 0 calorias (água, chá, etc.)
+            if (!nome) continue;
+            
+            const tipoNome = determinarTipo(nome, proteina, carboidrato, gordura);
+            const tipo = tipos.find(t => t.nome_tipo === tipoNome);
+            
+            processed.push({
+              nome,
+              tipo_id: tipo?.id || tipos[0]?.id,
+              tipo_nome: tipoNome,
+              quantidade_referencia_g: 100,
+              kcal_por_referencia: calorias,
+              cho_por_referencia: carboidrato,
+              ptn_por_referencia: proteina,
+              lip_por_referencia: gordura,
+              origem_ptn: determinarOrigemProteina(nome),
+              info_adicional: fibra ? `Fibra: ${fibra}g | Fonte: TACO` : 'Fonte: TACO'
+            });
+          }
         }
         
+        console.log(`Total processado: ${processed.length} alimentos`);
         return processed;
       } else {
         // Processar CSV (mantém lógica existente)
@@ -297,33 +312,66 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         toast.error("Você precisa estar autenticado");
+        setImporting(false);
         return;
       }
 
-      const alimentosParaInserir = importPreview.map(item => ({
-        ...item,
-        autor: user.id,
-        tipo_nome: undefined // Remove campo temporário
-      }));
+      // Buscar alimentos existentes para evitar duplicatas
+      const { data: existingFoods } = await supabase
+        .from("alimentos")
+        .select("nome");
+      
+      const existingNames = new Set((existingFoods || []).map(f => f.nome.toLowerCase()));
+
+      // Filtrar apenas alimentos novos
+      const novosAlimentos = importPreview.filter(item => 
+        !existingNames.has(item.nome.toLowerCase())
+      );
+
+      if (novosAlimentos.length === 0) {
+        toast.info("Todos os alimentos já existem no banco de dados");
+        setIsImportDialogOpen(false);
+        setImporting(false);
+        return;
+      }
+
+      const alimentosParaInserir = novosAlimentos.map(item => {
+        const { tipo_nome, ...resto } = item;
+        return {
+          ...resto,
+          autor: user.id
+        };
+      });
+
+      console.log(`Inserindo ${alimentosParaInserir.length} novos alimentos`);
 
       // Inserir em lotes de 50
       const batchSize = 50;
       let importados = 0;
+      let erros = 0;
       
       for (let i = 0; i < alimentosParaInserir.length; i += batchSize) {
         const batch = alimentosParaInserir.slice(i, i + batchSize);
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from("alimentos")
-          .upsert(batch, { onConflict: 'nome', ignoreDuplicates: false });
+          .insert(batch)
+          .select();
 
         if (error) {
           console.error('Erro no lote:', error);
+          erros += batch.length;
         } else {
-          importados += batch.length;
+          importados += data?.length || 0;
         }
       }
 
-      toast.success(`${importados} alimentos importados com sucesso!`);
+      if (importados > 0) {
+        toast.success(`${importados} alimentos importados com sucesso!`);
+      }
+      if (erros > 0) {
+        toast.warning(`${erros} alimentos não puderam ser importados`);
+      }
+      
       setIsImportDialogOpen(false);
       setImportFile(null);
       setImportPreview([]);
