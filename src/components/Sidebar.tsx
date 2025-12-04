@@ -267,11 +267,6 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       icon: Wallet,
     },
     {
-      id: "payments",
-      label: "Criar Pagamento",
-      icon: DollarSign,
-    },
-    {
       id: "payments-tracker",
       label: "Acompanhar Pagamentos",
       icon: CreditCard,
