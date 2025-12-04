@@ -268,6 +268,71 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
 
         if (dietaError) throw dietaError;
 
+        // Fetch existing foods to match
+        const { data: alimentosExistentes } = await supabase
+          .from('alimentos')
+          .select('id, nome');
+
+        const alimentosMap = new Map<string, string>();
+        (alimentosExistentes || []).forEach(a => {
+          alimentosMap.set(a.nome.toLowerCase().trim(), a.id);
+        });
+
+        // Helper function to find matching food
+        const findMatchingAlimento = (nomeAlimento: string): string | null => {
+          const nomeNormalizado = nomeAlimento.toLowerCase().trim();
+          
+          // Exact match
+          if (alimentosMap.has(nomeNormalizado)) {
+            return alimentosMap.get(nomeNormalizado)!;
+          }
+          
+          // Partial match
+          for (const [nome, id] of alimentosMap) {
+            if (nome.includes(nomeNormalizado) || nomeNormalizado.includes(nome)) {
+              return id;
+            }
+          }
+          
+          return null;
+        };
+
+        // Import diet items (refeicoes)
+        const itensToInsert: Array<{
+          dieta_id: string;
+          alimento_id: string;
+          quantidade: number;
+          refeicao: string;
+        }> = [];
+
+        for (const refeicao of editableData.dieta.refeicoes) {
+          for (const alimento of refeicao.alimentos) {
+            if (!alimento.nome.trim()) continue;
+            
+            const alimentoId = findMatchingAlimento(alimento.nome);
+            if (alimentoId) {
+              // Parse quantity - extract number from string like "100g" or "2 unidades"
+              const qtdMatch = alimento.quantidade.match(/[\d.,]+/);
+              const quantidade = qtdMatch ? parseFloat(qtdMatch[0].replace(',', '.')) : 100;
+              
+              itensToInsert.push({
+                dieta_id: dieta.id,
+                alimento_id: alimentoId,
+                quantidade: quantidade,
+                refeicao: refeicao.nome
+              });
+            }
+          }
+        }
+
+        if (itensToInsert.length > 0) {
+          const { error: itensError } = await supabase.from('itens_dieta').insert(itensToInsert);
+          if (itensError) {
+            console.error('Erro ao inserir itens da dieta:', itensError);
+          }
+        }
+
+        // Import farmacos
         if (editableData.farmacos && editableData.farmacos.length > 0) {
           const farmacosInsert = editableData.farmacos
             .filter(f => f.nome.trim())
@@ -283,6 +348,7 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           }
         }
 
+        // Import suplementos
         if (editableData.suplementos && editableData.suplementos.length > 0) {
           const suplementosInsert = editableData.suplementos
             .filter(s => s.nome.trim())
@@ -296,6 +362,15 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           if (suplementosInsert.length > 0) {
             await supabase.from('dieta_farmacos').insert(suplementosInsert);
           }
+        }
+
+        // Show warning if some foods weren't matched
+        const totalAlimentos = editableData.dieta.refeicoes.reduce(
+          (acc, r) => acc + r.alimentos.filter(a => a.nome.trim()).length, 0
+        );
+        const importados = itensToInsert.length;
+        if (importados < totalAlimentos) {
+          toast.warning(`${importados} de ${totalAlimentos} alimentos foram importados. Alguns alimentos não foram encontrados no banco de dados.`);
         }
       }
 
