@@ -87,7 +87,8 @@ const StudentManager = () => {
     objetivo: "",
     plano: "",
     data_nascimento: "",
-    peso: ""
+    peso: "",
+    dia_cobranca: ""
   });
 
   useEffect(() => {
@@ -242,7 +243,7 @@ const StudentManager = () => {
         });
       }
 
-      // Se o aluno tem um plano associado, criar configuração de cobrança recorrente
+      // Se o aluno tem um plano associado, criar/atualizar configuração de cobrança recorrente
       if (newStudent.plano && alunoId) {
         // Verificar se já existe configuração de cobrança para este aluno
         const { data: existingConfig } = await supabase
@@ -250,6 +251,8 @@ const StudentManager = () => {
           .select('id')
           .eq('aluno_id', alunoId)
           .maybeSingle();
+
+        const diaCobranca = newStudent.dia_cobranca ? parseInt(newStudent.dia_cobranca) : null;
 
         if (!existingConfig) {
           // Criar configuração de cobrança recorrente
@@ -259,6 +262,7 @@ const StudentManager = () => {
               aluno_id: alunoId,
               payment_plan_id: newStudent.plano,
               coach_id: user.id,
+              dia_vencimento_customizado: diaCobranca,
               ativo: true,
             });
 
@@ -275,12 +279,13 @@ const StudentManager = () => {
               description: "Cobrança recorrente ativada para este aluno",
             });
           }
-        } else if (editingStudent) {
-          // Atualizar configuração existente se o plano mudou
+        } else {
+          // Atualizar configuração existente
           const { error: updateError } = await supabase
             .from('recurring_charges_config')
             .update({
               payment_plan_id: newStudent.plano,
+              dia_vencimento_customizado: diaCobranca,
             })
             .eq('aluno_id', alunoId);
 
@@ -299,7 +304,8 @@ const StudentManager = () => {
         objetivo: "",
         plano: "",
         data_nascimento: "",
-        peso: ""
+        peso: "",
+        dia_cobranca: ""
       });
       
       setEditingStudent(null);
@@ -315,7 +321,7 @@ const StudentManager = () => {
     }
   };
 
-  const handleEditStudent = (student: Student) => {
+  const handleEditStudent = async (student: Student) => {
     setEditingStudent(student);
     
     // Find plan ID - student.plan might be either the plan ID or plan name
@@ -333,6 +339,23 @@ const StudentManager = () => {
         }
       }
     }
+
+    // Buscar configuração de cobrança para obter dia_vencimento_customizado
+    let diaCobranca = "";
+    const { data: configData } = await supabase
+      .from('recurring_charges_config')
+      .select('dia_vencimento_customizado, payment_plan_id')
+      .eq('aluno_id', student.id)
+      .eq('ativo', true)
+      .maybeSingle();
+
+    if (configData) {
+      diaCobranca = configData.dia_vencimento_customizado?.toString() || "";
+      // Se temos config, usar o plan_id da config
+      if (configData.payment_plan_id) {
+        planId = configData.payment_plan_id;
+      }
+    }
     
     setNewStudent({
       nome: student.name,
@@ -342,7 +365,8 @@ const StudentManager = () => {
       objetivo: student.goal || "",
       plano: planId,
       data_nascimento: student.data_nascimento || "",
-      peso: student.peso?.toString() || ""
+      peso: student.peso?.toString() || "",
+      dia_cobranca: diaCobranca
     });
     setIsDialogOpen(true);
   };
@@ -462,7 +486,8 @@ const StudentManager = () => {
                 objetivo: "",
                 plano: "",
                 data_nascimento: "",
-                peso: ""
+                peso: "",
+                dia_cobranca: ""
               });
             }
           }}>
@@ -556,6 +581,14 @@ const StudentManager = () => {
                 type="date"
                 value={newStudent.data_nascimento}
                 onChange={(e) => setNewStudent({...newStudent, data_nascimento: e.target.value})}
+              />
+              <Input 
+                placeholder="Dia de cobrança (1-31)" 
+                type="number"
+                min="1"
+                max="31"
+                value={newStudent.dia_cobranca}
+                onChange={(e) => setNewStudent({...newStudent, dia_cobranca: e.target.value})}
               />
             </div>
             <div className="flex justify-end gap-2">
