@@ -9,7 +9,6 @@ import VideoGallery from "./VideoGallery";
 import NutritionInterface from "./NutritionInterface";
 import MessageManager from "./MessageManager";
 import AgendaManager from "./AgendaManager";
-import PaymentManager from "./PaymentManager";
 import PlanManager from "./PlanManager";
 import FinancialExceptionsManager from "./FinancialExceptionsManager";
 import ExpenseManager from "./ExpenseManager";
@@ -55,8 +54,6 @@ const AppLayout = () => {
         return <div className="p-6"><MessageManager /></div>;
       case "payment-plans":
         return <div className="p-6"><PlanManager /></div>;
-      case "payments":
-        return <PaymentManager />;
       case "exceptions":
         return <div className="p-6"><FinancialExceptionsManager /></div>;
       case "expenses":
