@@ -146,10 +146,18 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
     const { data: userData } = await supabase.auth.getUser();
     if (userData?.user) {
       const metadata = userData.user.user_metadata;
-      const fullName = metadata?.full_name || metadata?.name || user.email?.split('@')[0] || 'Coach';
+      const fullName = metadata?.full_name || metadata?.name || metadata?.display_name || user.email?.split('@')[0] || 'Coach';
       const firstName = fullName.split(' ')[0];
       setCoachName(firstName);
-      setCoachAvatar(metadata?.avatar_url || null);
+      
+      // Try to get avatar from profiles table first
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('avatar_url')
+        .eq('id', userData.user.id)
+        .single();
+      
+      setCoachAvatar(profile?.avatar_url || metadata?.avatar_url || null);
     }
   };
 
