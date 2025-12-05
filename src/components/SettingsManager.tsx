@@ -15,7 +15,8 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { User, Bell, Key, Palette, Eye, EyeOff } from "lucide-react";
+import { User, Bell, Key, Palette, Eye, EyeOff, Camera, Loader2 } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -29,6 +30,8 @@ import {
 const SettingsManager = () => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [asaasConfig, setAsaasConfig] = useState<any>(null);
   const [twilioConfig, setTwilioConfig] = useState<any>(null);
   
@@ -62,7 +65,91 @@ const SettingsManager = () => {
   useEffect(() => {
     loadAsaasConfig();
     loadTwilioConfig();
+    loadProfile();
   }, [user]);
+
+  const loadProfile = async () => {
+    if (!user) return;
+    
+    // Load avatar from profiles table
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('avatar_url')
+      .eq('id', user.id)
+      .single();
+    
+    if (profile?.avatar_url) {
+      setAvatarUrl(profile.avatar_url);
+    }
+    
+    // Load display name from user metadata
+    const { data: userData } = await supabase.auth.getUser();
+    if (userData?.user?.user_metadata) {
+      const metadata = userData.user.user_metadata;
+      setProfileData(prev => ({
+        ...prev,
+        displayName: metadata.display_name || metadata.full_name || metadata.name || "",
+        phone: metadata.phone || "",
+      }));
+    }
+  };
+
+  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !user) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error("Por favor, selecione uma imagem válida");
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("A imagem deve ter no máximo 5MB");
+      return;
+    }
+
+    setUploadingAvatar(true);
+    try {
+      // Create unique file name
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${user.id}/avatar.${fileExt}`;
+
+      // Upload to storage
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(fileName, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(fileName);
+
+      const publicUrl = `${urlData.publicUrl}?t=${Date.now()}`; // Add cache buster
+
+      // Upsert profile with avatar URL
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .upsert({
+          id: user.id,
+          avatar_url: publicUrl,
+          updated_at: new Date().toISOString(),
+        });
+
+      if (profileError) throw profileError;
+
+      setAvatarUrl(publicUrl);
+      toast.success("Avatar atualizado com sucesso!");
+    } catch (error: any) {
+      console.error("Error uploading avatar:", error);
+      toast.error("Erro ao atualizar avatar: " + error.message);
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
 
   const loadAsaasConfig = async () => {
     if (!user) return;
@@ -272,6 +359,51 @@ const SettingsManager = () => {
         </TabsList>
 
         <TabsContent value="profile" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Foto de Perfil</CardTitle>
+              <CardDescription>
+                Atualize sua foto de perfil
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-6">
+                <div className="relative">
+                  <Avatar className="h-24 w-24">
+                    <AvatarImage src={avatarUrl || undefined} alt="Avatar" />
+                    <AvatarFallback className="bg-primary/10 text-primary text-2xl">
+                      {profileData.displayName?.charAt(0)?.toUpperCase() || user?.email?.charAt(0)?.toUpperCase() || "U"}
+                    </AvatarFallback>
+                  </Avatar>
+                  <label
+                    htmlFor="avatar-upload"
+                    className="absolute bottom-0 right-0 p-1.5 bg-primary text-primary-foreground rounded-full cursor-pointer hover:bg-primary/90 transition-colors"
+                  >
+                    {uploadingAvatar ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Camera className="h-4 w-4" />
+                    )}
+                  </label>
+                  <input
+                    id="avatar-upload"
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleAvatarUpload}
+                    disabled={uploadingAvatar}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Alterar foto</p>
+                  <p className="text-xs text-muted-foreground">
+                    JPG, PNG ou GIF. Máximo 5MB.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Informações do Perfil</CardTitle>
