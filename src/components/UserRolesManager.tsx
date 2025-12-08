@@ -108,6 +108,16 @@ const UserRolesManager = () => {
       return;
     }
 
+    // Prevent demoting the last coach
+    const currentUser = users.find((u) => u.id === userId);
+    if (currentUser?.role === "coach" && newRole === "aluno") {
+      const coachesCount = users.filter((u) => u.role === "coach").length;
+      if (coachesCount <= 1) {
+        toast.error("Não é possível rebaixar o último coach do sistema. Promova outro usuário a coach primeiro.");
+        return;
+      }
+    }
+
     setUpdating(userId);
     try {
       const { error } = await supabase
