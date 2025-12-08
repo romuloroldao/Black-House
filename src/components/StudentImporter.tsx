@@ -407,7 +407,101 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           refeicao: string;
         }> = [];
 
-        const alimentosNaoEncontrados: string[] = [];
+        const alimentosCadastrados: string[] = [];
+
+        // Helper to determine food type based on name
+        const inferirTipoAlimento = (nome: string): string => {
+          const nomeNorm = normalizeText(nome);
+          
+          // Proteínas
+          if (/frango|carne|peixe|atum|sardinha|ovo|peito|patinho|file|tilapia|salmao|camarao|lagosta|porco|peru|chester|linguica|bacon|presunto|mortadela|salsicha|whey|albumina|caseina/.test(nomeNorm)) {
+            return '33acba74-bbc2-446a-8476-401693c56baf'; // Proteínas
+          }
+          
+          // Carboidratos
+          if (/arroz|batata|macarrao|pao|aveia|tapioca|mandioca|inhame|milho|cereal|granola|biscoito|bolacha|torrada|cuscuz|quinoa|feijao|lentilha|grao de bico/.test(nomeNorm)) {
+            return 'dea776a3-f586-40bb-a945-6f466b8c3e31'; // Carboidratos
+          }
+          
+          // Lipídeos
+          if (/azeite|oleo|manteiga|castanha|amendoim|nozes|amendoa|abacate|coco|linhaça|chia|gergelim|pasta de amendoim|oleaginosa/.test(nomeNorm)) {
+            return 'e5863a2d-695d-46a7-9ef5-d7e3cf87ee1c'; // Lipídeos
+          }
+          
+          // Frutas
+          if (/banana|maca|laranja|morango|uva|manga|mamao|melao|melancia|abacaxi|pera|pessego|kiwi|limao|acerola|goiaba|maracuja|framboesa|mirtilo|amora|fruta/.test(nomeNorm)) {
+            return 'c0a07056-794b-424a-acd6-14215b9be248'; // Frutas
+          }
+          
+          // Vegetais
+          if (/alface|tomate|cenoura|brocolis|couve|espinafre|pepino|abobrinha|berinjela|pimentao|cebola|alho|rucula|agriã|repolho|beterraba|vegetal|legume|salada|verdura/.test(nomeNorm)) {
+            return '92b02101-c685-4fd7-956d-51fd21673690'; // Vegetais
+          }
+          
+          // Laticínios
+          if (/leite|queijo|iogurte|requeijao|cream cheese|ricota|cottage|nata|creme de leite/.test(nomeNorm)) {
+            return 'b46fa5f1-7333-4313-a747-9ea6efbfe3a7'; // Laticínios
+          }
+          
+          // Default: Carboidratos (mais comum em dietas)
+          return 'dea776a3-f586-40bb-a945-6f466b8c3e31';
+        };
+
+        // Helper to infer protein origin
+        const inferirOrigemPtn = (nome: string): string => {
+          const nomeNorm = normalizeText(nome);
+          
+          if (/frango|carne|peixe|ovo|atum|sardinha|peito|patinho|file|tilapia|salmao|camarao|porco|peru|presunto|whey|albumina|caseina|leite|queijo|iogurte/.test(nomeNorm)) {
+            return 'animal';
+          }
+          
+          if (/feijao|lentilha|grao de bico|soja|tofu|quinoa|ervilha|amendoim|castanha/.test(nomeNorm)) {
+            return 'vegetal';
+          }
+          
+          return 'misto';
+        };
+
+        // Function to create new food automatically
+        const criarAlimentoAutomatico = async (nomeAlimento: string, quantidade: string): Promise<string | null> => {
+          try {
+            const tipoId = inferirTipoAlimento(nomeAlimento);
+            const origemPtn = inferirOrigemPtn(nomeAlimento);
+            
+            // Parse quantity to determine reference amount
+            const qtdMatch = quantidade.match(/[\d.,]+/);
+            const qtdReferencia = qtdMatch ? parseFloat(qtdMatch[0].replace(',', '.')) : 100;
+            
+            // Default nutritional values (can be edited later)
+            const { data: novoAlimento, error } = await supabase
+              .from('alimentos')
+              .insert({
+                nome: nomeAlimento.trim(),
+                tipo_id: tipoId,
+                origem_ptn: origemPtn,
+                quantidade_referencia_g: qtdReferencia || 100,
+                kcal_por_referencia: 100, // Valor padrão
+                ptn_por_referencia: 10,   // Valor padrão
+                cho_por_referencia: 10,   // Valor padrão
+                lip_por_referencia: 5,    // Valor padrão
+                info_adicional: 'Cadastrado automaticamente via importação de PDF',
+                autor: user.id
+              })
+              .select('id')
+              .single();
+
+            if (error) {
+              console.error('Erro ao criar alimento:', nomeAlimento, error);
+              return null;
+            }
+
+            alimentosCadastrados.push(nomeAlimento);
+            return novoAlimento.id;
+          } catch (err) {
+            console.error('Erro ao criar alimento automaticamente:', err);
+            return null;
+          }
+        };
 
         for (const refeicao of editableData.dieta.refeicoes) {
           const refeicaoNome = mapRefeicaoName(refeicao.nome);
@@ -415,7 +509,13 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           for (const alimento of refeicao.alimentos) {
             if (!alimento.nome.trim()) continue;
             
-            const alimentoId = findMatchingAlimento(alimento.nome);
+            let alimentoId = findMatchingAlimento(alimento.nome);
+            
+            // Se não encontrou, cria automaticamente
+            if (!alimentoId) {
+              alimentoId = await criarAlimentoAutomatico(alimento.nome, alimento.quantidade);
+            }
+            
             if (alimentoId) {
               // Parse quantity - extract number from string like "100g" or "2 unidades"
               const qtdMatch = alimento.quantidade.match(/[\d.,]+/);
@@ -427,8 +527,6 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                 quantidade: quantidade,
                 refeicao: refeicaoNome
               });
-            } else {
-              alimentosNaoEncontrados.push(`${alimento.nome} (${refeicao.nome})`);
             }
           }
         }
@@ -479,15 +577,18 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
         );
         const importados = itensToInsert.length;
         
+        if (alimentosCadastrados.length > 0) {
+          toast.info(
+            `${alimentosCadastrados.length} novo(s) alimento(s) cadastrado(s): ${alimentosCadastrados.slice(0, 3).join(', ')}${alimentosCadastrados.length > 3 ? ` e mais ${alimentosCadastrados.length - 3}` : ''}`
+          );
+        }
+        
         if (importados === totalAlimentos) {
           toast.success(`Todos os ${totalAlimentos} alimentos foram importados!`);
         } else if (importados > 0) {
-          toast.warning(
-            `${importados} de ${totalAlimentos} alimentos importados. Não encontrados: ${alimentosNaoEncontrados.slice(0, 3).join(', ')}${alimentosNaoEncontrados.length > 3 ? ` e mais ${alimentosNaoEncontrados.length - 3}` : ''}`
-          );
-          console.log('Alimentos não encontrados:', alimentosNaoEncontrados);
+          toast.success(`${importados} de ${totalAlimentos} alimentos importados com sucesso!`);
         } else if (totalAlimentos > 0) {
-          toast.error('Nenhum alimento foi encontrado no banco de dados. Verifique se os alimentos estão cadastrados.');
+          toast.error('Erro ao importar alimentos da dieta.');
         }
       }
 
