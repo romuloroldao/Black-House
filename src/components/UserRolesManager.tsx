@@ -24,9 +24,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Loader2, Search, Shield, User, Users } from "lucide-react";
+import { Loader2, Search, Shield, Trash2, User, Users } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 interface UserWithRole {
@@ -44,6 +55,8 @@ const UserRolesManager = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [updating, setUpdating] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [userToDelete, setUserToDelete] = useState<UserWithRole | null>(null);
 
   useEffect(() => {
     loadUsers();
@@ -142,6 +155,61 @@ const UserRolesManager = () => {
     }
   };
 
+  const handleDeleteUser = async () => {
+    if (!userToDelete) return;
+
+    // Prevent deleting yourself
+    if (userToDelete.id === user?.id) {
+      toast.error("Você não pode excluir a si mesmo");
+      setUserToDelete(null);
+      return;
+    }
+
+    // Prevent deleting the last coach
+    if (userToDelete.role === "coach") {
+      const coachesCount = users.filter((u) => u.role === "coach").length;
+      if (coachesCount <= 1) {
+        toast.error("Não é possível excluir o último coach do sistema.");
+        setUserToDelete(null);
+        return;
+      }
+    }
+
+    setDeleting(userToDelete.id);
+    try {
+      // Delete user role
+      const { error: roleError } = await supabase
+        .from("user_roles")
+        .delete()
+        .eq("user_id", userToDelete.id);
+
+      if (roleError) throw roleError;
+
+      // Delete profile if exists
+      await supabase
+        .from("profiles")
+        .delete()
+        .eq("id", userToDelete.id);
+
+      // Delete aluno record if exists (by email)
+      if (userToDelete.email) {
+        await supabase
+          .from("alunos")
+          .delete()
+          .eq("email", userToDelete.email);
+      }
+
+      setUsers((prev) => prev.filter((u) => u.id !== userToDelete.id));
+      toast.success(`Usuário "${userToDelete.display_name || userToDelete.email}" excluído com sucesso!`);
+    } catch (error: any) {
+      console.error("Error deleting user:", error);
+      toast.error("Erro ao excluir usuário: " + error.message);
+    } finally {
+      setDeleting(null);
+      setUserToDelete(null);
+    }
+  };
+
   const filteredUsers = users.filter(
     (u) =>
       u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -233,13 +301,14 @@ const UserRolesManager = () => {
                   <TableHead>Usuário</TableHead>
                   <TableHead>Papel Atual</TableHead>
                   <TableHead>Alterar Para</TableHead>
-                  <TableHead className="text-right">Desde</TableHead>
+                  <TableHead>Desde</TableHead>
+                  <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredUsers.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                       {searchTerm
                         ? "Nenhum usuário encontrado com esses critérios"
                         : "Nenhum usuário cadastrado"}
@@ -321,8 +390,23 @@ const UserRolesManager = () => {
                           </SelectContent>
                         </Select>
                       </TableCell>
-                      <TableCell className="text-right text-sm text-muted-foreground">
+                      <TableCell className="text-sm text-muted-foreground">
                         {new Date(u.created_at).toLocaleDateString("pt-BR")}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                          disabled={u.id === user?.id || deleting === u.id}
+                          onClick={() => setUserToDelete(u)}
+                        >
+                          {deleting === u.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))
@@ -372,6 +456,37 @@ const UserRolesManager = () => {
           </div>
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!userToDelete} onOpenChange={() => setUserToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir Usuário</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir o usuário{" "}
+              <strong>{userToDelete?.display_name || userToDelete?.email}</strong>?
+              <br /><br />
+              Esta ação irá remover:
+              <ul className="list-disc ml-4 mt-2">
+                <li>Papel do usuário no sistema</li>
+                <li>Perfil e avatar</li>
+                <li>Dados do aluno (se aplicável)</li>
+              </ul>
+              <br />
+              <strong className="text-destructive">Esta ação não pode ser desfeita.</strong>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteUser}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
