@@ -37,68 +37,87 @@ serve(async (req) => {
           {
             role: 'system',
             content: `Você é um assistente especializado em extrair dados de fichas de alunos de personal trainers/nutricionistas.
-            
-Extraia os seguintes dados do PDF em formato JSON:
+
+INSTRUÇÕES IMPORTANTES PARA EXTRAÇÃO:
+
+1. O PDF contém um plano alimentar com várias REFEIÇÕES (Refeição 1, Refeição 2, etc.)
+2. Cada refeição tem uma TABELA com colunas: Qtd (g/ml), Alimentos de preferência, Alimentos substitutos
+3. Extraia APENAS os alimentos da coluna "Alimentos de preferência" com suas quantidades
+4. Os alimentos podem ser:
+   - Alimentos específicos como "Whey Protein", "Pão de forma tradicional"
+   - Grupos genéricos como "Carnes e Proteínas", "Feijão e Leguminosas", "Vegetais A"
+   
+5. Para SUPLEMENTOS: procure tabelas com "Suplementação" ou "Fitoterápicos"
+6. Para FÁRMACOS: procure tabelas com "Fármacos" ou "Protocolos"
+7. ORIENTAÇÕES: texto com dicas gerais de alimentação
+
+Extraia os dados em formato JSON:
 
 {
   "aluno": {
-    "nome": "string",
-    "peso": number (em kg, apenas número),
-    "altura": number (em cm, apenas número, opcional),
+    "nome": "string (nome do aluno, ex: Nome: João Silva)",
+    "peso": number (peso em kg, apenas o número),
+    "altura": number (altura em cm, opcional),
     "idade": number (apenas número, opcional),
-    "objetivo": "string (opcional)"
+    "objetivo": "string (objetivo, opcional)"
   },
   "dieta": {
-    "nome": "string (nome do plano alimentar)",
-    "objetivo": "string",
+    "nome": "string (geralmente PLANO ALIMENTAR ou nome do plano)",
+    "objetivo": "string (estratégia ou objetivo)",
     "refeicoes": [
       {
-        "nome": "string (ex: Refeição 1, Café da manhã, etc)",
+        "nome": "Refeição 1",
         "alimentos": [
           {
-            "nome": "string",
-            "quantidade": "string (ex: 100g, 2 unidades, etc)"
+            "nome": "Whey Protein",
+            "quantidade": "30g"
+          },
+          {
+            "nome": "Pão de forma tradicional", 
+            "quantidade": "80g"
           }
         ]
       }
     ],
     "macros": {
-      "proteina": number (em gramas, opcional),
-      "carboidrato": number (em gramas, opcional),
-      "gordura": number (em gramas, opcional),
-      "calorias": number (kcal, opcional)
+      "proteina": number (PTN total em gramas),
+      "carboidrato": number (CHO total em gramas),
+      "gordura": number (LIP total em gramas),
+      "calorias": number (Kcal total)
     }
   },
   "suplementos": [
     {
-      "nome": "string",
-      "dosagem": "string",
-      "observacao": "string (opcional)"
+      "nome": "Creatina",
+      "dosagem": "10g",
+      "observacao": "Pré treino"
     }
   ],
   "farmacos": [
     {
-      "nome": "string",
-      "dosagem": "string",
-      "observacao": "string (opcional)"
+      "nome": "Testosterona",
+      "dosagem": "150mg",
+      "observacao": "1x a cada 7 dias"
     }
   ],
-  "orientacoes": "string (orientações gerais, opcional)"
+  "orientacoes": "string com todas as orientações/dicas"
 }
 
-IMPORTANTE:
-- Retorne APENAS o JSON válido, sem markdown ou explicações
-- Se algum dado não estiver presente, omita o campo ou use null
-- Separe suplementos de fármacos (medicamentos/hormônios)
-- Extraia todas as refeições encontradas
-- Mantenha os nomes dos alimentos como estão no documento`
+REGRAS CRÍTICAS:
+- Retorne APENAS o JSON válido, sem markdown, sem \`\`\` ou explicações
+- Use exatamente os nomes dos alimentos como aparecem no PDF
+- A quantidade DEVE incluir a unidade (g, ml, unidades)
+- Mantenha "Refeição 1", "Refeição 2" etc como nomes das refeições
+- Separe SUPLEMENTOS (Creatina, Whey, Vitaminas, Fitoterápicos) de FÁRMACOS (medicamentos, hormônios como Testosterona, Glifage)
+- Se um campo não existir, omita-o ou use null
+- Extraia TODAS as refeições do documento`
           },
           {
             role: 'user',
             content: [
               {
                 type: 'text',
-                text: 'Extraia os dados deste PDF de ficha de aluno:'
+                text: 'Analise este PDF de plano alimentar e extraia todos os dados estruturados. Preste atenção especial às tabelas de refeições, extraindo os alimentos com suas quantidades da coluna "Alimentos de preferência":'
               },
               {
                 type: 'image_url',
@@ -109,7 +128,7 @@ IMPORTANTE:
             ]
           }
         ],
-        max_tokens: 4096,
+        max_tokens: 8192,
         temperature: 0.1
       }),
     });
@@ -127,16 +146,41 @@ IMPORTANTE:
       throw new Error('Resposta vazia da IA');
     }
 
-    console.log('Resposta da IA:', content);
+    console.log('Resposta da IA (primeiros 2000 chars):', content.substring(0, 2000));
 
     // Parse JSON da resposta
     let parsedData;
     try {
-      // Remove possíveis marcadores de código
-      const cleanContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      // Remove possíveis marcadores de código e espaços
+      let cleanContent = content
+        .replace(/```json\n?/g, '')
+        .replace(/```\n?/g, '')
+        .replace(/^\s+|\s+$/g, '');
+      
+      // Tenta encontrar o JSON se houver texto antes/depois
+      const jsonMatch = cleanContent.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        cleanContent = jsonMatch[0];
+      }
+      
       parsedData = JSON.parse(cleanContent);
+      
+      // Validação básica
+      if (!parsedData.aluno) {
+        parsedData.aluno = { nome: 'Aluno Importado' };
+      }
+      if (!parsedData.aluno.nome) {
+        parsedData.aluno.nome = 'Aluno Importado';
+      }
+      
+      console.log('Dados extraídos - Aluno:', parsedData.aluno?.nome);
+      console.log('Dados extraídos - Refeições:', parsedData.dieta?.refeicoes?.length || 0);
+      console.log('Dados extraídos - Suplementos:', parsedData.suplementos?.length || 0);
+      console.log('Dados extraídos - Fármacos:', parsedData.farmacos?.length || 0);
+      
     } catch (parseError) {
       console.error('Erro ao fazer parse do JSON:', parseError);
+      console.error('Conteúdo que falhou:', content.substring(0, 1000));
       throw new Error('Não foi possível extrair dados estruturados do PDF');
     }
 

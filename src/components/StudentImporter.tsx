@@ -274,23 +274,87 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           .select('id, nome');
 
         const alimentosMap = new Map<string, string>();
+        const alimentosList: Array<{ id: string; nome: string; nomeNorm: string }> = [];
         (alimentosExistentes || []).forEach(a => {
-          alimentosMap.set(a.nome.toLowerCase().trim(), a.id);
+          const nomeNorm = a.nome.toLowerCase().trim()
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // Remove acentos
+          alimentosMap.set(nomeNorm, a.id);
+          alimentosList.push({ id: a.id, nome: a.nome, nomeNorm });
         });
 
-        // Helper function to find matching food
+        // Helper function to normalize text for comparison
+        const normalizeText = (text: string): string => {
+          return text.toLowerCase().trim()
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // Remove acentos
+            .replace(/[^a-z0-9\s]/g, ' ') // Remove caracteres especiais
+            .replace(/\s+/g, ' '); // Normaliza espaços
+        };
+
+        // Mapeamento de grupos genéricos para alimentos específicos
+        const gruposParaAlimentos: Record<string, string[]> = {
+          'carnes e proteinas': ['peito de frango', 'carne bovina', 'carne vermelha', 'patinho'],
+          'feijao e leguminosas': ['feijao', 'feijão', 'feijao carioca', 'feijao preto'],
+          'vegetais a': ['brocolis', 'alface', 'couve', 'espinafre', 'tomate'],
+          'vegetais b': ['cenoura', 'beterraba', 'abobora', 'chuchu'],
+          'paes e variedades': ['pao de forma', 'pao frances', 'tapioca'],
+          'personalizado - prot': ['peito de frango', 'carne bovina'],
+          'personalizado - carb': ['arroz branco', 'batata doce', 'macarrao'],
+          'personalizado - lip': ['azeite', 'oleaginosas', 'castanha'],
+        };
+
+        // Helper function to find matching food with improved algorithm
         const findMatchingAlimento = (nomeAlimento: string): string | null => {
-          const nomeNormalizado = nomeAlimento.toLowerCase().trim();
+          const nomeNormalizado = normalizeText(nomeAlimento);
           
-          // Exact match
+          // 1. Exact match
           if (alimentosMap.has(nomeNormalizado)) {
             return alimentosMap.get(nomeNormalizado)!;
           }
           
-          // Partial match
-          for (const [nome, id] of alimentosMap) {
-            if (nome.includes(nomeNormalizado) || nomeNormalizado.includes(nome)) {
-              return id;
+          // 2. Check if it's a generic group and map to first available food
+          for (const [grupo, opcoes] of Object.entries(gruposParaAlimentos)) {
+            if (nomeNormalizado.includes(grupo) || grupo.includes(nomeNormalizado)) {
+              for (const opcao of opcoes) {
+                const opcaoNorm = normalizeText(opcao);
+                for (const alimento of alimentosList) {
+                  if (alimento.nomeNorm.includes(opcaoNorm) || opcaoNorm.includes(alimento.nomeNorm)) {
+                    return alimento.id;
+                  }
+                }
+              }
+            }
+          }
+          
+          // 3. Word-based matching - find foods that share significant words
+          const palavrasAlimento = nomeNormalizado.split(' ').filter(p => p.length > 2);
+          let melhorMatch: { id: string; score: number } | null = null;
+          
+          for (const alimento of alimentosList) {
+            const palavrasBase = alimento.nomeNorm.split(' ').filter(p => p.length > 2);
+            let score = 0;
+            
+            for (const palavra of palavrasAlimento) {
+              for (const palavraBase of palavrasBase) {
+                if (palavraBase.includes(palavra) || palavra.includes(palavraBase)) {
+                  score += palavra.length; // Pontuação baseada no tamanho da palavra
+                }
+              }
+            }
+            
+            if (score > 0 && (!melhorMatch || score > melhorMatch.score)) {
+              melhorMatch = { id: alimento.id, score };
+            }
+          }
+          
+          // Retorna apenas se tiver um score mínimo significativo
+          if (melhorMatch && melhorMatch.score >= 4) {
+            return melhorMatch.id;
+          }
+          
+          // 4. Partial string match as fallback
+          for (const alimento of alimentosList) {
+            if (alimento.nomeNorm.includes(nomeNormalizado) || nomeNormalizado.includes(alimento.nomeNorm)) {
+              return alimento.id;
             }
           }
           
@@ -343,6 +407,8 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           refeicao: string;
         }> = [];
 
+        const alimentosNaoEncontrados: string[] = [];
+
         for (const refeicao of editableData.dieta.refeicoes) {
           const refeicaoNome = mapRefeicaoName(refeicao.nome);
           
@@ -361,6 +427,8 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                 quantidade: quantidade,
                 refeicao: refeicaoNome
               });
+            } else {
+              alimentosNaoEncontrados.push(`${alimento.nome} (${refeicao.nome})`);
             }
           }
         }
@@ -369,6 +437,7 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           const { error: itensError } = await supabase.from('itens_dieta').insert(itensToInsert);
           if (itensError) {
             console.error('Erro ao inserir itens da dieta:', itensError);
+            toast.error('Erro ao salvar alguns itens da dieta');
           }
         }
 
@@ -404,13 +473,21 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           }
         }
 
-        // Show warning if some foods weren't matched
+        // Show detailed feedback
         const totalAlimentos = editableData.dieta.refeicoes.reduce(
           (acc, r) => acc + r.alimentos.filter(a => a.nome.trim()).length, 0
         );
         const importados = itensToInsert.length;
-        if (importados < totalAlimentos) {
-          toast.warning(`${importados} de ${totalAlimentos} alimentos foram importados. Alguns alimentos não foram encontrados no banco de dados.`);
+        
+        if (importados === totalAlimentos) {
+          toast.success(`Todos os ${totalAlimentos} alimentos foram importados!`);
+        } else if (importados > 0) {
+          toast.warning(
+            `${importados} de ${totalAlimentos} alimentos importados. Não encontrados: ${alimentosNaoEncontrados.slice(0, 3).join(', ')}${alimentosNaoEncontrados.length > 3 ? ` e mais ${alimentosNaoEncontrados.length - 3}` : ''}`
+          );
+          console.log('Alimentos não encontrados:', alimentosNaoEncontrados);
+        } else if (totalAlimentos > 0) {
+          toast.error('Nenhum alimento foi encontrado no banco de dados. Verifique se os alimentos estão cadastrados.');
         }
       }
 
