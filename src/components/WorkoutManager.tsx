@@ -19,10 +19,12 @@ import {
   Play,
   Star,
   Calendar,
-  Dumbbell
+  Dumbbell,
+  FileDown
 } from "lucide-react";
 import WorkoutForm from "./WorkoutForm";
 import WorkoutTemplates from "./WorkoutTemplates";
+import { exportWorkoutToPdf, exportMultipleWorkoutsToPdf } from "@/utils/workoutPdfExport";
 
 const WorkoutManager = () => {
   const { toast } = useToast();
@@ -122,6 +124,78 @@ const WorkoutManager = () => {
     }
   };
 
+  const handleExportPdf = async (workoutId: string) => {
+    try {
+      const { data: treino, error } = await supabase
+        .from('treinos')
+        .select('*')
+        .eq('id', workoutId)
+        .single();
+
+      if (error) throw error;
+
+      exportWorkoutToPdf({
+        id: treino.id,
+        nome: treino.nome,
+        descricao: treino.descricao || '',
+        categoria: treino.categoria,
+        dificuldade: treino.dificuldade,
+        duracao: treino.duracao,
+        exercicios: treino.exercicios as any[] || [],
+        tags: treino.tags || [],
+      });
+
+      toast({
+        title: "PDF exportado!",
+        description: "O treino foi exportado com sucesso.",
+      });
+    } catch (error) {
+      console.error('Erro ao exportar PDF:', error);
+      toast({
+        title: "Erro ao exportar",
+        description: "Não foi possível exportar o treino.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleExportAllPdf = async () => {
+    try {
+      const { data: treinos, error } = await supabase
+        .from('treinos')
+        .select('*')
+        .eq('is_template', false)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const treinosFormatados = treinos?.map(t => ({
+        id: t.id,
+        nome: t.nome,
+        descricao: t.descricao || '',
+        categoria: t.categoria,
+        dificuldade: t.dificuldade,
+        duracao: t.duracao,
+        exercicios: t.exercicios as any[] || [],
+        tags: t.tags || [],
+      })) || [];
+
+      exportMultipleWorkoutsToPdf(treinosFormatados);
+
+      toast({
+        title: "PDF exportado!",
+        description: `${treinosFormatados.length} treinos exportados com sucesso.`,
+      });
+    } catch (error) {
+      console.error('Erro ao exportar PDFs:', error);
+      toast({
+        title: "Erro ao exportar",
+        description: "Não foi possível exportar os treinos.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const renderWorkoutCard = (workout: any) => (
     <Card key={workout.id} className="group hover:shadow-elevated transition-smooth">
       <CardHeader className="pb-3">
@@ -146,10 +220,20 @@ const WorkoutManager = () => {
               size="icon"
               className="h-8 w-8"
               onClick={() => handleEditWorkout(workout)}
+              title="Editar"
             >
               <Edit3 className="w-4 h-4" />
             </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8"
+              onClick={() => handleExportPdf(workout.id)}
+              title="Exportar PDF"
+            >
+              <FileDown className="w-4 h-4" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8" title="Copiar">
               <Copy className="w-4 h-4" />
             </Button>
             <Button 
@@ -248,10 +332,16 @@ const WorkoutManager = () => {
             Crie, edite e organize seus treinos personalizados
           </p>
         </div>
-        <Button onClick={handleCreateNew} className="shadow-glow">
-          <Plus className="w-4 h-4 mr-2" />
-          Novo Treino
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={handleExportAllPdf}>
+            <FileDown className="w-4 h-4 mr-2" />
+            Exportar Todos
+          </Button>
+          <Button onClick={handleCreateNew} className="shadow-glow">
+            <Plus className="w-4 h-4 mr-2" />
+            Novo Treino
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="workouts" className="space-y-6">
