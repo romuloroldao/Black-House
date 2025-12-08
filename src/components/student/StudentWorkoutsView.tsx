@@ -6,13 +6,44 @@ import { Separator } from "@/components/ui/separator";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Dumbbell, Clock, Target, ChevronDown, Play, Weight } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { Dumbbell, Clock, Target, ChevronDown, Play, Weight, FileDown } from "lucide-react";
+import { exportWorkoutToPdf } from "@/utils/workoutPdfExport";
 
 const StudentWorkoutsView = () => {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [treinos, setTreinos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedWorkouts, setExpandedWorkouts] = useState<Set<string>>(new Set());
+  const [studentName, setStudentName] = useState<string>("");
+
+  const handleExportPdf = (treino: any) => {
+    try {
+      exportWorkoutToPdf({
+        id: treino.id,
+        nome: treino.nome,
+        descricao: treino.descricao,
+        categoria: treino.categoria,
+        dificuldade: treino.dificuldade,
+        duracao: treino.duracao,
+        exercicios: treino.exercicios,
+        tags: treino.tags,
+        dataExpiracao: treino.dataExpiracao,
+      }, studentName);
+      toast({
+        title: "PDF exportado!",
+        description: "Seu treino foi exportado com sucesso.",
+      });
+    } catch (error) {
+      console.error("Erro ao exportar PDF:", error);
+      toast({
+        title: "Erro ao exportar",
+        description: "Não foi possível exportar o treino.",
+        variant: "destructive",
+      });
+    }
+  };
 
   useEffect(() => {
     if (user) {
@@ -25,11 +56,13 @@ const StudentWorkoutsView = () => {
       setLoading(true);
       const { data: aluno } = await supabase
         .from("alunos")
-        .select("id")
+        .select("id, nome")
         .eq("email", user?.email)
         .maybeSingle();
 
       if (aluno) {
+        setStudentName(aluno.nome || user?.email || "");
+        
         const { data: alunosTreinos } = await supabase
           .from("alunos_treinos")
           .select(`
@@ -122,7 +155,7 @@ const StudentWorkoutsView = () => {
                     <CardTitle className="text-2xl">{treino.nome}</CardTitle>
                     <p className="text-muted-foreground mt-2">{treino.descricao}</p>
                   </div>
-                  <div className="flex gap-2 ml-4">
+                  <div className="flex gap-2 ml-4 items-start">
                     <Badge variant="premium">Ativo</Badge>
                     {diasRestantes !== null && (
                       <Badge 
@@ -135,6 +168,15 @@ const StudentWorkoutsView = () => {
                         }
                       </Badge>
                     )}
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => handleExportPdf(treino)}
+                      className="shrink-0"
+                    >
+                      <FileDown className="h-4 w-4 mr-1" />
+                      PDF
+                    </Button>
                   </div>
                 </div>
               </CardHeader>
