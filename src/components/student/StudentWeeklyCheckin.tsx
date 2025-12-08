@@ -8,6 +8,7 @@ import { Slider } from "@/components/ui/slider";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
+import escalaBristol from "@/assets/escala-bristol.jpg";
 
 export default function StudentWeeklyCheckin() {
   const [loading, setLoading] = useState(false);
@@ -655,6 +656,13 @@ export default function StudentWeeklyCheckin() {
 
             <div className="space-y-3">
               <Label>24. Formato das fezes (Escala de Bristol)</Label>
+              <div className="my-4 rounded-lg overflow-hidden border">
+                <img 
+                  src={escalaBristol} 
+                  alt="Escala de Bristol - Tipos de fezes de 1 a 7" 
+                  className="w-full max-w-md mx-auto"
+                />
+              </div>
               <RadioGroup
                 value={formData.formato_fezes}
                 onValueChange={(value) => setFormData({ ...formData, formato_fezes: value })}
