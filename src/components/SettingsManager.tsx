@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { User, Bell, Key, Palette, Eye, EyeOff, Camera, Loader2 } from "lucide-react";
+import { User, Bell, Key, Palette, Eye, EyeOff, Camera, Loader2, Shield } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -26,6 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import UserRolesManager from "./UserRolesManager";
 
 const SettingsManager = () => {
   const { user } = useAuth();
@@ -339,10 +340,14 @@ const SettingsManager = () => {
       </div>
 
       <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-4 lg:w-[500px]">
+        <TabsList className="grid w-full grid-cols-5 lg:w-[620px]">
           <TabsTrigger value="profile" className="gap-2">
             <User className="h-4 w-4" />
             <span className="hidden sm:inline">Perfil</span>
+          </TabsTrigger>
+          <TabsTrigger value="users" className="gap-2">
+            <Shield className="h-4 w-4" />
+            <span className="hidden sm:inline">Usuários</span>
           </TabsTrigger>
           <TabsTrigger value="notifications" className="gap-2">
             <Bell className="h-4 w-4" />
@@ -357,6 +362,10 @@ const SettingsManager = () => {
             <span className="hidden sm:inline">Aparência</span>
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="users">
+          <UserRolesManager />
+        </TabsContent>
 
         <TabsContent value="profile" className="space-y-4">
           <Card>
