@@ -133,14 +133,6 @@ const StudentManager = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Get all users with 'coach' role to exclude them from student list
-      const { data: coachRoles } = await supabase
-        .from('user_roles')
-        .select('user_id')
-        .eq('role', 'coach');
-
-      const coachUserIds = coachRoles?.map(r => r.user_id) || [];
-
       // Get all alunos for this coach
       const { data, error } = await supabase
         .from('alunos')
@@ -150,13 +142,14 @@ const StudentManager = () => {
 
       if (error) throw error;
 
-      // Filter out any alunos whose email matches a coach's auth user
-      // We need to check if the aluno email matches any user who has coach role
-      let filteredData = data || [];
-      
-      // If we have coach user IDs, we need to check their emails
-      // For now, we'll exclude the coach's own email
-      filteredData = filteredData.filter(aluno => aluno.email !== user.email);
+      // Get emails of all users with 'coach' role to exclude them from student list
+      const { data: coachEmailsData } = await supabase.rpc('get_coach_emails');
+      const coachEmails = (coachEmailsData || []).map((row: { email: string }) => row.email?.toLowerCase());
+
+      // Filter out any alunos whose email matches a coach's email
+      let filteredData = (data || []).filter(aluno => 
+        !coachEmails.includes(aluno.email?.toLowerCase())
+      );
 
       const alunosFormatados: Student[] = filteredData.map(aluno => ({
         id: aluno.id,
