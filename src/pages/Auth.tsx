@@ -29,6 +29,20 @@ const signInSchema = z.object({
   password: z.string().min(1, "Senha é obrigatória"),
 });
 
+// Schema for forgot password
+const forgotPasswordSchema = z.object({
+  email: z.string().email("Email inválido"),
+});
+
+// Schema for reset password
+const resetPasswordSchema = z.object({
+  password: z.string().min(6, "Senha deve ter pelo menos 6 caracteres").max(72, "Senha muito longa"),
+  confirmPassword: z.string()
+}).refine((data) => data.password === data.confirmPassword, {
+  message: "As senhas não coincidem",
+  path: ["confirmPassword"],
+});
+
 const Auth = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -37,6 +51,10 @@ const Auth = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [activeTab, setActiveTab] = useState<'signin' | 'signup'>('signin');
   const [signupSuccess, setSignupSuccess] = useState(false);
+  const [forgotPasswordMode, setForgotPasswordMode] = useState(false);
+  const [resetPasswordMode, setResetPasswordMode] = useState(false);
+  const [forgotPasswordSuccess, setForgotPasswordSuccess] = useState(false);
+  const [resetPasswordSuccess, setResetPasswordSuccess] = useState(false);
   
   // Form states
   const [nome, setNome] = useState('');
@@ -49,12 +67,21 @@ const Auth = () => {
   const [passwordStrength, setPasswordStrength] = useState(0);
 
   useEffect(() => {
-    // Check if already authenticated
+    // Check if already authenticated and handle password reset
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         navigate('/');
       }
     });
+
+    // Check URL for password reset flow
+    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+    const type = hashParams.get('type');
+    const accessToken = hashParams.get('access_token');
+    
+    if (type === 'recovery' && accessToken) {
+      setResetPasswordMode(true);
+    }
   }, [navigate]);
 
   useEffect(() => {
@@ -194,7 +221,351 @@ const Auth = () => {
     setConfirmPassword('');
     setErrors({});
     setSignupSuccess(false);
+    setForgotPasswordSuccess(false);
+    setResetPasswordSuccess(false);
   };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrors({});
+    
+    // Validate
+    const result = forgotPasswordSchema.safeParse({ email });
+    if (!result.success) {
+      const fieldErrors: Record<string, string> = {};
+      result.error.errors.forEach((err) => {
+        if (err.path[0]) {
+          fieldErrors[err.path[0] as string] = err.message;
+        }
+      });
+      setErrors(fieldErrors);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const redirectUrl = `${window.location.origin}/auth`;
+      
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: redirectUrl,
+      });
+
+      if (error) throw error;
+
+      setForgotPasswordSuccess(true);
+      toast({
+        title: "Email enviado!",
+        description: "Verifique sua caixa de entrada para redefinir sua senha.",
+      });
+      
+    } catch (error: any) {
+      toast({
+        title: "Erro ao enviar email",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrors({});
+    
+    // Validate
+    const result = resetPasswordSchema.safeParse({ password, confirmPassword });
+    if (!result.success) {
+      const fieldErrors: Record<string, string> = {};
+      result.error.errors.forEach((err) => {
+        if (err.path[0]) {
+          fieldErrors[err.path[0] as string] = err.message;
+        }
+      });
+      setErrors(fieldErrors);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      const { error } = await supabase.auth.updateUser({
+        password: password,
+      });
+
+      if (error) throw error;
+
+      setResetPasswordSuccess(true);
+      toast({
+        title: "Senha alterada com sucesso!",
+        description: "Agora você pode fazer login com sua nova senha.",
+      });
+      
+      // Clear the URL hash
+      window.history.replaceState(null, '', window.location.pathname);
+      
+    } catch (error: any) {
+      toast({
+        title: "Erro ao alterar senha",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Success state after password reset
+  if (resetPasswordSuccess) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted p-4">
+        <Card className="w-full max-w-md border-primary/20">
+          <CardContent className="pt-8 pb-8 text-center space-y-6">
+            <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+              <Check className="w-8 h-8 text-primary" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-foreground mb-2">Senha alterada!</h2>
+              <p className="text-muted-foreground">
+                Sua senha foi redefinida com sucesso.
+              </p>
+            </div>
+            <Button 
+              onClick={() => { 
+                resetForm(); 
+                setResetPasswordMode(false);
+                setActiveTab('signin'); 
+              }}
+              className="w-full"
+            >
+              Ir para Login
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Reset password form
+  if (resetPasswordMode) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted p-4">
+        <div className="w-full max-w-md space-y-6">
+          {/* Logo */}
+          <div className="text-center space-y-4">
+            <div className="flex justify-center">
+              <img src={logoWhite} alt="Black House" className="h-20 w-auto" />
+            </div>
+          </div>
+
+          <Card className="border-border/50 shadow-card">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-xl">Redefinir sua senha</CardTitle>
+              <CardDescription>Digite sua nova senha abaixo</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleResetPassword} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="new-password" className="flex items-center gap-2">
+                    <Lock className="w-4 h-4 text-muted-foreground" />
+                    Nova senha
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="new-password"
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="Mínimo 6 caracteres"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      disabled={loading}
+                      className={errors.password ? 'border-destructive pr-10' : 'pr-10'}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  {password && (
+                    <div className="space-y-1">
+                      <Progress value={passwordStrength} className="h-1" />
+                      <p className={`text-xs ${
+                        passwordStrength <= 25 ? 'text-destructive' :
+                        passwordStrength <= 50 ? 'text-warning' :
+                        'text-primary'
+                      }`}>
+                        Força: {getPasswordStrengthText()}
+                      </p>
+                    </div>
+                  )}
+                  {errors.password && (
+                    <p className="text-xs text-destructive flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" />
+                      {errors.password}
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="confirm-new-password" className="flex items-center gap-2">
+                    <Lock className="w-4 h-4 text-muted-foreground" />
+                    Confirmar nova senha
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="confirm-new-password"
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      placeholder="Digite a senha novamente"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      disabled={loading}
+                      className={errors.confirmPassword ? 'border-destructive pr-10' : 'pr-10'}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  {confirmPassword && password === confirmPassword && (
+                    <p className="text-xs text-primary flex items-center gap-1">
+                      <Check className="w-3 h-3" />
+                      Senhas coincidem
+                    </p>
+                  )}
+                  {errors.confirmPassword && (
+                    <p className="text-xs text-destructive flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" />
+                      {errors.confirmPassword}
+                    </p>
+                  )}
+                </div>
+
+                <Button 
+                  type="submit" 
+                  className="w-full shadow-glow" 
+                  disabled={loading}
+                  size="lg"
+                >
+                  {loading ? 'Salvando...' : 'Salvar nova senha'}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  // Success state after forgot password request
+  if (forgotPasswordSuccess) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted p-4">
+        <Card className="w-full max-w-md border-primary/20">
+          <CardContent className="pt-8 pb-8 text-center space-y-6">
+            <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+              <Mail className="w-8 h-8 text-primary" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-foreground mb-2">Email enviado!</h2>
+              <p className="text-muted-foreground">
+                Enviamos um link de recuperação para <strong className="text-foreground">{email}</strong>
+              </p>
+            </div>
+            <div className="bg-muted/50 rounded-lg p-4 text-sm text-muted-foreground">
+              <p>Verifique sua caixa de entrada e clique no link para redefinir sua senha.</p>
+              <p className="mt-2">Não recebeu? Verifique a pasta de spam.</p>
+            </div>
+            <div className="space-y-2">
+              <Button 
+                onClick={() => { resetForm(); setForgotPasswordMode(false); setActiveTab('signin'); }}
+                className="w-full"
+              >
+                Voltar ao Login
+              </Button>
+              <Button 
+                variant="ghost" 
+                onClick={() => setForgotPasswordSuccess(false)}
+                className="w-full"
+              >
+                Tentar outro email
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Forgot password form
+  if (forgotPasswordMode) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted p-4">
+        <div className="w-full max-w-md space-y-6">
+          {/* Logo */}
+          <div className="text-center space-y-4">
+            <div className="flex justify-center">
+              <img src={logoWhite} alt="Black House" className="h-20 w-auto" />
+            </div>
+          </div>
+
+          <Card className="border-border/50 shadow-card">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-xl">Esqueceu sua senha?</CardTitle>
+              <CardDescription>Digite seu email para receber um link de recuperação</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleForgotPassword} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="forgot-email" className="flex items-center gap-2">
+                    <Mail className="w-4 h-4 text-muted-foreground" />
+                    Email
+                  </Label>
+                  <Input
+                    id="forgot-email"
+                    type="email"
+                    placeholder="seu@email.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    disabled={loading}
+                    className={errors.email ? 'border-destructive' : ''}
+                  />
+                  {errors.email && (
+                    <p className="text-xs text-destructive flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" />
+                      {errors.email}
+                    </p>
+                  )}
+                </div>
+
+                <Button 
+                  type="submit" 
+                  className="w-full shadow-glow" 
+                  disabled={loading}
+                  size="lg"
+                >
+                  {loading ? 'Enviando...' : 'Enviar link de recuperação'}
+                </Button>
+
+                <Button 
+                  type="button"
+                  variant="ghost" 
+                  onClick={() => { resetForm(); setForgotPasswordMode(false); }}
+                  className="w-full"
+                >
+                  Voltar ao login
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   // Success state after signup
   if (signupSuccess) {
@@ -346,6 +717,16 @@ const Auth = () => {
                   >
                     {loading ? 'Entrando...' : 'Entrar'}
                   </Button>
+
+                  <div className="text-center">
+                    <button
+                      type="button"
+                      onClick={() => { resetForm(); setForgotPasswordMode(true); }}
+                      className="text-sm text-muted-foreground hover:text-primary transition-colors"
+                    >
+                      Esqueceu sua senha?
+                    </button>
+                  </div>
                 </form>
               </TabsContent>
               
