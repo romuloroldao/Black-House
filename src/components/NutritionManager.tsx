@@ -52,40 +52,30 @@ const NutritionManager = () => {
   }
 
   function calcularSubstituicoes(alimentoSelecionado: Alimento): Substituto[] {
-    // Determinar nutriente dominante baseado no tipo
-    let nutrienteDominante: keyof Pick<Alimento, 'ptn_por_referencia' | 'cho_por_referencia' | 'lip_por_referencia'> = 'ptn_por_referencia';
+    // Usar KCAL como base de substituição (igual à planilha)
+    const kcalOriginalPor100g = (alimentoSelecionado.kcal_por_referencia / alimentoSelecionado.quantidade_referencia_g) * 100;
     
-    // Analisar qual macronutriente é dominante
-    const maxMacro = Math.max(
-      alimentoSelecionado.ptn_por_referencia,
-      alimentoSelecionado.cho_por_referencia,
-      alimentoSelecionado.lip_por_referencia
-    );
-    
-    if (maxMacro === alimentoSelecionado.cho_por_referencia) nutrienteDominante = 'cho_por_referencia';
-    else if (maxMacro === alimentoSelecionado.lip_por_referencia) nutrienteDominante = 'lip_por_referencia';
-
-    const valorOriginal = alimentoSelecionado[nutrienteDominante];
-    const quantidadeOriginal = alimentoSelecionado.quantidade_referencia_g;
-
-    if (valorOriginal === 0) return [];
+    if (kcalOriginalPor100g === 0) return [];
 
     return alimentos
       .filter(a => 
         a.tipo_id === alimentoSelecionado.tipo_id && 
         a.nome !== alimentoSelecionado.nome &&
-        a[nutrienteDominante] > 0
+        a.kcal_por_referencia > 0
       )
       .map(sub => {
-        const valorSub = sub[nutrienteDominante];
-        const qtdEquivalente = ((valorOriginal * quantidadeOriginal) / valorSub).toFixed(1);
+        // Fórmula: Qtd_B = Qtd_A × (kcal_A / kcal_B)
+        // Para 100g do alimento original, quanto do substituto é necessário?
+        const kcalSubPor100g = (sub.kcal_por_referencia / sub.quantidade_referencia_g) * 100;
+        const qtdEquivalente = (kcalOriginalPor100g / kcalSubPor100g) * 100;
+        
         return {
           nome: sub.nome,
-          quantidade: qtdEquivalente,
-          nutrienteDominante: nutrienteDominante === 'ptn_por_referencia' ? 'Proteínas' : 
-                             nutrienteDominante === 'cho_por_referencia' ? 'Carboidratos' : 'Lipídios'
+          quantidade: qtdEquivalente.toFixed(0),
+          nutrienteDominante: 'Kcal'
         };
       })
+      .sort((a, b) => Math.abs(parseFloat(a.quantidade) - 100) - Math.abs(parseFloat(b.quantidade) - 100))
       .slice(0, 3); // Limitar a 3 substitutos
   }
 

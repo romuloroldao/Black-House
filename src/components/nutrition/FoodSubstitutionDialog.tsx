@@ -62,7 +62,7 @@ export default function FoodSubstitutionDialog({
   const calcularSubstituicoes = () => {
     if (!alimentoAtual) return;
 
-    // Calcular valores do alimento atual
+    // Calcular valores do alimento atual para a quantidade especificada
     const fatorAtual = quantidadeAtual / alimentoAtual.quantidade_referencia_g;
     const kcalAtual = alimentoAtual.kcal_por_referencia * fatorAtual;
     const choAtual = alimentoAtual.cho_por_referencia * fatorAtual;
@@ -75,33 +75,38 @@ export default function FoodSubstitutionDialog({
     );
 
     // Calcular substituições
-    const novasSubstituicoes: Substituicao[] = alimentosDoMesmoGrupo.map((alimento) => {
-      let quantidadeEquivalente: number;
-      let formula: string;
+    const novasSubstituicoes: Substituicao[] = alimentosDoMesmoGrupo
+      .filter((alimento) => {
+        if (criterio === "kcal") return alimento.kcal_por_referencia > 0;
+        return alimento.cho_por_referencia > 0;
+      })
+      .map((alimento) => {
+        let quantidadeEquivalente: number;
+        let formula: string;
 
-      if (criterio === "kcal") {
-        // qtd_B = qtd_A × (kcal_A / kcal_B)
-        const kcalPor100g = alimento.kcal_por_referencia / alimento.quantidade_referencia_g * 100;
-        quantidadeEquivalente = (kcalAtual / kcalPor100g) * 100;
-        formula = `${quantidadeAtual}g × (${kcalAtual.toFixed(1)} kcal / ${kcalPor100g.toFixed(1)} kcal/100g)`;
-      } else {
-        // qtd_B = qtd_A × (CHO_A / CHO_B)
-        const choPor100g = alimento.cho_por_referencia / alimento.quantidade_referencia_g * 100;
-        quantidadeEquivalente = choAtual === 0 || choPor100g === 0 
-          ? 0 
-          : (choAtual / choPor100g) * 100;
-        formula = `${quantidadeAtual}g × (${choAtual.toFixed(1)}g CHO / ${choPor100g.toFixed(1)}g CHO/100g)`;
-      }
+        if (criterio === "kcal") {
+          // Fórmula correta: Qtd_B = kcal_A / (kcal_B / qtd_ref_B)
+          const kcalSubPorGrama = alimento.kcal_por_referencia / alimento.quantidade_referencia_g;
+          quantidadeEquivalente = kcalAtual / kcalSubPorGrama;
+          formula = `${kcalAtual.toFixed(1)} kcal ÷ ${kcalSubPorGrama.toFixed(2)} kcal/g = ${quantidadeEquivalente.toFixed(0)}g`;
+        } else {
+          // Fórmula correta: Qtd_B = CHO_A / (CHO_B / qtd_ref_B)
+          const choSubPorGrama = alimento.cho_por_referencia / alimento.quantidade_referencia_g;
+          quantidadeEquivalente = choAtual === 0 || choSubPorGrama === 0 
+            ? 0 
+            : choAtual / choSubPorGrama;
+          formula = `${choAtual.toFixed(1)}g CHO ÷ ${choSubPorGrama.toFixed(2)}g CHO/g = ${quantidadeEquivalente.toFixed(0)}g`;
+        }
 
-      return {
-        alimento,
-        quantidadeEquivalente,
-        criterio,
-        formula,
-      };
-    });
+        return {
+          alimento,
+          quantidadeEquivalente,
+          criterio,
+          formula,
+        };
+      });
 
-    // Ordenar por proximidade de quantidade
+    // Ordenar por proximidade de quantidade à original
     novasSubstituicoes.sort((a, b) => {
       const diffA = Math.abs(a.quantidadeEquivalente - quantidadeAtual);
       const diffB = Math.abs(b.quantidadeEquivalente - quantidadeAtual);
