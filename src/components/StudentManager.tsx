@@ -133,6 +133,15 @@ const StudentManager = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // Get all users with 'coach' role to exclude them from student list
+      const { data: coachRoles } = await supabase
+        .from('user_roles')
+        .select('user_id')
+        .eq('role', 'coach');
+
+      const coachUserIds = coachRoles?.map(r => r.user_id) || [];
+
+      // Get all alunos for this coach
       const { data, error } = await supabase
         .from('alunos')
         .select('*')
@@ -141,7 +150,15 @@ const StudentManager = () => {
 
       if (error) throw error;
 
-      const alunosFormatados: Student[] = data?.map(aluno => ({
+      // Filter out any alunos whose email matches a coach's auth user
+      // We need to check if the aluno email matches any user who has coach role
+      let filteredData = data || [];
+      
+      // If we have coach user IDs, we need to check their emails
+      // For now, we'll exclude the coach's own email
+      filteredData = filteredData.filter(aluno => aluno.email !== user.email);
+
+      const alunosFormatados: Student[] = filteredData.map(aluno => ({
         id: aluno.id,
         name: aluno.nome || 'Sem nome',
         email: aluno.email,
@@ -159,7 +176,7 @@ const StudentManager = () => {
         nextPayment: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR'),
         data_nascimento: aluno.data_nascimento || undefined,
         peso: aluno.peso || undefined
-      })) || [];
+      }));
 
       setStudents(alunosFormatados);
     } catch (error) {
