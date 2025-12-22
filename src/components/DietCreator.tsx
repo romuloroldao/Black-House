@@ -269,36 +269,32 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
     if (!item.alimento) return [];
     
     const alimento = item.alimento;
-    let nutrienteDominante: keyof Pick<Alimento, 'ptn_por_referencia' | 'cho_por_referencia' | 'lip_por_referencia'> = 'ptn_por_referencia';
     
-    const maxMacro = Math.max(
-      alimento.ptn_por_referencia,
-      alimento.cho_por_referencia,
-      alimento.lip_por_referencia
-    );
+    // Calcular kcal do alimento atual na quantidade especificada
+    const fatorAtual = item.quantidade / alimento.quantidade_referencia_g;
+    const kcalAtual = alimento.kcal_por_referencia * fatorAtual;
     
-    if (maxMacro === alimento.cho_por_referencia) nutrienteDominante = 'cho_por_referencia';
-    else if (maxMacro === alimento.lip_por_referencia) nutrienteDominante = 'lip_por_referencia';
-
-    const valorOriginal = alimento[nutrienteDominante];
-    if (valorOriginal === 0) return [];
+    if (kcalAtual === 0) return [];
 
     return alimentos
       .filter(a => 
         a.tipo_id === alimento.tipo_id && 
         a.id !== alimento.id &&
-        a[nutrienteDominante] > 0
+        a.kcal_por_referencia > 0
       )
       .map(sub => {
-        const valorSub = sub[nutrienteDominante];
-        const qtdEquivalente = (item.quantidade * valorOriginal) / valorSub;
+        // Fórmula: Qtd_B = (kcal_A / (kcal_B / qtd_ref_B)) 
+        // Ou seja: quanto do substituto para ter as mesmas kcal
+        const kcalSubPorGrama = sub.kcal_por_referencia / sub.quantidade_referencia_g;
+        const qtdEquivalente = kcalAtual / kcalSubPorGrama;
+        
         return {
           nome: sub.nome,
-          quantidade: Math.round(qtdEquivalente * 10) / 10,
-          nutriente: nutrienteDominante === 'ptn_por_referencia' ? 'Proteínas' : 
-                    nutrienteDominante === 'cho_por_referencia' ? 'Carboidratos' : 'Lipídios'
+          quantidade: Math.round(qtdEquivalente),
+          nutriente: 'Kcal'
         };
       })
+      .sort((a, b) => Math.abs(a.quantidade - item.quantidade) - Math.abs(b.quantidade - item.quantidade))
       .slice(0, 3);
   };
 
