@@ -34,7 +34,8 @@ import {
   UsersRound,
   Megaphone,
   CalendarDays,
-  Menu
+  Menu,
+  Link2
 } from "lucide-react";
 
 interface SidebarProps {
@@ -314,6 +315,11 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       id: "announcements",
       label: "Avisos em Massa",
       icon: Megaphone,
+    },
+    {
+      id: "user-linking",
+      label: "Vincular Usuários",
+      icon: Link2,
     }
   ];
 

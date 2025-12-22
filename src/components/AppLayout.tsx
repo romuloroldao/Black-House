@@ -19,6 +19,7 @@ import { ClassGroupManager } from "./ClassGroupManager";
 import { AnnouncementManager } from "./AnnouncementManager";
 import { EventsCalendar } from "./EventsCalendar";
 import SettingsManager from "./SettingsManager";
+import UserLinkingManager from "./UserLinkingManager";
 
 const AppLayout = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -71,6 +72,8 @@ const AppLayout = () => {
         return <div className="p-6"><AnnouncementManager /></div>;
       case "events":
         return <div className="p-6"><EventsCalendar /></div>;
+      case "user-linking":
+        return <div className="p-6"><UserLinkingManager /></div>;
       case "analytics":
         return <div className="p-6"><h1 className="text-3xl font-bold">Análises</h1><p className="text-muted-foreground">Análises detalhadas em desenvolvimento...</p></div>;
       case "settings":
