@@ -290,16 +290,115 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
             .replace(/\s+/g, ' '); // Normaliza espaços
         };
 
+        // SISTEMA DE NORMALIZAÇÃO: alimentos que são nutricionalmente equivalentes
+        // Ex: ovo cozido, ovo mexido, ovo inteiro → todos mapeiam para "ovo"
+        const alimentosEquivalentes: Record<string, string[]> = {
+          'ovo': [
+            'ovo cozido', 'ovo mexido', 'ovo inteiro', 'ovo frito', 'ovo pochê', 
+            'ovo poche', 'ovo escalfado', 'ovo omelet', 'omelete', 'ovos', 
+            'clara de ovo', 'gema de ovo', 'ovo de galinha', '1un=45g'
+          ],
+          'frango': [
+            'peito de frango', 'frango grelhado', 'frango cozido', 'frango desfiado',
+            'file de frango', 'filé de frango', 'coxa de frango', 'sobrecoxa de frango',
+            'frango assado', 'frango na chapa'
+          ],
+          'carne vermelha': [
+            'carne bovina', 'carne de boi', 'patinho', 'alcatra', 'maminha', 
+            'file mignon', 'filé mignon', 'contrafile', 'picanha', 'lagarto',
+            'coxao mole', 'coxao duro', 'acem', 'acém', 'carne moida', 'carne moída',
+            'carne vermelha magra', 'carne magra'
+          ],
+          'arroz': [
+            'arroz branco', 'arroz integral', 'arroz cozido', 'arroz parboilizado',
+            'arroz 7 graos', 'arroz negro', 'arroz agulhinha'
+          ],
+          'batata': [
+            'batata doce', 'batata inglesa', 'batata cozida', 'batata assada',
+            'pure de batata', 'purê de batata', 'batata baroa', 'batata yacon'
+          ],
+          'pao': [
+            'pao de forma', 'pão de forma', 'pao frances', 'pão francês', 
+            'pao integral', 'pão integral', 'pao de forma tradicional',
+            'torrada', 'pao de forma light'
+          ],
+          'queijo': [
+            'queijo branco', 'queijo minas', 'queijo cottage', 'queijo coalho',
+            'queijo mussarela', 'mussarela', 'muçarela', 'queijo prato',
+            'queijo ricota', 'ricota'
+          ],
+          'iogurte': [
+            'iogurte natural', 'iogurte grego', 'iogurte desnatado', 'iogurte integral',
+            'iogurte zero', 'iogurte sem lactose', 'iogurte proteico'
+          ],
+          'leite': [
+            'leite integral', 'leite desnatado', 'leite semi desnatado',
+            'leite sem lactose', 'leite zero lactose'
+          ],
+          'feijao': [
+            'feijao carioca', 'feijão carioca', 'feijao preto', 'feijão preto',
+            'feijao branco', 'feijao cozido', 'feijao e leguminosas'
+          ],
+          'banana': [
+            'banana prata', 'banana nanica', 'banana da terra', 'banana madura',
+            'banana verde', 'banana congelada'
+          ],
+          'azeite': [
+            'azeite de oliva', 'azeite extra virgem', 'azeite virgem'
+          ],
+          'whey protein': [
+            'whey', 'whey protein isolado', 'whey protein concentrado',
+            'proteina do soro do leite', 'whey isolado', 'whey concentrado'
+          ],
+          'aveia': [
+            'aveia em flocos', 'flocos de aveia', 'aveia integral', 
+            'farelo de aveia', 'aveia fina', 'aveia grossa'
+          ],
+          'requeijao': [
+            'requeijao light', 'requeijão', 'requeijao cremoso', 'cream cheese'
+          ],
+          'manteiga': [
+            'manteiga com sal', 'manteiga sem sal', 'manteiga ghee', 'ghee'
+          ],
+          'margarina': [
+            'margarina becel', 'becel', 'margarina light'
+          ]
+        };
+
+        // Função para encontrar o alimento base a partir de uma variação
+        const encontrarAlimentoBase = (nome: string): string => {
+          const nomeNorm = normalizeText(nome);
+          
+          for (const [base, variacoes] of Object.entries(alimentosEquivalentes)) {
+            const baseNorm = normalizeText(base);
+            
+            // Verifica se o nome é o próprio base
+            if (nomeNorm === baseNorm || nomeNorm.includes(baseNorm)) {
+              return base;
+            }
+            
+            // Verifica se o nome está nas variações
+            for (const variacao of variacoes) {
+              const variacaoNorm = normalizeText(variacao);
+              if (nomeNorm === variacaoNorm || nomeNorm.includes(variacaoNorm) || variacaoNorm.includes(nomeNorm)) {
+                return base;
+              }
+            }
+          }
+          
+          return nome; // Retorna o original se não encontrar equivalente
+        };
+
         // Mapeamento de grupos genéricos para alimentos específicos
         const gruposParaAlimentos: Record<string, string[]> = {
-          'carnes e proteinas': ['peito de frango', 'carne bovina', 'carne vermelha', 'patinho'],
-          'feijao e leguminosas': ['feijao', 'feijão', 'feijao carioca', 'feijao preto'],
-          'vegetais a': ['brocolis', 'alface', 'couve', 'espinafre', 'tomate'],
-          'vegetais b': ['cenoura', 'beterraba', 'abobora', 'chuchu'],
-          'paes e variedades': ['pao de forma', 'pao frances', 'tapioca'],
-          'personalizado - prot': ['peito de frango', 'carne bovina'],
-          'personalizado - carb': ['arroz branco', 'batata doce', 'macarrao'],
-          'personalizado - lip': ['azeite', 'oleaginosas', 'castanha'],
+          'carnes e proteinas': ['peito de frango', 'frango', 'carne bovina', 'carne vermelha', 'patinho'],
+          'feijao e leguminosas': ['feijao', 'feijão', 'feijao carioca', 'feijao preto', 'lentilha'],
+          'vegetais a': ['brocolis', 'alface', 'couve', 'espinafre', 'tomate', 'rucula'],
+          'vegetais b': ['cenoura', 'beterraba', 'abobora', 'abobrinha', 'chuchu'],
+          'paes e variedades': ['pao de forma', 'pão de forma', 'pao frances', 'tapioca'],
+          'personalizado prot': ['peito de frango', 'frango', 'carne bovina', 'ovo'],
+          'personalizado carb': ['arroz branco', 'arroz', 'batata doce', 'macarrao'],
+          'personalizado lip': ['azeite', 'oleaginosas', 'castanha', 'amendoim'],
         };
 
         // Helper function to find matching food with improved algorithm
@@ -311,9 +410,23 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
             return alimentosMap.get(nomeNormalizado)!;
           }
           
-          // 2. Check if it's a generic group and map to first available food
+          // 2. Busca pelo alimento base (normalização de variações)
+          const alimentoBase = encontrarAlimentoBase(nomeAlimento);
+          const alimentoBaseNorm = normalizeText(alimentoBase);
+          
+          // Procura o alimento base na lista
+          for (const alimento of alimentosList) {
+            if (alimento.nomeNorm === alimentoBaseNorm || 
+                alimento.nomeNorm.includes(alimentoBaseNorm) ||
+                alimentoBaseNorm.includes(alimento.nomeNorm)) {
+              return alimento.id;
+            }
+          }
+          
+          // 3. Check if it's a generic group and map to first available food
           for (const [grupo, opcoes] of Object.entries(gruposParaAlimentos)) {
-            if (nomeNormalizado.includes(grupo) || grupo.includes(nomeNormalizado)) {
+            const grupoNorm = normalizeText(grupo);
+            if (nomeNormalizado.includes(grupoNorm) || grupoNorm.includes(nomeNormalizado)) {
               for (const opcao of opcoes) {
                 const opcaoNorm = normalizeText(opcao);
                 for (const alimento of alimentosList) {
@@ -325,9 +438,9 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
             }
           }
           
-          // 3. Word-based matching - find foods that share significant words
+          // 4. Word-based matching - find foods that share significant words
           const palavrasAlimento = nomeNormalizado.split(' ').filter(p => p.length > 2);
-          let melhorMatch: { id: string; score: number } | null = null;
+          let melhorMatch: { id: string; score: number; nome: string } | null = null;
           
           for (const alimento of alimentosList) {
             const palavrasBase = alimento.nomeNorm.split(' ').filter(p => p.length > 2);
@@ -335,29 +448,34 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
             
             for (const palavra of palavrasAlimento) {
               for (const palavraBase of palavrasBase) {
-                if (palavraBase.includes(palavra) || palavra.includes(palavraBase)) {
-                  score += palavra.length; // Pontuação baseada no tamanho da palavra
+                // Match exato de palavra = maior score
+                if (palavraBase === palavra) {
+                  score += palavra.length * 2;
+                } else if (palavraBase.includes(palavra) || palavra.includes(palavraBase)) {
+                  score += Math.min(palavra.length, palavraBase.length);
                 }
               }
             }
             
             if (score > 0 && (!melhorMatch || score > melhorMatch.score)) {
-              melhorMatch = { id: alimento.id, score };
+              melhorMatch = { id: alimento.id, score, nome: alimento.nomeNorm };
             }
           }
           
           // Retorna apenas se tiver um score mínimo significativo
-          if (melhorMatch && melhorMatch.score >= 4) {
+          if (melhorMatch && melhorMatch.score >= 3) {
+            console.log(`Match encontrado: "${nomeAlimento}" → "${melhorMatch.nome}" (score: ${melhorMatch.score})`);
             return melhorMatch.id;
           }
           
-          // 4. Partial string match as fallback
+          // 5. Partial string match as fallback
           for (const alimento of alimentosList) {
             if (alimento.nomeNorm.includes(nomeNormalizado) || nomeNormalizado.includes(alimento.nomeNorm)) {
               return alimento.id;
             }
           }
           
+          console.log(`Alimento não encontrado, será criado: "${nomeAlimento}"`);
           return null;
         };
 
@@ -462,40 +580,82 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           return 'misto';
         };
 
-        // Function to create new food automatically
+        // Valores nutricionais estimados por tipo de alimento (por 100g)
+        const valoresNutricionaisEstimados: Record<string, { kcal: number; ptn: number; cho: number; lip: number }> = {
+          'proteinas': { kcal: 165, ptn: 31, cho: 0, lip: 3.6 }, // Frango
+          'carboidratos': { kcal: 130, ptn: 2.7, cho: 28, lip: 0.3 }, // Arroz
+          'lipideos': { kcal: 884, ptn: 0, cho: 0, lip: 100 }, // Azeite
+          'frutas': { kcal: 52, ptn: 0.3, cho: 14, lip: 0.2 }, // Maçã
+          'vegetais': { kcal: 25, ptn: 2, cho: 4, lip: 0.4 }, // Brócolis
+          'laticinios': { kcal: 42, ptn: 3.4, cho: 5, lip: 1 }, // Leite
+          'default': { kcal: 100, ptn: 10, cho: 10, lip: 5 }
+        };
+
+        // Function to create new food automatically with better nutritional estimates
         const criarAlimentoAutomatico = async (nomeAlimento: string, quantidade: string): Promise<string | null> => {
           try {
-            const tipoId = inferirTipoAlimento(nomeAlimento);
-            const origemPtn = inferirOrigemPtn(nomeAlimento);
+            // Usa o nome base normalizado para evitar duplicatas
+            const nomeBase = encontrarAlimentoBase(nomeAlimento);
+            const nomeParaSalvar = nomeBase !== nomeAlimento ? nomeBase : nomeAlimento.trim();
             
-            // Parse quantity to determine reference amount
-            const qtdMatch = quantidade.match(/[\d.,]+/);
-            const qtdReferencia = qtdMatch ? parseFloat(qtdMatch[0].replace(',', '.')) : 100;
+            const tipoId = inferirTipoAlimento(nomeParaSalvar);
+            const origemPtn = inferirOrigemPtn(nomeParaSalvar);
             
-            // Default nutritional values (can be edited later)
+            // Determina valores nutricionais baseados no tipo
+            let valoresNutr = valoresNutricionaisEstimados['default'];
+            const nomeNorm = normalizeText(nomeParaSalvar);
+            
+            if (/frango|carne|peixe|ovo|atum|whey|peito/.test(nomeNorm)) {
+              valoresNutr = valoresNutricionaisEstimados['proteinas'];
+            } else if (/arroz|batata|pao|macarrao|aveia|tapioca/.test(nomeNorm)) {
+              valoresNutr = valoresNutricionaisEstimados['carboidratos'];
+            } else if (/azeite|oleo|manteiga|castanha|amendoim/.test(nomeNorm)) {
+              valoresNutr = valoresNutricionaisEstimados['lipideos'];
+            } else if (/banana|maca|laranja|fruta|morango/.test(nomeNorm)) {
+              valoresNutr = valoresNutricionaisEstimados['frutas'];
+            } else if (/alface|tomate|brocolis|cenoura|vegetal/.test(nomeNorm)) {
+              valoresNutr = valoresNutricionaisEstimados['vegetais'];
+            } else if (/leite|queijo|iogurte|requeijao/.test(nomeNorm)) {
+              valoresNutr = valoresNutricionaisEstimados['laticinios'];
+            }
+            
+            // Verifica se já existe um alimento com nome similar antes de criar
+            const { data: existente } = await supabase
+              .from('alimentos')
+              .select('id')
+              .ilike('nome', `%${nomeParaSalvar}%`)
+              .limit(1);
+            
+            if (existente && existente.length > 0) {
+              console.log(`Alimento similar já existe: "${nomeParaSalvar}", usando ID existente`);
+              return existente[0].id;
+            }
+            
+            // Cria o novo alimento com valores estimados
             const { data: novoAlimento, error } = await supabase
               .from('alimentos')
               .insert({
-                nome: nomeAlimento.trim(),
+                nome: nomeParaSalvar,
                 tipo_id: tipoId,
                 origem_ptn: origemPtn,
-                quantidade_referencia_g: qtdReferencia || 100,
-                kcal_por_referencia: 100, // Valor padrão
-                ptn_por_referencia: 10,   // Valor padrão
-                cho_por_referencia: 10,   // Valor padrão
-                lip_por_referencia: 5,    // Valor padrão
-                info_adicional: 'Cadastrado automaticamente via importação de PDF',
+                quantidade_referencia_g: 100, // Sempre 100g como referência
+                kcal_por_referencia: valoresNutr.kcal,
+                ptn_por_referencia: valoresNutr.ptn,
+                cho_por_referencia: valoresNutr.cho,
+                lip_por_referencia: valoresNutr.lip,
+                info_adicional: `Cadastrado automaticamente via importação de PDF. Valores nutricionais estimados - revisar.`,
                 autor: user.id
               })
               .select('id')
               .single();
 
             if (error) {
-              console.error('Erro ao criar alimento:', nomeAlimento, error);
+              console.error('Erro ao criar alimento:', nomeParaSalvar, error);
               return null;
             }
 
-            alimentosCadastrados.push(nomeAlimento);
+            alimentosCadastrados.push(nomeParaSalvar);
+            console.log(`Novo alimento criado: "${nomeParaSalvar}" com valores estimados`);
             return novoAlimento.id;
           } catch (err) {
             console.error('Erro ao criar alimento automaticamente:', err);
