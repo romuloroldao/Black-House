@@ -457,6 +457,51 @@ export type Database = {
           },
         ]
       }
+      coach_profiles: {
+        Row: {
+          anos_experiencia: number | null
+          avatar_url: string | null
+          bio: string | null
+          conquistas: Json | null
+          created_at: string | null
+          especialidades: string[] | null
+          id: string
+          nome_completo: string | null
+          principais_resultados: string | null
+          total_alunos_acompanhados: number | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          anos_experiencia?: number | null
+          avatar_url?: string | null
+          bio?: string | null
+          conquistas?: Json | null
+          created_at?: string | null
+          especialidades?: string[] | null
+          id?: string
+          nome_completo?: string | null
+          principais_resultados?: string | null
+          total_alunos_acompanhados?: number | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          anos_experiencia?: number | null
+          avatar_url?: string | null
+          bio?: string | null
+          conquistas?: Json | null
+          created_at?: string | null
+          especialidades?: string[] | null
+          id?: string
+          nome_completo?: string | null
+          principais_resultados?: string | null
+          total_alunos_acompanhados?: number | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       conversas: {
         Row: {
           aluno_id: string

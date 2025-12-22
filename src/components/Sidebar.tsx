@@ -320,6 +320,11 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       id: "user-linking",
       label: "Vincular Usuários",
       icon: Link2,
+    },
+    {
+      id: "coach-profile",
+      label: "Meu Perfil Coach",
+      icon: Star,
     }
   ];
 
