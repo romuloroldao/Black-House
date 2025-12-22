@@ -10,7 +10,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
-import { Plus, Search, Edit, Trash2, Apple, AlertCircle, Calculator, Upload, Download, FileSpreadsheet } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Apple, AlertCircle, Calculator, Upload, Download, FileSpreadsheet, ClipboardCheck, Merge } from "lucide-react";
+import FoodReviewManager from "./FoodReviewManager";
 import * as XLSX from 'xlsx';
 
 interface TipoAlimento {
@@ -48,6 +49,7 @@ export default function FoodManager() {
   const [importing, setImporting] = useState(false);
   const [importPreview, setImportPreview] = useState<any[]>([]);
   const [showPreview, setShowPreview] = useState(false);
+  const [showReviewManager, setShowReviewManager] = useState(false);
 
   const [formData, setFormData] = useState({
     nome: "",
@@ -544,6 +546,15 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
     return tipo?.nome_tipo || "Sem categoria";
   };
 
+  // Se estiver mostrando o gerenciador de revisão, renderiza apenas ele
+  if (showReviewManager) {
+    return (
+      <div className="container mx-auto p-6 max-w-7xl">
+        <FoodReviewManager onBack={() => setShowReviewManager(false)} />
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto p-6 max-w-7xl">
       <div className="flex items-center justify-between mb-6">
@@ -558,6 +569,14 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
         </div>
         
         <div className="flex gap-2">
+          <Button 
+            variant="outline" 
+            className="gap-2"
+            onClick={() => setShowReviewManager(true)}
+          >
+            <ClipboardCheck className="w-4 h-4" />
+            Revisar / Mesclar
+          </Button>
           <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" className="gap-2">
