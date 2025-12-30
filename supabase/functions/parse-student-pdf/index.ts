@@ -38,20 +38,21 @@ serve(async (req) => {
             role: 'system',
             content: `Você é um assistente especializado em extrair dados de fichas de alunos de personal trainers/nutricionistas.
 
-INSTRUÇÕES IMPORTANTES PARA EXTRAÇÃO:
+INSTRUÇÕES CRÍTICAS - LEIA COM ATENÇÃO:
 
-1. O PDF contém um plano alimentar com várias REFEIÇÕES (Refeição 1, Refeição 2, etc.)
-2. Cada refeição tem uma TABELA com colunas: Qtd (g/ml), Alimentos de preferência, Alimentos substitutos
-3. Extraia APENAS os alimentos da coluna "Alimentos de preferência" com suas quantidades
-4. Os alimentos podem ser:
+1. O PDF contém um plano alimentar com VÁRIAS REFEIÇÕES. Planos típicos têm entre 4 a 8 refeições.
+2. VOCÊ DEVE EXTRAIR TODAS AS REFEIÇÕES do documento, sem exceção. Não limite a extração.
+3. Cada refeição tem uma TABELA com colunas: Qtd (g/ml), Alimentos de preferência, Alimentos substitutos
+4. Extraia APENAS os alimentos da coluna "Alimentos de preferência" com suas quantidades
+5. Os alimentos podem ser:
    - Alimentos específicos como "Whey Protein", "Pão de forma tradicional"
    - Grupos genéricos como "Carnes e Proteínas", "Feijão e Leguminosas", "Vegetais A"
    
-5. Para SUPLEMENTOS: procure tabelas com "Suplementação" ou "Fitoterápicos"
-6. Para FÁRMACOS: procure tabelas com "Fármacos" ou "Protocolos"
-7. ORIENTAÇÕES: texto com dicas gerais de alimentação
+6. Para SUPLEMENTOS: procure tabelas com "Suplementação" ou "Fitoterápicos"
+7. Para FÁRMACOS: procure tabelas com "Fármacos" ou "Protocolos"
+8. ORIENTAÇÕES: texto com dicas gerais de alimentação
 
-Extraia os dados em formato JSON:
+ESTRUTURA DO JSON DE SAÍDA:
 
 {
   "aluno": {
@@ -68,15 +69,29 @@ Extraia os dados em formato JSON:
       {
         "nome": "Refeição 1",
         "alimentos": [
-          {
-            "nome": "Whey Protein",
-            "quantidade": "30g"
-          },
-          {
-            "nome": "Pão de forma tradicional", 
-            "quantidade": "80g"
-          }
+          { "nome": "Whey Protein", "quantidade": "30g" },
+          { "nome": "Pão de forma tradicional", "quantidade": "80g" }
         ]
+      },
+      {
+        "nome": "Refeição 2",
+        "alimentos": [...]
+      },
+      {
+        "nome": "Refeição 3",
+        "alimentos": [...]
+      },
+      {
+        "nome": "Refeição 4",
+        "alimentos": [...]
+      },
+      {
+        "nome": "Refeição 5",
+        "alimentos": [...]
+      },
+      {
+        "nome": "Refeição 6",
+        "alimentos": [...]
       }
     ],
     "macros": {
@@ -87,37 +102,30 @@ Extraia os dados em formato JSON:
     }
   },
   "suplementos": [
-    {
-      "nome": "Creatina",
-      "dosagem": "10g",
-      "observacao": "Pré treino"
-    }
+    { "nome": "Creatina", "dosagem": "10g", "observacao": "Pré treino" }
   ],
   "farmacos": [
-    {
-      "nome": "Testosterona",
-      "dosagem": "150mg",
-      "observacao": "1x a cada 7 dias"
-    }
+    { "nome": "Testosterona", "dosagem": "150mg", "observacao": "1x a cada 7 dias" }
   ],
   "orientacoes": "string com todas as orientações/dicas"
 }
 
 REGRAS CRÍTICAS:
 - Retorne APENAS o JSON válido, sem markdown, sem \`\`\` ou explicações
+- EXTRAIA ABSOLUTAMENTE TODAS AS REFEIÇÕES - geralmente são de 4 a 8 refeições
 - Use exatamente os nomes dos alimentos como aparecem no PDF
 - A quantidade DEVE incluir a unidade (g, ml, unidades)
 - Mantenha "Refeição 1", "Refeição 2" etc como nomes das refeições
 - Separe SUPLEMENTOS (Creatina, Whey, Vitaminas, Fitoterápicos) de FÁRMACOS (medicamentos, hormônios como Testosterona, Glifage)
 - Se um campo não existir, omita-o ou use null
-- Extraia TODAS as refeições do documento`
+- NÃO PULE NENHUMA REFEIÇÃO - extraia todas as que existem no documento`
           },
           {
             role: 'user',
             content: [
               {
                 type: 'text',
-                text: 'Analise este PDF de plano alimentar e extraia todos os dados estruturados. Preste atenção especial às tabelas de refeições, extraindo os alimentos com suas quantidades da coluna "Alimentos de preferência":'
+                text: 'Analise este PDF de plano alimentar e extraia TODOS os dados estruturados. IMPORTANTE: Extraia TODAS as refeições do documento (geralmente são 4 a 8 refeições). Não limite a extração às primeiras refeições. Extraia cada alimento com sua quantidade da coluna "Alimentos de preferência":'
               },
               {
                 type: 'image_url',
@@ -128,7 +136,7 @@ REGRAS CRÍTICAS:
             ]
           }
         ],
-        max_tokens: 8192,
+        max_tokens: 16384,
         temperature: 0.1
       }),
     });
@@ -146,7 +154,7 @@ REGRAS CRÍTICAS:
       throw new Error('Resposta vazia da IA');
     }
 
-    console.log('Resposta da IA (primeiros 2000 chars):', content.substring(0, 2000));
+    console.log('Resposta da IA (primeiros 3000 chars):', content.substring(0, 3000));
 
     // Parse JSON da resposta
     let parsedData;
@@ -173,10 +181,24 @@ REGRAS CRÍTICAS:
         parsedData.aluno.nome = 'Aluno Importado';
       }
       
+      const numRefeicoes = parsedData.dieta?.refeicoes?.length || 0;
       console.log('Dados extraídos - Aluno:', parsedData.aluno?.nome);
-      console.log('Dados extraídos - Refeições:', parsedData.dieta?.refeicoes?.length || 0);
+      console.log('Dados extraídos - Número de Refeições:', numRefeicoes);
+      
+      // Log each meal name
+      if (parsedData.dieta?.refeicoes) {
+        parsedData.dieta.refeicoes.forEach((ref: any, idx: number) => {
+          console.log(`  - ${ref.nome}: ${ref.alimentos?.length || 0} alimentos`);
+        });
+      }
+      
       console.log('Dados extraídos - Suplementos:', parsedData.suplementos?.length || 0);
       console.log('Dados extraídos - Fármacos:', parsedData.farmacos?.length || 0);
+      
+      // Warning if few meals
+      if (numRefeicoes < 3) {
+        console.warn('AVISO: Poucas refeições extraídas. O PDF pode conter mais refeições.');
+      }
       
     } catch (parseError) {
       console.error('Erro ao fazer parse do JSON:', parseError);
