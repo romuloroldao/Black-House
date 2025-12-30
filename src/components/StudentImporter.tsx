@@ -227,6 +227,48 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
     });
   };
 
+  const addRefeicao = () => {
+    if (!editableData?.dieta) {
+      // If no diet exists yet, create one
+      setEditableData({
+        ...editableData!,
+        dieta: {
+          nome: 'Plano Alimentar',
+          objetivo: '',
+          refeicoes: [{ nome: '', alimentos: [{ nome: '', quantidade: '' }] }],
+          macros: {}
+        }
+      });
+    } else {
+      const newRefeicoes = [...editableData.dieta.refeicoes, { nome: '', alimentos: [{ nome: '', quantidade: '' }] }];
+      setEditableData({
+        ...editableData,
+        dieta: { ...editableData.dieta, refeicoes: newRefeicoes }
+      });
+    }
+  };
+
+  const removeRefeicao = (refeicaoIdx: number) => {
+    if (!editableData?.dieta) return;
+    const newRefeicoes = editableData.dieta.refeicoes.filter((_, i) => i !== refeicaoIdx);
+    setEditableData({
+      ...editableData,
+      dieta: { ...editableData.dieta, refeicoes: newRefeicoes }
+    });
+  };
+
+  // Standard meal options for quick add
+  const refeicoesDisponiveis = [
+    'Café da Manhã',
+    'Lanche da Manhã', 
+    'Almoço',
+    'Lanche da Tarde',
+    'Pré-Treino',
+    'Pós-Treino',
+    'Jantar',
+    'Ceia'
+  ];
+
   const importStudent = async () => {
     if (!editableData) return;
 
@@ -919,13 +961,63 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                 <Separator />
 
                 {/* Diet Info */}
-                {editableData.dieta && (
-                  <div className="space-y-3">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Utensils className="h-4 w-4 text-primary" />
                       <h4 className="font-medium">Dieta</h4>
+                      {editableData.dieta && editableData.dieta.refeicoes.length > 0 && (
+                        <Badge variant="secondary" className="ml-2">
+                          {editableData.dieta.refeicoes.length} refeição(ões) detectada(s)
+                        </Badge>
+                      )}
                     </div>
-                    
+                    <Button variant="outline" size="sm" onClick={addRefeicao}>
+                      <Plus className="h-4 w-4 mr-1" /> Adicionar Refeição
+                    </Button>
+                  </div>
+
+                  {/* Warning if few meals detected */}
+                  {editableData.dieta && editableData.dieta.refeicoes.length < 4 && editableData.dieta.refeicoes.length > 0 && (
+                    <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-sm text-amber-700 dark:text-amber-400">
+                      <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                      <span>
+                        Apenas {editableData.dieta.refeicoes.length} refeição(ões) detectada(s). 
+                        Se houver mais refeições no plano, adicione manualmente clicando em "Adicionar Refeição".
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Quick add meal buttons */}
+                  {editableData.dieta && (
+                    <div className="flex flex-wrap gap-2">
+                      {refeicoesDisponiveis
+                        .filter(ref => !editableData.dieta?.refeicoes.some(r => 
+                          r.nome.toLowerCase().includes(ref.toLowerCase().split(' ')[0])
+                        ))
+                        .slice(0, 4)
+                        .map(ref => (
+                          <Button 
+                            key={ref} 
+                            variant="ghost" 
+                            size="sm" 
+                            className="h-7 text-xs"
+                            onClick={() => {
+                              const newRefeicoes = [...editableData.dieta!.refeicoes, { nome: ref, alimentos: [{ nome: '', quantidade: '' }] }];
+                              setEditableData({
+                                ...editableData,
+                                dieta: { ...editableData.dieta!, refeicoes: newRefeicoes }
+                              });
+                            }}
+                          >
+                            <Plus className="h-3 w-3 mr-1" /> {ref}
+                          </Button>
+                        ))
+                      }
+                    </div>
+                  )}
+                  
+                  {editableData.dieta && (
                     <div className="p-4 bg-muted/50 rounded-lg space-y-3">
                       <div className="space-y-1">
                         <Label className="text-xs">Nome da Dieta</Label>
@@ -953,17 +1045,30 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                         </div>
                       )}
                     </div>
+                  )}
 
-                    {/* Meals */}
+                  {/* Meals */}
+                  {editableData.dieta && editableData.dieta.refeicoes.length > 0 && (
                     <div className="space-y-3">
                       {editableData.dieta.refeicoes.map((refeicao, rIdx) => (
-                        <div key={rIdx} className="p-4 bg-muted/50 rounded-lg space-y-3">
-                          <Input
-                            value={refeicao.nome}
-                            onChange={(e) => updateRefeicao(rIdx, 'nome', e.target.value)}
-                            className="font-medium"
-                            placeholder="Nome da refeição"
-                          />
+                        <div key={rIdx} className="p-4 bg-muted/50 rounded-lg space-y-3 relative">
+                          <div className="flex items-center gap-2">
+                            <Input
+                              value={refeicao.nome}
+                              onChange={(e) => updateRefeicao(rIdx, 'nome', e.target.value)}
+                              className="font-medium flex-1"
+                              placeholder="Nome da refeição (ex: Café da Manhã, Almoço...)"
+                            />
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => removeRefeicao(rIdx)}
+                              className="h-8 w-8 text-destructive flex-shrink-0"
+                              title="Remover refeição"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                           <div className="space-y-2">
                             {refeicao.alimentos.map((alimento, aIdx) => (
                               <div key={aIdx} className="flex gap-2 items-center">
@@ -976,8 +1081,8 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                                 <Input
                                   value={alimento.quantidade}
                                   onChange={(e) => updateAlimento(rIdx, aIdx, 'quantidade', e.target.value)}
-                                  placeholder="Qtd"
-                                  className="w-24"
+                                  placeholder="Qtd (ex: 100g)"
+                                  className="w-28"
                                 />
                                 <Button
                                   variant="ghost"
@@ -1001,8 +1106,18 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
+                  )}
+
+                  {/* Empty state for diet */}
+                  {(!editableData.dieta || editableData.dieta.refeicoes.length === 0) && (
+                    <div className="p-6 bg-muted/30 rounded-lg text-center space-y-3">
+                      <Utensils className="h-8 w-8 text-muted-foreground mx-auto" />
+                      <p className="text-sm text-muted-foreground">
+                        Nenhuma refeição detectada no PDF. Clique em "Adicionar Refeição" para criar manualmente.
+                      </p>
+                    </div>
+                  )}
+                </div>
 
                 {/* Supplements/Pharma */}
                 <Separator />
