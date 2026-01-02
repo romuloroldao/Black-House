@@ -332,10 +332,66 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
             .replace(/\s+/g, ' '); // Normaliza espaços
         };
 
+        // Mapeamentos específicos para alimentos comuns que causam confusão
+        // Chave: termo normalizado do PDF → Nome exato no banco de dados
+        const mapeamentosEspecificos: Record<string, string> = {
+          'ovo': 'ovo inteiro',
+          'ovos': 'ovo inteiro',
+          'ovo cozido': 'ovo inteiro',
+          'ovo inteiro cozido': 'ovo inteiro',
+          'pao de forma': 'pao de forma',
+          'pao de forma tradicional': 'pao de forma',
+          'pao de forma integral': 'pao de forma',
+          'pao frances': 'pao frances',
+          'pao': 'pao frances',
+          'frango': 'frango peito sem pele grelhado',
+          'peito de frango': 'frango peito sem pele grelhado',
+          'frango grelhado': 'frango peito sem pele grelhado',
+          'arroz': 'arroz branco cozido',
+          'arroz branco': 'arroz branco cozido',
+          'arroz cozido': 'arroz branco cozido',
+          'arroz integral': 'arroz integral cozido',
+          'feijao': 'feijao carioca cozido',
+          'feijao carioca': 'feijao carioca cozido',
+          'feijao preto': 'feijao preto cozido',
+          'batata doce': 'batata doce cozida',
+          'batata': 'batata inglesa cozida',
+          'banana': 'banana prata',
+          'banana prata': 'banana prata',
+          'maca': 'maca fuji',
+          'maça': 'maca fuji',
+          'aveia': 'aveia em flocos',
+          'leite': 'leite desnatado',
+          'leite desnatado': 'leite desnatado',
+          'leite integral': 'leite integral',
+          'queijo': 'queijo minas frescal',
+          'queijo branco': 'queijo minas frescal',
+          'queijo minas': 'queijo minas frescal',
+          'iogurte': 'iogurte natural desnatado',
+          'iogurte natural': 'iogurte natural desnatado',
+          'azeite': 'azeite de oliva',
+          'azeite de oliva': 'azeite de oliva',
+          'carne': 'carne bovina patinho sem gordura grelhado',
+          'patinho': 'carne bovina patinho sem gordura grelhado',
+          'carne moida': 'carne bovina moida refogada',
+          'peixe': 'peixe tilapia file grelhado',
+          'tilapia': 'peixe tilapia file grelhado',
+          'atum': 'atum conserva em oleo',
+        };
+
         // Helper function to find matching food with improved algorithm
-        // PRIORIDADE: Buscar match EXATO primeiro, usar o nome do PDF tal como está
+        // PRIORIDADE: 1) Mapeamento específico, 2) Match exato, 3) Match por proximidade
         const findMatchingAlimento = (nomeAlimento: string): string | null => {
           const nomeNormalizado = normalizeText(nomeAlimento);
+          
+          // 0. MAPEAMENTO ESPECÍFICO - prioridade máxima
+          if (mapeamentosEspecificos[nomeNormalizado]) {
+            const nomeMapeado = mapeamentosEspecificos[nomeNormalizado];
+            if (alimentosMap.has(nomeMapeado)) {
+              console.log(`Mapeamento específico: "${nomeAlimento}" → "${nomeMapeado}"`);
+              return alimentosMap.get(nomeMapeado)!;
+            }
+          }
           
           // 1. MATCH EXATO - prioridade máxima
           if (alimentosMap.has(nomeNormalizado)) {
