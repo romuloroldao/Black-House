@@ -297,7 +297,14 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
 
       if (alunoError) throw alunoError;
 
-      if (editableData.dieta && editableData.dieta.refeicoes?.length > 0) {
+      console.log('=== DEBUG: Verificando estrutura editableData ===');
+      console.log('editableData.dieta existe?', !!editableData.dieta);
+      console.log('editableData.dieta.refeicoes existe?', !!editableData.dieta?.refeicoes);
+      console.log('editableData.dieta.refeicoes.length:', editableData.dieta?.refeicoes?.length);
+      console.log('Refeições completas:', JSON.stringify(editableData.dieta?.refeicoes, null, 2));
+
+      if (editableData.dieta && editableData.dieta.refeicoes && editableData.dieta.refeicoes.length > 0) {
+        console.log('=== Entrando no bloco de criação da dieta ===');
         const { data: dieta, error: dietaError } = await supabase
           .from('dietas')
           .insert({
