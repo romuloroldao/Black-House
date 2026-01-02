@@ -335,33 +335,43 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
         // Mapeamentos específicos para alimentos comuns que causam confusão
         // Chave: termo normalizado do PDF → Nome normalizado no banco de dados
         const mapeamentosEspecificos: Record<string, string> = {
+          // Ovos
           'ovo': 'ovo inteiro',
           'ovos': 'ovo inteiro',
           'ovo cozido': 'ovo inteiro',
           'ovo inteiro cozido': 'ovo inteiro',
+          // Pães
           'pao de forma': 'pao de forma',
           'pao de forma tradicional': 'pao de forma',
           'pao de forma integral': 'pao de forma',
           'pao frances': 'pao frances',
           'pao': 'pao frances',
+          // Frango
           'frango': 'peito de frango',
           'peito de frango': 'peito de frango',
           'frango grelhado': 'peito de frango',
+          // Arroz
           'arroz': 'arroz branco',
           'arroz branco': 'arroz branco',
           'arroz cozido': 'arroz branco',
           'arroz integral': 'arroz integral',
-          'feijao': 'feijao carioca',
-          'feijao carioca': 'feijao carioca',
-          'feijao carioca cozido': 'feijao carioca',
-          'feijao preto': 'feijao preto',
+          // Feijão - corrigido para nomes exatos do banco
+          'feijao': 'feijao carioca cozido',
+          'feijao carioca': 'feijao carioca cozido',
+          'feijao carioca cozido': 'feijao carioca cozido',
+          'feijao preto': 'feijao preto cozido',
+          'feijao preto cozido': 'feijao preto cozido',
+          // Batatas
           'batata doce': 'batata doce',
           'batata': 'batata inglesa',
+          // Frutas
           'banana': 'banana prata',
           'banana prata': 'banana prata',
           'maca': 'maca',
           'maça': 'maca',
+          // Cereais
           'aveia': 'aveia',
+          // Laticínios
           'leite': 'leite',
           'leite desnatado': 'leite',
           'leite integral': 'leite',
@@ -370,22 +380,27 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           'queijo minas': 'queijo',
           'iogurte': 'iogurte',
           'iogurte natural': 'iogurte',
+          // Gorduras
           'azeite': 'azeite',
           'azeite de oliva': 'azeite',
-          'carne': 'carne',
-          'carne vermelha': 'carne',
-          'carne vermelha magra': 'carne',
-          'patinho': 'patinho',
-          'carne moida': 'carne bovina acem moido',
+          // Carnes - corrigido para nomes exatos do banco
+          'carne': 'carne bovina patinho sem gordura grelhado',
+          'carne vermelha': 'carne bovina patinho sem gordura grelhado',
+          'carne vermelha magra': 'carne bovina patinho sem gordura grelhado',
+          'patinho': 'carne bovina patinho sem gordura grelhado',
+          'carne moida': 'carne bovina acem moido cozido',
+          // Peixes
           'peixe': 'peixe',
           'tilapia': 'tilapia',
           'atum': 'atum',
+          // Outros
           'mussarela': 'mussarela',
           'requeijao': 'requeijao',
           'whey': 'whey',
           'whey protein': 'whey',
+          // Legumes - corrigido para nome exato do banco
           'cenoura': 'cenoura',
-          'abobrinha': 'abobrinha',
+          'abobrinha': 'abobrinha italiana cozida',
         };
 
         // Helper function to find matching food with improved algorithm
