@@ -643,8 +643,23 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           }
         };
 
+        console.log('=== DEBUG: Refeições para processar ===');
+        console.log('Total de refeições:', editableData.dieta.refeicoes.length);
+        editableData.dieta.refeicoes.forEach((ref, idx) => {
+          console.log(`Refeição ${idx + 1}: "${ref.nome}" - ${ref.alimentos.length} alimentos`);
+        });
+        
         for (const refeicao of editableData.dieta.refeicoes) {
+          console.log(`Processando refeição: "${refeicao.nome}" com ${refeicao.alimentos.length} alimentos`);
+          
+          // Skip empty meals
+          if (!refeicao.alimentos || refeicao.alimentos.length === 0) {
+            console.log(`Pulando refeição vazia: "${refeicao.nome}"`);
+            continue;
+          }
+          
           const refeicaoNome = mapRefeicaoName(refeicao.nome);
+          console.log(`Nome mapeado: "${refeicao.nome}" → "${refeicaoNome}"`);
           
           for (const alimento of refeicao.alimentos) {
             if (!alimento.nome.trim()) continue;
