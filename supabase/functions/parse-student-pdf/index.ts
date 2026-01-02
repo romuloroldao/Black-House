@@ -38,39 +38,52 @@ serve(async (req) => {
             role: 'system',
             content: `Você é um assistente especializado em extrair dados de fichas de alunos de personal trainers/nutricionistas.
 
-INSTRUÇÕES CRÍTICAS - LEIA COM ATENÇÃO:
+## INSTRUÇÕES CRÍTICAS - LEIA COM ATENÇÃO:
 
-1. O PDF contém um plano alimentar com VÁRIAS REFEIÇÕES. Planos típicos têm entre 4 a 8 refeições.
-2. VOCÊ DEVE EXTRAIR TODAS AS REFEIÇÕES do documento, sem exceção. Não limite a extração.
-3. Cada refeição tem uma TABELA com colunas: Qtd (g/ml), Alimentos de preferência, Alimentos substitutos
-4. Extraia APENAS os alimentos da coluna "Alimentos de preferência" com suas quantidades
-5. Os alimentos podem ser:
-   - Alimentos específicos como "Whey Protein", "Pão de forma tradicional"
-   - Grupos genéricos como "Carnes e Proteínas", "Feijão e Leguminosas", "Vegetais A"
-   
-6. Para SUPLEMENTOS: procure tabelas com "Suplementação" ou "Fitoterápicos"
-7. Para FÁRMACOS: procure tabelas com "Fármacos" ou "Protocolos"
-8. ORIENTAÇÕES: texto com dicas gerais de alimentação
+### EXTRAÇÃO DE REFEIÇÕES (MUITO IMPORTANTE):
+1. O PDF contém um plano alimentar com VÁRIAS REFEIÇÕES (geralmente 4 a 8 refeições).
+2. VOCÊ DEVE EXTRAIR ABSOLUTAMENTE TODAS AS REFEIÇÕES do documento. NÃO pare na refeição 2 ou 3.
+3. Percorra TODO o documento página por página para encontrar todas as refeições.
+4. Cada refeição geralmente está em uma seção separada com título "Refeição 1", "Refeição 2", etc.
+5. Alguns PDFs usam nomes como "Café da Manhã", "Almoço", "Jantar" - extraia todos.
 
-ESTRUTURA DO JSON DE SAÍDA:
+### EXTRAÇÃO DE ALIMENTOS (MUITO IMPORTANTE):
+1. Cada refeição tem uma TABELA com colunas: Qtd (g/ml), Alimentos de preferência, Alimentos substitutos
+2. Extraia APENAS os alimentos da coluna "Alimentos de preferência" 
+3. Use NOMES SIMPLES E ESPECÍFICOS para os alimentos:
+   - ✅ CORRETO: "frango", "arroz branco", "ovo", "banana", "batata doce"
+   - ❌ ERRADO: "Carnes e Proteínas", "Personalizado Prot", "Vegetais A"
+4. Se o PDF mostrar grupos genéricos, tente identificar o alimento específico mencionado ou use o nome mais comum:
+   - "Carnes e Proteínas" → "frango" ou "carne bovina"
+   - "Feijão e Leguminosas" → "feijão"
+   - "Vegetais A" → "salada verde"
+   - "Vegetais B" → "legumes cozidos"
+5. A quantidade DEVE incluir a unidade (g, ml, unidades). Ex: "150g", "200ml", "2 unidades"
+
+### SUPLEMENTOS E FÁRMACOS:
+- SUPLEMENTOS: Creatina, Whey, Vitaminas, Ômega 3, Fitoterápicos, Colágeno
+- FÁRMACOS: Medicamentos controlados, hormônios (Testosterona, GH), Glifage, etc.
+
+### ESTRUTURA DO JSON DE SAÍDA:
 
 {
   "aluno": {
-    "nome": "string (nome do aluno, ex: Nome: João Silva)",
-    "peso": number (peso em kg, apenas o número),
-    "altura": number (altura em cm, opcional),
-    "idade": number (apenas número, opcional),
-    "objetivo": "string (objetivo, opcional)"
+    "nome": "string",
+    "peso": number,
+    "altura": number,
+    "idade": number,
+    "objetivo": "string"
   },
   "dieta": {
-    "nome": "string (geralmente PLANO ALIMENTAR ou nome do plano)",
-    "objetivo": "string (estratégia ou objetivo)",
+    "nome": "string",
+    "objetivo": "string",
     "refeicoes": [
       {
         "nome": "Refeição 1",
         "alimentos": [
-          { "nome": "Whey Protein", "quantidade": "30g" },
-          { "nome": "Pão de forma tradicional", "quantidade": "80g" }
+          { "nome": "whey protein", "quantidade": "30g" },
+          { "nome": "pão de forma", "quantidade": "80g" },
+          { "nome": "banana", "quantidade": "1 unidade" }
         ]
       },
       {
@@ -95,37 +108,48 @@ ESTRUTURA DO JSON DE SAÍDA:
       }
     ],
     "macros": {
-      "proteina": number (PTN total em gramas),
-      "carboidrato": number (CHO total em gramas),
-      "gordura": number (LIP total em gramas),
-      "calorias": number (Kcal total)
+      "proteina": number,
+      "carboidrato": number,
+      "gordura": number,
+      "calorias": number
     }
   },
   "suplementos": [
-    { "nome": "Creatina", "dosagem": "10g", "observacao": "Pré treino" }
+    { "nome": "creatina", "dosagem": "10g", "observacao": "pré treino" }
   ],
   "farmacos": [
-    { "nome": "Testosterona", "dosagem": "150mg", "observacao": "1x a cada 7 dias" }
+    { "nome": "testosterona", "dosagem": "150mg", "observacao": "1x semana" }
   ],
-  "orientacoes": "string com todas as orientações/dicas"
+  "orientacoes": "string"
 }
 
-REGRAS CRÍTICAS:
-- Retorne APENAS o JSON válido, sem markdown, sem \`\`\` ou explicações
-- EXTRAIA ABSOLUTAMENTE TODAS AS REFEIÇÕES - geralmente são de 4 a 8 refeições
-- Use exatamente os nomes dos alimentos como aparecem no PDF
-- A quantidade DEVE incluir a unidade (g, ml, unidades)
-- Mantenha "Refeição 1", "Refeição 2" etc como nomes das refeições
-- Separe SUPLEMENTOS (Creatina, Whey, Vitaminas, Fitoterápicos) de FÁRMACOS (medicamentos, hormônios como Testosterona, Glifage)
-- Se um campo não existir, omita-o ou use null
-- NÃO PULE NENHUMA REFEIÇÃO - extraia todas as que existem no documento`
+### REGRAS CRÍTICAS:
+1. Retorne APENAS JSON válido, sem markdown, sem \`\`\`
+2. EXTRAIA TODAS AS REFEIÇÕES (mínimo esperado: 4-8 refeições)
+3. Use nomes de alimentos SIMPLES e ESPECÍFICOS, não grupos genéricos
+4. Quantidade sempre com unidade (g, ml, unidades)
+5. Se não encontrar um campo, omita ou use null`
           },
           {
             role: 'user',
             content: [
               {
                 type: 'text',
-                text: 'Analise este PDF de plano alimentar e extraia TODOS os dados estruturados. IMPORTANTE: Extraia TODAS as refeições do documento (geralmente são 4 a 8 refeições). Não limite a extração às primeiras refeições. Extraia cada alimento com sua quantidade da coluna "Alimentos de preferência":'
+                text: `TAREFA: Extraia TODOS os dados deste plano alimentar em PDF.
+
+CHECKLIST OBRIGATÓRIO:
+□ Extrair dados do aluno (nome, peso, objetivo)
+□ Extrair TODAS as refeições (geralmente 4-8, NÃO pare na 2ª ou 3ª)
+□ Para cada refeição, extrair TODOS os alimentos com quantidade
+□ Usar nomes SIMPLES para alimentos (ex: "frango" não "Carnes e Proteínas")
+□ Extrair suplementos
+□ Extrair fármacos
+□ Extrair orientações
+
+ATENÇÃO: Percorra TODAS as páginas do documento para encontrar todas as refeições.
+Muitos PDFs têm refeições espalhadas em várias páginas.
+
+Retorne apenas o JSON, sem explicações.`
               },
               {
                 type: 'image_url',
@@ -136,8 +160,8 @@ REGRAS CRÍTICAS:
             ]
           }
         ],
-        max_tokens: 16384,
-        temperature: 0.1
+        max_tokens: 32000,
+        temperature: 0.05
       }),
     });
 
