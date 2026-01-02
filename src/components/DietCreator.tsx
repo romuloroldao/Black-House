@@ -142,9 +142,15 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
       setObjetivo(dieta.objetivo || '');
       setSelectedAluno(dieta.aluno_id);
 
-      // Reorganizar itens por refeição
-      const refeicoesPadrao = ['Café da Manhã', 'Almoço', 'Jantar'];
-      const novasRefeicoes = refeicoesPadrao.map(nomeRefeicao => {
+      // Reorganizar itens por refeição - usar nomes únicos do banco
+      const nomesRefeicoesBanco = [...new Set((itens || []).map(item => item.refeicao))];
+      
+      // Se não houver itens, usar refeições padrão
+      const nomesRefeicoes = nomesRefeicoesBanco.length > 0 
+        ? nomesRefeicoesBanco 
+        : ['Café da Manhã', 'Almoço', 'Jantar'];
+      
+      const novasRefeicoes = nomesRefeicoes.map(nomeRefeicao => {
         const itensRefeicao = (itens || [])
           .filter(item => item.refeicao === nomeRefeicao)
           .map(item => ({
