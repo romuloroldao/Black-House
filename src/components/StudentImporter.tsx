@@ -333,7 +333,7 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
         };
 
         // Mapeamentos específicos para alimentos comuns que causam confusão
-        // Chave: termo normalizado do PDF → Nome exato no banco de dados
+        // Chave: termo normalizado do PDF → Nome normalizado no banco de dados
         const mapeamentosEspecificos: Record<string, string> = {
           'ovo': 'ovo inteiro',
           'ovos': 'ovo inteiro',
@@ -344,39 +344,48 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           'pao de forma integral': 'pao de forma',
           'pao frances': 'pao frances',
           'pao': 'pao frances',
-          'frango': 'frango peito sem pele grelhado',
-          'peito de frango': 'frango peito sem pele grelhado',
-          'frango grelhado': 'frango peito sem pele grelhado',
-          'arroz': 'arroz branco cozido',
-          'arroz branco': 'arroz branco cozido',
-          'arroz cozido': 'arroz branco cozido',
-          'arroz integral': 'arroz integral cozido',
-          'feijao': 'feijao carioca cozido',
-          'feijao carioca': 'feijao carioca cozido',
-          'feijao preto': 'feijao preto cozido',
-          'batata doce': 'batata doce cozida',
-          'batata': 'batata inglesa cozida',
+          'frango': 'peito de frango',
+          'peito de frango': 'peito de frango',
+          'frango grelhado': 'peito de frango',
+          'arroz': 'arroz branco',
+          'arroz branco': 'arroz branco',
+          'arroz cozido': 'arroz branco',
+          'arroz integral': 'arroz integral',
+          'feijao': 'feijao carioca',
+          'feijao carioca': 'feijao carioca',
+          'feijao carioca cozido': 'feijao carioca',
+          'feijao preto': 'feijao preto',
+          'batata doce': 'batata doce',
+          'batata': 'batata inglesa',
           'banana': 'banana prata',
           'banana prata': 'banana prata',
-          'maca': 'maca fuji',
-          'maça': 'maca fuji',
-          'aveia': 'aveia em flocos',
-          'leite': 'leite desnatado',
-          'leite desnatado': 'leite desnatado',
-          'leite integral': 'leite integral',
-          'queijo': 'queijo minas frescal',
-          'queijo branco': 'queijo minas frescal',
-          'queijo minas': 'queijo minas frescal',
-          'iogurte': 'iogurte natural desnatado',
-          'iogurte natural': 'iogurte natural desnatado',
-          'azeite': 'azeite de oliva',
-          'azeite de oliva': 'azeite de oliva',
-          'carne': 'carne bovina patinho sem gordura grelhado',
-          'patinho': 'carne bovina patinho sem gordura grelhado',
-          'carne moida': 'carne bovina moida refogada',
-          'peixe': 'peixe tilapia file grelhado',
-          'tilapia': 'peixe tilapia file grelhado',
-          'atum': 'atum conserva em oleo',
+          'maca': 'maca',
+          'maça': 'maca',
+          'aveia': 'aveia',
+          'leite': 'leite',
+          'leite desnatado': 'leite',
+          'leite integral': 'leite',
+          'queijo': 'queijo',
+          'queijo branco': 'queijo',
+          'queijo minas': 'queijo',
+          'iogurte': 'iogurte',
+          'iogurte natural': 'iogurte',
+          'azeite': 'azeite',
+          'azeite de oliva': 'azeite',
+          'carne': 'carne',
+          'carne vermelha': 'carne',
+          'carne vermelha magra': 'carne',
+          'patinho': 'patinho',
+          'carne moida': 'carne bovina acem moido',
+          'peixe': 'peixe',
+          'tilapia': 'tilapia',
+          'atum': 'atum',
+          'mussarela': 'mussarela',
+          'requeijao': 'requeijao',
+          'whey': 'whey',
+          'whey protein': 'whey',
+          'cenoura': 'cenoura',
+          'abobrinha': 'abobrinha',
         };
 
         // Helper function to find matching food with improved algorithm
@@ -529,19 +538,19 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           return 'dea776a3-f586-40bb-a945-6f466b8c3e31';
         };
 
-        // Helper to infer protein origin
+        // Helper to infer protein origin - IMPORTANTE: valores devem ser 'Animal', 'Vegetal' ou 'Mista'
         const inferirOrigemPtn = (nome: string): string => {
           const nomeNorm = normalizeText(nome);
           
           if (/frango|carne|peixe|ovo|atum|sardinha|peito|patinho|file|tilapia|salmao|camarao|porco|peru|presunto|whey|albumina|caseina|leite|queijo|iogurte/.test(nomeNorm)) {
-            return 'animal';
+            return 'Animal';
           }
           
           if (/feijao|lentilha|grao de bico|soja|tofu|quinoa|ervilha|amendoim|castanha/.test(nomeNorm)) {
-            return 'vegetal';
+            return 'Vegetal';
           }
           
-          return 'misto';
+          return 'Mista';
         };
 
         // Valores nutricionais estimados por tipo de alimento (por 100g)
