@@ -332,193 +332,59 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
             .replace(/\s+/g, ' '); // Normaliza espaços
         };
 
-        // SISTEMA DE NORMALIZAÇÃO: alimentos que são nutricionalmente equivalentes
-        // Ex: ovo cozido, ovo mexido, ovo inteiro → todos mapeiam para "ovo"
-        const alimentosEquivalentes: Record<string, string[]> = {
-          'ovo': [
-            'ovo cozido', 'ovo mexido', 'ovo inteiro', 'ovo frito', 'ovo pochê', 
-            'ovo poche', 'ovo escalfado', 'ovo omelet', 'omelete', 'ovos', 
-            'clara de ovo', 'gema de ovo', 'ovo de galinha', '1un=45g'
-          ],
-          'frango': [
-            'peito de frango', 'frango grelhado', 'frango cozido', 'frango desfiado',
-            'file de frango', 'filé de frango', 'coxa de frango', 'sobrecoxa de frango',
-            'frango assado', 'frango na chapa'
-          ],
-          'carne vermelha': [
-            'carne bovina', 'carne de boi', 'patinho', 'alcatra', 'maminha', 
-            'file mignon', 'filé mignon', 'contrafile', 'picanha', 'lagarto',
-            'coxao mole', 'coxao duro', 'acem', 'acém', 'carne moida', 'carne moída',
-            'carne vermelha magra', 'carne magra'
-          ],
-          'arroz': [
-            'arroz branco', 'arroz integral', 'arroz cozido', 'arroz parboilizado',
-            'arroz 7 graos', 'arroz negro', 'arroz agulhinha'
-          ],
-          'batata': [
-            'batata doce', 'batata inglesa', 'batata cozida', 'batata assada',
-            'pure de batata', 'purê de batata', 'batata baroa', 'batata yacon'
-          ],
-          'pao': [
-            'pao de forma', 'pão de forma', 'pao frances', 'pão francês', 
-            'pao integral', 'pão integral', 'pao de forma tradicional',
-            'torrada', 'pao de forma light'
-          ],
-          'queijo': [
-            'queijo branco', 'queijo minas', 'queijo cottage', 'queijo coalho',
-            'queijo mussarela', 'mussarela', 'muçarela', 'queijo prato',
-            'queijo ricota', 'ricota'
-          ],
-          'iogurte': [
-            'iogurte natural', 'iogurte grego', 'iogurte desnatado', 'iogurte integral',
-            'iogurte zero', 'iogurte sem lactose', 'iogurte proteico'
-          ],
-          'leite': [
-            'leite integral', 'leite desnatado', 'leite semi desnatado',
-            'leite sem lactose', 'leite zero lactose'
-          ],
-          'feijao': [
-            'feijao carioca', 'feijão carioca', 'feijao preto', 'feijão preto',
-            'feijao branco', 'feijao cozido', 'feijao e leguminosas'
-          ],
-          'banana': [
-            'banana prata', 'banana nanica', 'banana da terra', 'banana madura',
-            'banana verde', 'banana congelada'
-          ],
-          'azeite': [
-            'azeite de oliva', 'azeite extra virgem', 'azeite virgem'
-          ],
-          'whey protein': [
-            'whey', 'whey protein isolado', 'whey protein concentrado',
-            'proteina do soro do leite', 'whey isolado', 'whey concentrado'
-          ],
-          'aveia': [
-            'aveia em flocos', 'flocos de aveia', 'aveia integral', 
-            'farelo de aveia', 'aveia fina', 'aveia grossa'
-          ],
-          'requeijao': [
-            'requeijao light', 'requeijão', 'requeijao cremoso', 'cream cheese'
-          ],
-          'manteiga': [
-            'manteiga com sal', 'manteiga sem sal', 'manteiga ghee', 'ghee'
-          ],
-          'margarina': [
-            'margarina becel', 'becel', 'margarina light'
-          ]
-        };
-
-        // Função para encontrar o alimento base a partir de uma variação
-        const encontrarAlimentoBase = (nome: string): string => {
-          const nomeNorm = normalizeText(nome);
-          
-          for (const [base, variacoes] of Object.entries(alimentosEquivalentes)) {
-            const baseNorm = normalizeText(base);
-            
-            // Verifica se o nome é o próprio base
-            if (nomeNorm === baseNorm || nomeNorm.includes(baseNorm)) {
-              return base;
-            }
-            
-            // Verifica se o nome está nas variações
-            for (const variacao of variacoes) {
-              const variacaoNorm = normalizeText(variacao);
-              if (nomeNorm === variacaoNorm || nomeNorm.includes(variacaoNorm) || variacaoNorm.includes(nomeNorm)) {
-                return base;
-              }
-            }
-          }
-          
-          return nome; // Retorna o original se não encontrar equivalente
-        };
-
-        // Mapeamento de grupos genéricos para alimentos específicos
-        const gruposParaAlimentos: Record<string, string[]> = {
-          'carnes e proteinas': ['peito de frango', 'frango', 'carne bovina', 'carne vermelha', 'patinho'],
-          'feijao e leguminosas': ['feijao', 'feijão', 'feijao carioca', 'feijao preto', 'lentilha'],
-          'vegetais a': ['brocolis', 'alface', 'couve', 'espinafre', 'tomate', 'rucula'],
-          'vegetais b': ['cenoura', 'beterraba', 'abobora', 'abobrinha', 'chuchu'],
-          'paes e variedades': ['pao de forma', 'pão de forma', 'pao frances', 'tapioca'],
-          'personalizado prot': ['peito de frango', 'frango', 'carne bovina', 'ovo'],
-          'personalizado carb': ['arroz branco', 'arroz', 'batata doce', 'macarrao'],
-          'personalizado lip': ['azeite', 'oleaginosas', 'castanha', 'amendoim'],
-        };
-
         // Helper function to find matching food with improved algorithm
+        // PRIORIDADE: Buscar match EXATO primeiro, usar o nome do PDF tal como está
         const findMatchingAlimento = (nomeAlimento: string): string | null => {
           const nomeNormalizado = normalizeText(nomeAlimento);
           
-          // 1. Exact match
+          // 1. MATCH EXATO - prioridade máxima
           if (alimentosMap.has(nomeNormalizado)) {
+            console.log(`Match exato encontrado: "${nomeAlimento}" → id: ${alimentosMap.get(nomeNormalizado)}`);
             return alimentosMap.get(nomeNormalizado)!;
           }
           
-          // 2. Busca pelo alimento base (normalização de variações)
-          const alimentoBase = encontrarAlimentoBase(nomeAlimento);
-          const alimentoBaseNorm = normalizeText(alimentoBase);
-          
-          // Procura o alimento base na lista
+          // 2. Busca por nome que contenha exatamente o termo (para variações como "pão de forma tradicional")
           for (const alimento of alimentosList) {
-            if (alimento.nomeNorm === alimentoBaseNorm || 
-                alimento.nomeNorm.includes(alimentoBaseNorm) ||
-                alimentoBaseNorm.includes(alimento.nomeNorm)) {
+            // Match se o nome do banco contém exatamente o nome buscado
+            if (alimento.nomeNorm === nomeNormalizado) {
+              console.log(`Match exato por nomeNorm: "${nomeAlimento}" → "${alimento.nome}"`);
               return alimento.id;
             }
           }
           
-          // 3. Check if it's a generic group and map to first available food
-          for (const [grupo, opcoes] of Object.entries(gruposParaAlimentos)) {
-            const grupoNorm = normalizeText(grupo);
-            if (nomeNormalizado.includes(grupoNorm) || grupoNorm.includes(nomeNormalizado)) {
-              for (const opcao of opcoes) {
-                const opcaoNorm = normalizeText(opcao);
-                for (const alimento of alimentosList) {
-                  if (alimento.nomeNorm.includes(opcaoNorm) || opcaoNorm.includes(alimento.nomeNorm)) {
-                    return alimento.id;
-                  }
-                }
+          // 3. Busca por nome mais específico primeiro (evita "ovo" virar "clara de ovo")
+          // O nome mais específico é aquele que contém o termo buscado E tem menos caracteres extras
+          let matchMaisEspecifico: { id: string; nome: string; diff: number } | null = null;
+          
+          for (const alimento of alimentosList) {
+            // Se o nome do banco contém o nome buscado
+            if (alimento.nomeNorm.includes(nomeNormalizado)) {
+              const diff = alimento.nomeNorm.length - nomeNormalizado.length;
+              if (!matchMaisEspecifico || diff < matchMaisEspecifico.diff) {
+                matchMaisEspecifico = { id: alimento.id, nome: alimento.nome, diff };
+              }
+            }
+            // Se o nome buscado contém o nome do banco (ex: "pão de forma tradicional" contém "pão de forma")
+            if (nomeNormalizado.includes(alimento.nomeNorm)) {
+              const diff = nomeNormalizado.length - alimento.nomeNorm.length;
+              if (!matchMaisEspecifico || diff < matchMaisEspecifico.diff) {
+                matchMaisEspecifico = { id: alimento.id, nome: alimento.nome, diff };
               }
             }
           }
           
-          // 4. Word-based matching - find foods that share significant words
-          const palavrasAlimento = nomeNormalizado.split(' ').filter(p => p.length > 2);
-          let melhorMatch: { id: string; score: number; nome: string } | null = null;
-          
-          for (const alimento of alimentosList) {
-            const palavrasBase = alimento.nomeNorm.split(' ').filter(p => p.length > 2);
-            let score = 0;
-            
-            for (const palavra of palavrasAlimento) {
-              for (const palavraBase of palavrasBase) {
-                // Match exato de palavra = maior score
-                if (palavraBase === palavra) {
-                  score += palavra.length * 2;
-                } else if (palavraBase.includes(palavra) || palavra.includes(palavraBase)) {
-                  score += Math.min(palavra.length, palavraBase.length);
-                }
-              }
-            }
-            
-            if (score > 0 && (!melhorMatch || score > melhorMatch.score)) {
-              melhorMatch = { id: alimento.id, score, nome: alimento.nomeNorm };
-            }
-          }
-          
-          // Retorna apenas se tiver um score mínimo significativo
-          if (melhorMatch && melhorMatch.score >= 3) {
-            console.log(`Match encontrado: "${nomeAlimento}" → "${melhorMatch.nome}" (score: ${melhorMatch.score})`);
-            return melhorMatch.id;
-          }
-          
-          // 5. Partial string match as fallback
-          for (const alimento of alimentosList) {
-            if (alimento.nomeNorm.includes(nomeNormalizado) || nomeNormalizado.includes(alimento.nomeNorm)) {
-              return alimento.id;
-            }
+          if (matchMaisEspecifico && matchMaisEspecifico.diff <= 15) {
+            console.log(`Match específico: "${nomeAlimento}" → "${matchMaisEspecifico.nome}" (diff: ${matchMaisEspecifico.diff})`);
+            return matchMaisEspecifico.id;
           }
           
           console.log(`Alimento não encontrado, será criado: "${nomeAlimento}"`);
           return null;
+        };
+
+        // Função simples para obter o nome a ser salvo (mantém o nome original)
+        const encontrarAlimentoBase = (nome: string): string => {
+          return nome.trim();
         };
 
         // Map meal names to standard names
