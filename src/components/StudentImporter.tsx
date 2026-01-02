@@ -467,52 +467,34 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           return nome.trim();
         };
 
-        // Map meal names to standard names
-        // Mapeamento atualizado: Refeição 1=Café, Refeição 2=Almoço, Refeição 3=Lanche Tarde, Refeição 4=Jantar
+        // Map meal names to standard format: "Refeição 1", "Refeição 2", etc.
+        // Mantém nomenclatura simples para evitar problemas de mapeamento
         const mapRefeicaoName = (nome: string): string => {
           const nomeNormalizado = nome.toLowerCase().trim();
           
-          // Direct mappings - ajustado para refletir padrão comum de planos alimentares
-          // Refeição 1 = Café da Manhã
-          // Refeição 2 = Almoço
-          // Refeição 3 = Lanche da Tarde
-          // Refeição 4 = Jantar
-          // Refeição 5 = Ceia
-          // Refeição 6 = Pré-Treino / Extra
-          const mappings: Record<string, string> = {
-            'refeição 1': 'Café da Manhã',
-            'refeicao 1': 'Café da Manhã',
-            'ref 1': 'Café da Manhã',
-            'refeição 2': 'Almoço',
-            'refeicao 2': 'Almoço',
-            'ref 2': 'Almoço',
-            'refeição 3': 'Lanche da Tarde',
-            'refeicao 3': 'Lanche da Tarde',
-            'ref 3': 'Lanche da Tarde',
-            'refeição 4': 'Jantar',
-            'refeicao 4': 'Jantar',
-            'ref 4': 'Jantar',
-            'refeição 5': 'Ceia',
-            'refeicao 5': 'Ceia',
-            'ref 5': 'Ceia',
-            'refeição 6': 'Pré-Treino',
-            'refeicao 6': 'Pré-Treino',
-            'ref 6': 'Pré-Treino',
-            'café da manhã': 'Café da Manhã',
-            'cafe da manha': 'Café da Manhã',
-            'lanche da manhã': 'Lanche da Manhã',
-            'lanche da manha': 'Lanche da Manhã',
-            'almoço': 'Almoço',
-            'almoco': 'Almoço',
-            'lanche da tarde': 'Lanche da Tarde',
-            'lanche': 'Lanche da Tarde',
-            'jantar': 'Jantar',
-            'ceia': 'Ceia',
-            'pré-treino': 'Pré-Treino',
-            'pre treino': 'Pré-Treino',
+          // Extrai o número da refeição se existir
+          const matchNumero = nomeNormalizado.match(/(?:refeição|refeicao|ref)\s*(\d+)/);
+          if (matchNumero) {
+            return `Refeição ${matchNumero[1]}`;
+          }
+          
+          // Mapeia nomes tradicionais para números sequenciais
+          const mappingsParaNumero: Record<string, string> = {
+            'café da manhã': 'Refeição 1',
+            'cafe da manha': 'Refeição 1',
+            'lanche da manhã': 'Refeição 2',
+            'lanche da manha': 'Refeição 2',
+            'almoço': 'Refeição 3',
+            'almoco': 'Refeição 3',
+            'lanche da tarde': 'Refeição 4',
+            'lanche': 'Refeição 4',
+            'jantar': 'Refeição 5',
+            'ceia': 'Refeição 6',
+            'pré-treino': 'Refeição 7',
+            'pre treino': 'Refeição 7',
           };
           
-          return mappings[nomeNormalizado] || nome;
+          return mappingsParaNumero[nomeNormalizado] || nome;
         };
 
         // Import diet items (refeicoes)
