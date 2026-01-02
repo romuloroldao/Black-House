@@ -693,12 +693,26 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           }
         }
 
+        console.log('=== DEBUG: itensToInsert ===');
+        console.log('Total de itens para inserir:', itensToInsert.length);
+        console.log('Itens:', JSON.stringify(itensToInsert, null, 2));
+        
         if (itensToInsert.length > 0) {
-          const { error: itensError } = await supabase.from('itens_dieta').insert(itensToInsert);
+          console.log('Inserindo itens no banco de dados...');
+          const { data: insertedItens, error: itensError } = await supabase
+            .from('itens_dieta')
+            .insert(itensToInsert)
+            .select();
+          
           if (itensError) {
             console.error('Erro ao inserir itens da dieta:', itensError);
-            toast.error('Erro ao salvar alguns itens da dieta');
+            console.error('Detalhes do erro:', JSON.stringify(itensError, null, 2));
+            toast.error('Erro ao salvar alguns itens da dieta: ' + itensError.message);
+          } else {
+            console.log('Itens inseridos com sucesso:', insertedItens?.length);
           }
+        } else {
+          console.warn('ATENÇÃO: Nenhum item para inserir!');
         }
 
         // Import farmacos
