@@ -468,29 +468,36 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
         };
 
         // Map meal names to standard names
+        // Mapeamento atualizado: Refeição 1=Café, Refeição 2=Almoço, Refeição 3=Lanche Tarde, Refeição 4=Jantar
         const mapRefeicaoName = (nome: string): string => {
           const nomeNormalizado = nome.toLowerCase().trim();
           
-          // Direct mappings
+          // Direct mappings - ajustado para refletir padrão comum de planos alimentares
+          // Refeição 1 = Café da Manhã
+          // Refeição 2 = Almoço
+          // Refeição 3 = Lanche da Tarde
+          // Refeição 4 = Jantar
+          // Refeição 5 = Ceia
+          // Refeição 6 = Pré-Treino / Extra
           const mappings: Record<string, string> = {
             'refeição 1': 'Café da Manhã',
             'refeicao 1': 'Café da Manhã',
             'ref 1': 'Café da Manhã',
-            'refeição 2': 'Lanche da Manhã',
-            'refeicao 2': 'Lanche da Manhã',
-            'ref 2': 'Lanche da Manhã',
-            'refeição 3': 'Almoço',
-            'refeicao 3': 'Almoço',
-            'ref 3': 'Almoço',
-            'refeição 4': 'Lanche da Tarde',
-            'refeicao 4': 'Lanche da Tarde',
-            'ref 4': 'Lanche da Tarde',
-            'refeição 5': 'Jantar',
-            'refeicao 5': 'Jantar',
-            'ref 5': 'Jantar',
-            'refeição 6': 'Ceia',
-            'refeicao 6': 'Ceia',
-            'ref 6': 'Ceia',
+            'refeição 2': 'Almoço',
+            'refeicao 2': 'Almoço',
+            'ref 2': 'Almoço',
+            'refeição 3': 'Lanche da Tarde',
+            'refeicao 3': 'Lanche da Tarde',
+            'ref 3': 'Lanche da Tarde',
+            'refeição 4': 'Jantar',
+            'refeicao 4': 'Jantar',
+            'ref 4': 'Jantar',
+            'refeição 5': 'Ceia',
+            'refeicao 5': 'Ceia',
+            'ref 5': 'Ceia',
+            'refeição 6': 'Pré-Treino',
+            'refeicao 6': 'Pré-Treino',
+            'ref 6': 'Pré-Treino',
             'café da manhã': 'Café da Manhã',
             'cafe da manha': 'Café da Manhã',
             'lanche da manhã': 'Lanche da Manhã',
@@ -498,8 +505,11 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
             'almoço': 'Almoço',
             'almoco': 'Almoço',
             'lanche da tarde': 'Lanche da Tarde',
+            'lanche': 'Lanche da Tarde',
             'jantar': 'Jantar',
             'ceia': 'Ceia',
+            'pré-treino': 'Pré-Treino',
+            'pre treino': 'Pré-Treino',
           };
           
           return mappings[nomeNormalizado] || nome;
