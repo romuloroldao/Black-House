@@ -17,23 +17,18 @@ import {
   Dumbbell,
   UtensilsCrossed,
   MessageSquare,
-  DollarSign,
   BarChart3,
   Settings,
   Calendar,
   Video,
-  Bell,
-  Star,
   LogOut,
   CreditCard,
   TrendingDown,
   AlertCircle,
   Wallet,
-  RefreshCw,
   FileText,
   UsersRound,
   Megaphone,
-  CalendarDays,
   Menu,
   Link2
 } from "lucide-react";
@@ -320,11 +315,6 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       id: "user-linking",
       label: "Vincular Usuários",
       icon: Link2,
-    },
-    {
-      id: "coach-profile",
-      label: "Meu Perfil Coach",
-      icon: Star,
     }
   ];
 
