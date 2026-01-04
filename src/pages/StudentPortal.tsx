@@ -15,7 +15,7 @@ import StudentReportsView from "@/components/student/StudentReportsView";
 import StudentMessagesView from "@/components/student/StudentMessagesView";
 import StudentWeeklyCheckin from "@/components/student/StudentWeeklyCheckin";
 import StudentProgressDashboard from "@/components/student/StudentProgressDashboard";
-import CoachProfileView from "@/components/student/CoachProfileView";
+
 import NotificationsPopover from "@/components/NotificationsPopover";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -130,8 +130,6 @@ const StudentPortal = () => {
     switch (activeTab) {
       case "dashboard":
         return <StudentDashboardView />;
-      case "coach":
-        return <CoachProfileView onChatClick={() => handleTabChange("chat")} />;
       case "diet":
         return <StudentDietView />;
       case "workouts":
