@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.parse-student-pdf]
 verify_jwt = true
+
+[functions.create-user]
+verify_jwt = false
