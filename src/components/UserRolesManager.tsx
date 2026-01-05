@@ -66,13 +66,11 @@ const UserRolesManager = () => {
     try {
       setLoading(true);
       
-      // Get all user roles
-      const { data: rolesData, error: rolesError } = await supabase
-        .from("user_roles")
-        .select("*")
-        .order("created_at", { ascending: false });
+      // Get all users with roles using the database function (includes auth.users emails)
+      const { data: usersData, error: usersError } = await supabase
+        .rpc("get_users_with_roles");
 
-      if (rolesError) throw rolesError;
+      if (usersError) throw usersError;
 
       // Get profiles for avatars
       const { data: profilesData } = await supabase
@@ -83,25 +81,24 @@ const UserRolesManager = () => {
         profilesData?.map((p) => [p.id, p.avatar_url]) || []
       );
 
-      // Get alunos data for emails
+      // Get alunos data for display names
       const { data: alunosData } = await supabase
         .from("alunos")
         .select("id, email, nome");
 
-      const alunosMap = new Map(
-        alunosData?.map((a) => [a.id, { email: a.email, nome: a.nome }]) || []
+      const alunosNameMap = new Map(
+        alunosData?.map((a) => [a.email, a.nome]) || []
       );
 
-      // Map roles to user data
-      const usersWithRoles: UserWithRole[] = (rolesData || []).map((role) => {
-        const alunoInfo = alunosMap.get(role.user_id);
+      // Map users data
+      const usersWithRoles: UserWithRole[] = (usersData || []).map((u: any) => {
         return {
-          id: role.user_id,
-          email: alunoInfo?.email || role.user_id,
-          role: role.role,
-          created_at: role.created_at,
-          avatar_url: profilesMap.get(role.user_id) || undefined,
-          display_name: alunoInfo?.nome || undefined,
+          id: u.user_id,
+          email: u.email,
+          role: u.role,
+          created_at: u.created_at,
+          avatar_url: profilesMap.get(u.user_id) || undefined,
+          display_name: alunosNameMap.get(u.email) || undefined,
         };
       });
 
