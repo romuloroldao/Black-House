@@ -1809,6 +1809,15 @@ export type Database = {
         Args: { user_uuid?: string }
         Returns: Database["public"]["Enums"]["user_role"]
       }
+      get_users_with_roles: {
+        Args: never
+        Returns: {
+          created_at: string
+          email: string
+          role: Database["public"]["Enums"]["user_role"]
+          user_id: string
+        }[]
+      }
       is_coach: { Args: { user_uuid?: string }; Returns: boolean }
     }
     Enums: {
