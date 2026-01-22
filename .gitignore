@@ -1,0 +1,46 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Cursor and Deno (large binaries)
+.cursor-server/
+.deno/
+CONFIGURACAO_PROVIDERS_IA.md
+MIGRACAO_GROQ.md
+IA_CONFIGURADA_SUCESSO.md
+CONFIGURACAO_FINAL_CONCLUIDA.md
+
+# Arquivos de documentação com secrets de API
+CONFIGURACAO_IA_CONCLUIDA.md
+IMPLEMENTACAO_AI_ABSTRACTION.md
+AI_PROVIDER_GUIDE.md
+COMO_CONFIGURAR_IA.md
+CONFIGURACAO_FINAL_CONCLUIDA.md
+
+# Arquivos de ambiente e configuração com secrets
+IA_GROQ_CONFIGURADA_FINAL.md
+server/.env
+server/.env.backup-*
+
+FALLBACK_IA_IMPLEMENTADO.md

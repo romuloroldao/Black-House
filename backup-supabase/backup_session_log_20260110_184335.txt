@@ -1,0 +1,1 @@
+pg_dump: error: connection to server at "aws-0-sa-east-1.pooler.supabase.com" (52.67.1.88), port 5432 failed: FATAL:  Tenant or user not found

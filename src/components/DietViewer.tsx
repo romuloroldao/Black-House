@@ -1,0 +1,482 @@
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { apiClient } from '@/lib/api-client';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Separator } from '@/components/ui/separator';
+import { Calendar, Eye, Calculator, ChefHat, Pencil, Trash2 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { toast } from 'sonner';
+
+interface Dieta {
+  id: string;
+  nome: string;
+  objetivo: string;
+  data_criacao: string;
+  aluno: {
+    nome: string;
+    email: string;
+  };
+}
+
+interface ItemDieta {
+  id: string;
+  quantidade: number;
+  refeicao: string;
+  alimento: {
+    id: number;
+    nome: string;
+    quantidade: number;
+    kcal: number;
+    carboidratos: number;
+    proteinas: number;
+    lipidios: number;
+    grupo: string;
+  };
+}
+
+interface DietaCompleta extends Dieta {
+  itens: ItemDieta[];
+}
+
+const DietViewer = () => {
+  const navigate = useNavigate();
+  const [dietas, setDietas] = useState<Dieta[]>([]);
+  const [dietaSelecionada, setDietaSelecionada] = useState<DietaCompleta | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingDetalhes, setLoadingDetalhes] = useState(false);
+
+  useEffect(() => {
+    carregarDietas();
+  }, []);
+
+  const carregarDietas = async () => {
+    try {
+      const data = await apiClient
+        .from('dietas')
+        .select('*')
+        .order('data_criacao', { ascending: false });
+
+      const dietasData = Array.isArray(data) ? data : [];
+      
+      // Buscar dados dos alunos para cada dieta
+      const dietasFormatadas = await Promise.all(
+        dietasData.map(async (dieta: any) => {
+          const alunoData = await apiClient
+            .from('alunos')
+            .select('nome, email')
+            .eq('id', dieta.aluno_id);
+          
+          const aluno = Array.isArray(alunoData) && alunoData.length > 0 ? alunoData[0] : null;
+          
+          return {
+            ...dieta,
+            aluno: aluno || { nome: 'Aluno não encontrado', email: '' }
+          };
+        })
+      );
+      
+      setDietas(dietasFormatadas);
+    } catch (error) {
+      console.error('Erro ao carregar dietas:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const carregarDetalhesDieta = async (dietaId: string) => {
+    setLoadingDetalhes(true);
+    try {
+      const dietaData = await apiClient
+        .from('dietas')
+        .select('*')
+        .eq('id', dietaId);
+
+      const dieta = Array.isArray(dietaData) && dietaData.length > 0 ? dietaData[0] : null;
+      if (!dieta) throw new Error('Dieta não encontrada');
+
+      // Buscar dados do aluno
+      const alunoData = await apiClient
+        .from('alunos')
+        .select('nome, email')
+        .eq('id', dieta.aluno_id);
+      
+      const aluno = Array.isArray(alunoData) && alunoData.length > 0 ? alunoData[0] : null;
+
+      // Buscar itens da dieta
+      const itensData = await apiClient
+        .from('itens_dieta')
+        .select('*')
+        .eq('dieta_id', dietaId);
+
+      const itens = Array.isArray(itensData) ? itensData : [];
+
+      // Buscar dados dos alimentos para cada item
+      const itensCompletos = await Promise.all(
+        itens.map(async (item: any) => {
+          const alimentoData = await apiClient
+            .from('alimentos')
+            .select('*')
+            .eq('id', item.alimento_id);
+          
+          const alimento = Array.isArray(alimentoData) && alimentoData.length > 0 ? alimentoData[0] : null;
+          
+          // Garantir que quantidade seja número
+          const quantidade = typeof item.quantidade === 'string' ? parseFloat(item.quantidade) || 0 : (item.quantidade || 0);
+          
+          return {
+            ...item,
+            quantidade: quantidade,
+            alimento: alimento ? {
+              ...alimento,
+              quantidade: typeof alimento.quantidade_referencia_g === 'string' 
+                ? parseFloat(alimento.quantidade_referencia_g) || 100 
+                : (alimento.quantidade_referencia_g || 100),
+              kcal: typeof alimento.kcal_por_referencia === 'string' 
+                ? parseFloat(alimento.kcal_por_referencia) || 0 
+                : (alimento.kcal_por_referencia || 0),
+              carboidratos: typeof alimento.cho_por_referencia === 'string' 
+                ? parseFloat(alimento.cho_por_referencia) || 0 
+                : (alimento.cho_por_referencia || 0),
+              proteinas: typeof alimento.ptn_por_referencia === 'string' 
+                ? parseFloat(alimento.ptn_por_referencia) || 0 
+                : (alimento.ptn_por_referencia || 0),
+              lipidios: typeof alimento.lip_por_referencia === 'string' 
+                ? parseFloat(alimento.lip_por_referencia) || 0 
+                : (alimento.lip_por_referencia || 0),
+              grupo: alimento.tipo_id || ''
+            } : { id: 0, nome: 'Alimento não encontrado', quantidade: 0, kcal: 0, carboidratos: 0, proteinas: 0, lipidios: 0, grupo: '' }
+          };
+        })
+      );
+
+      const dietaCompleta: DietaCompleta = {
+        ...dieta,
+        aluno: aluno || { nome: 'Aluno não encontrado', email: '' },
+        itens: itensCompletos
+      };
+
+      setDietaSelecionada(dietaCompleta);
+    } catch (error) {
+      console.error('Erro ao carregar detalhes da dieta:', error);
+    } finally {
+      setLoadingDetalhes(false);
+    }
+  };
+
+  const calcularSubstituicoes = (item: ItemDieta, alimentos: any[]) => {
+    const alimento = item.alimento;
+    let nutrienteDominante: keyof Pick<typeof alimento, 'proteinas' | 'carboidratos' | 'lipidios'> = 'proteinas';
+    
+    if (alimento.grupo === 'Carboidrato') nutrienteDominante = 'carboidratos';
+    if (alimento.grupo === 'Lipídio') nutrienteDominante = 'lipidios';
+
+    const valorOriginal = alimento[nutrienteDominante];
+    if (valorOriginal === 0) return [];
+
+    return alimentos
+      .filter(a => 
+        a.grupo === alimento.grupo && 
+        a.id !== alimento.id &&
+        a[nutrienteDominante] > 0
+      )
+      .map(sub => {
+        const valorSub = sub[nutrienteDominante];
+        const qtdEquivalente = (item.quantidade * valorOriginal) / valorSub;
+        return {
+          nome: sub.nome,
+          quantidade: Math.round(qtdEquivalente * 10) / 10,
+          nutriente: nutrienteDominante === 'proteinas' ? 'Proteínas' : 
+                    nutrienteDominante === 'carboidratos' ? 'Carboidratos' : 'Lipídios'
+        };
+      })
+      .slice(0, 3);
+  };
+
+  const calcularTotaisRefeicao = (itens: ItemDieta[], refeicao: string) => {
+    return itens
+      .filter(item => item.refeicao === refeicao)
+      .reduce((total, item) => {
+        const fator = item.quantidade / item.alimento.quantidade;
+        return {
+          kcal: total.kcal + (item.alimento.kcal * fator),
+          proteinas: total.proteinas + (item.alimento.proteinas * fator),
+          carboidratos: total.carboidratos + (item.alimento.carboidratos * fator),
+          lipidios: total.lipidios + (item.alimento.lipidios * fator)
+        };
+      }, { kcal: 0, proteinas: 0, carboidratos: 0, lipidios: 0 });
+  };
+
+  const calcularTotaisDieta = (itens: ItemDieta[]) => {
+    return itens.reduce((total, item) => {
+      const fator = item.quantidade / item.alimento.quantidade;
+      return {
+        kcal: total.kcal + (item.alimento.kcal * fator),
+        proteinas: total.proteinas + (item.alimento.proteinas * fator),
+        carboidratos: total.carboidratos + (item.alimento.carboidratos * fator),
+        lipidios: total.lipidios + (item.alimento.lipidios * fator)
+      };
+    }, { kcal: 0, proteinas: 0, carboidratos: 0, lipidios: 0 });
+  };
+
+  const handleEditarDieta = (dietaId: string) => {
+    navigate(`/dieta/${dietaId}`);
+  };
+
+  const handleExcluirDieta = async (dietaId: string) => {
+    try {
+      // Primeiro excluir os itens da dieta
+      // Nota: apiClient.delete() pode precisar de filtro diferente, então vamos buscar IDs primeiro
+      const itensData = await apiClient
+        .from('itens_dieta')
+        .select('id')
+        .eq('dieta_id', dietaId);
+
+      const itens = Array.isArray(itensData) ? itensData : [];
+      for (const item of itens) {
+        await apiClient
+          .from('itens_dieta')
+          .delete(item.id);
+      }
+
+      // Depois excluir a dieta
+      await apiClient
+        .from('dietas')
+        .delete(dietaId);
+
+      toast.success('Dieta excluída com sucesso!');
+      carregarDietas();
+    } catch (error) {
+      console.error('Erro ao excluir dieta:', error);
+      toast.error('Erro ao excluir dieta. Tente novamente.');
+    }
+  };
+
+  const refeicoesPadrao = ['Café da Manhã', 'Lanche da Manhã', 'Almoço', 'Lanche da Tarde', 'Jantar', 'Ceia'];
+
+  if (loading) {
+    return (
+      <div className="p-6">
+        <div className="animate-pulse space-y-4">
+          <div className="h-8 bg-muted rounded w-1/3"></div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="h-32 bg-muted rounded"></div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
+          <ChefHat className="w-8 h-8" />
+          Dietas Criadas
+        </h1>
+        <p className="text-muted-foreground mt-2">
+          Visualize e gerencie as dietas dos seus alunos
+        </p>
+      </div>
+
+      {dietas.length === 0 ? (
+        <Card>
+          <CardContent className="py-8 text-center">
+            <p className="text-muted-foreground">
+              Nenhuma dieta criada ainda. Comece criando uma nova dieta!
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {dietas.map((dieta) => (
+            <Card key={dieta.id} className="shadow-card">
+              <CardHeader>
+                <CardTitle className="text-lg">{dieta.nome}</CardTitle>
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">{dieta.aluno?.nome}</p>
+                  <Badge variant="outline">{dieta.objetivo}</Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+                  <Calendar className="w-4 h-4" />
+                  {new Date(dieta.data_criacao).toLocaleDateString('pt-BR')}
+                </div>
+                
+                <div className="flex items-center justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleEditarDieta(dieta.id)}
+                  >
+                    <Pencil className="w-4 h-4 mr-2" />
+                    Editar
+                  </Button>
+                  
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Excluir
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Tem certeza que deseja excluir a dieta "{dieta.nome}"? Esta ação não pode ser desfeita.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => handleExcluirDieta(dieta.id)}>
+                          Excluir
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                  
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => carregarDetalhesDieta(dieta.id)}
+                      >
+                        <Eye className="w-4 h-4 mr-2" />
+                        Ver Dieta
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+                      <DialogHeader>
+                        <DialogTitle>{dietaSelecionada?.nome}</DialogTitle>
+                      </DialogHeader>
+                      
+                      {loadingDetalhes ? (
+                        <div className="space-y-4">
+                          <div className="animate-pulse">
+                            <div className="h-4 bg-muted rounded w-1/2 mb-2"></div>
+                            <div className="h-4 bg-muted rounded w-3/4"></div>
+                          </div>
+                        </div>
+                      ) : dietaSelecionada && (
+                        <div className="space-y-6">
+                          {/* Informações da dieta */}
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <p className="text-sm font-medium">Aluno:</p>
+                              <p className="text-sm text-muted-foreground">{dietaSelecionada.aluno.nome}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium">Objetivo:</p>
+                              <p className="text-sm text-muted-foreground">{dietaSelecionada.objetivo}</p>
+                            </div>
+                          </div>
+
+                          {/* Totais gerais */}
+                          {dietaSelecionada.itens.length > 0 && (
+                            <Card>
+                              <CardHeader>
+                                <CardTitle className="flex items-center gap-2 text-base">
+                                  <Calculator className="w-4 h-4" />
+                                  Resumo Nutricional Total
+                                </CardTitle>
+                              </CardHeader>
+                              <CardContent>
+                                {(() => {
+                                  const totais = calcularTotaisDieta(dietaSelecionada.itens);
+                                  return (
+                                    <div className="grid grid-cols-4 gap-4 text-center">
+                                      <div>
+                                        <div className="text-lg font-bold text-primary">{Math.round(totais.kcal)}</div>
+                                        <div className="text-xs text-muted-foreground">Calorias</div>
+                                      </div>
+                                      <div>
+                                        <div className="text-lg font-bold text-primary">{Math.round(totais.proteinas)}g</div>
+                                        <div className="text-xs text-muted-foreground">Proteínas</div>
+                                      </div>
+                                      <div>
+                                        <div className="text-lg font-bold text-warning">{Math.round(totais.carboidratos)}g</div>
+                                        <div className="text-xs text-muted-foreground">Carboidratos</div>
+                                      </div>
+                                      <div>
+                                        <div className="text-lg font-bold text-destructive">{Math.round(totais.lipidios)}g</div>
+                                        <div className="text-xs text-muted-foreground">Lipídios</div>
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+                              </CardContent>
+                            </Card>
+                          )}
+
+                          {/* Refeições */}
+                          <div className="space-y-4">
+                            {refeicoesPadrao.map(nomeRefeicao => {
+                              const itensRefeicao = dietaSelecionada.itens.filter(item => item.refeicao === nomeRefeicao);
+                              if (itensRefeicao.length === 0) return null;
+
+                              const totaisRefeicao = calcularTotaisRefeicao(dietaSelecionada.itens, nomeRefeicao);
+
+                              return (
+                                <div key={nomeRefeicao} className="border rounded-lg p-4">
+                                  <div className="flex items-center justify-between mb-3">
+                                    <h3 className="font-semibold">{nomeRefeicao}</h3>
+                                    <div className="flex gap-2 text-xs">
+                                      <Badge variant="outline">{Math.round(totaisRefeicao.kcal)} kcal</Badge>
+                                      <Badge variant="outline">{Math.round(totaisRefeicao.proteinas)}g prot</Badge>
+                                    </div>
+                                  </div>
+
+                                  <div className="space-y-3">
+                                    {itensRefeicao.map(item => (
+                                      <div key={item.id} className="border rounded p-3 space-y-2">
+                                        <div className="flex items-center justify-between">
+                                          <span className="font-medium">{item.alimento.nome}</span>
+                                          <span className="text-sm text-muted-foreground">
+                                            {item.quantidade}g - {Math.round((item.alimento.kcal * item.quantidade) / item.alimento.quantidade)} kcal
+                                          </span>
+                                        </div>
+
+                                        {/* Substituições */}
+                                        <div className="text-xs">
+                                          <p className="font-medium text-muted-foreground mb-1">Pode substituir por:</p>
+                                          <div className="flex flex-wrap gap-1">
+                                            {calcularSubstituicoes(item, []).map((sub, idx) => (
+                                              <Badge key={idx} variant="secondary" className="text-xs">
+                                                {sub.nome} - {sub.quantidade}g
+                                              </Badge>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </DialogContent>
+                  </Dialog>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default DietViewer;

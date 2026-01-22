@@ -1,0 +1,32 @@
+-- Fix infinite recursion in user_roles RLS policy
+-- Remove the problematic policy that causes recursion
+DROP POLICY IF EXISTS "Coaches can view student roles" ON public.user_roles;
+
+-- Create a simpler policy for user_roles that only allows users to see their own role
+-- This prevents recursion while still maintaining security
+CREATE POLICY "Users can view their own role" ON public.user_roles
+FOR SELECT 
+TO authenticated
+USING (auth.uid() = user_id);
+
+-- Update the functions to be more robust and avoid potential issues
+CREATE OR REPLACE FUNCTION public.get_user_role(user_uuid uuid DEFAULT auth.uid())
+RETURNS user_role
+LANGUAGE sql
+STABLE SECURITY DEFINER
+SET search_path = public
+AS $function$
+  SELECT role FROM public.user_roles WHERE user_id = user_uuid LIMIT 1;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.is_coach(user_uuid uuid DEFAULT auth.uid())
+RETURNS boolean
+LANGUAGE sql
+STABLE SECURITY DEFINER
+SET search_path = public
+AS $function$
+  SELECT EXISTS (
+    SELECT 1 FROM public.user_roles 
+    WHERE user_id = user_uuid AND role = 'coach'
+  );
+$function$;

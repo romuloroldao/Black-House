@@ -1,0 +1,147 @@
+// ============================================================================
+// MIDDLEWARE: resolveAlunoOrFail (TypeScript)
+// ============================================================================
+// DOMAIN-RESOLUTION-ALUNO-COACH-003
+// Versão TypeScript corrigida - usa linked_user_id (canônico)
+// ============================================================================
+
+import { Request, Response, NextFunction } from 'express';
+import { Pool } from 'pg';
+
+// Estender Request para incluir user e aluno
+interface AuthenticatedRequest extends Request {
+  user?: {
+    id: string;
+    role: string;
+    email?: string;
+  };
+  aluno?: {
+    id: string;
+    nome: string;
+    email: string;
+    telefone?: string;
+    coach_id: string;
+    linked_user_id: string;
+    status?: string;
+    created_at: Date;
+  };
+}
+
+export function resolveAlunoOrFail(pool: Pool) {
+  return async (
+    req: AuthenticatedRequest,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const userId = req.user?.id;
+      const userRole = req.user?.role;
+
+      if (!userId) {
+        return res.status(401).json({ 
+          error: 'Não autenticado',
+          error_code: 'UNAUTHENTICATED' 
+        });
+      }
+
+      // Se for aluno, resolver aluno via linked_user_id (canônico)
+      if (userRole === 'aluno') {
+        const alunoResult = await pool.query(
+          `
+          SELECT 
+            a.id,
+            a.nome,
+            a.email,
+            a.telefone,
+            a.coach_id,
+            a.linked_user_id,
+            a.status,
+            a.created_at
+          FROM public.alunos a
+          WHERE a.linked_user_id = $1
+          LIMIT 1
+          `,
+          [userId]
+        );
+
+        if (alunoResult.rows.length === 0) {
+          return res.status(403).json({
+            error: 'Aluno não vinculado',
+            error_code: 'ALUNO_NOT_LINKED',
+            message: 'Seu perfil não está vinculado a um aluno. Entre em contato com seu coach.'
+          });
+        }
+
+        // Anexa o aluno canônico à request
+        req.aluno = alunoResult.rows[0];
+        return next();
+      }
+
+      // Se for coach, validar aluno_id se fornecido
+      if (userRole === 'coach') {
+        const { aluno_id } = req.body || req.query;
+
+        if (aluno_id) {
+          // Validar que aluno pertence ao coach
+          const alunoResult = await pool.query(
+            `
+            SELECT 
+              a.id,
+              a.nome,
+              a.email,
+              a.telefone,
+              a.coach_id,
+              a.linked_user_id,
+              a.status
+            FROM public.alunos a
+            WHERE a.id = $1 AND a.coach_id = $2
+            `,
+            [aluno_id, userId]
+          );
+
+          if (alunoResult.rows.length === 0) {
+            return res.status(403).json({
+              error: 'Aluno não encontrado ou não pertence a este coach',
+              error_code: 'ALUNO_NOT_BELONGS_TO_COACH'
+            });
+          }
+
+          req.aluno = alunoResult.rows[0];
+        }
+
+        return next();
+      }
+
+      // Admin pode acessar qualquer aluno (se fornecido)
+      if (userRole === 'admin') {
+        const { aluno_id } = req.body || req.query;
+
+        if (aluno_id) {
+          const alunoResult = await pool.query(
+            'SELECT * FROM public.alunos WHERE id = $1',
+            [aluno_id]
+          );
+
+          if (alunoResult.rows.length > 0) {
+            req.aluno = alunoResult.rows[0];
+          }
+        }
+
+        return next();
+      }
+
+      // Role inválido
+      return res.status(403).json({
+        error: 'Acesso negado',
+        error_code: 'INVALID_ROLE'
+      });
+
+    } catch (err: any) {
+      console.error('resolveAlunoOrFail.error', err);
+      res.status(500).json({ 
+        error: 'Erro ao resolver aluno',
+        error_code: 'ALUNO_RESOLUTION_ERROR'
+      });
+    }
+  };
+}

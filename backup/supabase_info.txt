@@ -1,0 +1,14 @@
+Informações do Projeto Supabase
+================================
+
+PROJECT_REF: cghzttbggklhuyqxzabq
+SUPABASE_URL: https://cghzttbggklhuyqxzabq.supabase.co
+SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNnaHp0dGJnZ2tsaHV5cXh6YWJxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ1OTU4MjksImV4cCI6MjA3MDE3MTgyOX0.h64J00FCvjOX86vhpdI3sTXXVRkoWfpYLS6jQWkuUx8
+
+Para exportação completa:
+1. Obtenha a senha do PostgreSQL em Settings → Database
+2. Execute: export SUPABASE_PASSWORD='senha'
+3. Execute: ./scripts/exportar-supabase-completo.sh
+
+Connection String Template:
+postgresql://postgres:[SENHA]@db.cghzttbggklhuyqxzabq.supabase.co:5432/postgres

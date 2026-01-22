@@ -1,0 +1,34 @@
+project_id = "cghzttbggklhuyqxzabq"
+
+[functions.create-asaas-customer]
+verify_jwt = true
+
+[functions.create-asaas-payment]
+verify_jwt = true
+
+[functions.asaas-webhook]
+verify_jwt = false
+
+[functions.generate-recurring-charges]
+verify_jwt = false
+
+[functions.send-payment-reminders]
+verify_jwt = false
+
+[functions.check-workout-expirations]
+verify_jwt = false
+
+[functions.send-event-reminders]
+verify_jwt = false
+
+[functions.send-checkin-reminders]
+verify_jwt = false
+
+[functions.parse-student-pdf]
+verify_jwt = true
+
+[functions.create-user]
+verify_jwt = false
+
+[functions.reset-password]
+verify_jwt = false
