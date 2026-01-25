@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- DESIGN-FAVICON-REUSE-LOGO-013: Favicon reutilizando logo existente do frontend -->
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Black House - saúde integrativa & performance</title>
+    <meta name="description" content="Black House - saúde integrativa & performance" />
+    <meta name="author" content="Black House" />
+
+    <meta property="og:title" content="Black House - saúde integrativa & performance" />
+    <meta property="og:description" content="saúde integrativa & performance" />
+    <meta property="og:type" content="website" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    
+    <!-- REACT-PWA-SOFT-LOCK-FIX-004: Meta tags para prevenir cache do index.html -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+  </head>
+
+  <body>
+    <!-- DESIGN-CHECKPOINT-FAILSAFE-CLIENT-DELIVERY-001: Fail-Safe UI - Sempre visível até React montar -->
+    <!-- Esta UI garante que o cliente sempre veja algo, mesmo se React falhar -->
+    <div id="failsafe-ui" style="
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      color: #ffffff;
+      padding: 2rem;
+      box-sizing: border-box;
+    ">
+      <div style="
+        text-align: center;
+        max-width: 600px;
+        animation: fadeIn 0.5s ease-in;
+      ">
+        <div style="
+          font-size: 3rem;
+          margin-bottom: 1.5rem;
+          opacity: 0.9;
+        ">🛡️</div>
+        <h1 style="
+          font-size: 2rem;
+          font-weight: 600;
+          margin: 0 0 1rem 0;
+          color: #ffffff;
+        ">Sistema em Modo Seguro</h1>
+        <p style="
+          font-size: 1.125rem;
+          line-height: 1.6;
+          margin: 0 0 2rem 0;
+          color: #e0e0e0;
+          opacity: 0.9;
+        ">O sistema está operando com estabilidade garantida. Carregando interface principal...</p>
+        <div style="
+          display: inline-block;
+          width: 40px;
+          height: 40px;
+          border: 4px solid rgba(255, 255, 255, 0.3);
+          border-top-color: #ffffff;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin-top: 1rem;
+        "></div>
+      </div>
+      <style>
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        #failsafe-ui.hidden {
+          display: none !important;
+        }
+      </style>
+    </div>
+
+    <div id="root"></div>
+    
+    <!-- REACT-PWA-SOFT-LOCK-FIX-004: Desregistrar Service Workers antigos que podem bloquear novos deploys -->
+    <script>
+      // REACT-PWA-SOFT-LOCK-FIX-004: Executar ANTES de qualquer outro script
+      // Service Workers antigos podem interceptar requests e servir assets inválidos
+      (function() {
+        // REACT-PWA-SOFT-LOCK-FIX-004: Desregistrar TODOS os Service Workers antigos
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.getRegistrations().then(function(registrations) {
+            if (registrations.length > 0) {
+              console.warn('[REACT-PWA-SOFT-LOCK-FIX-004] Encontrados', registrations.length, 'Service Worker(s) antigo(s). Desregistrando...');
+              for (let registration of registrations) {
+                console.warn('[REACT-PWA-SOFT-LOCK-FIX-004] Desregistrando Service Worker:', registration.scope);
+                registration.unregister().then(function(success) {
+                  if (success) {
+                    console.log('[REACT-PWA-SOFT-LOCK-FIX-004] Service Worker desregistrado:', registration.scope);
+                  } else {
+                    console.error('[REACT-PWA-SOFT-LOCK-FIX-004] Falha ao desregistrar Service Worker:', registration.scope);
+                  }
+                }).catch(function(error) {
+                  console.error('[REACT-PWA-SOFT-LOCK-FIX-004] Erro ao desregistrar Service Worker:', error);
+                });
+              }
+            } else {
+              console.log('[REACT-PWA-SOFT-LOCK-FIX-004] Nenhum Service Worker encontrado');
+            }
+          }).catch(function(error) {
+            console.error('[REACT-PWA-SOFT-LOCK-FIX-004] Erro ao verificar Service Workers:', error);
+          });
+        }
+        
+        // REACT-PWA-SOFT-LOCK-FIX-004: Limpar TODOS os caches antigos que podem conter assets inválidos
+        if ('caches' in window) {
+          caches.keys().then(function(cacheNames) {
+            if (cacheNames.length > 0) {
+              console.warn('[REACT-PWA-SOFT-LOCK-FIX-004] Encontrados', cacheNames.length, 'cache(s) antigo(s). Limpando...');
+              return Promise.all(
+                cacheNames.map(function(cacheName) {
+                  console.warn('[REACT-PWA-SOFT-LOCK-FIX-004] Limpando cache:', cacheName);
+                  return caches.delete(cacheName);
+                })
+              );
+            } else {
+              console.log('[REACT-PWA-SOFT-LOCK-FIX-004] Nenhum cache encontrado');
+              return Promise.resolve([]);
+            }
+          }).then(function() {
+            console.log('[REACT-PWA-SOFT-LOCK-FIX-004] Caches antigos limpos com sucesso');
+          }).catch(function(error) {
+            console.error('[REACT-PWA-SOFT-LOCK-FIX-004] Erro ao limpar caches:', error);
+          });
+        }
+      })();
+    </script>
+    
+    <!-- DESIGN-CHECKPOINT-FAILSAFE-CLIENT-DELIVERY-001: Script para esconder Fail-Safe quando React montar -->
+    <script>
+      // DESIGN-CHECKPOINT-FAILSAFE-CLIENT-DELIVERY-001: Esconder Fail-Safe UI quando React montar com sucesso
+      // Este script é executado antes do React e monitora quando o React monta
+      (function() {
+        var failsafeUI = document.getElementById('failsafe-ui');
+        var root = document.getElementById('root');
+        
+        // Função para esconder Fail-Safe UI
+        function hideFailsafeUI() {
+          if (failsafeUI) {
+            failsafeUI.classList.add('hidden');
+            // DESIGN-CHECKPOINT-FAILSAFE-CLIENT-DELIVERY-001: Marcar como React montado
+            window.__REACT_MOUNTED__ = true;
+          }
+        }
+        
+        // DESIGN-CHECKPOINT-FAILSAFE-CLIENT-DELIVERY-001: Monitorar quando React monta
+        // Verificar se root tem conteúdo (React montou)
+        var observer = new MutationObserver(function(mutations) {
+          if (root && root.children.length > 0) {
+            // React montou - esconder Fail-Safe após pequeno delay para transição suave
+            setTimeout(hideFailsafeUI, 300);
+            observer.disconnect();
+          }
+        });
+        
+        // Observar mudanças no root
+        if (root) {
+          observer.observe(root, { childList: true, subtree: true });
+        }
+        
+        // DESIGN-CHECKPOINT-FAILSAFE-CLIENT-DELIVERY-001: Timeout de segurança
+        // Se React não montar em 10 segundos, manter Fail-Safe visível mas mostrar mensagem
+        setTimeout(function() {
+          if (!window.__REACT_MOUNTED__ && failsafeUI) {
+            var message = failsafeUI.querySelector('p');
+            if (message) {
+              message.textContent = 'O sistema está operando em modo seguro. Algumas funcionalidades podem estar limitadas. Por favor, recarregue a página ou entre em contato com o suporte.';
+            }
+          }
+        }, 10000);
+      })();
+    </script>
+    
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

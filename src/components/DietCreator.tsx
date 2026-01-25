@@ -1,0 +1,794 @@
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { apiClient } from '@/lib/api-client';
+import { useAuth } from '@/contexts/AuthContext';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Combobox } from '@/components/ui/combobox';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Textarea } from '@/components/ui/textarea';
+import { Plus, Trash2, Calculator, Users, Pill } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { Food, getAllFoodsSafe, getMacroGroup } from '@/lib/foodService';
+
+type Alimento = Food;
+
+interface Aluno {
+  id: string;
+  nome: string;
+  email: string;
+  objetivo: string;
+}
+
+interface ItemRefeicao {
+  id: string;
+  alimento_id: string;
+  quantidade: number;
+  refeicao: string;
+  alimento?: Alimento;
+}
+
+interface Refeicao {
+  nome: string;
+  itens: ItemRefeicao[];
+}
+
+interface Farmaco {
+  id: string;
+  nome: string;
+  dosagem: string;
+  observacao: string;
+}
+
+interface DietCreatorProps {
+  dietaId?: string;
+}
+
+const DietCreator = ({ dietaId }: DietCreatorProps) => {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [alimentos, setAlimentos] = useState<Alimento[]>([]);
+  const [alunos, setAlunos] = useState<Aluno[]>([]);
+  const [selectedAluno, setSelectedAluno] = useState<string>('');
+  const [dietName, setDietName] = useState('');
+  const [objetivo, setObjetivo] = useState('');
+  const [refeicoes, setRefeicoes] = useState<Refeicao[]>([
+    { nome: 'Café da Manhã', itens: [] },
+    { nome: 'Almoço', itens: [] },
+    { nome: 'Jantar', itens: [] }
+  ]);
+  const [farmacos, setFarmacos] = useState<Farmaco[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    carregarDados();
+  }, []);
+
+  useEffect(() => {
+    if (dietaId) {
+      carregarDietaExistente();
+    }
+  }, [dietaId]);
+
+  const carregarDados = async () => {
+    try {
+      const [alimentosRes, alunosRes] = await Promise.all([
+        getAllFoodsSafe(),
+        apiClient.getAlunosByCoachSafe()
+      ]);
+
+      setAlimentos(alimentosRes.success && Array.isArray(alimentosRes.data) ? alimentosRes.data : []);
+      setAlunos(alunosRes.success && Array.isArray(alunosRes.data) ? alunosRes.data : []);
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Erro ao carregar dados",
+        description: error instanceof Error ? error.message : 'Erro desconhecido'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const carregarDietaExistente = async () => {
+    if (!dietaId) return;
+    
+    try {
+      setLoading(true);
+
+      // Carregar dados da dieta
+      const dietaResult = await apiClient.requestSafe<any>(`/api/dietas/${dietaId}`);
+      const dieta = dietaResult.success ? dietaResult.data : null;
+      if (!dieta) throw new Error('Dieta não encontrada');
+
+      // Buscar dados do aluno separadamente (joins não suportados ainda)
+      const alunoResult = await apiClient.requestSafe<any>(`/api/alunos/${dieta.aluno_id}`);
+      const aluno = alunoResult.success ? alunoResult.data : null;
+
+      // Carregar itens da dieta e fármacos
+      const [itensRes, farmacosRes] = await Promise.all([
+        apiClient.requestSafe<any[]>(`/api/itens-dieta?dieta_id=${dietaId}`),
+        apiClient.requestSafe<any[]>(`/api/dieta-farmacos?dieta_id=${dietaId}`)
+      ]);
+
+      const itens = itensRes.success && Array.isArray(itensRes.data) ? itensRes.data : [];
+      const farmacosData = farmacosRes.success && Array.isArray(farmacosRes.data) ? farmacosRes.data : [];
+
+      // Buscar alimentos para cada item
+      let alimentosBase: Alimento[] = alimentos;
+      if (alimentosBase.length === 0) {
+        const alimentosRes = await getAllFoodsSafe();
+        alimentosBase = alimentosRes.success && Array.isArray(alimentosRes.data) ? alimentosRes.data : [];
+      }
+      const alimentosMap = new Map((Array.isArray(alimentosBase) ? alimentosBase : []).map((a: Alimento) => [a.id, a]));
+      const itensComAlimentos = await Promise.all(
+        itens.map(async (item) => {
+          if (item.alimento_id) {
+            return {
+              ...item,
+              alimentos: alimentosMap.get(item.alimento_id) || null
+            };
+          }
+          return { ...item, alimentos: null };
+        })
+      );
+
+      // Preencher os dados
+      setDietName(dieta.nome);
+      setObjetivo(dieta.objetivo || '');
+      setSelectedAluno(dieta.aluno_id);
+
+      // Reorganizar itens por refeição - usar nomes únicos do banco
+      const nomesRefeicoesBanco = [...new Set(itensComAlimentos.map(item => item.refeicao))];
+      
+      // Se não houver itens, usar refeições padrão
+      const nomesRefeicoes = nomesRefeicoesBanco.length > 0 
+        ? nomesRefeicoesBanco 
+        : ['Café da Manhã', 'Almoço', 'Jantar'];
+      
+      const novasRefeicoes = nomesRefeicoes.map(nomeRefeicao => {
+        const itensRefeicao = itensComAlimentos
+          .filter(item => item.refeicao === nomeRefeicao)
+          .map(item => ({
+            id: item.id,
+            alimento_id: item.alimento_id || '',
+            quantidade: typeof item.quantidade === 'string' ? parseFloat(item.quantidade) || 0 : (item.quantidade || 0),
+            refeicao: nomeRefeicao,
+            alimento: item.alimentos as Alimento
+          }));
+
+        return {
+          nome: nomeRefeicao,
+          itens: itensRefeicao
+        };
+      });
+
+      setRefeicoes(novasRefeicoes);
+
+      // Carregar fármacos
+      if (farmacosData) {
+        setFarmacos(farmacosData.map(f => ({
+          id: f.id,
+          nome: f.nome,
+          dosagem: f.dosagem,
+          observacao: f.observacao || ''
+        })));
+      }
+
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Erro ao carregar dieta",
+        description: error instanceof Error ? error.message : 'Erro desconhecido'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const adicionarItem = (refeicaoIndex: number) => {
+    const novoItem: ItemRefeicao = {
+      id: Math.random().toString(36).substr(2, 9),
+      alimento_id: '',
+      quantidade: 100,
+      refeicao: refeicoes[refeicaoIndex].nome
+    };
+
+    const novasRefeicoes = [...refeicoes];
+    novasRefeicoes[refeicaoIndex].itens.push(novoItem);
+    setRefeicoes(novasRefeicoes);
+  };
+
+  const removerItem = (refeicaoIndex: number, itemIndex: number) => {
+    const novasRefeicoes = [...refeicoes];
+    novasRefeicoes[refeicaoIndex].itens.splice(itemIndex, 1);
+    setRefeicoes(novasRefeicoes);
+  };
+
+  const adicionarRefeicao = () => {
+    const novaRefeicao: Refeicao = {
+      nome: `Refeição ${refeicoes.length + 1}`,
+      itens: []
+    };
+    setRefeicoes([...refeicoes, novaRefeicao]);
+  };
+
+  const removerRefeicao = (refeicaoIndex: number) => {
+    if (refeicoes.length > 1) {
+      const novasRefeicoes = refeicoes.filter((_, index) => index !== refeicaoIndex);
+      setRefeicoes(novasRefeicoes);
+    }
+  };
+
+  const editarNomeRefeicao = (refeicaoIndex: number, novoNome: string) => {
+    const novasRefeicoes = [...refeicoes];
+    novasRefeicoes[refeicaoIndex].nome = novoNome;
+    setRefeicoes(novasRefeicoes);
+  };
+
+  const adicionarFarmaco = () => {
+    const novoFarmaco: Farmaco = {
+      id: Math.random().toString(36).substr(2, 9),
+      nome: '',
+      dosagem: '',
+      observacao: ''
+    };
+    setFarmacos([...farmacos, novoFarmaco]);
+  };
+
+  const removerFarmaco = (farmacoIndex: number) => {
+    setFarmacos(farmacos.filter((_, index) => index !== farmacoIndex));
+  };
+
+  const atualizarFarmaco = (farmacoIndex: number, campo: keyof Farmaco, valor: string) => {
+    const novosFarmacos = [...farmacos];
+    novosFarmacos[farmacoIndex] = {
+      ...novosFarmacos[farmacoIndex],
+      [campo]: valor
+    };
+    setFarmacos(novosFarmacos);
+  };
+
+  const atualizarItem = (refeicaoIndex: number, itemIndex: number, campo: keyof ItemRefeicao, valor: any) => {
+    const novasRefeicoes = [...refeicoes];
+    novasRefeicoes[refeicaoIndex].itens[itemIndex] = {
+      ...novasRefeicoes[refeicaoIndex].itens[itemIndex],
+      [campo]: valor
+    };
+
+    // Se mudou o alimento, buscar os dados
+    if (campo === 'alimento_id') {
+      const alimento = alimentos.find(a => a.id === valor);
+      if (alimento) {
+        novasRefeicoes[refeicaoIndex].itens[itemIndex].alimento = alimento;
+      }
+    }
+
+    setRefeicoes(novasRefeicoes);
+  };
+
+  const calcularSubstituicoes = (item: ItemRefeicao): Array<{nome: string, quantidade: number, nutriente: string}> => {
+    if (!item.alimento) return [];
+    
+    const alimento = item.alimento;
+    
+    // Garantir que valores sejam números
+    const quantidade = typeof item.quantidade === 'string' ? parseFloat(item.quantidade) || 0 : (item.quantidade || 0);
+    const quantidadeRef = alimento.portion || 100;
+    const kcalRef = alimento.calories || 0;
+    
+    // Calcular kcal do alimento atual na quantidade especificada
+    const fatorAtual = quantidade / quantidadeRef;
+    const kcalAtual = kcalRef * fatorAtual;
+    
+    if (kcalAtual === 0) return [];
+
+    return alimentos
+      .filter(a => 
+        getMacroGroup(a) === getMacroGroup(alimento) && 
+        a.id !== alimento.id &&
+        a.calories > 0
+      )
+      .map(sub => {
+        // Fórmula: Qtd_B = (kcal_A / (kcal_B / qtd_ref_B)) 
+        // Ou seja: quanto do substituto para ter as mesmas kcal
+        const subKcalRef = sub.calories || 0;
+        const subQtdRef = sub.portion || 100;
+        
+        const kcalSubPorGrama = subKcalRef / subQtdRef;
+        const qtdEquivalente = kcalAtual / kcalSubPorGrama;
+        
+        return {
+          nome: sub.name,
+          quantidade: Math.round(qtdEquivalente),
+          nutriente: 'Kcal'
+        };
+      })
+      .sort((a, b) => Math.abs(a.quantidade - quantidade) - Math.abs(b.quantidade - quantidade))
+      .slice(0, 3);
+  };
+
+  const calcularTotaisRefeicao = (refeicao: Refeicao) => {
+    return refeicao.itens.reduce((total, item) => {
+      if (!item.alimento) return total;
+      
+      // Garantir que quantidade seja número
+      const quantidade = typeof item.quantidade === 'string' ? parseFloat(item.quantidade) || 0 : (item.quantidade || 0);
+      const quantidadeRef = item.alimento.portion || 100;
+      
+      const fator = quantidade / quantidadeRef;
+      
+      // Garantir que valores nutricionais sejam números
+      const kcal = item.alimento.calories || 0;
+      const ptn = item.alimento.protein || 0;
+      const cho = item.alimento.carbs || 0;
+      const lip = item.alimento.fat || 0;
+      
+      return {
+        kcal: total.kcal + (kcal * fator),
+        proteinas: total.proteinas + (ptn * fator),
+        carboidratos: total.carboidratos + (cho * fator),
+        lipidios: total.lipidios + (lip * fator)
+      };
+    }, { kcal: 0, proteinas: 0, carboidratos: 0, lipidios: 0 });
+  };
+
+  const calcularTotaisDieta = () => {
+    return refeicoes.reduce((total, refeicao) => {
+      const totaisRefeicao = calcularTotaisRefeicao(refeicao);
+      return {
+        kcal: total.kcal + totaisRefeicao.kcal,
+        proteinas: total.proteinas + totaisRefeicao.proteinas,
+        carboidratos: total.carboidratos + totaisRefeicao.carboidratos,
+        lipidios: total.lipidios + totaisRefeicao.lipidios
+      };
+    }, { kcal: 0, proteinas: 0, carboidratos: 0, lipidios: 0 });
+  };
+
+  const salvarDieta = async () => {
+    // Se estamos editando uma dieta existente, não precisa validar aluno/nome
+    if (!dietaId) {
+      if (!selectedAluno || !dietName) {
+        toast({
+          variant: "destructive",
+          title: "Dados incompletos",
+          description: "Selecione um aluno e digite o nome da dieta"
+        });
+        return;
+      }
+    }
+
+    try {
+      let dietaIdAtual = dietaId;
+
+      // Se não há dietaId, criar nova dieta
+      if (!dietaIdAtual) {
+        const createResult = await apiClient.requestSafe<any>('/api/dietas', {
+          method: 'POST',
+          body: JSON.stringify({
+            nome: dietName,
+            objetivo: objetivo,
+            aluno_id: selectedAluno
+          }),
+        });
+        dietaIdAtual = createResult.success ? createResult.data?.id : null;
+        if (!dietaIdAtual) throw new Error('Erro ao criar dieta');
+      } else {
+        // Atualizar dieta existente
+        const updateResult = await apiClient.requestSafe(`/api/dietas/${dietaIdAtual}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            nome: dietName,
+            objetivo: objetivo
+          }),
+        });
+        if (!updateResult.success) {
+          throw new Error(updateResult.error || 'Erro ao atualizar dieta');
+        }
+
+        // Remover itens e fármacos antigos
+        // Buscar IDs primeiro
+        const itensRes = await apiClient.requestSafe<any[]>(`/api/itens-dieta?dieta_id=${dietaIdAtual}`);
+        const farmacosRes = await apiClient.requestSafe<any[]>(`/api/dieta-farmacos?dieta_id=${dietaIdAtual}`);
+        const itensAntigos = itensRes.success && Array.isArray(itensRes.data) ? itensRes.data : [];
+        const farmacosAntigos = farmacosRes.success && Array.isArray(farmacosRes.data) ? farmacosRes.data : [];
+        
+        // Deletar cada um
+        if (Array.isArray(itensAntigos)) {
+          for (const item of itensAntigos) {
+            await apiClient.requestSafe(`/api/itens-dieta/${item.id}`, { method: 'DELETE' });
+          }
+        }
+        if (Array.isArray(farmacosAntigos)) {
+          for (const farmaco of farmacosAntigos) {
+            await apiClient.requestSafe(`/api/dieta-farmacos/${farmaco.id}`, { method: 'DELETE' });
+          }
+        }
+      }
+
+      // Salvar itens da dieta
+      const itensParaSalvar = refeicoes.flatMap(refeicao =>
+        refeicao.itens
+          .filter(item => item.alimento_id !== '')
+          .map(item => ({
+            dieta_id: dietaIdAtual,
+            alimento_id: item.alimento_id,
+            quantidade: item.quantidade,
+            refeicao: refeicao.nome
+          }))
+      );
+
+      if (itensParaSalvar.length > 0) {
+        const itensResult = await apiClient.requestSafe('/api/itens-dieta', {
+          method: 'POST',
+          body: JSON.stringify(itensParaSalvar),
+        });
+        if (!itensResult.success) {
+          throw new Error(itensResult.error || 'Erro ao salvar itens');
+        }
+      }
+
+      // Salvar fármacos
+      const farmacosParaSalvar = farmacos
+        .filter(f => f.nome.trim() !== '' && f.dosagem.trim() !== '')
+        .map(f => ({
+          dieta_id: dietaIdAtual,
+          nome: f.nome,
+          dosagem: f.dosagem,
+          observacao: f.observacao || null
+        }));
+
+      if (farmacosParaSalvar.length > 0) {
+        const farmacosResult = await apiClient.requestSafe('/api/dieta-farmacos', {
+          method: 'POST',
+          body: JSON.stringify(farmacosParaSalvar),
+        });
+        if (!farmacosResult.success) {
+          throw new Error(farmacosResult.error || 'Erro ao salvar fármacos');
+        }
+      }
+
+      toast({
+        title: "Sucesso!",
+        description: dietaId ? "Dieta atualizada com sucesso" : "Dieta criada com sucesso"
+      });
+
+      // Se estamos editando, voltar para a lista de dietas
+      if (dietaId) {
+        setTimeout(() => {
+          navigate('/?tab=nutrition');
+        }, 1000);
+      } else {
+        // Se criamos nova, limpar formulário
+        setDietName('');
+        setObjetivo('');
+        setSelectedAluno('');
+        setRefeicoes([
+          { nome: 'Café da Manhã', itens: [] },
+          { nome: 'Almoço', itens: [] },
+          { nome: 'Jantar', itens: [] }
+        ]);
+        setFarmacos([]);
+      }
+
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Erro ao salvar dieta",
+        description: error instanceof Error ? error.message : 'Erro desconhecido'
+      });
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="p-6">
+        <div className="animate-pulse space-y-4">
+          <div className="h-8 bg-muted rounded w-1/3"></div>
+          <div className="h-4 bg-muted rounded w-1/2"></div>
+        </div>
+      </div>
+    );
+  }
+
+  const totaisDieta = calcularTotaisDieta();
+
+  return (
+    <div className="p-6 space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
+          <Users className="w-8 h-8" />
+          Criador de Dietas
+        </h1>
+        <p className="text-muted-foreground mt-2">
+          Crie dietas personalizadas com substituições automáticas
+        </p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Informações da Dieta</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="aluno">Aluno</Label>
+              <Combobox
+                options={alunos.map(aluno => ({
+                  value: aluno.id,
+                  label: aluno.nome,
+                  description: aluno.objetivo
+                }))}
+                value={selectedAluno}
+                onSelect={setSelectedAluno}
+                placeholder="Selecione um aluno"
+                searchPlaceholder="Buscar aluno..."
+                emptyText="Nenhum aluno encontrado."
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="nome">Nome da Dieta</Label>
+              <Input
+                id="nome"
+                value={dietName}
+                onChange={(e) => setDietName(e.target.value)}
+                placeholder="Ex: Dieta para Ganho de Massa"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="objetivo">Objetivo</Label>
+            <Input
+              id="objetivo"
+              value={objetivo}
+              onChange={(e) => setObjetivo(e.target.value)}
+              placeholder="Ex: Ganho de massa muscular"
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Resumo Nutricional */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Calculator className="w-5 h-5" />
+            Resumo Nutricional Total
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-primary">{Math.round(totaisDieta.kcal)}</div>
+              <div className="text-sm text-muted-foreground">Calorias</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-primary">{Math.round(totaisDieta.proteinas)}g</div>
+              <div className="text-sm text-muted-foreground">Proteínas</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-warning">{Math.round(totaisDieta.carboidratos)}g</div>
+              <div className="text-sm text-muted-foreground">Carboidratos</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-destructive">{Math.round(totaisDieta.lipidios)}g</div>
+              <div className="text-sm text-muted-foreground">Lipídios</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Fármacos */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Pill className="w-5 h-5" />
+            Fármacos e Suplementos
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {farmacos.length === 0 ? (
+            <Alert>
+              <AlertDescription>
+                Nenhum fármaco adicionado ainda. Clique no botão abaixo para adicionar.
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <div className="space-y-3">
+              {farmacos.map((farmaco, index) => (
+                <div key={farmaco.id} className="border rounded-lg p-4 space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="space-y-2">
+                      <Label>Nome</Label>
+                      <Input
+                        value={farmaco.nome}
+                        onChange={(e) => atualizarFarmaco(index, 'nome', e.target.value)}
+                        placeholder="Ex: Vitamina D3"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Dosagem</Label>
+                      <Input
+                        value={farmaco.dosagem}
+                        onChange={(e) => atualizarFarmaco(index, 'dosagem', e.target.value)}
+                        placeholder="Ex: 2000 UI/dia"
+                      />
+                    </div>
+
+                    <div className="flex items-end">
+                      <Button
+                        variant="destructive"
+                        size="icon"
+                        onClick={() => removerFarmaco(index)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Observação</Label>
+                    <Textarea
+                      value={farmaco.observacao}
+                      onChange={(e) => atualizarFarmaco(index, 'observacao', e.target.value)}
+                      placeholder="Ex: Tomar pela manhã junto com o café"
+                      rows={2}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <Button
+            variant="outline"
+            onClick={adicionarFarmaco}
+            className="w-full"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Adicionar Fármaco
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Refeições */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold">Refeições</h2>
+          <Button onClick={adicionarRefeicao} variant="outline" size="sm">
+            <Plus className="w-4 h-4 mr-2" />
+            Adicionar Refeição
+          </Button>
+        </div>
+        
+        {refeicoes.map((refeicao, refeicaoIndex) => {
+          const totaisRefeicao = calcularTotaisRefeicao(refeicao);
+          
+          return (
+            <Card key={refeicaoIndex}>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 flex-1">
+                    <Input
+                      value={refeicao.nome}
+                      onChange={(e) => editarNomeRefeicao(refeicaoIndex, e.target.value)}
+                      className="font-semibold bg-transparent border-none p-0 h-auto text-lg"
+                    />
+                    {refeicoes.length > 1 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removerRefeicao(refeicaoIndex)}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    )}
+                  </div>
+                  <div className="flex gap-2 text-sm">
+                    <Badge variant="outline">{Math.round(totaisRefeicao.kcal)} kcal</Badge>
+                    <Badge variant="outline">{Math.round(totaisRefeicao.proteinas)}g prot</Badge>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {refeicao.itens.map((item, itemIndex) => (
+                  <div key={item.id} className="border rounded-lg p-4 space-y-3">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                      <div className="space-y-2">
+                        <Label>Alimento</Label>
+                        <Combobox
+                          options={alimentos.map(alimento => ({
+                            value: alimento.id,
+                            label: alimento.name,
+                            description: `${alimento.calories}kcal/${alimento.portion}g`
+                          }))}
+                          value={item.alimento_id}
+                          onSelect={(value) => atualizarItem(refeicaoIndex, itemIndex, 'alimento_id', value)}
+                          placeholder="Selecione um alimento"
+                          searchPlaceholder="Buscar alimento..."
+                          emptyText="Nenhum alimento encontrado."
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Quantidade (g/ml)</Label>
+                        <Input
+                          type="number"
+                          value={item.quantidade}
+                          onChange={(e) => atualizarItem(refeicaoIndex, itemIndex, 'quantidade', Number(e.target.value))}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Calorias</Label>
+                        <div className="flex items-center h-10 px-3 border rounded-md bg-muted">
+                          {item.alimento ? (() => {
+                            const qtd = typeof item.quantidade === 'string' ? parseFloat(item.quantidade) || 0 : (item.quantidade || 0);
+                            const kcalRef = item.alimento.calories || 0;
+                            const qtdRef = item.alimento.portion || 100;
+                            return Math.round((kcalRef * qtd) / qtdRef);
+                          })() : 0}
+                        </div>
+                      </div>
+
+                      <div className="flex items-end">
+                        <Button
+                          variant="destructive"
+                          size="icon"
+                          onClick={() => removerItem(refeicaoIndex, itemIndex)}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Substituições */}
+                    {item.alimento && (
+                      <div className="pt-3 border-t">
+                        <Label className="text-sm font-medium text-muted-foreground">Substituições equivalentes:</Label>
+                        <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2">
+                          {calcularSubstituicoes(item).map((sub, idx) => (
+                            <div key={idx} className="flex items-center justify-between p-2 bg-muted/50 rounded text-sm">
+                              <span>{sub.nome}</span>
+                              <Badge variant="secondary">{sub.quantidade}g ({sub.nutriente})</Badge>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                <Button
+                  variant="outline"
+                  onClick={() => adicionarItem(refeicaoIndex)}
+                  className="w-full"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Adicionar Alimento
+                </Button>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      <div className="flex justify-end">
+        <Button onClick={salvarDieta} size="lg" className="px-8">
+          Salvar Dieta
+        </Button>
+      </div>
+    </div>
+  );
+};
+
+export default DietCreator;
