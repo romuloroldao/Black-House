@@ -6,7 +6,7 @@
 -- ============================================================================
 
 -- users
-CREATE TABLE IF NOT EXISTS public.users (
+CREATE TABLE IF NOT EXISTS app_auth.users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
@@ -15,16 +15,16 @@ CREATE TABLE IF NOT EXISTS public.users (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_users_email ON public.users(email);
-CREATE INDEX IF NOT EXISTS idx_users_role ON public.users(role);
+CREATE INDEX IF NOT EXISTS idx_users_email ON app_auth.users(email);
+CREATE INDEX IF NOT EXISTS idx_users_role ON app_auth.users(role);
 
 -- alunos
 -- IMPORTANTE: Usa linked_user_id (canônico) ao invés de user_id
 -- linked_user_id é UNIQUE e NOT NULL - um usuário só pode estar vinculado a um aluno
 CREATE TABLE IF NOT EXISTS public.alunos (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  linked_user_id UUID UNIQUE NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-  coach_id UUID NOT NULL REFERENCES public.users(id) ON DELETE RESTRICT,
+  linked_user_id UUID UNIQUE NOT NULL REFERENCES app_auth.users(id) ON DELETE CASCADE,
+  coach_id UUID NOT NULL REFERENCES app_auth.users(id) ON DELETE RESTRICT,
   nome TEXT,
   email TEXT,
   telefone TEXT,
@@ -45,7 +45,7 @@ COMMENT ON COLUMN public.alunos.coach_id IS 'ID do coach responsável (obrigató
 CREATE TABLE IF NOT EXISTS public.conversas (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   aluno_id UUID NOT NULL REFERENCES public.alunos(id) ON DELETE CASCADE,
-  coach_id UUID NOT NULL REFERENCES public.users(id) ON DELETE RESTRICT,
+  coach_id UUID NOT NULL REFERENCES app_auth.users(id) ON DELETE RESTRICT,
   ultima_mensagem TEXT,
   ultima_mensagem_em TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
@@ -61,7 +61,7 @@ CREATE INDEX IF NOT EXISTS idx_conversas_coach_id ON public.conversas(coach_id);
 CREATE TABLE IF NOT EXISTS public.mensagens (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   conversa_id UUID NOT NULL REFERENCES public.conversas(id) ON DELETE CASCADE,
-  remetente_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  remetente_id UUID NOT NULL REFERENCES app_auth.users(id) ON DELETE CASCADE,
   conteudo TEXT NOT NULL,
   lida BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT now()
@@ -96,7 +96,7 @@ BEGIN
   ) THEN
     -- Adicionar coluna linked_user_id
     ALTER TABLE public.alunos 
-    ADD COLUMN linked_user_id UUID REFERENCES public.users(id) ON DELETE CASCADE;
+    ADD COLUMN linked_user_id UUID REFERENCES app_auth.users(id) ON DELETE CASCADE;
     
     -- Copiar dados de user_id para linked_user_id
     UPDATE public.alunos 

@@ -18,7 +18,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA public;
 -- Substitui app_auth.users - simplificado e canônico
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS public.users (
+CREATE TABLE IF NOT EXISTS app_auth.users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
@@ -27,11 +27,11 @@ CREATE TABLE IF NOT EXISTS public.users (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_users_email ON public.users(email);
-CREATE INDEX IF NOT EXISTS idx_users_role ON public.users(role);
+CREATE INDEX IF NOT EXISTS idx_users_email ON app_auth.users(email);
+CREATE INDEX IF NOT EXISTS idx_users_role ON app_auth.users(role);
 
-COMMENT ON TABLE public.users IS 'Usuários do sistema (auth canônico)';
-COMMENT ON COLUMN public.users.role IS 'Papel do usuário: coach, aluno, admin';
+COMMENT ON TABLE app_auth.users IS 'Usuários do sistema (auth canônico)';
+COMMENT ON COLUMN app_auth.users.role IS 'Papel do usuário: coach, aluno, admin';
 
 -- ============================================================================
 -- TABELA: alunos (entidade de negócio)
@@ -43,8 +43,8 @@ COMMENT ON COLUMN public.users.role IS 'Papel do usuário: coach, aluno, admin';
 
 CREATE TABLE IF NOT EXISTS public.alunos (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    linked_user_id UUID UNIQUE NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-    coach_id UUID NOT NULL REFERENCES public.users(id) ON DELETE RESTRICT,
+    linked_user_id UUID UNIQUE NOT NULL REFERENCES app_auth.users(id) ON DELETE CASCADE,
+    coach_id UUID NOT NULL REFERENCES app_auth.users(id) ON DELETE RESTRICT,
     nome TEXT NOT NULL,
     email TEXT,
     telefone TEXT,
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS public.mensagens (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     aluno_id UUID NOT NULL REFERENCES public.alunos(id) ON DELETE CASCADE,
     sender_role TEXT NOT NULL CHECK (sender_role IN ('aluno', 'coach')),
-    sender_user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    sender_user_id UUID NOT NULL REFERENCES app_auth.users(id) ON DELETE CASCADE,
     conteudo TEXT NOT NULL,
     lida BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -96,7 +96,7 @@ COMMENT ON COLUMN public.mensagens.sender_user_id IS 'ID do usuário que enviou 
 
 CREATE TABLE IF NOT EXISTS public.uploads (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    owner_user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    owner_user_id UUID NOT NULL REFERENCES app_auth.users(id) ON DELETE CASCADE,
     type TEXT NOT NULL CHECK (type IN ('avatar', 'document')),
     path TEXT NOT NULL,
     mime_type TEXT,
@@ -137,7 +137,7 @@ RETURNS UUID AS $$
 DECLARE
     new_user_id UUID;
 BEGIN
-    INSERT INTO public.users (email, password_hash, role)
+    INSERT INTO app_auth.users (email, password_hash, role)
     VALUES (LOWER(p_email), public.hash_password(p_password), p_role)
     RETURNING id INTO new_user_id;
     
@@ -149,10 +149,10 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE FUNCTION public.login(p_email TEXT, p_password TEXT) 
 RETURNS TABLE(user_id UUID, role TEXT) AS $$
 DECLARE
-    v_user public.users%ROWTYPE;
+    v_user app_auth.users%ROWTYPE;
 BEGIN
     SELECT * INTO v_user 
-    FROM public.users 
+    FROM app_auth.users 
     WHERE email = LOWER(p_email);
     
     IF NOT FOUND THEN
@@ -181,7 +181,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Triggers para updated_at
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON public.users 
+CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON app_auth.users 
 FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 CREATE TRIGGER update_alunos_updated_at BEFORE UPDATE ON public.alunos 

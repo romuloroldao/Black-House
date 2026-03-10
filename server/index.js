@@ -34,7 +34,7 @@ const GracefulShutdown = require('./utils/graceful-shutdown');
 const { assertDatabaseSchema, assertGlobalSchema } = require('./utils/schema-validator');
 const { extractDatabaseIdentity } = require('./utils/db-identity');
 const { createDomainSchemaGuard } = require('./utils/domain-schema-guard');
-const { assertCanonicalSchema } = require('./utils/canonical-schema-validator');
+const { assertFullSchema } = require('./utils/schema-completo-validator');
 // dotenv já foi carregado no topo do arquivo
 
 // INFRA-03: Logar BOOT_ID no logger também
@@ -91,18 +91,11 @@ app.use(helmet({
         }
     }
 }));
-// ============================================================================
-// CORS MIDDLEWARE - CORS-SINGLE-SOURCE-OF-TRUTH-001
-// ============================================================================
-// Single source of truth para CORS
-// Configuração única e centralizada
-// Nunca setar CORS em múltiplas camadas
-// ============================================================================
+
 const cors = require('cors');
 const corsConfig = require('./config/cors');
 const { validateCORSConfig } = require('./utils/cors-assert');
 
-// Validar configuração de CORS antes de aplicar
 const corsValidation = validateCORSConfig(corsConfig);
 if (!corsValidation.valid) {
     logger.error('CORS-ASSERT: Configuração de CORS inválida', {
@@ -111,14 +104,12 @@ if (!corsValidation.valid) {
     throw new Error(`CORS config inválido: ${corsValidation.errors.join(', ')}`);
 }
 
-// Aplicar CORS antes de qualquer rota
 app.use(cors(corsConfig));
 
-// Garantir que OPTIONS sempre responde 204
 app.options('*', cors(corsConfig));
 
 logger.info('CORS configurado', {
-    origin: 'https://blackhouse.app.br',
+    origin: ['https://blackhouse.app.br', 'http://localhost:8080'],
     methods: corsConfig.methods,
     credentials: corsConfig.credentials,
     optionsSuccessStatus: corsConfig.optionsSuccessStatus
@@ -178,9 +169,6 @@ logger.info('STEP-02: Pool inicializado com sucesso', {
 });
 
 // SCHEMA-03: Validação de schema no boot
-// DOMAIN-SCHEMA-ISOLATION-005: Separar validação global (auth) de validação de domínio (alunos)
-// Schema global: necessário para sistema funcionar (auth)
-// Schema de domínio: validado em runtime por domainSchemaGuard
 
 let globalSchemaValid = false;
 let globalSchemaError = null;
@@ -240,33 +228,26 @@ let domainSchemaError = null;
     }
     
     // ============================================================================
-    // VALIDAÇÃO DE SCHEMA CANÔNICO - VPS-BACKEND-CANONICAL-ARCH-001
+    // VALIDAÇÃO DE SCHEMA CANÔNICO - VPS-BACKEND-ARCH-001
     // ============================================================================
     // AUTH-502-BAD-GATEWAY-FIX-001: Não bloquear servidor se schema canônico inválido
     // Schema canônico é opcional - apenas endpoints canônicos serão afetados
     // Auth deve funcionar mesmo sem schema canônico
     // ============================================================================
-    let canonicalSchemaValid = false;
-    let canonicalSchemaError = null;
+    let SchemaValid = false;
+    let SchemaError = null;
     
     try {
-        logger.info('CANONICAL-SCHEMA: Iniciando validação de schema canônico...');
-        await assertCanonicalSchema(pool);
-        canonicalSchemaValid = true;
-        logger.info('CANONICAL-SCHEMA: Schema canônico válido');
+        logger.info('SCHEMA-COMPLETO: Iniciando validação de schema ...');
+        await assertFullSchema(pool);
+        SchemaValid = true;
+        logger.info('SCHEMA: Schema válido');
     } catch (error) {
-        canonicalSchemaValid = false;
-        canonicalSchemaError = error;
-        logger.warn('CANONICAL-SCHEMA: Schema canônico inválido - Apenas endpoints canônicos afetados', {
-            error: error.message,
-            mode: 'DEGRADED',
-            note: 'Auth e outros endpoints continuam funcionando. Aplicar schema_canonico_vps.sql para habilitar endpoints canônicos.'
-        });
-        console.warn('⚠️ CANONICAL-SCHEMA: Schema canônico inválido');
+        SchemaValid = false;
+        SchemaError = error;
+        console.warn('⚠️ SCHEMA: Schema completo inválido');
         console.warn('⚠️ Erro:', error.message);
         console.warn('⚠️ Aplicar schema: /root/schema_canonico_vps.sql');
-        console.warn('⚠️ Servidor continuará funcionando - apenas endpoints canônicos estarão desabilitados');
-        // NÃO bloquear servidor - apenas endpoints canônicos serão afetados
     }
 })();
 
@@ -842,31 +823,12 @@ app.post('/auth/logout', (req, res) => {
 
 // =============== ROTAS DA API ===============
 
-// DOMAIN-SCHEMA-ISOLATION-005: Guard de schema por domínio
-// Valida apenas o schema do domínio específico da requisição
-// Não bloqueia rotas de outros domínios quando um domínio tem schema inválido
 const domainSchemaGuard = createDomainSchemaGuard(pool);
 
-// =============== ROTAS DA API REST (/api/*) - Substitui /rest/v1/* ===============
-// DESIGN-VPS-ONLY-DATABASE-AND-BACKEND-001: Remoção completa do Supabase
-// Todas as rotas antigas /rest/v1/* migram para /api/*
-// ============================================================================
 // ROTAS DA API
-// ============================================================================
-// VPS-BACKEND-CANONICAL-ARCH-001: Endpoints canônicos
-// ============================================================================
-
-// Rotas canônicas (novas)
-const createCanonicalApiRouter = require('./routes/api-canonical');
-const createCanonicalUploadsRouter = require('./routes/uploads-canonical');
 
 // Rotas existentes (compatibilidade)
 const createApiRouter = require('./routes/api');
-
-// Aplicar rotas canônicas primeiro (prioridade)
-// VPS-BACKEND-CANONICAL-ARCH-001: Endpoints canônicos
-app.use('/api', createCanonicalApiRouter(pool, authenticate));
-app.use('/api', createCanonicalUploadsRouter(pool, authenticate));
 
 // Rotas existentes (compatibilidade - outras rotas /api/*)
 app.use('/api', createApiRouter(pool, authenticate, domainSchemaGuard));

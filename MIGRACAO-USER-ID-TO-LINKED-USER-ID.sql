@@ -22,7 +22,7 @@ BEGIN
       AND column_name = 'linked_user_id'
     ) THEN
       ALTER TABLE public.alunos 
-      ADD COLUMN linked_user_id UUID REFERENCES public.users(id) ON DELETE CASCADE;
+      ADD COLUMN linked_user_id UUID REFERENCES app_auth.users(id) ON DELETE CASCADE;
       
       RAISE NOTICE 'Coluna linked_user_id criada';
     END IF;

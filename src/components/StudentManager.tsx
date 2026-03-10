@@ -48,6 +48,7 @@ import {
   Upload
 } from "lucide-react";
 import StudentImporter from "./StudentImporter";
+import { maskCpfCnpj, maskPhone, onlyNumbers } from "@/utils/MaskFormat";
 
 interface Student {
   id: string;
@@ -179,18 +180,50 @@ const StudentManager = () => {
     setCoachEmail(user.email || "");
   }, [isReady, user]);
 
+  const handleDataChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let value = e.target.value;
+    // Remove tudo que não for número
+    value = value.replace(/\D/g, "");
+    // Limita a 8 números (ddmmaaaa)
+    value = value.slice(0, 8);
+    // Adiciona as barras automaticamente
+    if (value.length > 4) {
+      value = value.replace(/(\d{2})(\d{2})(\d{1,4})/, "$1/$2/$3");
+    } else if (value.length > 2) {
+      value = value.replace(/(\d{2})(\d{1,2})/, "$1/$2");
+    }
+    setNewStudent({
+      ...newStudent,
+      data_nascimento: value,
+    });
+  };
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const masked = maskPhone(e.target.value);
+    setNewStudent({
+      ...newStudent,
+      telefone: masked,
+    });
+  };
+
+  const handleCpfCnpjChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const masked = maskCpfCnpj(e.target.value);
+
+    setNewStudent({
+      ...newStudent,
+      cpf_cnpj: masked,
+    });
+  };
+
   const handleSaveStudent = async () => {
     try {
-      if (!newStudent.nome || !newStudent.email || !newStudent.cpf_cnpj) {
+      if (!newStudent.nome || !newStudent.email || !newStudent.cpf_cnpj || !newStudent.dia_cobranca) {
         toast({
           title: "Campos obrigatórios",
-          description: "Nome, Email e CPF/CNPJ são obrigatórios. O CPF/CNPJ é necessário para gerar cobranças.",
+          description: "Nome, Email, Dia de cobrança e CPF/CNPJ são obrigatórios.",
           variant: "destructive",
         });
         return;
       }
-
-      // Validar dia de cobrança
       if (newStudent.dia_cobranca) {
         const dia = parseInt(newStudent.dia_cobranca);
         if (isNaN(dia) || dia < 1 || dia > 31) {
@@ -215,20 +248,27 @@ const StudentManager = () => {
       let alunoId = editingStudent?.id;
 
       if (editingStudent) {
-        const updateResult = await apiClient.requestSafe(`/api/alunos/${editingStudent.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({
-            nome: newStudent.nome,
-            email: newStudent.email,
-            cpf_cnpj: newStudent.cpf_cnpj,
-            telefone: newStudent.telefone || null,
-            objetivo: newStudent.objetivo || null,
-            plano: newStudent.plano || null,
-            data_nascimento: newStudent.data_nascimento || null,
-            peso: newStudent.peso ? parseInt(newStudent.peso) : null,
-            coach_id: user.id,
-          }),
-        });
+
+        const formatDoc = onlyNumbers(newStudent.cpf_cnpj);
+        const formatTel = onlyNumbers(newStudent.telefone);
+
+        const updateResult = await apiClient.requestSafe(
+          `/api/alunos/${editingStudent.id}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              nome: newStudent.nome,
+              email: newStudent.email,
+              cpf_cnpj: formatDoc,
+              telefone: formatTel || null,
+              objetivo: newStudent.objetivo || null,
+              plano: newStudent.plano || null,
+              data_nascimento: newStudent.data_nascimento || null,
+              peso: newStudent.peso ? parseInt(newStudent.peso) : null,
+              user_id: user.id,
+            }),
+          },
+        );
         if (!updateResult.success) {
           toast({
             title: "Erro",
@@ -242,13 +282,14 @@ const StudentManager = () => {
           description: "Aluno atualizado com sucesso",
         });
       } else {
+
         const insertResult = await apiClient.requestSafe<any>('/api/alunos', {
           method: 'POST',
           body: JSON.stringify({
             nome: newStudent.nome,
             email: newStudent.email,
-            cpf_cnpj: newStudent.cpf_cnpj,
-            telefone: newStudent.telefone || null,
+            cpf_cnpj:onlyNumbers(newStudent.cpf_cnpj),
+            telefone: onlyNumbers(newStudent.telefone) || null,
             objetivo: newStudent.objetivo || null,
             plano: newStudent.plano || null,
             data_nascimento: newStudent.data_nascimento || null,
@@ -497,7 +538,10 @@ const StudentManager = () => {
         </div>
         <div className="flex gap-2">
           {/* Import Dialog */}
-          <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
+          <Dialog
+            open={isImportDialogOpen}
+            onOpenChange={setIsImportDialogOpen}
+          >
             <DialogTrigger asChild>
               <Button variant="outline" size="lg">
                 <Upload className="w-5 h-5 mr-2" />
@@ -508,10 +552,11 @@ const StudentManager = () => {
               <DialogHeader>
                 <DialogTitle>Importar Aluno</DialogTitle>
                 <DialogDescription>
-                  Faça upload de um PDF com os dados do aluno para importação automática
+                  Faça upload de um PDF com os dados do aluno para importação
+                  automática
                 </DialogDescription>
               </DialogHeader>
-              <StudentImporter 
+              <StudentImporter
                 onClose={() => setIsImportDialogOpen(false)}
                 onImportComplete={() => carregarAlunos()}
               />
@@ -519,136 +564,14 @@ const StudentManager = () => {
           </Dialog>
 
           {/* Add Student Dialog */}
-          <Dialog open={isDialogOpen} onOpenChange={(open) => {
-            setIsDialogOpen(open);
-            if (!open) {
-            setEditingStudent(null);
-              setNewStudent({
-                nome: "",
-                email: "",
-                telefone: "",
-                cpf_cnpj: "",
-                objetivo: "",
-                plano: "",
-                data_nascimento: "",
-                peso: "",
-                dia_cobranca: ""
-              });
-            }
-          }}>
-            <DialogTrigger asChild>
-              <Button variant="premium" size="lg">
-                <UserPlus className="w-5 h-5 mr-2" />
-                Novo Aluno
-              </Button>
-            </DialogTrigger>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>{editingStudent ? "Editar Aluno" : "Adicionar Novo Aluno"}</DialogTitle>
-              <p className="text-sm text-muted-foreground mt-2">
-                * Campos obrigatórios. O CPF/CNPJ é necessário para gerar cobranças via Asaas.
-              </p>
-            </DialogHeader>
-            
-            {/* Coach Link Badge */}
-            <Alert className="border-primary/20 bg-primary/5">
-              <Link2 className="h-4 w-4 text-primary" />
-              <AlertDescription className="text-sm">
-                <span className="font-medium">Vínculo automático:</span> Este aluno será vinculado à sua conta ({coachEmail})
-              </AlertDescription>
-            </Alert>
-
-            <div className="grid grid-cols-2 gap-4 py-4">
-              <Input 
-                placeholder="Nome completo *" 
-                value={newStudent.nome}
-                onChange={(e) => setNewStudent({...newStudent, nome: e.target.value})}
-              />
-              <Input 
-                placeholder="Email *" 
-                type="email"
-                value={newStudent.email}
-                onChange={(e) => setNewStudent({...newStudent, email: e.target.value})}
-              />
-              <Input 
-                placeholder="Telefone" 
-                value={newStudent.telefone}
-                onChange={(e) => setNewStudent({...newStudent, telefone: e.target.value})}
-              />
-              <Input 
-                placeholder="CPF ou CNPJ *" 
-                value={newStudent.cpf_cnpj}
-                onChange={(e) => setNewStudent({...newStudent, cpf_cnpj: e.target.value})}
-              />
-              <Select
-                value={newStudent.objetivo}
-                onValueChange={(value) => setNewStudent({...newStudent, objetivo: value})}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Objetivo" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Emagrecimento">Emagrecimento</SelectItem>
-                  <SelectItem value="Hipertrofia">Hipertrofia</SelectItem>
-                  <SelectItem value="Condicionamento">Condicionamento</SelectItem>
-                  <SelectItem value="Reabilitação">Reabilitação</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select
-                value={newStudent.plano}
-                onValueChange={(value) => setNewStudent({...newStudent, plano: value})}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Plano" />
-                </SelectTrigger>
-                <SelectContent>
-                  {paymentPlans.length > 0 ? (
-                    paymentPlans.map((plano) => (
-                      <SelectItem key={plano.id} value={plano.id}>
-                        {plano.nome}
-                      </SelectItem>
-                    ))
-                  ) : (
-                    <SelectItem value="Nenhum" disabled>
-                      Nenhum plano cadastrado
-                    </SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
-              <Input 
-                placeholder="Peso (kg)" 
-                type="number"
-                value={newStudent.peso}
-                onChange={(e) => setNewStudent({...newStudent, peso: e.target.value})}
-              />
-              <Input 
-                placeholder="Data de nascimento" 
-                type="date"
-                value={newStudent.data_nascimento}
-                onChange={(e) => setNewStudent({...newStudent, data_nascimento: e.target.value})}
-              />
-              <Input 
-                placeholder="Dia de cobrança (1-31)" 
-                type="number"
-                min="1"
-                max="31"
-                value={newStudent.dia_cobranca}
-                onChange={(e) => setNewStudent({...newStudent, dia_cobranca: e.target.value})}
-              />
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => {
-                setIsDialogOpen(false);
-                setEditingStudent(null);
-              }}>
-                Cancelar
-              </Button>
-              <Button variant="premium" onClick={handleSaveStudent}>
-                {editingStudent ? "Atualizar Aluno" : "Salvar Aluno"}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+          <Button
+            variant="premium"
+            size="lg"
+            onClick={() => setIsDialogOpen(true)}
+          >
+            <UserPlus className="w-5 h-5 mr-2" />
+            Novo Aluno
+          </Button>
         </div>
       </div>
 
@@ -687,10 +610,6 @@ const StudentManager = () => {
                 <SelectItem value="Reabilitação">Reabilitação</SelectItem>
               </SelectContent>
             </Select>
-            <Button variant="outline">
-              <Filter className="w-4 h-4" />
-              Filtros
-            </Button>
           </div>
         </CardContent>
       </Card>
@@ -701,25 +620,36 @@ const StudentManager = () => {
         {Array.isArray(filteredStudents) && filteredStudents.length > 0 ? (
           filteredStudents.map((student) => {
             // DESIGN-023: Optional chaining para acessos profundos
-            const studentId = student?.id || '';
-            const studentName = student?.name || 'Sem nome';
-            const studentEmail = student?.email || '';
+            const studentId = student?.id || "";
+            const studentName = student?.name || "Sem nome";
+            const studentEmail = student?.email || "";
             const studentAvatar = student?.avatar;
-            const studentStatus = student?.status || 'active';
-            const studentPlan = student?.plan || '';
-            const studentGoal = student?.goal || '';
-            const studentProgress = typeof student?.progress === 'number' ? student.progress : 0;
-            const studentLastWorkout = student?.lastWorkout || 'Não registrado';
-            const studentPayment = student?.payment || 'pending';
-            const studentTags = Array.isArray(student?.tags) ? student.tags : [];
+            const studentStatus = student?.status || "active";
+            const studentPlan = student?.plan || "";
+            const studentGoal = student?.goal || "";
+            const studentProgress =
+              typeof student?.progress === "number" ? student.progress : 0;
+            const studentLastWorkout = student?.lastWorkout || "Não registrado";
+            const studentPayment = student?.payment || "pending";
+            const studentTags = Array.isArray(student?.tags)
+              ? student.tags
+              : [];
 
             // DESIGN-023: Safe string operations
             const initials = studentName
-              ? studentName.split(' ').map((n: string) => n?.[0] || '').join('').toUpperCase().slice(0, 2)
-              : '??';
+              ? studentName
+                  .split(" ")
+                  .map((n: string) => n?.[0] || "")
+                  .join("")
+                  .toUpperCase()
+                  .slice(0, 2)
+              : "??";
 
             return (
-              <Card key={studentId} className="bg-gradient-card border-0 shadow-card hover:shadow-elevated transition-smooth">
+              <Card
+                key={studentId}
+                className="bg-gradient-card border-0 shadow-card hover:shadow-elevated transition-smooth"
+              >
                 <CardHeader className="pb-4">
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-3">
@@ -729,131 +659,284 @@ const StudentManager = () => {
                       </Avatar>
                       <div>
                         <h3 className="font-semibold text-lg">{studentName}</h3>
-                        <p className="text-sm text-muted-foreground">{studentEmail}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {studentEmail}
+                        </p>
                       </div>
                     </div>
-                <Button variant="ghost" size="icon">
-                  <MoreVertical className="w-4 h-4" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Status and Plan */}
-              <div className="flex items-center justify-between">
-                <Badge className={getStatusColor(studentStatus)}>
-                  {studentStatus === 'active' ? 'Ativo' : 'Inativo'}
-                </Badge>
-                <Badge className={getPlanColor(studentPlan)}>
-                  {studentPlan}
-                </Badge>
-              </div>
-
-              {/* Goal and Progress */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Objetivo:</span>
-                  <span className="font-medium">{studentGoal}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Progresso:</span>
-                  <span className="font-medium">{studentProgress}%</span>
-                </div>
-                <div className="w-full bg-muted rounded-full h-2">
-                  <div 
-                    className="bg-gradient-primary h-2 rounded-full transition-all"
-                    style={{ width: `${Math.max(0, Math.min(100, studentProgress))}%` }}
-                  />
-                </div>
-              </div>
-
-              {/* Last Workout */}
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Último treino:</span>
-                <span className="font-medium">{studentLastWorkout}</span>
-              </div>
-
-              {/* Payment Status */}
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Pagamento:</span>
-                <Badge className={getPaymentColor(studentPayment)}>
-                  {studentPayment === 'paid' ? 'Em dia' : 
-                   studentPayment === 'overdue' ? 'Vencido' : 'Pendente'}
-                </Badge>
-              </div>
-
-              {/* Tags */}
-              {/* DESIGN-023: Guard defensivo - verificar array antes de .map */}
-              {studentTags.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {studentTags.map((tag, index) => (
-                    <Badge key={index} variant="outline" className="text-xs">
-                      {tag || ''}
+                    <Button variant="ghost" size="icon">
+                      <MoreVertical className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Status and Plan */}
+                  <div className="flex items-center justify-between">
+                    <Badge className={getStatusColor(studentStatus)}>
+                      {studentStatus === "active" ? "Ativo" : "Inativo"}
                     </Badge>
-                  ))}
-                </div>
-              )}
+                    <Badge className={getPlanColor(studentPlan)}>
+                      {studentPlan}
+                    </Badge>
+                  </div>
 
-              {/* Action Buttons */}
-              <div className="flex gap-2 pt-2">
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="flex-1"
-                  onClick={() => navigate(`/alunos/${studentId}`)}
-                >
-                  <Eye className="w-4 h-4" />
-                  Ver detalhes
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="flex-1"
-                  onClick={() => handleEditStudent(student)}
-                >
-                  <Edit className="w-4 h-4" />
-                  Editar
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="hover:bg-destructive/10 hover:text-destructive"
-                  onClick={() => handleDeleteStudent(studentId)}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+                  {/* Goal and Progress */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Objetivo:</span>
+                      <span className="font-medium">{studentGoal}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Progresso:</span>
+                      <span className="font-medium">{studentProgress}%</span>
+                    </div>
+                    <div className="w-full bg-muted rounded-full h-2">
+                      <div
+                        className="bg-gradient-primary h-2 rounded-full transition-all"
+                        style={{
+                          width: `${Math.max(0, Math.min(100, studentProgress))}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Last Workout */}
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">
+                      Último treino:
+                    </span>
+                    <span className="font-medium">{studentLastWorkout}</span>
+                  </div>
+
+                  {/* Payment Status */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">
+                      Pagamento:
+                    </span>
+                    <Badge className={getPaymentColor(studentPayment)}>
+                      {studentPayment === "paid"
+                        ? "Em dia"
+                        : studentPayment === "overdue"
+                          ? "Vencido"
+                          : "Pendente"}
+                    </Badge>
+                  </div>
+
+                  {/* Tags */}
+                  {/* DESIGN-023: Guard defensivo - verificar array antes de .map */}
+                  {studentTags.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {studentTags.map((tag, index) => (
+                        <Badge
+                          key={index}
+                          variant="outline"
+                          className="text-xs"
+                        >
+                          {tag || ""}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Action Buttons */}
+                  <div className="flex gap-2 pt-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => navigate(`/alunos/${studentId}`)}
+                    >
+                      <Eye className="w-4 h-4" />
+                      Ver detalhes
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => handleEditStudent(student)}
+                    >
+                      <Edit className="w-4 h-4" />
+                      Editar
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="hover:bg-destructive/10 hover:text-destructive"
+                      onClick={() => handleDeleteStudent(studentId)}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
             );
           })
         ) : (
           <Card className="bg-gradient-card border-0 shadow-card col-span-full">
             <CardContent className="text-center py-12">
               <Users className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-xl font-semibold mb-2">Nenhum aluno encontrado</h3>
-              <p className="text-muted-foreground mb-6">
-                Ajuste os filtros ou adicione um novo aluno para começar
-              </p>
+              <h3 className="text-xl font-semibold mb-7">
+                Nenhum aluno encontrado
+              </h3>
+              <Button variant="premium" onClick={() => setIsDialogOpen(true)}>
+                <UserPlus className="w-5 h-5" />
+                Adicionar Novo Aluno
+              </Button>
             </CardContent>
           </Card>
         )}
       </div>
+      {isDialogOpen && (
+        <Dialog
+          open={isDialogOpen}
+          onOpenChange={(open) => {
+            setIsDialogOpen(open);
+            if (!open) {
+              setEditingStudent(null);
+              setNewStudent({
+                nome: "",
+                email: "",
+                telefone: "",
+                cpf_cnpj: "",
+                objetivo: "",
+                plano: "",
+                data_nascimento: "",
+                peso: "",
+                dia_cobranca: "",
+              });
+            }
+          }}
+        >
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>
+                {editingStudent ? "Editar Aluno" : "Adicionar Novo Aluno"}
+              </DialogTitle>
+              <p className="text-sm text-muted-foreground mt-2">
+                * Campos obrigatórios. O CPF/CNPJ é obrigatório.
+              </p>
+            </DialogHeader>
 
-      {/* Empty State - DESIGN-023: Removido duplicado, já tratado acima */}
-      {Array.isArray(filteredStudents) && filteredStudents.length === 0 && (
-        <Card className="bg-gradient-card border-0 shadow-card">
-          <CardContent className="text-center py-12">
-            <Users className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-            <h3 className="text-xl font-semibold mb-2">Nenhum aluno encontrado</h3>
-            <p className="text-muted-foreground mb-6">
-              Ajuste os filtros ou adicione um novo aluno para começar
-            </p>
-            <Button variant="premium">
-              <UserPlus className="w-5 h-5" />
-              Adicionar Primeiro Aluno
-            </Button>
-          </CardContent>
-        </Card>
+            {/* Coach Link Badge */}
+            <Alert className="border-primary/20 bg-primary/5">
+              <Link2 className="h-4 w-4 text-primary" />
+              <AlertDescription className="text-sm">
+                <span className="font-medium">Vínculo automático:</span> Este
+                aluno será vinculado à sua conta ({coachEmail})
+              </AlertDescription>
+            </Alert>
+
+            <div className="grid grid-cols-2 gap-4 py-4">
+              <Input
+                placeholder="Nome completo *"
+                value={newStudent.nome}
+                onChange={(e) =>
+                  setNewStudent({ ...newStudent, nome: e.target.value })
+                }
+              />
+              <Input
+                placeholder="Email *"
+                type="email"
+                value={newStudent.email}
+                onChange={(e) =>
+                  setNewStudent({ ...newStudent, email: e.target.value })
+                }
+              />
+              <Input
+                placeholder="Telefone"
+                value={newStudent.telefone}
+                onChange={handlePhoneChange}
+              />
+              <Input
+                placeholder="CPF ou CNPJ *"
+                value={newStudent.cpf_cnpj}
+                onChange={handleCpfCnpjChange}
+              />
+              <Select
+                value={newStudent.objetivo}
+                onValueChange={(value) =>
+                  setNewStudent({ ...newStudent, objetivo: value })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Objetivo" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Emagrecimento">Emagrecimento</SelectItem>
+                  <SelectItem value="Hipertrofia">Hipertrofia</SelectItem>
+                  <SelectItem value="Condicionamento">
+                    Condicionamento
+                  </SelectItem>
+                  <SelectItem value="Reabilitação">Reabilitação</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select
+                value={newStudent.plano}
+                onValueChange={(value) =>
+                  setNewStudent({ ...newStudent, plano: value })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Plano" />
+                </SelectTrigger>
+                <SelectContent>
+                  {paymentPlans.length > 0 ? (
+                    paymentPlans.map((plano) => (
+                      <SelectItem key={plano.id} value={plano.id}>
+                        {plano.nome}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <SelectItem value="Nenhum" disabled>
+                      Nenhum plano cadastrado
+                    </SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+              <Input
+                placeholder="Peso (kg)"
+                type="number"
+                value={newStudent.peso}
+                onChange={(e) =>
+                  setNewStudent({ ...newStudent, peso: e.target.value })
+                }
+              />
+              <Input
+                placeholder="Data de nascimento"
+                type="text"
+                value={newStudent.data_nascimento}
+                onChange={handleDataChange}
+              />
+              <Input
+                placeholder="Dia de cobrança (1-31)"
+                type="number"
+                min="1"
+                max="31"
+                value={newStudent.dia_cobranca}
+                onChange={(e) =>
+                  setNewStudent({
+                    ...newStudent,
+                    dia_cobranca: e.target.value,
+                  })
+                }
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsDialogOpen(false);
+                  setEditingStudent(null);
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button variant="premium" onClick={handleSaveStudent}>
+                {editingStudent ? "Atualizar Aluno" : "Salvar Aluno"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );
