@@ -33,7 +33,7 @@ interface Aluno {
   email: string;
   cpf_cnpj: string | null;
   coach_id: string | null;
-  linked_user_id?: string | null; // FONTE DE VERDADE: vínculo com credencial de usuário (opcional para compatibilidade)
+  user_id?: string | null; // FONTE DE VERDADE: vínculo com credencial de usuário (opcional para compatibilidade)
 }
 
 interface UserRole {

@@ -24,14 +24,20 @@ import {
   Plus,
   Edit2
 } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { maskCpfCnpj, onlyNumbers } from '@/utils/MaskFormat';
+import { parseArgs } from 'util';
 
 interface ParsedStudentData {
   aluno: {
     nome: string;
+    email?: string;
+    telefone?: string;
     peso?: number;
     altura?: number;
     idade?: number;
     objetivo?: string;
+    cpf_cnpj: string;
   };
   dieta?: {
     nome: string;
@@ -315,8 +321,9 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
     if (!editableData) return;
 
     // Validation
-    if (!editableData.aluno.nome.trim()) {
-      toast.error('Nome do aluno é obrigatório');
+    if (!editableData.aluno.nome.trim() ||  !editableData.aluno.email.trim() ||
+      !editableData.aluno.cpf_cnpj ) {
+      toast.error('Nome do aluno, Email e CPF/CNPJ são obrigatórios');
       return;
     }
 
@@ -330,6 +337,16 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
       if (!token) {
         throw new Error('Usuário não autenticado');
       }
+      const payload = {
+        ...editableData,
+        aluno: {
+          ...editableData.aluno,
+          cpf_cnpj: onlyNumbers(editableData.aluno?.cpf_cnpj),
+          telefone: editableData.aluno?.telefone
+          ? onlyNumbers(editableData.aluno.telefone)
+          : null,
+        },
+      };
 
       // Usar novo endpoint de confirmação que faz tudo em transação
       const response = await fetch(`${API_URL}/api/import/confirm`, {
@@ -338,7 +355,7 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ data: editableData })
+        body: JSON.stringify({ data: payload , user: {id: user.id}})
       });
 
       if (!response.ok) {
@@ -360,6 +377,7 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
       }
 
       const aluno = result.aluno;
+      console.log(aluno)
 
       // Mostrar estatísticas da importação
       const stats = result.stats;
@@ -401,34 +419,51 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
     setCurrentStep('upload');
   };
 
+  const handleCpfCnpjChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const masked = maskCpfCnpj(e.target.value);
+      updateAluno("cpf_cnpj", masked);
+    };
+
   return (
     <div className="space-y-6">
       {/* Steps indicator */}
       <div className="flex items-center gap-4">
-        <div className={`flex items-center gap-2 ${currentStep === 'upload' ? 'text-primary' : 'text-muted-foreground'}`}>
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${currentStep === 'upload' ? 'bg-primary text-primary-foreground' : 'bg-green-500 text-white'}`}>
-            {currentStep === 'upload' ? '1' : <Check className="w-4 h-4" />}
+        <div
+          className={`flex items-center gap-2 ${currentStep === "upload" ? "text-primary" : "text-muted-foreground"}`}
+        >
+          <div
+            className={`w-8 h-8 rounded-full flex items-center justify-center ${currentStep === "upload" ? "bg-primary text-primary-foreground" : "bg-green-500 text-white"}`}
+          >
+            {currentStep === "upload" ? "1" : <Check className="w-4 h-4" />}
           </div>
           <span className="font-medium text-sm">Upload</span>
         </div>
         <ChevronRight className="w-4 h-4 text-muted-foreground" />
-        <div className={`flex items-center gap-2 ${currentStep === 'review' ? 'text-primary' : 'text-muted-foreground'}`}>
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${currentStep === 'review' ? 'bg-primary text-primary-foreground' : currentStep === 'complete' ? 'bg-green-500 text-white' : 'bg-muted'}`}>
-            {currentStep === 'complete' ? <Check className="w-4 h-4" /> : '2'}
+        <div
+          className={`flex items-center gap-2 ${currentStep === "review" ? "text-primary" : "text-muted-foreground"}`}
+        >
+          <div
+            className={`w-8 h-8 rounded-full flex items-center justify-center ${currentStep === "review" ? "bg-primary text-primary-foreground" : currentStep === "complete" ? "bg-green-500 text-white" : "bg-muted"}`}
+          >
+            {currentStep === "complete" ? <Check className="w-4 h-4" /> : "2"}
           </div>
           <span className="font-medium text-sm">Revisar</span>
         </div>
         <ChevronRight className="w-4 h-4 text-muted-foreground" />
-        <div className={`flex items-center gap-2 ${currentStep === 'complete' ? 'text-primary' : 'text-muted-foreground'}`}>
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${currentStep === 'complete' ? 'bg-green-500 text-white' : 'bg-muted'}`}>
-            {currentStep === 'complete' ? <Check className="w-4 h-4" /> : '3'}
+        <div
+          className={`flex items-center gap-2 ${currentStep === "complete" ? "text-primary" : "text-muted-foreground"}`}
+        >
+          <div
+            className={`w-8 h-8 rounded-full flex items-center justify-center ${currentStep === "complete" ? "bg-green-500 text-white" : "bg-muted"}`}
+          >
+            {currentStep === "complete" ? <Check className="w-4 h-4" /> : "3"}
           </div>
           <span className="font-medium text-sm">Concluído</span>
         </div>
       </div>
 
       {/* Upload Step */}
-      {currentStep === 'upload' && (
+      {currentStep === "upload" && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -436,7 +471,8 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
               Upload do PDF
             </CardTitle>
             <CardDescription>
-              Faça upload da ficha do aluno em formato PDF. O sistema irá extrair automaticamente os dados.
+              Faça upload da ficha do aluno em formato PDF. O sistema irá
+              extrair automaticamente os dados.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -459,8 +495,12 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                   <div className="flex flex-col items-center gap-4">
                     <FileText className="w-12 h-12 text-muted-foreground" />
                     <div>
-                      <p className="font-medium">Clique para selecionar ou arraste o PDF</p>
-                      <p className="text-sm text-muted-foreground">Apenas arquivos PDF são aceitos</p>
+                      <p className="font-medium">
+                        Clique para selecionar ou arraste o PDF
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Apenas arquivos PDF são aceitos
+                      </p>
                     </div>
                   </div>
                 )}
@@ -481,14 +521,17 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
 
             <div className="flex items-center gap-2 p-4 bg-muted/50 rounded-lg text-sm text-muted-foreground">
               <AlertCircle className="h-4 w-4 flex-shrink-0" />
-              <span>O sistema extrai automaticamente: dados do aluno, dieta, refeições, suplementos e fármacos.</span>
+              <span>
+                O sistema extrai automaticamente: dados do aluno, dieta,
+                refeições, suplementos e fármacos.
+              </span>
             </div>
           </CardContent>
         </Card>
       )}
 
       {/* Review Step */}
-      {currentStep === 'review' && editableData && (
+      {currentStep === "review" && editableData && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -509,20 +552,68 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                     <h4 className="font-medium">Dados do Aluno</h4>
                   </div>
                   <div className="grid grid-cols-2 gap-3 p-4 bg-muted/50 rounded-lg">
-                    <div className="col-span-2 space-y-1">
+                    <div className="space-y-1">
                       <Label className="text-xs">Nome *</Label>
                       <Input
                         value={editableData.aluno.nome}
-                        onChange={(e) => updateAluno('nome', e.target.value)}
+                        onChange={(e) => updateAluno("nome", e.target.value)}
                         placeholder="Nome do aluno"
                       />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">CPF/CNPJ *</Label>
+                      <Input
+                        value={editableData.aluno.cpf_cnpj}
+                        onChange={handleCpfCnpjChange}
+                        placeholder="CPF/CNPJ do aluno"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Email *</Label>
+                      <Input
+                        value={editableData.aluno.email}
+                        onChange={(e) => updateAluno("email", e.target.value)}
+                        placeholder="Email do aluno"
+                      />
+                    </div>
+                    <div className=" space-y-1">
+                      <Label className="text-xs">Objetivo</Label>
+                      <Select
+                        value={editableData.aluno.objetivo || ""}
+                        onValueChange={(value) =>
+                          updateAluno("objetivo", value)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Emagrecimento">
+                            Emagrecimento
+                          </SelectItem>
+                          <SelectItem value="Hipertrofia">
+                            Hipertrofia
+                          </SelectItem>
+                          <SelectItem value="Condicionamento">
+                            Condicionamento
+                          </SelectItem>
+                          <SelectItem value="Reabilitação">
+                            Reabilitação
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-1">
                       <Label className="text-xs">Peso (kg)</Label>
                       <Input
                         type="number"
-                        value={editableData.aluno.peso || ''}
-                        onChange={(e) => updateAluno('peso', e.target.value ? Number(e.target.value) : 0)}
+                        value={editableData.aluno.peso || ""}
+                        onChange={(e) =>
+                          updateAluno(
+                            "peso",
+                            e.target.value ? Number(e.target.value) : 0,
+                          )
+                        }
                         placeholder="Peso"
                       />
                     </div>
@@ -530,18 +621,14 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                       <Label className="text-xs">Altura (cm)</Label>
                       <Input
                         type="number"
-                        value={editableData.aluno.altura || ''}
-                        onChange={(e) => updateAluno('altura', e.target.value ? Number(e.target.value) : 0)}
+                        value={editableData.aluno.altura || ""}
+                        onChange={(e) =>
+                          updateAluno(
+                            "altura",
+                            e.target.value ? Number(e.target.value) : 0,
+                          )
+                        }
                         placeholder="Altura"
-                      />
-                    </div>
-                    <div className="col-span-2 space-y-1">
-                      <Label className="text-xs">Objetivo</Label>
-                      <Textarea
-                        value={editableData.aluno.objetivo || ''}
-                        onChange={(e) => updateAluno('objetivo', e.target.value)}
-                        placeholder="Objetivo do aluno"
-                        rows={2}
                       />
                     </div>
                   </div>
@@ -555,11 +642,13 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                     <div className="flex items-center gap-2">
                       <Utensils className="h-4 w-4 text-primary" />
                       <h4 className="font-medium">Dieta</h4>
-                      {editableData.dieta && editableData.dieta.refeicoes.length > 0 && (
-                        <Badge variant="secondary" className="ml-2">
-                          {editableData.dieta.refeicoes.length} refeição(ões) detectada(s)
-                        </Badge>
-                      )}
+                      {editableData.dieta &&
+                        editableData.dieta.refeicoes.length > 0 && (
+                          <Badge variant="secondary" className="ml-2">
+                            {editableData.dieta.refeicoes.length} refeição(ões)
+                            detectada(s)
+                          </Badge>
+                        )}
                     </div>
                     <Button variant="outline" size="sm" onClick={addRefeicao}>
                       <Plus className="h-4 w-4 mr-1" /> Adicionar Refeição
@@ -567,52 +656,69 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                   </div>
 
                   {/* Warning if few meals detected */}
-                  {editableData.dieta && editableData.dieta.refeicoes.length < 4 && editableData.dieta.refeicoes.length > 0 && (
-                    <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-sm text-amber-700 dark:text-amber-400">
-                      <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                      <span>
-                        Apenas {editableData.dieta.refeicoes.length} refeição(ões) detectada(s). 
-                        Se houver mais refeições no plano, adicione manualmente clicando em "Adicionar Refeição".
-                      </span>
-                    </div>
-                  )}
+                  {editableData.dieta &&
+                    editableData.dieta.refeicoes.length < 4 &&
+                    editableData.dieta.refeicoes.length > 0 && (
+                      <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-sm text-amber-700 dark:text-amber-400">
+                        <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                        <span>
+                          Apenas {editableData.dieta.refeicoes.length}{" "}
+                          refeição(ões) detectada(s). Se houver mais refeições
+                          no plano, adicione manualmente clicando em "Adicionar
+                          Refeição".
+                        </span>
+                      </div>
+                    )}
 
                   {/* Quick add meal buttons */}
                   {editableData.dieta && (
                     <div className="flex flex-wrap gap-2">
                       {refeicoesDisponiveis
-                        .filter(ref => !editableData.dieta?.refeicoes.some(r => 
-                          r.nome.toLowerCase().includes(ref.toLowerCase().split(' ')[0])
-                        ))
+                        .filter(
+                          (ref) =>
+                            !editableData.dieta?.refeicoes.some((r) =>
+                              r.nome
+                                .toLowerCase()
+                                .includes(ref.toLowerCase().split(" ")[0]),
+                            ),
+                        )
                         .slice(0, 4)
-                        .map(ref => (
-                          <Button 
-                            key={ref} 
-                            variant="ghost" 
-                            size="sm" 
+                        .map((ref) => (
+                          <Button
+                            key={ref}
+                            variant="ghost"
+                            size="sm"
                             className="h-7 text-xs"
                             onClick={() => {
-                              const newRefeicoes = [...editableData.dieta!.refeicoes, { nome: ref, alimentos: [{ nome: '', quantidade: '' }] }];
+                              const newRefeicoes = [
+                                ...editableData.dieta!.refeicoes,
+                                {
+                                  nome: ref,
+                                  alimentos: [{ nome: "", quantidade: "" }],
+                                },
+                              ];
                               setEditableData({
                                 ...editableData,
-                                dieta: { ...editableData.dieta!, refeicoes: newRefeicoes }
+                                dieta: {
+                                  ...editableData.dieta!,
+                                  refeicoes: newRefeicoes,
+                                },
                               });
                             }}
                           >
                             <Plus className="h-3 w-3 mr-1" /> {ref}
                           </Button>
-                        ))
-                      }
+                        ))}
                     </div>
                   )}
-                  
+
                   {editableData.dieta && (
                     <div className="p-4 bg-muted/50 rounded-lg space-y-3">
                       <div className="space-y-1">
                         <Label className="text-xs">Nome da Dieta</Label>
                         <Input
                           value={editableData.dieta.nome}
-                          onChange={(e) => updateDieta('nome', e.target.value)}
+                          onChange={(e) => updateDieta("nome", e.target.value)}
                           placeholder="Nome do plano alimentar"
                         />
                       </div>
@@ -620,16 +726,24 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                       {editableData.dieta.macros && (
                         <div className="flex gap-2 flex-wrap">
                           {editableData.dieta.macros.calorias && (
-                            <Badge variant="outline">{editableData.dieta.macros.calorias} kcal</Badge>
+                            <Badge variant="outline">
+                              {editableData.dieta.macros.calorias} kcal
+                            </Badge>
                           )}
                           {editableData.dieta.macros.proteina && (
-                            <Badge variant="outline">P: {editableData.dieta.macros.proteina}g</Badge>
+                            <Badge variant="outline">
+                              P: {editableData.dieta.macros.proteina}g
+                            </Badge>
                           )}
                           {editableData.dieta.macros.carboidrato && (
-                            <Badge variant="outline">C: {editableData.dieta.macros.carboidrato}g</Badge>
+                            <Badge variant="outline">
+                              C: {editableData.dieta.macros.carboidrato}g
+                            </Badge>
                           )}
                           {editableData.dieta.macros.gordura && (
-                            <Badge variant="outline">G: {editableData.dieta.macros.gordura}g</Badge>
+                            <Badge variant="outline">
+                              G: {editableData.dieta.macros.gordura}g
+                            </Badge>
                           )}
                         </div>
                       )}
@@ -637,72 +751,98 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                   )}
 
                   {/* Meals */}
-                  {editableData.dieta && editableData.dieta.refeicoes.length > 0 && (
-                    <div className="space-y-3">
-                      {editableData.dieta.refeicoes.map((refeicao, rIdx) => (
-                        <div key={rIdx} className="p-4 bg-muted/50 rounded-lg space-y-3 relative">
-                          <div className="flex items-center gap-2">
-                            <Input
-                              value={refeicao.nome}
-                              onChange={(e) => updateRefeicao(rIdx, 'nome', e.target.value)}
-                              className="font-medium flex-1"
-                              placeholder="Nome da refeição (ex: Café da Manhã, Almoço...)"
-                            />
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => removeRefeicao(rIdx)}
-                              className="h-8 w-8 text-destructive flex-shrink-0"
-                              title="Remover refeição"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                          <div className="space-y-2">
-                            {refeicao.alimentos.map((alimento, aIdx) => (
-                              <div key={aIdx} className="flex gap-2 items-center">
-                                <Input
-                                  value={alimento.nome}
-                                  onChange={(e) => updateAlimento(rIdx, aIdx, 'nome', e.target.value)}
-                                  placeholder="Nome do alimento"
-                                  className="flex-1"
-                                />
-                                <Input
-                                  value={alimento.quantidade}
-                                  onChange={(e) => updateAlimento(rIdx, aIdx, 'quantidade', e.target.value)}
-                                  placeholder="Qtd (ex: 100g)"
-                                  className="w-28"
-                                />
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => removeAlimento(rIdx, aIdx)}
-                                  className="h-8 w-8 text-destructive"
+                  {editableData.dieta &&
+                    editableData.dieta.refeicoes.length > 0 && (
+                      <div className="space-y-3">
+                        {editableData.dieta.refeicoes.map((refeicao, rIdx) => (
+                          <div
+                            key={rIdx}
+                            className="p-4 bg-muted/50 rounded-lg space-y-3 relative"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Input
+                                value={refeicao.nome}
+                                onChange={(e) =>
+                                  updateRefeicao(rIdx, "nome", e.target.value)
+                                }
+                                className="font-medium flex-1"
+                                placeholder="Nome da refeição (ex: Café da Manhã, Almoço...)"
+                              />
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => removeRefeicao(rIdx)}
+                                className="h-8 w-8 text-destructive flex-shrink-0"
+                                title="Remover refeição"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                            <div className="space-y-2">
+                              {refeicao.alimentos.map((alimento, aIdx) => (
+                                <div
+                                  key={aIdx}
+                                  className="flex gap-2 items-center"
                                 >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            ))}
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => addAlimento(rIdx)}
-                              className="w-full"
-                            >
-                              <Plus className="h-4 w-4 mr-1" /> Adicionar Alimento
-                            </Button>
+                                  <Input
+                                    value={alimento.nome}
+                                    onChange={(e) =>
+                                      updateAlimento(
+                                        rIdx,
+                                        aIdx,
+                                        "nome",
+                                        e.target.value,
+                                      )
+                                    }
+                                    placeholder="Nome do alimento"
+                                    className="flex-1"
+                                  />
+                                  <Input
+                                    value={alimento.quantidade}
+                                    onChange={(e) =>
+                                      updateAlimento(
+                                        rIdx,
+                                        aIdx,
+                                        "quantidade",
+                                        e.target.value,
+                                      )
+                                    }
+                                    placeholder="Qtd (ex: 100g)"
+                                    className="w-28"
+                                  />
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => removeAlimento(rIdx, aIdx)}
+                                    className="h-8 w-8 text-destructive"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              ))}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => addAlimento(rIdx)}
+                                className="w-full"
+                              >
+                                <Plus className="h-4 w-4 mr-1" /> Adicionar
+                                Alimento
+                              </Button>
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                        ))}
+                      </div>
+                    )}
 
                   {/* Empty state for diet */}
-                  {(!editableData.dieta || editableData.dieta.refeicoes.length === 0) && (
+                  {(!editableData.dieta ||
+                    editableData.dieta.refeicoes.length === 0) && (
                     <div className="p-6 bg-muted/30 rounded-lg text-center space-y-3">
                       <Utensils className="h-8 w-8 text-muted-foreground mx-auto" />
                       <p className="text-sm text-muted-foreground">
-                        Nenhuma refeição detectada no PDF. Clique em "Adicionar Refeição" para criar manualmente.
+                        Nenhuma refeição detectada no PDF. Clique em "Adicionar
+                        Refeição" para criar manualmente.
                       </p>
                     </div>
                   )}
@@ -722,16 +862,23 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                   </div>
                   <div className="space-y-2">
                     {editableData.farmacos?.map((farmaco, idx) => (
-                      <div key={idx} className="flex gap-2 items-center p-2 bg-muted/50 rounded">
+                      <div
+                        key={idx}
+                        className="flex gap-2 items-center p-2 bg-muted/50 rounded"
+                      >
                         <Input
                           value={farmaco.nome}
-                          onChange={(e) => updateFarmaco(idx, 'nome', e.target.value)}
+                          onChange={(e) =>
+                            updateFarmaco(idx, "nome", e.target.value)
+                          }
                           placeholder="Nome"
                           className="flex-1"
                         />
                         <Input
                           value={farmaco.dosagem}
-                          onChange={(e) => updateFarmaco(idx, 'dosagem', e.target.value)}
+                          onChange={(e) =>
+                            updateFarmaco(idx, "dosagem", e.target.value)
+                          }
                           placeholder="Dosagem"
                           className="w-32"
                         />
@@ -745,8 +892,11 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                         </Button>
                       </div>
                     ))}
-                    {(!editableData.farmacos || editableData.farmacos.length === 0) && (
-                      <p className="text-sm text-muted-foreground text-center py-2">Nenhum fármaco</p>
+                    {(!editableData.farmacos ||
+                      editableData.farmacos.length === 0) && (
+                      <p className="text-sm text-muted-foreground text-center py-2">
+                        Nenhum fármaco
+                      </p>
                     )}
                   </div>
                 </div>
@@ -763,16 +913,23 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                   </div>
                   <div className="space-y-2">
                     {editableData.suplementos?.map((sup, idx) => (
-                      <div key={idx} className="flex gap-2 items-center p-2 bg-muted/50 rounded">
+                      <div
+                        key={idx}
+                        className="flex gap-2 items-center p-2 bg-muted/50 rounded"
+                      >
                         <Input
                           value={sup.nome}
-                          onChange={(e) => updateSuplemento(idx, 'nome', e.target.value)}
+                          onChange={(e) =>
+                            updateSuplemento(idx, "nome", e.target.value)
+                          }
                           placeholder="Nome"
                           className="flex-1"
                         />
                         <Input
                           value={sup.dosagem}
-                          onChange={(e) => updateSuplemento(idx, 'dosagem', e.target.value)}
+                          onChange={(e) =>
+                            updateSuplemento(idx, "dosagem", e.target.value)
+                          }
                           placeholder="Dosagem"
                           className="w-32"
                         />
@@ -786,8 +943,11 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                         </Button>
                       </div>
                     ))}
-                    {(!editableData.suplementos || editableData.suplementos.length === 0) && (
-                      <p className="text-sm text-muted-foreground text-center py-2">Nenhum suplemento</p>
+                    {(!editableData.suplementos ||
+                      editableData.suplementos.length === 0) && (
+                      <p className="text-sm text-muted-foreground text-center py-2">
+                        Nenhum suplemento
+                      </p>
                     )}
                   </div>
                 </div>
@@ -805,7 +965,7 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                     Importando...
                   </>
                 ) : (
-                  'Importar Aluno'
+                  "Importar Aluno"
                 )}
               </Button>
             </div>
@@ -814,7 +974,7 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
       )}
 
       {/* Complete Step */}
-      {currentStep === 'complete' && (
+      {currentStep === "complete" && (
         <Card>
           <CardContent className="pt-6">
             <div className="text-center space-y-4">
@@ -824,16 +984,15 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
               <div>
                 <h3 className="text-lg font-semibold">Importação Concluída!</h3>
                 <p className="text-muted-foreground">
-                  O aluno "{editableData?.aluno.nome}" foi importado com sucesso.
+                  O aluno "{editableData?.aluno.nome}" foi importado com
+                  sucesso.
                 </p>
               </div>
               <div className="flex gap-2 justify-center">
                 <Button variant="outline" onClick={resetImporter}>
                   Importar Outro
                 </Button>
-                <Button onClick={onClose}>
-                  Fechar
-                </Button>
+                <Button onClick={onClose}>Fechar</Button>
               </div>
             </div>
           </CardContent>

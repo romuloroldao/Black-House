@@ -1,8 +1,7 @@
 // ============================================================================
 // ROTAS DE UPLOAD DE ARQUIVOS (/api/uploads/*)
 // ============================================================================
-// DESIGN-VPS-ONLY-CANONICAL-DATA-AND-STORAGE-002
-// Upload de arquivos gerenciado pelo backend (sem Supabase Storage)
+// Upload de arquivos gerenciado pelo backend
 // ============================================================================
 
 const express = require('express');

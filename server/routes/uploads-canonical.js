@@ -1,7 +1,7 @@
 // ============================================================================
 // ROTAS CANÔNICAS DE UPLOAD (/api/uploads/*)
 // ============================================================================
-// VPS-BACKEND-CANONICAL-ARCH-001
+// VPS-BACKEND-ARCH-001
 // Uploads controlados via filesystem
 // Tabela uploads como única fonte de verdade
 // ============================================================================

@@ -1,9 +1,6 @@
 // ============================================================================
 // MIDDLEWARE: resolveAlunoOrFail
 // ============================================================================
-// VPS-BACKEND-CANONICAL-ARCH-001
-// Resolve aluno canônico baseado no role do usuário
-// ============================================================================
 
 const logger = require('../utils/logger');
 

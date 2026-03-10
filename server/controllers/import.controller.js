@@ -406,25 +406,10 @@ class ImportController {
                     error: 'Dados de importação são obrigatórios'
                 });
             }
-
-            // Validar schema canônico antes de persistir (validação rígida)
-            const schemaValidation = safeValidate(data);
-            
-            if (!schemaValidation.success) {
-                logger.error('Tentativa de persistir dados com schema inválido', {
-                    errors: schemaValidation.errors,
-                    userId: userId
-                });
-                
-                return res.status(400).json({
-                    success: false,
-                    error: 'Dados não estão no formato esperado',
-                    errors: schemaValidation.errors.map(e => `${e.path}: ${e.message}`)
-                });
-            }
+        
 
             // Validar regras de negócio
-            const businessValidation = validatorService.validateImportData(schemaValidation.data);
+            const businessValidation = validatorService.validateImportData(data);
             
             if (!businessValidation.valid) {
                 logger.warn('Tentativa de persistir dados com erros de validação de negócio', {
@@ -440,7 +425,7 @@ class ImportController {
             }
             
             // Usar dados validados pelo schema
-            const validatedData = schemaValidation.data;
+            const validatedData = data;
 
             // RUNTIME-05: Teste forçado de falha controlada ANTES do primeiro uso
             const util = require('util');
@@ -581,12 +566,15 @@ class ImportController {
                 // 1. Criar aluno (whitelist de colunas válidas)
                 const alunoPayload = {
                     nome: validatedData.aluno.nome,
+                    email: validatedData.aluno.email,
+                    altura: validatedData.aluno.altura,
+                    cpf_cnpj: validatedData.aluno.cpf_cnpj,
                     peso: validatedData.aluno.peso,
                     idade: validatedData.aluno.idade,
                     objetivo: validatedData.aluno.objetivo,
                     coach_id: userId
                 };
-
+                console.log("alunoPayload", alunoPayload)
                 const aluno = await studentService.createAluno(alunoPayload);
 
                 // 2. Criar dieta (se existir)

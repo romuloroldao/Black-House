@@ -8,7 +8,7 @@
 -- TABELA: users (auth canônico)
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS public.users (
+CREATE TABLE IF NOT EXISTS app_auth.users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
@@ -17,11 +17,11 @@ CREATE TABLE IF NOT EXISTS public.users (
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_users_email ON public.users(email);
-CREATE INDEX IF NOT EXISTS idx_users_role ON public.users(role);
+CREATE INDEX IF NOT EXISTS idx_users_email ON app_auth.users(email);
+CREATE INDEX IF NOT EXISTS idx_users_role ON app_auth.users(role);
 
-COMMENT ON TABLE public.users IS 'Usuários do sistema (auth canônico)';
-COMMENT ON COLUMN public.users.role IS 'Papel do usuário: aluno, coach, admin';
+COMMENT ON TABLE app_auth.users IS 'Usuários do sistema (auth canônico)';
+COMMENT ON COLUMN app_auth.users.role IS 'Papel do usuário: aluno, coach, admin';
 
 -- ============================================================================
 -- TABELA: alunos (entidade de negócio)
@@ -33,8 +33,8 @@ COMMENT ON COLUMN public.users.role IS 'Papel do usuário: aluno, coach, admin';
 
 CREATE TABLE IF NOT EXISTS public.alunos (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID UNIQUE NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-    coach_id UUID NOT NULL REFERENCES public.users(id) ON DELETE RESTRICT,
+    user_id UUID UNIQUE NOT NULL REFERENCES app_auth.users(id) ON DELETE CASCADE,
+    coach_id UUID NOT NULL REFERENCES app_auth.users(id) ON DELETE RESTRICT,
     nome TEXT,
     email TEXT,
     telefone TEXT,
@@ -61,7 +61,7 @@ COMMENT ON COLUMN public.alunos.coach_id IS 'ID do coach responsável (obrigató
 CREATE TABLE IF NOT EXISTS public.conversas (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     aluno_id UUID NOT NULL REFERENCES public.alunos(id) ON DELETE CASCADE,
-    coach_id UUID NOT NULL REFERENCES public.users(id) ON DELETE RESTRICT,
+    coach_id UUID NOT NULL REFERENCES app_auth.users(id) ON DELETE RESTRICT,
     ultima_mensagem TEXT,
     ultima_mensagem_em TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT now(),
@@ -88,8 +88,8 @@ COMMENT ON COLUMN public.conversas.coach_id IS 'ID do coach';
 CREATE TABLE IF NOT EXISTS public.mensagens (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     conversa_id UUID NOT NULL REFERENCES public.conversas(id) ON DELETE CASCADE,
-    remetente_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-    destinatario_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    remetente_id UUID NOT NULL REFERENCES app_auth.users(id) ON DELETE CASCADE,
+    destinatario_id UUID NOT NULL REFERENCES app_auth.users(id) ON DELETE CASCADE,
     lida BOOLEAN DEFAULT false,
     conteudo TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT now()

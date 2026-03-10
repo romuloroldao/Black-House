@@ -72,8 +72,8 @@ class StudentRepository {
         // Nota: altura não é persistida conforme especificação (forbidden_columns)
         const query = `
             INSERT INTO public.alunos (
-                nome, peso, idade, objetivo, coach_id, email
-            ) VALUES ($1, $2, $3, $4, $5, $6)
+                nome, peso, idade, objetivo, coach_id, email, cpf_cnpj, altura
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id, nome, peso, idade, objetivo, coach_id, email, created_at
         `;
         
@@ -84,7 +84,9 @@ class StudentRepository {
             alunoData.idade || null,
             alunoData.objetivo || null,
             alunoData.coach_id,
-            alunoData.email || `${alunoData.nome.toLowerCase().replace(/\s+/g, '.')}@importado.temp`
+            alunoData.email,
+            alunoData.cpf_cnpj,
+            alunoData.altura || null
         ];
         
         const result = await this.query(query, values);
