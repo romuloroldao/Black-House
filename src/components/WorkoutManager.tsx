@@ -342,10 +342,10 @@ const WorkoutManager = () => {
                     className="pl-10"
                   />
                 </div>
-                <Button variant="outline" className="shrink-0">
+                {/* <Button variant="outline" className="shrink-0">
                   <Filter className="w-4 h-4 mr-2" />
                   Filtros
-                </Button>
+                </Button> */}
               </div>
             </CardContent>
           </Card>

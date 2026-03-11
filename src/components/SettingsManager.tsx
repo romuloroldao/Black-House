@@ -106,7 +106,7 @@ const SettingsManager = () => {
       const fileName = `${user.id}/avatar.${fileExt}`;
 
       // Upload to storage
-      // Upload usando rota canônica /api/avatar - DESIGN-VPS-ONLY-CANONICAL-DATA-AND-STORAGE-002
+      // Upload usando rota canônica /api/avatar 
       const uploadResult = await apiClient.uploadFile('avatars', fileName, file);
       const publicUrl = uploadResult.url || `${apiClient.getPublicUrl('avatars', fileName)}?t=${Date.now()}`;
 
