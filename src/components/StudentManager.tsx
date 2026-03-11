@@ -214,6 +214,16 @@ const StudentManager = () => {
     });
   };
 
+  function formatarDataParaAPI(data: string) {
+    if (!data) return null;
+
+    const [dia, mes, ano] = data.split("/");
+
+    if (!dia || !mes || !ano) return null;
+
+    return `${ano}-${mes}-${dia}`;
+  }
+
   const handleSaveStudent = async () => {
     try {
       if (!newStudent.nome || !newStudent.email || !newStudent.cpf_cnpj || !newStudent.dia_cobranca) {
@@ -263,7 +273,7 @@ const StudentManager = () => {
               telefone: formatTel || null,
               objetivo: newStudent.objetivo || null,
               plano: newStudent.plano || null,
-              data_nascimento: newStudent.data_nascimento || null,
+              data_nascimento:formatarDataParaAPI(newStudent.data_nascimento) || null,
               peso: newStudent.peso ? parseInt(newStudent.peso) : null,
               user_id: user.id,
             }),
@@ -283,16 +293,16 @@ const StudentManager = () => {
         });
       } else {
 
-        const insertResult = await apiClient.requestSafe<any>('/api/alunos', {
-          method: 'POST',
+        const insertResult = await apiClient.requestSafe<any>("/api/alunos", {
+          method: "POST",
           body: JSON.stringify({
             nome: newStudent.nome,
             email: newStudent.email,
-            cpf_cnpj:onlyNumbers(newStudent.cpf_cnpj),
+            cpf_cnpj: onlyNumbers(newStudent.cpf_cnpj),
             telefone: onlyNumbers(newStudent.telefone) || null,
             objetivo: newStudent.objetivo || null,
             plano: newStudent.plano || null,
-            data_nascimento: newStudent.data_nascimento || null,
+            data_nascimento: formatarDataParaAPI(newStudent.data_nascimento) || null,
             peso: newStudent.peso ? parseInt(newStudent.peso) : null,
             coach_id: user.id,
           }),
