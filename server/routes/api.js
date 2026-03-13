@@ -176,7 +176,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
       }
 
       // Campos permitidos para atualização
-      const allowedFields = ['nome', 'email', 'telefone', 'cpf_cnpj', 'data_nascimento', 'peso', 'objetivo', 'plano', 'status'];
+      const allowedFields = ['nome', 'email', 'telefone', 'cpf_cnpj', 'data_nascimento', 'peso', 'objetivo', 'plano', 'status', 'idade', 'altura'];
 
       const updateFields = [];
       const queryParams = [];
@@ -292,7 +292,9 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
         peso,
         objetivo,
         plano,
-        user_id
+        user_id,
+        idade,
+        altura
       } = req.body;
 
       // Coaches só podem criar alunos para si mesmos
@@ -309,8 +311,10 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
                     data_nascimento,
                     peso,
                     objetivo,
-                    plano
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    plano,
+                    idade,
+                    altura
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 RETURNING *
             `;
 
@@ -324,7 +328,9 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
         data_nascimento || null,
         peso || null,
         objetivo || null,
-        plano || null
+        plano || null,
+        idade || null,
+        altura || null
       ]);
 
       // BLACKHOUSE-DOMAIN-ALUNO-COACH-004: user_id sempre é fornecido (obrigatório)

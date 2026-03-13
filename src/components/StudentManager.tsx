@@ -49,6 +49,7 @@ import {
 } from "lucide-react";
 import StudentImporter from "./StudentImporter";
 import { maskCpfCnpj, maskPhone, onlyNumbers } from "@/utils/MaskFormat";
+import ageCalculation from "@/utils/ageCalculation";
 
 interface Student {
   id: string;
@@ -56,10 +57,10 @@ interface Student {
   email: string;
   phone?: string;
   cpf_cnpj?: string;
-  avatar?: string;
   status: string;
   plan: string;
   goal?: string;
+  avatar?: string;
   joinDate: string;
   lastWorkout: string;
   progress: number;
@@ -68,6 +69,8 @@ interface Student {
   nextPayment: string;
   data_nascimento?: string;
   peso?: number;
+  idade?: number;
+  altura?: number;
 }
 
 const StudentManager = () => {
@@ -105,7 +108,9 @@ const StudentManager = () => {
     plano: "",
     data_nascimento: "",
     peso: "",
-    dia_cobranca: ""
+    dia_cobranca: "",
+    idade: "",
+    altura: ""
   });
 
   // DESIGN-023-RUNTIME-CRASH-RESOLUTION-001: Guard defensivo - componente NÃO renderiza fora de READY
@@ -135,6 +140,8 @@ const StudentManager = () => {
         const alunoCreatedAt = aluno?.created_at;
         const alunoDataNascimento = aluno?.data_nascimento;
         const alunoPeso = aluno?.peso;
+        const alunoIdade = aluno?.idade;
+        const alunoAltura = aluno?.altura;
 
         let joinDate = 'Data não disponível';
         try {
@@ -162,7 +169,9 @@ const StudentManager = () => {
           tags: [],
           nextPayment: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR'),
           data_nascimento: alunoDataNascimento,
-          peso: alunoPeso
+          peso: alunoPeso,
+          idade: alunoIdade,
+          altura: alunoAltura
         };
       });
 
@@ -276,6 +285,8 @@ const StudentManager = () => {
               data_nascimento:formatarDataParaAPI(newStudent.data_nascimento) || null,
               peso: newStudent.peso ? parseInt(newStudent.peso) : null,
               user_id: user.id,
+              idade: ageCalculation(newStudent.data_nascimento),
+              altura: newStudent.altura || null
             }),
           },
         );
@@ -302,9 +313,12 @@ const StudentManager = () => {
             telefone: onlyNumbers(newStudent.telefone) || null,
             objetivo: newStudent.objetivo || null,
             plano: newStudent.plano || null,
-            data_nascimento: formatarDataParaAPI(newStudent.data_nascimento) || null,
+            data_nascimento:
+              formatarDataParaAPI(newStudent.data_nascimento) || null,
             peso: newStudent.peso ? parseInt(newStudent.peso) : null,
             coach_id: user.id,
+            idade: ageCalculation(newStudent.data_nascimento),
+            altura: newStudent.altura || null,
           }),
         });
         if (!insertResult.success) {
@@ -374,7 +388,9 @@ const StudentManager = () => {
         plano: "",
         data_nascimento: "",
         peso: "",
-        dia_cobranca: ""
+        dia_cobranca: "",
+        idade: "",
+        altura: ""
       });
       
       setEditingStudent(null);
@@ -433,7 +449,9 @@ const StudentManager = () => {
       plano: planId,
       data_nascimento: student.data_nascimento || "",
       peso: student.peso?.toString() || "",
-      dia_cobranca: diaCobranca
+      dia_cobranca: diaCobranca,
+      idade: ageCalculation(student.data_nascimento).toString(),
+      altura: student.altura.toString(),
     });
     setIsDialogOpen(true);
   };
@@ -650,9 +668,9 @@ const StudentManager = () => {
               ? studentName
                   .split(" ")
                   .map((n: string) => n?.[0] || "")
+                  .slice(0, 2)
                   .join("")
                   .toUpperCase()
-                  .slice(0, 2)
               : "??";
 
             return (
@@ -813,6 +831,8 @@ const StudentManager = () => {
                 data_nascimento: "",
                 peso: "",
                 dia_cobranca: "",
+                idade: "",
+                altura: ""
               });
             }
           }}
@@ -916,6 +936,12 @@ const StudentManager = () => {
                 type="text"
                 value={newStudent.data_nascimento}
                 onChange={handleDataChange}
+              />
+              <Input
+                placeholder="Altura"
+                type="number"
+                value={newStudent.altura}
+                onChange={(e) => setNewStudent({ ...newStudent, altura: e.target.value })}
               />
               <Input
                 placeholder="Dia de cobrança (1-31)"

@@ -16,6 +16,7 @@ import DietaPage from "./pages/DietaPage";
 import StudentPortal from "./pages/StudentPortal";
 import StudentBlocked from "./pages/StudentBlocked";
 import ReportViewPage from "./pages/ReportViewPage";
+import './App.css'
 
 const queryClient = new QueryClient();
 

@@ -286,7 +286,7 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
                         {/* DESIGN-ROOT-RENDER-UNBLOCK-001: Validar activity.student antes de .split() */}
                         <AvatarFallback>
                           {activity.student && typeof activity.student === 'string' && activity.student.length > 0
-                            ? activity.student.split(' ').filter((n: string) => n && n.length > 0).map((n: string) => n[0]).join('').toUpperCase() || 'A'
+                            ? activity.student.split(' ').filter((n: string) => n && n.length > 0).map((n: string) => n[0]).join('').toUpperCase().slice(0,2) || 'A'
                             : 'A'}
                         </AvatarFallback>
                       </Avatar>
