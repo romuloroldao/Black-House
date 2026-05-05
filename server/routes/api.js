@@ -74,7 +74,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
 
       // DESIGN-LINK-ALUNO-USER-001: Validação 1 - Aluno existe e pertence ao coach
       const alunoResult = await pool.query(
-        'SELECT id, coach_id, user_id FROM public.alunos WHERE id = $1',
+        'SELECT id, coach_id, user_id, linked_user_id FROM public.alunos WHERE id = $1',
         [importedAlunoId]
       );
 
@@ -96,17 +96,18 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
       }
 
       // DESIGN-LINK-ALUNO-USER-001: Validação 3 - Aluno ainda não vinculado
-      if (aluno.user_id) {
+      const alreadyLinked = aluno.user_id || aluno.linked_user_id;
+      if (alreadyLinked) {
         return res.status(409).json({
           error: 'Aluno já está vinculado a um usuário',
           error_code: 'ALUNO_ALREADY_LINKED',
-          linked_user_id: aluno.user_id
+          linked_user_id: alreadyLinked
         });
       }
 
       // DESIGN-LINK-ALUNO-USER-001: Validação 4 - User existe
       const userResult = await pool.query(
-        'SELECT id, email FROM app_auth.users WHERE id = $1',
+        'SELECT id, email, email_confirmed_at FROM app_auth.users WHERE id = $1',
         [userIdToLink]
       );
 
@@ -117,9 +118,18 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
         });
       }
 
+      // Cenário 1: só permitir unificação após confirmação de email
+      const user = userResult.rows[0];
+      if (!user.email_confirmed_at) {
+        return res.status(403).json({
+          error: 'Confirme o seu e-mail antes de ser vinculado pelo coach.',
+          error_code: 'EMAIL_NOT_CONFIRMED'
+        });
+      }
+
       // DESIGN-LINK-ALUNO-USER-001: Validação 5 - User não está vinculado a outro aluno
       const existingLink = await pool.query(
-        'SELECT id, nome FROM public.alunos WHERE user_id = $1',
+        'SELECT id, nome FROM public.alunos WHERE user_id = $1 OR linked_user_id = $1',
         [userIdToLink]
       );
 
@@ -135,7 +145,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
       // DESIGN-LINK-ALUNO-USER-001: Realizar vínculo
       const updateResult = await pool.query(
         `UPDATE public.alunos 
-                 SET user_id = $1, updated_at = now()
+                 SET user_id = $1, linked_user_id = $1, updated_at = now()
                  WHERE id = $2
                  RETURNING id, user_id, coach_id, nome, email`,
         [userIdToLink, importedAlunoId]
@@ -623,7 +633,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
 
       if (req.user.role === 'aluno' && notificacao.aluno_id) {
         const alunoResult = await pool.query(
-          'SELECT id FROM public.alunos WHERE user_id = $1',
+          'SELECT id FROM public.alunos WHERE COALESCE(user_id, linked_user_id) = $1',
           [req.user.id]
         );
 
@@ -713,7 +723,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
         }
 
         const alunoResult = await pool.query(
-          'SELECT id FROM public.alunos WHERE user_id = $1',
+          'SELECT id FROM public.alunos WHERE COALESCE(user_id, linked_user_id) = $1',
           [req.user.id]
         );
 
@@ -1274,6 +1284,197 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
       res.status(500).json({
         error: error.message || 'Erro ao listar mensagens',
         error_code: 'MESSAGES_LIST_ERROR'
+      });
+    }
+  });
+
+  // ============================================================================
+  // ROTAS: VÍDEOS (YouTube / galeria)
+  // ============================================================================
+  const VISIBILIDADES_VIDEO = ['active-students', 'inactive-students', 'guests', 'everyone'];
+
+  // GET /api/videos — coach: próprios vídeos; aluno: vídeos do coach com visibilidade permitida no portal
+  router.get('/videos', authenticate, domainSchemaGuard, validateRole(['coach', 'aluno']), async (req, res) => {
+    try {
+      if (req.user.role === 'coach') {
+        const result = await pool.query(
+          `SELECT * FROM public.videos WHERE coach_id = $1 ORDER BY created_at DESC`,
+          [req.user.id]
+        );
+        return res.json(result.rows);
+      }
+
+      const alunoResult = await pool.query(
+        `SELECT a.id, a.coach_id
+         FROM public.alunos a
+         WHERE COALESCE(a.user_id, a.linked_user_id) = $1`,
+        [req.user.id]
+      );
+
+      if (alunoResult.rows.length === 0 || !alunoResult.rows[0].coach_id) {
+        return res.json([]);
+      }
+
+      const coachId = alunoResult.rows[0].coach_id;
+      const result = await pool.query(
+        `SELECT * FROM public.videos
+         WHERE coach_id = $1
+           AND visibilidade IN ('everyone', 'active-students')
+         ORDER BY created_at DESC`,
+        [coachId]
+      );
+      return res.json(result.rows);
+    } catch (error) {
+      console.error('Erro ao listar vídeos:', error);
+      res.status(500).json({
+        error: error.message || 'Erro ao listar vídeos',
+        error_code: 'VIDEOS_LIST_ERROR'
+      });
+    }
+  });
+
+  // POST /api/videos — apenas coach
+  router.post('/videos', authenticate, domainSchemaGuard, validateRole(['coach']), resolveCoachOrFail, async (req, res) => {
+    try {
+      const {
+        titulo,
+        descricao,
+        youtube_id,
+        duracao,
+        categoria,
+        visibilidade,
+        tags,
+        instrutor
+      } = req.body || {};
+
+      if (!titulo || !youtube_id || !categoria || !visibilidade) {
+        return res.status(400).json({
+          error: 'titulo, youtube_id, categoria e visibilidade são obrigatórios',
+          error_code: 'MISSING_PARAMETERS'
+        });
+      }
+
+      if (!VISIBILIDADES_VIDEO.includes(visibilidade)) {
+        return res.status(400).json({
+          error: 'visibilidade inválida',
+          error_code: 'INVALID_VISIBILITY',
+          allowed: VISIBILIDADES_VIDEO
+        });
+      }
+
+      const tagArray = Array.isArray(tags) ? tags : [];
+      const coachId = req.user.id;
+
+      const insertResult = await pool.query(
+        `INSERT INTO public.videos (
+          titulo, descricao, youtube_id, duracao, categoria, visibilidade, tags, instrutor, coach_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7::text[], $8, $9)
+        RETURNING *`,
+        [
+          titulo,
+          descricao || null,
+          youtube_id,
+          duracao || null,
+          categoria,
+          visibilidade,
+          tagArray,
+          instrutor || null,
+          coachId
+        ]
+      );
+
+      res.status(201).json(insertResult.rows[0]);
+    } catch (error) {
+      console.error('Erro ao criar vídeo:', error);
+      res.status(500).json({
+        error: error.message || 'Erro ao criar vídeo',
+        error_code: 'VIDEO_CREATE_ERROR'
+      });
+    }
+  });
+
+  // PATCH /api/videos/:id — apenas coach, apenas vídeos próprios
+  router.patch('/videos/:id', authenticate, domainSchemaGuard, validateRole(['coach']), resolveCoachOrFail, validateUUIDParam('id'), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const body = req.body || {};
+
+      const allowed = ['titulo', 'descricao', 'youtube_id', 'duracao', 'categoria', 'visibilidade', 'tags', 'instrutor', 'views', 'likes'];
+      const updates = [];
+      const values = [];
+
+      for (const key of allowed) {
+        if (Object.prototype.hasOwnProperty.call(body, key)) {
+          if (key === 'visibilidade' && !VISIBILIDADES_VIDEO.includes(body[key])) {
+            return res.status(400).json({
+              error: 'visibilidade inválida',
+              error_code: 'INVALID_VISIBILITY',
+              allowed: VISIBILIDADES_VIDEO
+            });
+          }
+          const p = values.length + 1;
+          if (key === 'tags') {
+            updates.push(`tags = $${p}::text[]`);
+            values.push(Array.isArray(body.tags) ? body.tags : []);
+          } else {
+            updates.push(`${key} = $${p}`);
+            values.push(body[key]);
+          }
+        }
+      }
+
+      if (updates.length === 0) {
+        return res.status(400).json({ error: 'Nenhum campo para atualizar', error_code: 'EMPTY_PATCH' });
+      }
+
+      updates.push('updated_at = now()');
+      const idParam = values.length + 1;
+      const coachParam = values.length + 2;
+      values.push(id, req.user.id);
+
+      const query = `
+        UPDATE public.videos
+        SET ${updates.join(', ')}
+        WHERE id = $${idParam} AND coach_id = $${coachParam}
+        RETURNING *
+      `;
+
+      const result = await pool.query(query, values);
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Vídeo não encontrado', error_code: 'VIDEO_NOT_FOUND' });
+      }
+
+      res.json(result.rows[0]);
+    } catch (error) {
+      console.error('Erro ao atualizar vídeo:', error);
+      res.status(500).json({
+        error: error.message || 'Erro ao atualizar vídeo',
+        error_code: 'VIDEO_UPDATE_ERROR'
+      });
+    }
+  });
+
+  // DELETE /api/videos/:id — apenas coach, apenas vídeos próprios
+  router.delete('/videos/:id', authenticate, domainSchemaGuard, validateRole(['coach']), resolveCoachOrFail, validateUUIDParam('id'), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const del = await pool.query(
+        'DELETE FROM public.videos WHERE id = $1 AND coach_id = $2 RETURNING id',
+        [id, req.user.id]
+      );
+
+      if (del.rows.length === 0) {
+        return res.status(404).json({ error: 'Vídeo não encontrado', error_code: 'VIDEO_NOT_FOUND' });
+      }
+
+      // 200 + JSON: o api-client faz response.json() em sucesso; 204 sem corpo quebraria o parse.
+      res.json({ ok: true, id: del.rows[0].id });
+    } catch (error) {
+      console.error('Erro ao deletar vídeo:', error);
+      res.status(500).json({
+        error: error.message || 'Erro ao deletar vídeo',
+        error_code: 'VIDEO_DELETE_ERROR'
       });
     }
   });

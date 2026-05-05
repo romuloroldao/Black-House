@@ -1,5 +1,7 @@
 // FIX-012 — Contrato oficial Frontend ↔ Backend (VPS)
-export const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+// Uma base só: VITE_API_BASE_URL (explícito) ou VITE_API_URL (igual ao api-client)
+export const API_BASE =
+  import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '';
 
 export const API_CONTRACT = {
   auth: {
@@ -24,9 +26,13 @@ export const API_CONTRACT = {
   paymentPlans: {
     list: () => `${API_BASE}/api/payment-plans`,
   },
+  uploads: {
+    avatar: () => `${API_BASE}/api/uploads/avatar`,
+  },
 } as const;
 
 const CONTRACT_PATTERNS = [
+  '/auth/signup',
   '/auth/login',
   '/auth/user',
   '/api/alunos/by-coach',
@@ -39,6 +45,9 @@ const CONTRACT_PATTERNS = [
   '/api/payment-plans',
   '/api/profiles/me',
   '/api/me',
+  '/api/uploads/avatar',
+  '/api/videos',
+  '/api/videos/:id',
 ] as const;
 
 const CONTRACT_REGEXES = CONTRACT_PATTERNS.map((pattern) => {

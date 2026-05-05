@@ -163,7 +163,8 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
       }
 
       // Extrair youtubeId se ainda não foi extraído
-      if (!formData.youtubeId && formData.youtubeUrl) {
+      let youtubeId = formData.youtubeId;
+      if (!youtubeId && formData.youtubeUrl) {
         const extractedId = extractYouTubeId(formData.youtubeUrl);
         if (!extractedId) {
           toast({
@@ -174,10 +175,11 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
           setSaving(false);
           return;
         }
-        formData.youtubeId = extractedId;
+        youtubeId = extractedId;
+        setFormData((prev) => ({ ...prev, youtubeId: extractedId }));
       }
 
-      if (!formData.youtubeId) {
+      if (!youtubeId) {
         toast({
           title: "Erro",
           description: "Não foi possível extrair o ID do vídeo do YouTube. Verifique a URL.",
@@ -190,7 +192,7 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
       const videoData = {
         titulo: formData.title,
         descricao: formData.description,
-        youtube_id: formData.youtubeId,
+        youtube_id: youtubeId,
         categoria: formData.category,
         visibilidade: formData.visibility,
         tags: formData.tags,
