@@ -34,12 +34,6 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
   const [isOnline, setIsOnline] = useState(true);
   const isMarkingAsReadRef = useRef(false);
 
-  // DESIGN-023-RUNTIME-CRASH-RESOLUTION-001: Guard defensivo - componente NÃO renderiza fora de READY
-  // DESIGN-FRONTEND-HERMETIC-BOOTSTRAP-AND-ASSET-FIX-021: Componente só monta quando DataContext === READY
-  if (!isReady) {
-    return null;
-  }
-
   // DESIGN-023: Guards defensivos para dados do aluno
   const safeStudentName = studentName || user?.email || 'Usuário';
   const safeStudentAvatar = studentAvatar || null;
@@ -232,6 +226,12 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
     { id: "financial", label: "Financeiro", icon: DollarSign },
     { id: "profile", label: "Meu Perfil", icon: User },
   ];
+
+  // DESIGN-023-RUNTIME-CRASH-RESOLUTION-001: Guard defensivo - componente NÃO renderiza fora de READY
+  // DESIGN-FRONTEND-HERMETIC-BOOTSTRAP-AND-ASSET-FIX-021: Componente só monta quando DataContext === READY
+  if (!isReady) {
+    return null;
+  }
 
   return (
     <aside className="w-64 bg-card border-r border-border flex flex-col transition-all duration-300 ease-in-out">

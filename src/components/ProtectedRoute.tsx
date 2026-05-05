@@ -18,6 +18,23 @@ const ProtectedRoute = ({
 }: ProtectedRouteProps) => {
   const { user, loading, authInitialized, role, payment_status } = useAuth();
   const location = useLocation();
+  // DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001: Loading state seguro
+  // REACT-SOFT-LOCK-FIX-005: Timeout para garantir que loading não bloqueie indefinidamente
+  const [forceRender, setForceRender] = useState(false);
+
+  useEffect(() => {
+    if (loading) {
+      // REACT-SOFT-LOCK-FIX-005: Timeout de 12 segundos para forçar render
+      const timeout = setTimeout(() => {
+        console.warn('[REACT-SOFT-LOCK-FIX-005] Timeout no ProtectedRoute loading (12s). Liberando render.');
+        setForceRender(true);
+      }, 12000);
+
+      return () => clearTimeout(timeout);
+    } else {
+      setForceRender(false);
+    }
+  }, [loading]);
 
   // REACT-AUTH-BOOTSTRAP-DEADLOCK-FIX-009: NUNCA decidir antes de authInitialized=true
   // Este é o invariante crítico - garante que user está no estado final (null ou válido)
@@ -30,24 +47,6 @@ const ProtectedRoute = ({
     );
   }
 
-  // DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001: Loading state seguro
-  // REACT-SOFT-LOCK-FIX-005: Timeout para garantir que loading não bloqueie indefinidamente
-  const [forceRender, setForceRender] = useState(false);
-  
-  useEffect(() => {
-    if (loading) {
-      // REACT-SOFT-LOCK-FIX-005: Timeout de 12 segundos para forçar render
-      const timeout = setTimeout(() => {
-        console.warn('[REACT-SOFT-LOCK-FIX-005] Timeout no ProtectedRoute loading (12s). Liberando render.');
-        setForceRender(true);
-      }, 12000);
-      
-      return () => clearTimeout(timeout);
-    } else {
-      setForceRender(false);
-    }
-  }, [loading]);
-  
   // REACT-SOFT-LOCK-FIX-005: Log de diagnóstico
   // REACT-AUTH-STATE-CONSISTENCY-FIX-007: Log detalhado de estado de autenticação
   // REACT-AUTH-BOOTSTRAP-DEADLOCK-FIX-009: Adicionar authInitialized ao log

@@ -108,19 +108,14 @@ const StudentManager = () => {
     dia_cobranca: ""
   });
 
-  // DESIGN-023-RUNTIME-CRASH-RESOLUTION-001: Guard defensivo - componente NÃO renderiza fora de READY
-  if (!isReady) {
-    return null;
-  }
-
   // REACT-API-RESILIENCE-FIX-008: Processar alunos quando carregarem
   useEffect(() => {
     if (!loadingAlunos && alunosRaw.length > 0) {
       // Get emails of all users with 'coach' role to exclude them from student list
-      let coachEmails: string[] = [];
+      const coachEmails: string[] = [];
 
       // Filter out any alunos whose email matches a coach's email
-      let filteredData = alunosRaw.filter(aluno => 
+      const filteredData = alunosRaw.filter(aluno => 
         !coachEmails.includes(aluno.email?.toLowerCase())
       );
 
@@ -499,6 +494,11 @@ const StudentManager = () => {
     return matchesSearch && matchesStatus && matchesGoal;
   });
 
+  // DESIGN-023-RUNTIME-CRASH-RESOLUTION-001: Guard defensivo - componente NÃO renderiza fora de READY
+  if (!isReady) {
+    return null;
+  }
+
   if (loading) {
     return (
       <div className="p-6 space-y-6">
@@ -568,7 +568,7 @@ const StudentManager = () => {
               </DialogHeader>
               <StudentImporter
                 onClose={() => setIsImportDialogOpen(false)}
-                onImportComplete={() => carregarAlunos()}
+                onImportComplete={refetchAlunos}
               />
             </DialogContent>
           </Dialog>

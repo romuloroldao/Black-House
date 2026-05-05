@@ -12,11 +12,6 @@ const StudentFinancialView = () => {
   const [pagamentos, setPagamentos] = useState<any[]>([]);
   const [alunoData, setAlunoData] = useState<any>(null);
 
-  // DESIGN-022: Componente só renderiza quando DataContext === READY
-  if (!isReady) {
-    return null;
-  }
-
   useEffect(() => {
     if (isReady && user) {
       loadFinancialData();
@@ -64,6 +59,11 @@ const StudentFinancialView = () => {
     };
     return types[type] || type;
   };
+
+  // DESIGN-022: Componente só renderiza quando DataContext === READY
+  if (!isReady) {
+    return null;
+  }
 
   return (
     <div className="space-y-6">

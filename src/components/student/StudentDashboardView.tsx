@@ -15,11 +15,6 @@ const StudentDashboardView = () => {
   const [dietaAtual, setDietaAtual] = useState<any>(null);
   const [proximosEventos, setProximosEventos] = useState<any[]>([]);
 
-  // DESIGN-022: Componente só renderiza quando DataContext === READY
-  if (!isReady) {
-    return null;
-  }
-
   useEffect(() => {
     if (isReady && user) {
       loadDashboardData();
@@ -67,6 +62,11 @@ const StudentDashboardView = () => {
       .slice(0, 3);
     setProximosEventos(proximos);
   };
+
+  // DESIGN-022: Componente só renderiza quando DataContext === READY
+  if (!isReady) {
+    return null;
+  }
 
   return (
     <div className="space-y-6">
