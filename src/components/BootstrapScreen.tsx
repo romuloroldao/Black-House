@@ -85,13 +85,24 @@ export const BootstrapGuard = ({ children }: { children: React.ReactNode }) => {
   const isAuthRoute = location.pathname === '/auth' || location.pathname.startsWith('/auth');
 
   // REACT-AUTH-BOOTSTRAP-DEADLOCK-FIX-009: Importar useAuth para verificar authInitialized
-  const { authInitialized } = useAuth();
+  const { authInitialized, user } = useAuth();
 
   // REACT-SOFT-LOCK-FIX-005: forceRender deve ser verificado PRIMEIRO, antes de qualquer condição
   // Se forceRender === true, NUNCA renderizar loading, sempre liberar render
   const [forceRender, setForceRender] = useState(false);
   
   useEffect(() => {
+    // Não armar timeout em rotas públicas, estado final, ou sem usuário autenticado.
+    if (
+      isAuthRoute ||
+      forceRender ||
+      state === 'READY' ||
+      state === 'FAILED' ||
+      (authInitialized && !user)
+    ) {
+      return;
+    }
+
     // REACT-SOFT-LOCK-FIX-005: Timeout de 20 segundos para forçar render
     const forceRenderTimeout = setTimeout(() => {
       console.warn('[REACT-SOFT-LOCK-FIX-005] Timeout no BootstrapGuard (20s). Liberando render forçadamente.');
@@ -99,7 +110,7 @@ export const BootstrapGuard = ({ children }: { children: React.ReactNode }) => {
     }, 20000);
     
     return () => clearTimeout(forceRenderTimeout);
-  }, []);
+  }, [isAuthRoute, forceRender, state, authInitialized, user]);
 
   // REACT-AUTH-BOOTSTRAP-DEADLOCK-FIX-009: Log de diagnóstico
   console.log('[REACT-AUTH-BOOTSTRAP-DEADLOCK-FIX-009] BootstrapGuard:', { 
@@ -120,6 +131,11 @@ export const BootstrapGuard = ({ children }: { children: React.ReactNode }) => {
   if (!authInitialized && !forceRender) {
     console.log('[REACT-AUTH-BOOTSTRAP-DEADLOCK-FIX-009] BootstrapGuard aguardando authInitialized');
     return <SplashScreen />;
+  }
+
+  // Se auth terminou e não há usuário, liberar imediatamente para o ProtectedRoute redirecionar para /auth.
+  if (authInitialized && !user) {
+    return <>{children}</>;
   }
 
   // REACT-SOFT-LOCK-FIX-005: VERIFICAR forceRender ANTES de qualquer condição de estado
