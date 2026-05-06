@@ -8,6 +8,36 @@
 const logger = require('./logger');
 
 /**
+ * Role efectiva para RBAC: user_roles tem prioridade; se não existir linha,
+ * utilizador com coach_profiles é tratado como coach (onboarding legado).
+ * Se user_roles = aluno, mantém-se aluno (nunca promover por perfil).
+ */
+async function resolveEffectiveRole(pool, userId) {
+  const ur = await pool.query(
+    'SELECT role FROM public.user_roles WHERE user_id = $1',
+    [userId]
+  );
+  const explicit = ur.rows.length > 0 ? ur.rows[0].role : null;
+
+  if (explicit === 'aluno') {
+    return 'aluno';
+  }
+  if (explicit === 'coach') {
+    return 'coach';
+  }
+
+  const cp = await pool.query(
+    'SELECT 1 FROM public.coach_profiles WHERE user_id = $1 LIMIT 1',
+    [userId]
+  );
+  if (cp.rows.length > 0) {
+    return 'coach';
+  }
+
+  return 'aluno';
+}
+
+/**
  * Resolve aluno pelo linked_user_id ou falha
  * Regra: alunos sempre resolvem via linked_user_id (obrigatório)
  * 
@@ -174,15 +204,9 @@ async function resolveCoachOrFail(pool, userId) {
       throw error;
     }
 
-    // Verificar se é coach
-    const roleResult = await pool.query(
-      'SELECT role FROM public.user_roles WHERE user_id = $1',
-      [userId]
-    );
+    const role = await resolveEffectiveRole(pool, userId);
 
-    const role = roleResult.rows.length > 0 ? roleResult.rows[0].role : 'aluno';
-
-    if (role !== 'coach' && role !== 'admin') {
+    if (role !== 'coach') {
       const error = new Error('Usuário não é um coach');
       error.code = 'NOT_A_COACH';
       error.http_status = 403;
@@ -211,5 +235,6 @@ module.exports = {
   resolveAlunoOrFail,
   resolveCoachByAluno,
   validateAlunoBelongsToCoach,
-  resolveCoachOrFail
+  resolveCoachOrFail,
+  resolveEffectiveRole
 };

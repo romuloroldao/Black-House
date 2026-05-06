@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "validate:no-supabase": "bash scripts/validate-no-supabase.sh",
     "generate:favicon": "node scripts/generate-favicon.js",
-    "prebuild": "npm run validate:no-supabase && npm run generate:favicon"
+    "verify:api-contract": "node scripts/verify-api-contract.mjs",
+    "prebuild": "npm run validate:no-supabase && npm run verify:api-contract && npm run generate:favicon"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

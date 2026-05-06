@@ -13,6 +13,7 @@ const resolveAlunoOrFailMiddleware = require('../middleware/resolveAlunoOrFail')
 const resolveCoachOrFailMiddleware = require('../middleware/resolveCoachOrFail');
 const validateRole = require('../middleware/validateRole');
 const createAlimentosRouter = require('./alimentos');
+const createUploadsRouter = require('./uploads');
 
 // ============================================================================
 // MIDDLEWARES
@@ -28,6 +29,9 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
 
   // ROTAS: ALIMENTOS (montadas antes de rotas paramétricas)
   router.use('/alimentos', createAlimentosRouter(pool, authenticate, domainSchemaGuard));
+
+  // ROTAS: UPLOADS — PostgreSQL + ficheiros em disco (sem Supabase Storage)
+  router.use('/uploads', createUploadsRouter(pool, authenticate));
 
   // ============================================================================
   // ROTAS: ALUNOS
@@ -1288,6 +1292,54 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
     }
   });
 
+  // PATCH /api/mensagens/:id — aluno marca como lida mensagem recebida do coach (mesmo modelo conversa_id)
+  router.patch('/mensagens/:id', authenticate, domainSchemaGuard, validateRole(['aluno']), resolveAlunoOrFail, validateUUIDParam('id'), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const userId = req.user.id;
+      const aluno = req.aluno;
+
+      const conversaResult = await pool.query(
+        'SELECT id FROM public.conversas WHERE aluno_id = $1 LIMIT 1',
+        [aluno.id]
+      );
+      if (conversaResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Conversa não encontrada', error_code: 'CONVERSA_NOT_FOUND' });
+      }
+      const conversaId = conversaResult.rows[0].id;
+
+      const msgResult = await pool.query(
+        'SELECT id, remetente_id, conversa_id FROM public.mensagens WHERE id = $1 AND conversa_id = $2',
+        [id, conversaId]
+      );
+      if (msgResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Mensagem não encontrada', error_code: 'MESSAGE_NOT_FOUND' });
+      }
+      const msg = msgResult.rows[0];
+      if (msg.remetente_id === userId) {
+        return res.status(403).json({
+          error: 'Não é possível marcar como lida a própria mensagem enviada',
+          error_code: 'CANNOT_MARK_OWN_MESSAGE'
+        });
+      }
+
+      const updateResult = await pool.query(
+        'UPDATE public.mensagens SET lida = true WHERE id = $1 RETURNING *',
+        [id]
+      );
+      res.json(updateResult.rows[0]);
+    } catch (error) {
+      if (error.code === 'ALUNO_NOT_LINKED') {
+        return res.status(403).json({ error: 'Aluno não vinculado', error_code: 'ALUNO_NOT_LINKED' });
+      }
+      console.error('Erro ao marcar mensagem como lida:', error);
+      res.status(500).json({
+        error: error.message || 'Erro ao marcar mensagem como lida',
+        error_code: 'MESSAGE_UPDATE_ERROR'
+      });
+    }
+  });
+
   // ============================================================================
   // ROTAS: VÍDEOS (YouTube / galeria)
   // ============================================================================
@@ -1475,6 +1527,23 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
       res.status(500).json({
         error: error.message || 'Erro ao deletar vídeo',
         error_code: 'VIDEO_DELETE_ERROR'
+      });
+    }
+  });
+
+  // GET /api/lives — apenas coach; lista lives do coach autenticado
+  router.get('/lives', authenticate, domainSchemaGuard, validateRole(['coach']), resolveCoachOrFail, async (req, res) => {
+    try {
+      const result = await pool.query(
+        `SELECT * FROM public.lives WHERE coach_id = $1 ORDER BY data_agendamento DESC NULLS LAST, hora_agendamento DESC NULLS LAST, created_at DESC`,
+        [req.user.id]
+      );
+      res.json(result.rows);
+    } catch (error) {
+      console.error('Erro ao listar lives:', error);
+      res.status(500).json({
+        error: error.message || 'Erro ao listar lives',
+        error_code: 'LIVES_LIST_ERROR'
       });
     }
   });

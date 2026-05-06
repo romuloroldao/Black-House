@@ -34,6 +34,7 @@ const GracefulShutdown = require('./utils/graceful-shutdown');
 const { assertDatabaseSchema, assertGlobalSchema } = require('./utils/schema-validator');
 const { extractDatabaseIdentity } = require('./utils/db-identity');
 const { createDomainSchemaGuard } = require('./utils/domain-schema-guard');
+const { resolveEffectiveRole } = require('./utils/identity-resolver');
 const { assertFullSchema } = require('./utils/schema-completo-validator');
 // dotenv já foi carregado no topo do arquivo
 
@@ -386,14 +387,7 @@ const authenticate = async (req, res, next) => {
         
         // Buscar usuário com role e payment_status
         const userResult = await pool.query(
-            `SELECT 
-                u.id, 
-                u.email, 
-                u.created_at,
-                COALESCE(ur.role, 'aluno') as role
-            FROM app_auth.users u
-            LEFT JOIN public.user_roles ur ON ur.user_id = u.id
-            WHERE u.id = $1`,
+            'SELECT u.id, u.email, u.created_at FROM app_auth.users u WHERE u.id = $1',
             [decoded.userId]
         );
         
@@ -402,10 +396,11 @@ const authenticate = async (req, res, next) => {
         }
         
         const user = userResult.rows[0];
+        const role = await resolveEffectiveRole(pool, user.id);
         
         // Buscar payment_status para alunos (OVERDUE ou PENDING_AFTER_DUE_DATE)
         let payment_status = null;
-        if (user.role === 'aluno') {
+        if (role === 'aluno') {
             const paymentResult = await pool.query(
                 `SELECT 
                     CASE 
@@ -432,7 +427,7 @@ const authenticate = async (req, res, next) => {
         // Adicionar role e payment_status ao req.user
         req.user = {
             ...user,
-            role: user.role,
+            role,
             payment_status: payment_status
         };
         
@@ -689,12 +684,7 @@ app.post('/auth/login', authLimiter, async (req, res) => {
         
         const { user_id } = result.rows[0];
         
-        // Buscar role do usuário
-        const roleResult = await pool.query(
-            'SELECT role FROM public.user_roles WHERE user_id = $1',
-            [user_id]
-        );
-        const role = roleResult.rows.length > 0 ? roleResult.rows[0].role : 'aluno';
+        const role = await resolveEffectiveRole(pool, user_id);
         
         // Buscar payment_status para alunos
         let payment_status = 'CURRENT';

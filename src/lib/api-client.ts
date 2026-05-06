@@ -2,17 +2,25 @@ import { assertDataContextReady, assertNoSupabaseDirectAccess } from './data-con
 import { API_CONTRACT, isContractEndpoint, normalizeEndpoint } from '@/contracts/api-contract';
 import { getAvailabilityKeyForEndpoint, isDataAvailable } from '@/lib/dataAvailability';
 
-// FIX-012 — allowlist de endpoints reais da VPS
+// FIX-012 — prefixos de rotas semânticas na VPS (PostgreSQL; ver src/contracts/api-contract.ts)
 export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/alunos/by-coach',
-    '/api/alunos',
     '/api/alunos/me',
-    '/api/profiles/me',
-    '/api/me',
+    '/api/alunos/link-user',
+    '/api/alunos',
+    '/api/alimentos',
     '/api/mensagens',
     '/api/notificacoes',
     '/api/payment-plans',
-    '/api/alimentos'
+    '/api/profiles/me',
+    '/api/me',
+    '/api/checkins',
+    '/api/videos',
+    '/api/lives',
+    '/api/uploads/avatar',
+    '/api/import/parse-pdf',
+    '/api/import/confirm',
+    '/api/payments/create-asaas',
 ]);
 
 export function isEndpointAllowed(endpoint: string) {
@@ -290,7 +298,18 @@ class ApiClient {
                 }
                 
                 // DESIGN-API-CONNECTIVITY-GUARD-009: Erro de backend (HTTP 4xx, 5xx)
-                const backendError = new Error(error.error || 'Erro na requisição');
+                const errObj = error as Record<string, unknown>;
+                const primary = typeof errObj.error === 'string' ? errObj.error : '';
+                const secondary = typeof errObj.message === 'string' ? errObj.message : '';
+                let text = primary || secondary || 'Erro na requisição';
+                if (primary && secondary && secondary !== primary) {
+                    text = `${primary} — ${secondary}`;
+                }
+                const code = typeof errObj.error_code === 'string' ? errObj.error_code : '';
+                if (code) {
+                    text = `${text} [${code}]`;
+                }
+                const backendError = new Error(text);
                 (backendError as any).status = response.status;
                 let errorType = ErrorType.BACKEND;
                 if (response.status === 401 || response.status === 403) {

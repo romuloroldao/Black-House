@@ -61,15 +61,15 @@ const VideoGallery = () => {
 
       const videosFormatados = filteredRaw.map((video: any) => ({
         id: video.id,
-        title: video.titulo,
+        title: video.titulo ?? '',
         description: video.descricao || '',
         youtubeId: video.youtube_id,
         thumbnail: video.youtube_id
           ? `https://img.youtube.com/vi/${video.youtube_id}/maxresdefault.jpg`
           : '',
         duration: video.duracao || '0:00',
-        category: video.categoria,
-        visibility: video.visibilidade,
+        category: video.categoria ?? '',
+        visibility: video.visibilidade ?? 'active-students',
         tags: safeArray(video.tags),
         uploadDate: new Date(video.created_at || Date.now()).toISOString().split('T')[0],
         views: video.views || 0,
@@ -106,9 +106,9 @@ const VideoGallery = () => {
   };
 
   const filteredVideos = videos.filter(video => {
-    const matchesSearch = video.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         video.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         video.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
+    const matchesSearch = (video.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         (video.description || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         safeArray(video.tags).some(tag => String(tag).toLowerCase().includes(searchTerm.toLowerCase()));
     
     const matchesCategory = selectedCategory === "all" || video.category === selectedCategory;
     
@@ -150,7 +150,9 @@ const VideoGallery = () => {
   };
 
   const renderVideoCard = (video: any) => {
-    const visibilityInfo = visibilityLabels[video.visibility as keyof typeof visibilityLabels];
+    const visibilityInfo =
+      visibilityLabels[video.visibility as keyof typeof visibilityLabels] ??
+      visibilityLabels['active-students'];
     const VisibilityIcon = visibilityInfo.icon;
 
     return (
@@ -455,8 +457,9 @@ const VideoGallery = () => {
           )}
         </TabsContent>
 
-        <TabsContent value="lives">
-          <LiveManager />
+        <TabsContent value="lives" className="space-y-6">
+          {/* Só montar após abrir o tab — evita GET /api/lives bloqueado pelo contrato e pedidos inúteis na galeria */}
+          {activeTab === 'lives' ? <LiveManager /> : null}
         </TabsContent>
       </Tabs>
       </div>

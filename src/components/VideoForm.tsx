@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { apiClient } from "@/lib/api-client";
-import { useAuth } from "@/contexts/AuthContext";
+import { API_CONTRACT } from "@/contracts/api-contract";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,7 +29,6 @@ interface VideoFormProps {
 }
 
 const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
-  const { user } = useAuth();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
@@ -190,18 +189,17 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
       }
 
       const videoData = {
-        titulo: formData.title,
-        descricao: formData.description,
+        titulo: formData.title.trim(),
+        descricao: formData.description?.trim() || null,
         youtube_id: youtubeId,
         categoria: formData.category,
         visibilidade: formData.visibility,
-        tags: formData.tags,
-        duracao: formData.duration,
-        coach_id: user?.id,
+        tags: Array.isArray(formData.tags) ? formData.tags : [],
+        duracao: formData.duration?.trim() || null,
       };
 
       if (video?.id) {
-        const updateResult = await apiClient.requestSafe(`/api/videos/${video.id}`, {
+        const updateResult = await apiClient.requestSafe(API_CONTRACT.videos.byId(video.id), {
           method: 'PATCH',
           body: JSON.stringify(videoData),
         });
@@ -219,7 +217,7 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
           description: "As alterações foram salvas com sucesso.",
         });
       } else {
-        const createResult = await apiClient.requestSafe('/api/videos', {
+        const createResult = await apiClient.requestSafe(API_CONTRACT.videos.list(), {
           method: 'POST',
           body: JSON.stringify(videoData),
         });
