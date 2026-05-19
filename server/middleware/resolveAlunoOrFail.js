@@ -3,6 +3,7 @@
 // ============================================================================
 
 const logger = require('../utils/logger');
+const { queryAlunoRowsFullForUser } = require('../utils/aluno-resolve-by-user');
 
 /**
  * Middleware para resolver aluno canônico
@@ -15,6 +16,12 @@ const logger = require('../utils/logger');
  * Injeta req.aluno no request
  */
 function resolveAlunoOrFail(pool) {
+    function withCanonicalUserId(row) {
+        if (!row) return row;
+        const link = row.linked_user_id != null ? row.linked_user_id : row.user_id;
+        return { ...row, user_id: link };
+    }
+
     return async (req, res, next) => {
         try {
             const userId = req.user.id;
@@ -30,33 +37,19 @@ function resolveAlunoOrFail(pool) {
                 });
             }
             
-            // Se for aluno, resolver aluno via user_id (canônico)
-            // BLACKHOUSE-DOMAIN-ALUNO-COACH-004: alunos.user_id é a única fonte de verdade
+            // Se for aluno: linked_user_id (canónico) ou fallback por email se a coluna não existir na BD
             if (userRole === 'aluno') {
-                const alunoResult = await pool.query(
-                    `SELECT 
-                        a.id,
-                        a.nome,
-                        a.email,
-                        a.telefone,
-                        a.coach_id,
-                        a.user_id,
-                        a.status,
-                        a.created_at
-                     FROM public.alunos a
-                     WHERE a.user_id = $1`,
-                    [userId]
-                );
-                
-                if (alunoResult.rows.length === 0) {
+                const rows = await queryAlunoRowsFullForUser(pool, userId);
+
+                if (rows.length === 0) {
                     return res.status(403).json({
                         error: 'Aluno não vinculado',
                         error_code: 'ALUNO_NOT_LINKED',
                         message: 'Seu perfil não está vinculado a um aluno. Entre em contato com seu coach.'
                     });
                 }
-                
-                req.aluno = alunoResult.rows[0];
+
+                req.aluno = withCanonicalUserId(rows[0]);
                 return next();
             }
             
@@ -65,18 +58,8 @@ function resolveAlunoOrFail(pool) {
                 const { aluno_id } = req.body || req.query;
                 
                 if (aluno_id) {
-                    // Validar que aluno pertence ao coach
                     const alunoResult = await pool.query(
-                        `SELECT 
-                            a.id,
-                            a.nome,
-                            a.email,
-                            a.telefone,
-                            a.coach_id,
-                            a.user_id,
-                            a.status
-                         FROM public.alunos a
-                         WHERE a.id = $1 AND a.coach_id = $2`,
+                        `SELECT a.* FROM public.alunos a WHERE a.id = $1 AND a.coach_id = $2`,
                         [aluno_id, userId]
                     );
                     
@@ -87,7 +70,7 @@ function resolveAlunoOrFail(pool) {
                         });
                     }
                     
-                    req.aluno = alunoResult.rows[0];
+                    req.aluno = withCanonicalUserId(alunoResult.rows[0]);
                 }
                 
                 return next();
@@ -104,7 +87,7 @@ function resolveAlunoOrFail(pool) {
                     );
                     
                     if (alunoResult.rows.length > 0) {
-                        req.aluno = alunoResult.rows[0];
+                        req.aluno = withCanonicalUserId(alunoResult.rows[0]);
                     }
                 }
                 

@@ -13,6 +13,14 @@
 
 const logger = require('../../utils/logger');
 
+function getProviderSpecificApiKey(provider) {
+    const normalizedProvider = provider?.toLowerCase();
+    if (normalizedProvider === 'gemini') return process.env.GEMINI_API_KEY || null;
+    if (normalizedProvider === 'groq') return process.env.GROQ_API_KEY || null;
+    if (normalizedProvider === 'openai') return process.env.OPENAI_API_KEY || null;
+    return null;
+}
+
 class AIProviderManager {
     constructor() {
         this.provider = null;
@@ -20,16 +28,19 @@ class AIProviderManager {
         this.isEnabled = false;
         
         // Configuração primária
+        const primaryProvider = process.env.AI_PROVIDER || null;
+        const fallbackProvider = process.env.AI_PROVIDER_FALLBACK || null;
+
         this.config = {
-            provider: process.env.AI_PROVIDER || null,
-            apiKey: process.env.AI_API_KEY || null,
+            provider: primaryProvider,
+            apiKey: process.env.AI_API_KEY || getProviderSpecificApiKey(primaryProvider),
             model: process.env.AI_MODEL || null
         };
         
         // Configuração secundária (fallback)
         this.fallbackConfig = {
-            provider: process.env.AI_PROVIDER_FALLBACK || null,
-            apiKey: process.env.AI_API_KEY_FALLBACK || null,
+            provider: fallbackProvider,
+            apiKey: process.env.AI_API_KEY_FALLBACK || getProviderSpecificApiKey(fallbackProvider),
             model: process.env.AI_MODEL_FALLBACK || null
         };
         
@@ -64,7 +75,7 @@ class AIProviderManager {
             const defaults = {
                 groq: 'llama-3.3-70b-versatile', // Modelo atualizado (llama-3.1-70b-versatile foi descontinuado)
                 openai: 'gpt-4o-mini',
-                gemini: 'gemini-pro'
+                gemini: 'gemini-2.5-pro'
             };
             this.config.model = defaults[this.config.provider.toLowerCase()] || 'llama-3.3-70b-versatile';
             logger.warn(`AI_MODEL não configurado, usando default: ${this.config.model}`);
@@ -156,7 +167,7 @@ class AIProviderManager {
             if (!this.fallbackConfig.model) {
                 const defaults = {
                     groq: 'llama-3.3-70b-versatile',
-                    gemini: 'gemini-pro'
+                gemini: 'gemini-2.5-pro'
                 };
                 this.fallbackConfig.model = defaults[this.fallbackConfig.provider.toLowerCase()] || 'gemini-pro';
             }
@@ -211,10 +222,11 @@ class AIProviderManager {
      * @param {string} pdfText - Texto extraído do PDF
      * @param {string} systemPrompt - Prompt do sistema
      * @param {string} userPrompt - Prompt do usuário
+     * @param {Buffer|null} pdfBuffer - PDF original para providers multimodais/layout-aware
      * @returns {Promise<Object>} Dados estruturados
      * @throws {Error} Se IA não estiver disponível ou ocorrer erro na extração
      */
-    async extractStructuredData(pdfText, systemPrompt, userPrompt) {
+    async extractStructuredData(pdfText, systemPrompt, userPrompt, pdfBuffer = null) {
         if (!this.isAvailable()) {
             throw new Error(
                 'IA não está disponível. Verifique se AI_PROVIDER e AI_API_KEY estão configurados.'
@@ -223,7 +235,7 @@ class AIProviderManager {
 
         // Tentar provider primário primeiro
         try {
-            const result = await this.provider.extractStructuredData(pdfText, systemPrompt, userPrompt);
+            const result = await this.provider.extractStructuredData(pdfText, systemPrompt, userPrompt, pdfBuffer);
             logger.info('AI: Dados extraídos com sucesso usando provider primário', {
                 provider: this.providerName
             });
@@ -242,7 +254,7 @@ class AIProviderManager {
                         fallbackProvider: this.fallbackProviderName
                     });
                     
-                    const result = await this.fallbackProvider.extractStructuredData(pdfText, systemPrompt, userPrompt);
+                    const result = await this.fallbackProvider.extractStructuredData(pdfText, systemPrompt, userPrompt, pdfBuffer);
                     
                     logger.info('AI: Dados extraídos com sucesso usando provider de fallback', {
                         fallbackProvider: this.fallbackProviderName,

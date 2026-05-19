@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Calendar, Dumbbell, Utensils, TrendingUp } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
+import { getPlanoAlunoLegivel } from "@/lib/aluno-display";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDataContext } from "@/contexts/DataContext";
 
@@ -63,21 +65,61 @@ const StudentDashboardView = () => {
     setProximosEventos(proximos);
   };
 
-  // DESIGN-022: Componente só renderiza quando DataContext === READY
+  // DESIGN-022: durante bootstrap mostra esqueleto (evita tela em branco no mobile)
   if (!isReady) {
-    return null;
+    return (
+      <div className="min-w-0 space-y-6">
+        <div className="space-y-2">
+          <Skeleton className="h-9 w-56 max-w-full" />
+          <Skeleton className="h-5 w-72 max-w-full" />
+        </div>
+        <div className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i} className="shadow-card">
+              <CardHeader className="pb-2">
+                <Skeleton className="h-4 w-24" />
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <Skeleton className="h-8 w-16" />
+                <Skeleton className="h-2 w-full" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+        <div className="grid min-w-0 gap-4 md:grid-cols-2">
+          <Card className="shadow-card">
+            <CardHeader>
+              <Skeleton className="h-6 w-40" />
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Skeleton className="h-5 w-full" />
+              <Skeleton className="h-5 w-[75%]" />
+              <Skeleton className="h-20 w-full" />
+            </CardContent>
+          </Card>
+          <Card className="shadow-card">
+            <CardHeader>
+              <Skeleton className="h-6 w-44" />
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Skeleton className="h-16 w-full" />
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <div>
-        <h1 className="text-3xl font-bold mb-2">Bem-vindo de volta!</h1>
+        <h1 className="text-2xl font-bold sm:text-3xl mb-2">Bem-vindo de volta!</h1>
         <p className="text-muted-foreground">
           Continue sua jornada de transformação
         </p>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid min-w-0 gap-4 sm:gap-6 md:grid-cols-2 lg:grid-cols-4">
         <Card className="shadow-card">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Peso Atual</CardTitle>
@@ -121,13 +163,13 @@ const StudentDashboardView = () => {
           <CardContent>
             <Badge variant="premium" className="mt-1">Ativo</Badge>
             <p className="text-xs text-muted-foreground mt-2">
-              Plano: {alunoData?.plano || "Premium"}
+              Plano: {getPlanoAlunoLegivel(alunoData)}
             </p>
           </CardContent>
         </Card>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid min-w-0 gap-4 sm:gap-6 md:grid-cols-2">
         <Card className="shadow-card">
           <CardHeader>
             <CardTitle>Treino Atual</CardTitle>

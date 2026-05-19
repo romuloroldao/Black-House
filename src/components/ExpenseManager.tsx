@@ -7,7 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DateInputBR } from "@/components/ui/date-input-br";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, TrendingDown, Clock, CheckCircle, XCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -335,6 +336,9 @@ export default function ExpenseManager() {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingId ? 'Editar' : 'Nova'} Despesa</DialogTitle>
+            <DialogDescription>
+              Registe categoria, valor, data e observações da despesa.
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
@@ -374,21 +378,19 @@ export default function ExpenseManager() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="data_vencimento">Data Vencimento *</Label>
-                <Input
+                <DateInputBR
                   id="data_vencimento"
-                  type="date"
                   value={formData.data_vencimento}
-                  onChange={(e) => setFormData({...formData, data_vencimento: e.target.value})}
+                  onChange={(value) => setFormData({...formData, data_vencimento: value})}
                   required
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="data_pagamento">Data Pagamento</Label>
-                <Input
+                <DateInputBR
                   id="data_pagamento"
-                  type="date"
                   value={formData.data_pagamento}
-                  onChange={(e) => setFormData({...formData, data_pagamento: e.target.value})}
+                  onChange={(value) => setFormData({...formData, data_pagamento: value})}
                 />
               </div>
             </div>

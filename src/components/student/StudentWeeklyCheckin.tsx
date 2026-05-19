@@ -667,7 +667,7 @@ export default function StudentWeeklyCheckin() {
                 <img 
                   src={escalaBristol} 
                   alt="Escala de Bristol - Tipos de fezes de 1 a 7" 
-                  className="w-full max-w-md mx-auto"
+                  className="mx-auto h-auto w-full max-w-md object-contain"
                 />
               </div>
               <RadioGroup
@@ -710,7 +710,7 @@ export default function StudentWeeklyCheckin() {
         <Button type="submit" size="lg" className="w-full" disabled={loading}>
           {loading ? (
             <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
               Enviando...
             </>
           ) : (

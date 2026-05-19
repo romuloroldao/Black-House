@@ -1,5 +1,5 @@
 // Workout Expirations Job
-// Verifica e notifica sobre treinos expirados
+// Notifica coach antes do vencimento do treino (ou no dia do vencimento)
 
 const cron = require('node-cron');
 
@@ -42,45 +42,51 @@ class WorkoutExpirationsJob {
      */
     async execute() {
         try {
-            // Buscar treinos que expiraram hoje
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-
+            // Busca treinos activos cujo dia de lembrete é hoje:
+            // data_expiracao - dias_antecedencia_notificacao == hoje
             const expiredResult = await this.pool.query(
-                `SELECT at.*, a.nome as aluno_nome, a.coach_id
+                `SELECT
+                    at.*,
+                    a.nome AS aluno_nome,
+                    a.coach_id,
+                    t.nome AS treino_nome
                  FROM public.alunos_treinos at
                  JOIN public.alunos a ON at.aluno_id = a.id
-                 WHERE at.data_fim IS NOT NULL
-                   AND DATE(at.data_fim) = DATE($1)
-                   AND at.expiration_notified = false`,
-                [today]
+                 LEFT JOIN public.treinos t ON t.id = at.treino_id
+                 WHERE at.data_expiracao IS NOT NULL
+                   AND COALESCE(at.ativo, true) = true
+                   AND COALESCE(at.notificacao_expiracao_enviada, false) = false
+                   AND DATE(
+                        at.data_expiracao
+                        - (COALESCE(at.dias_antecedencia_notificacao, 1) || ' days')::interval
+                   ) = CURRENT_DATE`
             );
 
-            console.log(`[WorkoutExpirationsJob] Encontrados ${expiredResult.rows.length} treinos expirados`);
+            console.log(`[WorkoutExpirationsJob] Encontrados ${expiredResult.rows.length} treinos para lembrete`);
 
             for (const workout of expiredResult.rows) {
                 try {
-                    // Notificar coach
-                    await this.notificationService.notifyUser(
-                        workout.coach_id,
-                        'workout_expired',
-                        'Treino Expirado',
-                        `O treino de ${workout.aluno_nome} expirou hoje`,
-                        { 
-                            workoutId: workout.id,
-                            alunoId: workout.aluno_id,
-                            alunoNome: workout.aluno_nome,
-                            dataFim: workout.data_fim
-                        }
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const expirationDate = new Date(workout.data_expiracao);
+                    expirationDate.setHours(0, 0, 0, 0);
+                    const diffMs = expirationDate.getTime() - today.getTime();
+                    const daysUntilExpiration = Math.round(diffMs / (1000 * 60 * 60 * 24));
+                    await this.notificationService.notifyWorkoutExpirationReminder(
+                        workout,
+                        daysUntilExpiration,
                     );
 
                     // Marcar como notificado
                     await this.pool.query(
-                        'UPDATE public.alunos_treinos SET expiration_notified = true WHERE id = $1',
+                        `UPDATE public.alunos_treinos
+                         SET notificacao_expiracao_enviada = true,
+                             expiration_notified = true
+                         WHERE id = $1`,
                         [workout.id]
                     );
 
-                    console.log(`[WorkoutExpirationsJob] Notificação enviada para treino ${workout.id}`);
+                    console.log(`[WorkoutExpirationsJob] Lembrete enviado para treino ${workout.id}`);
                 } catch (error) {
                     console.error(`[WorkoutExpirationsJob] Erro ao processar treino ${workout.id}:`, error);
                 }

@@ -5,7 +5,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Checkbox } from "./ui/checkbox";
@@ -266,6 +266,9 @@ export function ClassGroupManager() {
               <DialogTitle>
                 {selectedTurma ? "Editar Turma" : "Nova Turma"}
               </DialogTitle>
+              <DialogDescription>
+                Nome, descrição e cor para identificar a turma na agenda e listagens.
+              </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
@@ -398,6 +401,9 @@ export function ClassGroupManager() {
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Adicionar Alunos à Turma</DialogTitle>
+                      <DialogDescription>
+                        Marque os alunos a incluir e confirme para atualizar a turma.
+                      </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4">
                       {alunosDisponiveis.length === 0 ? (

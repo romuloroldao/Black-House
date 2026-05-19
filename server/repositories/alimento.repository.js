@@ -178,8 +178,8 @@ class AlimentoRepository {
             INSERT INTO public.alimentos (
                 nome, tipo_id, origem_ptn, quantidade_referencia_g,
                 kcal_por_referencia, ptn_por_referencia, cho_por_referencia, lip_por_referencia,
-                info_adicional, autor
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                alcool_por_referencia, info_adicional, autor
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING id, nome
         `;
         
@@ -192,6 +192,7 @@ class AlimentoRepository {
             alimentoData.ptn_por_referencia,
             alimentoData.cho_por_referencia,
             alimentoData.lip_por_referencia,
+            alimentoData.alcool_por_referencia ?? 0,
             alimentoData.info_adicional || null,
             alimentoData.autor
         ];

@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -21,6 +21,7 @@ const StudentProgressView = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [descricao, setDescricao] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (user) {
@@ -58,6 +59,7 @@ const StudentProgressView = () => {
 
       setSelectedFile(file);
     }
+    e.target.value = "";
   };
 
   const handleUpload = async () => {
@@ -72,8 +74,8 @@ const StudentProgressView = () => {
     const fileName = `${Date.now()}.${fileExt}`;
     const filePath = `${alunoId}/${fileName}`;
 
-    await apiClient.uploadFile("progress-photos", filePath, selectedFile);
-    const publicUrl = apiClient.getPublicUrl("progress-photos", filePath);
+    const uploadResult = await apiClient.uploadFile("progress-photos", filePath, selectedFile);
+    const publicUrl = uploadResult?.url || apiClient.getPublicUrl("progress-photos", filePath);
 
     const createResult = await apiClient.requestSafe('/api/fotos-alunos', {
       method: 'POST',
@@ -118,18 +120,16 @@ const StudentProgressView = () => {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Meu Progresso</h1>
-          <p className="text-muted-foreground mt-1">
-            Acompanhe sua evolução através de métricas semanais e fotos
-          </p>
-        </div>
+    <div className="min-w-0 space-y-6">
+      <div className="min-w-0">
+        <h1 className="text-2xl font-bold sm:text-3xl">Meu Progresso</h1>
+        <p className="mt-1 text-muted-foreground">
+          Acompanhe sua evolução através de métricas semanais e fotos
+        </p>
       </div>
 
-      <Tabs defaultValue="metrics" className="w-full">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
+      <Tabs defaultValue="metrics" className="min-w-0 w-full">
+        <TabsList className="grid h-auto w-full min-w-0 max-w-full grid-cols-2 gap-1 sm:max-w-md">
           <TabsTrigger value="metrics" className="flex items-center gap-2">
             <Activity className="h-4 w-4" />
             Métricas Semanais
@@ -167,6 +167,9 @@ const StudentProgressView = () => {
                 <DialogContent>
                   <DialogHeader>
                     <DialogTitle>Enviar Foto de Progresso</DialogTitle>
+                    <DialogDescription>
+                      Envie uma imagem (JPG, PNG ou WEBP até 5MB) e opcionalmente uma descrição.
+                    </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4 py-4">
                     <div className="space-y-2">
@@ -178,7 +181,15 @@ const StudentProgressView = () => {
                         onChange={handleFileSelect}
                         className="hidden"
                       />
-                      <div className="flex gap-2">
+                      <input
+                        ref={cameraInputRef}
+                        type="file"
+                        accept="image/jpeg,image/jpg,image/png,image/webp"
+                        capture="environment"
+                        onChange={handleFileSelect}
+                        className="hidden"
+                      />
+                      <div className="flex flex-col gap-2 sm:flex-row">
                         <Button
                           type="button"
                           variant="outline"
@@ -187,6 +198,15 @@ const StudentProgressView = () => {
                         >
                           <Upload className="h-4 w-4 mr-2" />
                           {selectedFile ? selectedFile.name : "Escolher arquivo"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="flex-1"
+                          onClick={() => cameraInputRef.current?.click()}
+                        >
+                          <Camera className="h-4 w-4 mr-2" />
+                          Tirar foto
                         </Button>
                       </div>
                       <p className="text-xs text-muted-foreground">
@@ -222,7 +242,7 @@ const StudentProgressView = () => {
                     >
                       {uploading ? (
                         <>
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          <Loader2 className="h-4 w-4 mr-2 motion-safe:animate-spin" />
                           Enviando...
                         </>
                       ) : (

@@ -20,17 +20,23 @@ class NormalizerService {
     }
 
     /**
-     * Normaliza dados do aluno
-     * Nota: altura não é persistida no banco (conforme especificação)
+     * Normaliza dados do aluno (altura opcional — não impede importação)
      */
     _normalizeAluno(aluno) {
-        return {
+        const out = {
             nome: this._normalizeString(aluno.nome) || 'Aluno Importado',
             peso: this._normalizeNumber(aluno.peso),
-            // altura: removido - não é persistido no banco conforme especificação
+            altura: this._normalizeNumber(aluno.altura),
             idade: this._normalizeNumber(aluno.idade),
             objetivo: this._normalizeString(aluno.objetivo)
         };
+        const email = this._normalizeString(aluno.email);
+        if (email) out.email = email;
+        const cpf = this._normalizeString(aluno.cpf_cnpj);
+        if (cpf) out.cpf_cnpj = cpf;
+        const tel = this._normalizeString(aluno.telefone);
+        if (tel) out.telefone = tel;
+        return out;
     }
 
     /**
@@ -46,7 +52,7 @@ class NormalizerService {
     }
 
     /**
-     * Normaliza refeições
+     * Normaliza refeições preservando metadados opcionais.
      */
     _normalizeRefeicoes(refeicoes) {
         if (!Array.isArray(refeicoes)) {
@@ -55,15 +61,37 @@ class NormalizerService {
 
         return refeicoes
             .filter(ref => ref && (ref.nome || ref.alimentos))
-            .map(ref => ({
-                nome: this._normalizeString(ref.nome) || 'Refeição',
-                alimentos: this._normalizeAlimentos(ref.alimentos || [])
-            }))
-            .filter(ref => ref.alimentos.length > 0); // Remove refeições sem alimentos
+            .map(ref => {
+                const out = {
+                    nome: this._normalizeString(ref.nome) || 'Refeição',
+                    alimentos: this._normalizeAlimentos(ref.alimentos || [])
+                };
+
+                const horario = this._normalizeString(ref.horario);
+                if (horario) out.horario = horario;
+
+                const observacao = this._normalizeString(ref.observacao);
+                if (observacao) out.observacao = observacao;
+
+                const diaSemana = this._normalizeString(ref.dia_semana);
+                if (diaSemana) out.dia_semana = diaSemana;
+
+                const plano = this._normalizeString(ref.plano);
+                if (plano) out.plano = plano;
+
+                if (ref.macros) {
+                    const macros = this._normalizeMacros(ref.macros);
+                    const hasMacros = macros && Object.values(macros).some(v => v !== null && v !== undefined);
+                    if (hasMacros) out.macros = macros;
+                }
+
+                return out;
+            })
+            .filter(ref => ref.alimentos.length > 0);
     }
 
     /**
-     * Normaliza alimentos
+     * Normaliza alimentos preservando alternativas (substitutos).
      */
     _normalizeAlimentos(alimentos) {
         if (!Array.isArray(alimentos)) {
@@ -72,10 +100,23 @@ class NormalizerService {
 
         return alimentos
             .filter(a => a && a.nome)
-            .map(a => ({
-                nome: this._normalizeString(a.nome).trim(),
-                quantidade: this._normalizeString(a.quantidade) || '100g'
-            }))
+            .map(a => {
+                const out = {
+                    nome: this._normalizeString(a.nome).trim(),
+                    quantidade: this._normalizeString(a.quantidade) || '100g'
+                };
+                if (Array.isArray(a.alternativas) && a.alternativas.length > 0) {
+                    const alts = a.alternativas
+                        .filter(alt => alt && alt.nome)
+                        .map(alt => ({
+                            nome: this._normalizeString(alt.nome).trim(),
+                            quantidade: this._normalizeString(alt.quantidade) || out.quantidade
+                        }))
+                        .filter(alt => alt.nome.length > 0);
+                    if (alts.length > 0) out.alternativas = alts;
+                }
+                return out;
+            })
             .filter(a => a.nome.length > 0);
     }
 
@@ -92,7 +133,7 @@ class NormalizerService {
     }
 
     /**
-     * Normaliza suplementos
+     * Normaliza suplementos preservando horário opcional.
      */
     _normalizeSuplementos(suplementos) {
         if (!Array.isArray(suplementos)) {
@@ -101,16 +142,21 @@ class NormalizerService {
 
         return suplementos
             .filter(s => s && s.nome)
-            .map(s => ({
-                nome: this._normalizeString(s.nome).trim(),
-                dosagem: this._normalizeString(s.dosagem) || '',
-                observacao: this._normalizeString(s.observacao)
-            }))
+            .map(s => {
+                const out = {
+                    nome: this._normalizeString(s.nome).trim(),
+                    dosagem: this._normalizeString(s.dosagem) || '',
+                    observacao: this._normalizeString(s.observacao)
+                };
+                const horario = this._normalizeString(s.horario);
+                if (horario) out.horario = horario;
+                return out;
+            })
             .filter(s => s.nome.length > 0);
     }
 
     /**
-     * Normaliza fármacos
+     * Normaliza fármacos preservando horário opcional.
      */
     _normalizeFarmacos(farmacos) {
         if (!Array.isArray(farmacos)) {
@@ -119,11 +165,16 @@ class NormalizerService {
 
         return farmacos
             .filter(f => f && f.nome)
-            .map(f => ({
-                nome: this._normalizeString(f.nome).trim(),
-                dosagem: this._normalizeString(f.dosagem) || '',
-                observacao: this._normalizeString(f.observacao)
-            }))
+            .map(f => {
+                const out = {
+                    nome: this._normalizeString(f.nome).trim(),
+                    dosagem: this._normalizeString(f.dosagem) || '',
+                    observacao: this._normalizeString(f.observacao)
+                };
+                const horario = this._normalizeString(f.horario);
+                if (horario) out.horario = horario;
+                return out;
+            })
             .filter(f => f.nome.length > 0);
     }
 

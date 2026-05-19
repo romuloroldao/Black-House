@@ -12,6 +12,7 @@ import { ptBR } from "date-fns/locale";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -225,6 +226,9 @@ const StudentReportsView = () => {
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{selectedReport?.titulo}</DialogTitle>
+            <DialogDescription>
+              Período, métricas, observações do coach, mídias e comentários do relatório.
+            </DialogDescription>
           </DialogHeader>
 
           {selectedReport && (

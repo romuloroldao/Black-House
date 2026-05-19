@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { DateInputBR } from "@/components/ui/date-input-br";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDataContext } from "@/contexts/DataContext";
@@ -25,7 +26,6 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
   const { toast } = useToast();
   
   const [pagamentos, setPagamentos] = useState<any[]>([]);
-  // DESIGN-022: planos removido - não há API semântica disponível
   const [planos, setPlanos] = useState<any[]>([]);
   const [excecoes, setExcecoes] = useState<any[]>([]);
   const [configCobranca, setConfigCobranca] = useState<any>(null);
@@ -72,9 +72,6 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
     return null;
   }
 
-  // DESIGN-022: useEffect removido - loadFinancialData() não carrega mais payment_plans
-  // useEffect removido para evitar chamadas PostgREST
-
   const loadFinancialData = async () => {
     setLoading(true);
 
@@ -85,7 +82,9 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
       .sort((a, b) => new Date(b.due_date || 0).getTime() - new Date(a.due_date || 0).getTime());
     setPagamentos(pagamentosFiltrados);
 
-    setPlanos([]);
+    const planosResult = await apiClient.requestSafe<any[]>('/api/payment-plans');
+    const planosData = planosResult.success && Array.isArray(planosResult.data) ? planosResult.data : [];
+    setPlanos(planosData);
 
     const excecoesResult = await apiClient.requestSafe<any[]>('/api/financial-exceptions');
     const excecoesData = excecoesResult.success && Array.isArray(excecoesResult.data) ? excecoesResult.data : [];
@@ -96,8 +95,16 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
     const configs = configsResult.success && Array.isArray(configsResult.data) ? configsResult.data : [];
     const configData = configs.find(c => c.aluno_id === studentId) || null;
     setConfigCobranca(configData);
+    if (configData) {
+      setRecurringForm({
+        payment_plan_id: configData.payment_plan_id || "",
+        dia_vencimento_customizado: configData.dia_vencimento_customizado ? String(configData.dia_vencimento_customizado) : "",
+        valor_customizado: configData.valor_customizado ? String(configData.valor_customizado) : "",
+        ativo: configData.ativo !== false,
+      });
+    }
 
-    if (!pagamentosResult.success || !excecoesResult.success || !configsResult.success) {
+    if (!pagamentosResult.success || !planosResult.success || !excecoesResult.success || !configsResult.success) {
       toast({
         title: "Aviso",
         description: "Dados financeiros carregados com fallback seguro.",
@@ -358,6 +365,9 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Criar Pagamento para {studentName}</DialogTitle>
+                <DialogDescription>
+                  Defina valor, forma de pagamento, vencimento e descrição da cobrança.
+                </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
                 <div>
@@ -384,10 +394,9 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
                 </div>
                 <div>
                   <Label>Data de Vencimento</Label>
-                  <Input
-                    type="date"
+                  <DateInputBR
                     value={paymentForm.dueDate}
-                    onChange={(e) => setPaymentForm({ ...paymentForm, dueDate: e.target.value })}
+                    onChange={(value) => setPaymentForm({ ...paymentForm, dueDate: value })}
                   />
                 </div>
                 <div>
@@ -414,6 +423,9 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Configurar Cobrança Recorrente</DialogTitle>
+                <DialogDescription>
+                  Associe um plano de pagamento e ajuste vencimento ou valor conforme necessário.
+                </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
                 <div>
@@ -423,11 +435,17 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
                       <SelectValue placeholder="Selecione um plano" />
                     </SelectTrigger>
                     <SelectContent>
-                      {planos.map((plano) => (
-                        <SelectItem key={plano.id} value={plano.id}>
-                          {plano.nome} - R$ {plano.valor}
-                        </SelectItem>
-                      ))}
+                      {planos.length > 0 ? (
+                        planos.map((plano) => (
+                          <SelectItem key={plano.id} value={plano.id}>
+                            {plano.nome} - R$ {Number(plano.valor || 0).toFixed(2)}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <div className="px-2 py-2 text-sm text-muted-foreground">
+                          Nenhum plano cadastrado
+                        </div>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -469,6 +487,9 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Criar Exceção Financeira</DialogTitle>
+                <DialogDescription>
+                  Registe desconto, isenção, bolsa ou plano personalizado com datas e valores.
+                </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
                 <div>
@@ -479,9 +500,9 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="desconto">Desconto</SelectItem>
-                      <SelectItem value="isencao">Isenção</SelectItem>
+                      <SelectItem value="isento">Isenção</SelectItem>
                       <SelectItem value="bolsa">Bolsa</SelectItem>
-                      <SelectItem value="plano_personalizado">Plano Personalizado</SelectItem>
+                      <SelectItem value="acordo_pagamento">Acordo de Pagamento</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -515,18 +536,16 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label>Data Início</Label>
-                    <Input
-                      type="date"
+                    <DateInputBR
                       value={exceptionForm.data_inicio}
-                      onChange={(e) => setExceptionForm({ ...exceptionForm, data_inicio: e.target.value })}
+                      onChange={(value) => setExceptionForm({ ...exceptionForm, data_inicio: value })}
                     />
                   </div>
                   <div>
                     <Label>Data Fim</Label>
-                    <Input
-                      type="date"
+                    <DateInputBR
                       value={exceptionForm.data_fim}
-                      onChange={(e) => setExceptionForm({ ...exceptionForm, data_fim: e.target.value })}
+                      onChange={(value) => setExceptionForm({ ...exceptionForm, data_fim: value })}
                     />
                   </div>
                 </div>

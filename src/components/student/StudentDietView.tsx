@@ -6,7 +6,7 @@ import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Utensils, Replace, Pill } from "lucide-react";
 import FoodSubstitutionDialog from "@/components/nutrition/FoodSubstitutionDialog";
-import { Food, getAllFoodsSafe } from "@/lib/foodService";
+import { Food, getAllFoodsSafe, macroScaleFactor, quantityUnitLabel } from "@/lib/foodService";
 
 const StudentDietView = () => {
   const { user } = useAuth();
@@ -18,11 +18,13 @@ const StudentDietView = () => {
     open: boolean;
     alimentoAtual: any;
     quantidadeAtual: number;
+    unidadeQuantidade: string;
     itemId: string;
   }>({
     open: false,
     alimentoAtual: null,
     quantidadeAtual: 0,
+    unidadeQuantidade: 'g',
     itemId: ''
   });
 
@@ -96,7 +98,11 @@ const StudentDietView = () => {
     return itens.reduce((total, item) => {
       if (!item.alimentos) return total;
       
-      const fator = item.quantidade / item.alimentos.portion;
+      const fator = macroScaleFactor(
+        item.quantidade,
+        item.unidade_quantidade,
+        item.alimentos.portion
+      );
       return {
         totalCalorias: total.totalCalorias + (item.alimentos.calories * fator),
         totalProteinas: total.totalProteinas + (item.alimentos.protein * fator),
@@ -111,6 +117,7 @@ const StudentDietView = () => {
       open: true,
       alimentoAtual: item.alimentos,
       quantidadeAtual: item.quantidade,
+      unidadeQuantidade: item.unidade_quantidade || 'g',
       itemId: item.id
     });
   };
@@ -256,7 +263,11 @@ const StudentDietView = () => {
             <CardContent>
               <div className="space-y-3">
                 {itensRefeicao.map((item: any) => {
-                  const fator = item.quantidade / item.alimentos.portion;
+                  const fator = macroScaleFactor(
+                    item.quantidade,
+                    item.unidade_quantidade,
+                    item.alimentos.portion
+                  );
                   const calorias = Math.round(item.alimentos.calories * fator);
                   
                   return (
@@ -264,7 +275,8 @@ const StudentDietView = () => {
                       <div className="flex-1">
                         <div className="font-medium text-lg">{item.alimentos.name}</div>
                         <div className="text-sm text-muted-foreground mt-1">
-                          {item.quantidade}g
+                          {item.quantidade}
+                          {quantityUnitLabel(item.unidade_quantidade)}
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
@@ -294,6 +306,7 @@ const StudentDietView = () => {
         onOpenChange={(open) => setSubstitutionDialog({ ...substitutionDialog, open })}
         alimentoAtual={substitutionDialog.alimentoAtual}
         quantidadeAtual={substitutionDialog.quantidadeAtual}
+        unidadeQuantidade={substitutionDialog.unidadeQuantidade}
         alimentosDisponiveis={todosAlimentos}
         onSubstituir={handleSubstituir}
       />

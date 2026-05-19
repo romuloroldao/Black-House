@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
-  allowedRoles?: ('coach' | 'aluno')[];
+  allowedRoles?: ('coach' | 'aluno' | 'admin')[];
   checkPayment?: boolean;
 }
 
@@ -13,7 +13,7 @@ interface ProtectedRouteProps {
 // REACT-AUTH-BOOTSTRAP-DEADLOCK-FIX-009: Bloquear decisões até authInitialized=true
 const ProtectedRoute = ({ 
   children, 
-  allowedRoles = ['coach', 'aluno'],
+  allowedRoles = ['coach', 'aluno', 'admin'],
   checkPayment = false
 }: ProtectedRouteProps) => {
   const { user, loading, authInitialized, role, payment_status } = useAuth();
@@ -42,7 +42,7 @@ const ProtectedRoute = ({
     console.log('[REACT-AUTH-BOOTSTRAP-DEADLOCK-FIX-009] ProtectedRoute aguardando bootstrap (authInitialized=false)');
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full motion-safe:animate-spin" />
       </div>
     );
   }
@@ -71,7 +71,7 @@ const ProtectedRoute = ({
   if (loading && !forceRender) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full motion-safe:animate-spin" />
       </div>
     );
   }
@@ -84,6 +84,12 @@ const ProtectedRoute = ({
 
   // DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001: Verificar role com valores padrão seguros
   const userRole = role || user?.role || 'aluno';
+
+  // Super admin: acesso a todas as rotas do painel
+  if (userRole === 'admin') {
+    return <>{children}</>;
+  }
+
   if (!allowedRoles.includes(userRole)) {
     // Redirecionar baseado no role
     if (userRole === 'aluno') {
@@ -112,8 +118,8 @@ const ProtectedRoute = ({
     return <Navigate to="/portal-aluno/dashboard" replace />;
   }
 
-  // Redirecionar coach para dashboard principal se tentar acessar portal-aluno
-  if (userRole === 'coach' && location.pathname.startsWith('/portal-aluno')) {
+  // Coach/admin usam painel principal (não portal do aluno)
+  if ((userRole === 'coach' || userRole === 'admin') && location.pathname.startsWith('/portal-aluno')) {
     return <Navigate to="/" replace />;
   }
 

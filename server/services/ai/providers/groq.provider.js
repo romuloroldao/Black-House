@@ -46,6 +46,14 @@ class GroqProvider {
         }
 
         try {
+            // IMPRECISÃO-009: max_tokens é reservado contra o limite de TPM da Groq
+            // (12.000 TPM no tier on_demand do llama-3.3-70b-versatile).
+            // Com max_tokens=32000, qualquer prompt explora o orçamento e gera
+            // erro 413 "Request too large". A resposta JSON realmente cabe em
+            // ~3-4k tokens, então mantemos 4096 por default, permitindo override
+            // via AI_MAX_TOKENS para fichas excepcionalmente grandes.
+            const maxTokens = Number.parseInt(process.env.AI_MAX_TOKENS || '4096', 10) || 4096;
+
             const response = await this.client.chat.completions.create({
                 model: this.model,
                 messages: [
@@ -53,8 +61,8 @@ class GroqProvider {
                     { role: 'user', content: userPrompt }
                 ],
                 response_format: { type: 'json_object' },
-                temperature: 0.05, // Reduzido para respostas mais consistentes
-                max_tokens: 32000 // Aumentado para suportar documentos maiores
+                temperature: 0.05,
+                max_tokens: maxTokens
             });
 
             const content = response.choices[0].message.content;

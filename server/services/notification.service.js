@@ -1,6 +1,9 @@
 // Notification Service
-// Serviço compartilhado para emitir notificações via WebSocket
-// Usado por Background Jobs e Webhooks
+// Serviço compartilhado para emitir notificações via WebSocket e public.notificacoes
+
+const logger = require('../utils/logger');
+const { getAlunoRecordForAuthUser } = require('../utils/aluno-auth-user');
+const { getAuthUserIdForAluno } = require('../utils/aluno-auth-user');
 
 class NotificationService {
     constructor(websocketService, pool) {
@@ -9,17 +12,63 @@ class NotificationService {
     }
 
     /**
-     * Emite notificação de pagamento
+     * E-mail transacional para aluno (não bloqueia o fluxo principal).
      */
-    async notifyPaymentStatus(paymentId, userId, status, data = {}) {
+    async sendStudentEmail(authUserId, templateType, context = {}) {
+        if (!authUserId || !templateType) return;
+
         try {
-            // Buscar dados do pagamento
+            const roleResult = await this.pool.query(
+                `SELECT role FROM public.user_roles WHERE user_id = $1 LIMIT 1`,
+                [authUserId],
+            );
+            if (roleResult.rows[0]?.role !== 'aluno') return;
+
+            const userResult = await this.pool.query(
+                `SELECT email FROM app_auth.users WHERE id = $1 LIMIT 1`,
+                [authUserId],
+            );
+            const email = userResult.rows[0]?.email;
+            if (!email || !String(email).includes('@')) return;
+
+            let alunoNome = context.alunoNome ? String(context.alunoNome) : '';
+            if (!alunoNome) {
+                const alunoRow = await getAlunoRecordForAuthUser(this.pool, authUserId);
+                if (alunoRow?.id) {
+                    const nomeR = await this.pool.query(
+                        'SELECT nome FROM public.alunos WHERE id = $1 LIMIT 1',
+                        [alunoRow.id],
+                    );
+                    alunoNome = nomeR.rows[0]?.nome || '';
+                }
+            }
+
+            const { sendStudentNotificationEmail } = require('../utils/send-student-notification-email');
+            await sendStudentNotificationEmail({
+                to: email,
+                type: templateType,
+                context: { ...context, alunoNome },
+            });
+        } catch (error) {
+            logger.warn('student_notification.email_failed', {
+                authUserId,
+                templateType,
+                error: error.message,
+            });
+        }
+    }
+
+    /**
+     * Emite notificação de pagamento (coach + aluno quando vinculado)
+     */
+    async notifyPaymentStatus(paymentId, coachUserId, status, data = {}) {
+        try {
             const paymentResult = await this.pool.query(
-                `SELECT p.*, a.nome as aluno_nome 
+                `SELECT p.*, a.nome AS aluno_nome, a.id AS aluno_id
                  FROM public.asaas_payments p
                  JOIN public.alunos a ON p.aluno_id = a.id
                  WHERE p.id = $1`,
-                [paymentId]
+                [paymentId],
             );
 
             if (paymentResult.rows.length === 0) {
@@ -28,63 +77,159 @@ class NotificationService {
             }
 
             const payment = paymentResult.rows[0];
+            const statusLabel = this.getStatusLabel(status);
 
-            // Emitir para o usuário
-            this.ws.emitToUser(userId, 'payment_status_update', {
+            if (coachUserId) {
+                this.ws.emitToUser(coachUserId, 'payment_status_update', {
+                    paymentId: payment.id,
+                    alunoId: payment.aluno_id,
+                    alunoNome: payment.aluno_nome,
+                    status,
+                    value: payment.value,
+                    dueDate: payment.due_date,
+                    ...data,
+                });
+
+                await this.saveNotification({
+                    userId: coachUserId,
+                    type: 'payment_status',
+                    title: `Pagamento ${statusLabel}`,
+                    message: `Pagamento de ${payment.aluno_nome}: ${statusLabel}`,
+                    data: { paymentId, status, alunoId: payment.aluno_id, ...data },
+                });
+            }
+
+            const studentUserId = await getAuthUserIdForAluno(this.pool, payment.aluno_id);
+            if (!studentUserId) return;
+
+            const studentMessages = {
+                RECEIVED: {
+                    title: 'Pagamento confirmado',
+                    message: 'Recebemos a confirmação do seu pagamento. Obrigado!',
+                },
+                CONFIRMED: {
+                    title: 'Pagamento confirmado',
+                    message: 'Seu pagamento foi confirmado.',
+                },
+                OVERDUE: {
+                    title: 'Pagamento em atraso',
+                    message:
+                        'Sua mensalidade está vencida. Regularize em Financeiro para restaurar o acesso.',
+                },
+                PENDING: {
+                    title: 'Cobrança pendente',
+                    message: 'Você tem uma cobrança pendente. Confira em Financeiro.',
+                },
+                CANCELLED: {
+                    title: 'Cobrança cancelada',
+                    message: 'Uma cobrança foi cancelada. Veja os detalhes em Financeiro.',
+                },
+            };
+
+            const copy = studentMessages[status] || {
+                title: `Pagamento ${statusLabel}`,
+                message: `Status da sua cobrança: ${statusLabel}.`,
+            };
+
+            this.ws.emitToUser(studentUserId, 'payment_status_update', {
                 paymentId: payment.id,
                 alunoId: payment.aluno_id,
-                alunoNome: payment.aluno_nome,
                 status,
                 value: payment.value,
                 dueDate: payment.due_date,
-                ...data
+                ...data,
             });
 
-            // Salvar notificação no banco
             await this.saveNotification({
-                userId,
+                userId: studentUserId,
                 type: 'payment_status',
-                title: `Pagamento ${this.getStatusLabel(status)}`,
-                message: `Pagamento de ${payment.aluno_nome}: ${this.getStatusLabel(status)}`,
-                data: { paymentId, status, ...data }
+                title: copy.title,
+                message: copy.message,
+                data: {
+                    paymentId,
+                    status,
+                    link: 'financial',
+                    ...data,
+                },
             });
+
+            const emailStatuses = new Set(['OVERDUE', 'RECEIVED', 'CONFIRMED']);
+            if (emailStatuses.has(String(status).toUpperCase())) {
+                await this.sendStudentEmail(studentUserId, 'payment_status', {
+                    status,
+                    dueDate: payment.due_date,
+                    value: payment.value,
+                    alunoNome: payment.aluno_nome,
+                });
+            }
         } catch (error) {
             console.error('Erro ao notificar status de pagamento:', error);
         }
     }
 
     /**
-     * Emite notificação de lembrete de pagamento
+     * Lembrete de pagamento — coach e aluno
      */
-    async notifyPaymentReminder(paymentId, userId, daysUntilDue) {
+    async notifyPaymentReminder(paymentId, coachUserId, daysUntilDue) {
         try {
             const paymentResult = await this.pool.query(
-                `SELECT p.*, a.nome as aluno_nome 
+                `SELECT p.*, a.nome AS aluno_nome, a.id AS aluno_id
                  FROM public.asaas_payments p
                  JOIN public.alunos a ON p.aluno_id = a.id
                  WHERE p.id = $1`,
-                [paymentId]
+                [paymentId],
             );
 
             if (paymentResult.rows.length === 0) return;
 
             const payment = paymentResult.rows[0];
 
-            this.ws.emitToUser(userId, 'payment_reminder', {
+            if (coachUserId) {
+                this.ws.emitToUser(coachUserId, 'payment_reminder', {
+                    paymentId: payment.id,
+                    alunoId: payment.aluno_id,
+                    alunoNome: payment.aluno_nome,
+                    value: payment.value,
+                    dueDate: payment.due_date,
+                    daysUntilDue,
+                });
+
+                await this.saveNotification({
+                    userId: coachUserId,
+                    type: 'payment_reminder',
+                    title: 'Lembrete de Pagamento',
+                    message: `Pagamento de ${payment.aluno_nome} vence em ${daysUntilDue} dia(s)`,
+                    data: { paymentId, daysUntilDue, alunoId: payment.aluno_id },
+                });
+            }
+
+            const studentUserId = await getAuthUserIdForAluno(this.pool, payment.aluno_id);
+            if (!studentUserId) return;
+
+            const dueStr = payment.due_date
+                ? new Date(payment.due_date).toLocaleDateString('pt-BR')
+                : 'em breve';
+
+            this.ws.emitToUser(studentUserId, 'payment_reminder', {
                 paymentId: payment.id,
-                alunoId: payment.aluno_id,
-                alunoNome: payment.aluno_nome,
-                value: payment.value,
+                daysUntilDue,
                 dueDate: payment.due_date,
-                daysUntilDue
+                value: payment.value,
             });
 
             await this.saveNotification({
-                userId,
+                userId: studentUserId,
                 type: 'payment_reminder',
-                title: 'Lembrete de Pagamento',
-                message: `Pagamento de ${payment.aluno_nome} vence em ${daysUntilDue} dia(s)`,
-                data: { paymentId, daysUntilDue }
+                title: 'Lembrete de pagamento',
+                message: `Sua mensalidade vence em ${daysUntilDue} dia(s) (${dueStr}). Acesse Financeiro para pagar.`,
+                data: { paymentId, daysUntilDue, link: 'financial' },
+            });
+
+            await this.sendStudentEmail(studentUserId, 'payment_reminder', {
+                daysUntilDue,
+                dueDate: payment.due_date,
+                value: payment.value,
+                alunoNome: payment.aluno_nome,
             });
         } catch (error) {
             console.error('Erro ao notificar lembrete de pagamento:', error);
@@ -92,31 +237,52 @@ class NotificationService {
     }
 
     /**
-     * Emite notificação de lembrete de check-in
+     * Lembrete de check-in semanal — coach e aluno
      */
     async notifyCheckinReminder(alunoId, coachId) {
         try {
             const alunoResult = await this.pool.query(
                 'SELECT id, nome FROM public.alunos WHERE id = $1',
-                [alunoId]
+                [alunoId],
             );
 
             if (alunoResult.rows.length === 0) return;
 
             const aluno = alunoResult.rows[0];
 
-            // Notificar coach
-            this.ws.emitToCoach(coachId, 'checkin_reminder', {
+            if (coachId) {
+                this.ws.emitToCoach(coachId, 'checkin_reminder', {
+                    alunoId: aluno.id,
+                    alunoNome: aluno.nome,
+                });
+
+                await this.saveNotification({
+                    userId: coachId,
+                    type: 'checkin_reminder',
+                    title: 'Lembrete de Check-in',
+                    message: `${aluno.nome} precisa fazer check-in semanal`,
+                    data: { alunoId: aluno.id },
+                });
+            }
+
+            const studentUserId = await getAuthUserIdForAluno(this.pool, aluno.id);
+            if (!studentUserId) return;
+
+            this.ws.emitToUser(studentUserId, 'checkin_reminder', {
                 alunoId: aluno.id,
-                alunoNome: aluno.nome
             });
 
             await this.saveNotification({
-                userId: coachId,
+                userId: studentUserId,
                 type: 'checkin_reminder',
-                title: 'Lembrete de Check-in',
-                message: `${aluno.nome} precisa fazer check-in semanal`,
-                data: { alunoId: aluno.id }
+                title: 'Check-in semanal',
+                message:
+                    'Você ainda não preencheu o check-in desta semana. Reserve alguns minutos para atualizar seu progresso.',
+                data: { alunoId: aluno.id, link: 'checkin' },
+            });
+
+            await this.sendStudentEmail(studentUserId, 'checkin_reminder', {
+                alunoNome: aluno.nome,
             });
         } catch (error) {
             console.error('Erro ao notificar lembrete de check-in:', error);
@@ -124,35 +290,135 @@ class NotificationService {
     }
 
     /**
-     * Emite notificação de evento próximo
+     * Lembrete de evento próximo (um destinatário auth user)
      */
-    async notifyEventReminder(eventId, userId) {
+    async notifyEventReminder(eventId, userId, options = {}) {
         try {
             const eventResult = await this.pool.query(
-                'SELECT id, titulo, data_evento FROM public.eventos WHERE id = $1',
-                [eventId]
+                `SELECT id, titulo, data_inicio
+                 FROM public.eventos
+                 WHERE id = $1`,
+                [eventId],
             );
 
             if (eventResult.rows.length === 0) return;
 
             const event = eventResult.rows[0];
+            const dataLabel = event.data_inicio
+                ? new Date(event.data_inicio).toLocaleDateString('pt-BR', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                  })
+                : 'em breve';
+
+            const isStudent = options.audience === 'student';
+            const title = isStudent ? 'Evento amanhã' : 'Lembrete de Evento';
+            const message = isStudent
+                ? `O evento "${event.titulo}" acontece amanhã (${dataLabel}).`
+                : `Evento "${event.titulo}" está próximo (${dataLabel}).`;
 
             this.ws.emitToUser(userId, 'event_reminder', {
                 eventId: event.id,
                 titulo: event.titulo,
-                dataEvento: event.data_evento
+                dataEvento: event.data_inicio,
             });
 
             await this.saveNotification({
                 userId,
                 type: 'event_reminder',
-                title: 'Lembrete de Evento',
-                message: `Evento "${event.titulo}" está próximo`,
-                data: { eventId: event.id }
+                title,
+                message,
+                data: {
+                    eventId: event.id,
+                    link: isStudent ? 'calendar' : undefined,
+                },
             });
+
+            if (isStudent) {
+                await this.sendStudentEmail(userId, 'event_reminder', {
+                    eventTitle: event.titulo,
+                    eventDate: event.data_inicio,
+                });
+            }
         } catch (error) {
             console.error('Erro ao notificar lembrete de evento:', error);
         }
+    }
+
+    /**
+     * Notifica coach e todos os participantes de um evento (24h antes)
+     */
+    async notifyEventReminderForEvent(eventId, coachId) {
+        if (coachId) {
+            await this.notifyEventReminder(eventId, coachId, { audience: 'coach' });
+        }
+
+        const participants = await this.pool.query(
+            `SELECT DISTINCT aluno_id
+             FROM public.eventos_participantes
+             WHERE evento_id = $1 AND aluno_id IS NOT NULL`,
+            [eventId],
+        );
+
+        for (const row of participants.rows) {
+            const studentUserId = await getAuthUserIdForAluno(this.pool, row.aluno_id);
+            if (studentUserId) {
+                await this.notifyEventReminder(eventId, studentUserId, { audience: 'student' });
+            }
+        }
+    }
+
+    /**
+     * Vencimento de treino — coach e aluno
+     */
+    async notifyWorkoutExpirationReminder(workout, daysUntilExpiration) {
+        const daysLabel =
+            daysUntilExpiration <= 0
+                ? 'vence hoje'
+                : `vence em ${daysUntilExpiration} dia(s)`;
+        const treinoNome = workout.treino_nome || 'treino';
+
+        if (workout.coach_id) {
+            await this.notifyUser(
+                workout.coach_id,
+                'workout_expiration_reminder',
+                'Lembrete de vencimento de treino',
+                `O ${treinoNome} de ${workout.aluno_nome} ${daysLabel}.`,
+                {
+                    workoutId: workout.id,
+                    alunoId: workout.aluno_id,
+                    alunoNome: workout.aluno_nome,
+                    treinoNome,
+                    dataExpiracao: workout.data_expiracao,
+                    daysUntilExpiration,
+                },
+            );
+        }
+
+        const studentUserId = await getAuthUserIdForAluno(this.pool, workout.aluno_id);
+        if (!studentUserId) return;
+
+        await this.notifyUser(
+            studentUserId,
+            'workout_expiration_reminder',
+            'Seu treino está perto do vencimento',
+            `Seu treino "${treinoNome}" ${daysLabel}. Confira em Treinos.`,
+            {
+                workoutId: workout.id,
+                alunoId: workout.aluno_id,
+                treinoNome,
+                daysUntilExpiration,
+                link: 'workouts',
+            },
+        );
+
+        await this.sendStudentEmail(studentUserId, 'workout_expiration_reminder', {
+            treinoNome,
+            daysUntilExpiration,
+            alunoNome: workout.aluno_nome,
+        });
     }
 
     /**
@@ -160,20 +426,22 @@ class NotificationService {
      */
     async notifyUser(userId, type, title, message, data = {}) {
         try {
-            this.ws.emitToUser(userId, 'notification', {
-                type,
-                title,
-                message,
-                data,
-                timestamp: new Date().toISOString()
-            });
+            if (this.ws) {
+                this.ws.emitToUser(userId, 'notification', {
+                    type,
+                    title,
+                    message,
+                    data,
+                    timestamp: new Date().toISOString(),
+                });
+            }
 
             await this.saveNotification({
                 userId,
                 type,
                 title,
                 message,
-                data
+                data,
             });
         } catch (error) {
             console.error('Erro ao notificar usuário:', error);
@@ -185,27 +453,61 @@ class NotificationService {
      */
     async saveNotification({ userId, type, title, message, data }) {
         try {
+            const roleResult = await this.pool.query(
+                `SELECT role FROM public.user_roles WHERE user_id = $1 LIMIT 1`,
+                [userId],
+            );
+            const role = roleResult.rows[0]?.role || 'coach';
+
+            let coachId = null;
+            let alunoId = null;
+            let link = null;
+
+            if (data && typeof data.link === 'string') {
+                link = data.link.trim() || null;
+            }
+
+            if (role === 'aluno') {
+                const alunoRow = await getAlunoRecordForAuthUser(this.pool, userId);
+                if (alunoRow) {
+                    alunoId = alunoRow.id;
+                    coachId = alunoRow.coach_id;
+                }
+            } else {
+                coachId = userId;
+                if (data && data.alunoId) {
+                    const alunoCandidate = await this.pool.query(
+                        'SELECT id FROM public.alunos WHERE id = $1 LIMIT 1',
+                        [data.alunoId],
+                    );
+                    if (alunoCandidate.rows.length > 0) {
+                        alunoId = data.alunoId;
+                    }
+                }
+            }
+
+            if (!coachId) {
+                return;
+            }
+
             await this.pool.query(
                 `INSERT INTO public.notificacoes 
-                 (user_id, type, title, message, data, read, created_at)
-                 VALUES ($1, $2, $3, $4, $5, false, NOW())`,
-                [userId, type, title, message, JSON.stringify(data)]
+                 (coach_id, aluno_id, tipo, titulo, mensagem, lida, link, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, false, $6, NOW(), NOW())`,
+                [coachId, alunoId, type, title, message, link],
             );
         } catch (error) {
             console.error('Erro ao salvar notificação:', error);
         }
     }
 
-    /**
-     * Retorna label do status de pagamento
-     */
     getStatusLabel(status) {
         const labels = {
-            'PENDING': 'Pendente',
-            'CONFIRMED': 'Confirmado',
-            'RECEIVED': 'Recebido',
-            'OVERDUE': 'Vencido',
-            'CANCELLED': 'Cancelado'
+            PENDING: 'Pendente',
+            CONFIRMED: 'Confirmado',
+            RECEIVED: 'Recebido',
+            OVERDUE: 'Vencido',
+            CANCELLED: 'Cancelado',
         };
         return labels[status] || status;
     }

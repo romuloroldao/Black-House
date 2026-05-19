@@ -1,5 +1,10 @@
 import { useState, useEffect } from 'react';
-import { getAllFoodsSafe, Food, getMacroGroup } from '@/lib/foodService';
+import {
+  getAllFoodsSafe,
+  Food,
+  getSubstitutionCategoryLabel,
+} from '@/lib/foodService';
+import { listarSubstituicoesIsocaloricas } from '@/lib/foodEquivalence';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -9,7 +14,7 @@ import { Calculator } from 'lucide-react';
 interface Substituto {
   nome: string;
   quantidade: string;
-  nutrienteDominante: string;
+  kcal: string;
 }
 
 const NutritionManager = () => {
@@ -24,8 +29,15 @@ const NutritionManager = () => {
   async function carregarAlimentos() {
     try {
       const result = await getAllFoodsSafe();
-      const data = result.success && Array.isArray(result.data) ? result.data : [];
-      const ordenados = data.sort((a, b) => a.name.localeCompare(b.name));
+      if (!result.success) {
+        setError(result.error || 'Erro ao carregar alimentos');
+        setAlimentos([]);
+        return;
+      }
+      const data = Array.isArray(result.data) ? result.data : [];
+      const ordenados = [...data].sort((a, b) =>
+        String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR'),
+      );
       setAlimentos(ordenados);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao carregar alimentos');
@@ -35,33 +47,17 @@ const NutritionManager = () => {
   }
 
   function calcularSubstituicoes(alimentoSelecionado: Food): Substituto[] {
-    // Usar KCAL como base de substituição (igual à planilha)
-    const kcalOriginalPor100g = (alimentoSelecionado.calories / alimentoSelecionado.portion) * 100;
-    
-    if (kcalOriginalPor100g === 0) return [];
-
-    const grupoSelecionado = getMacroGroup(alimentoSelecionado);
-
-    return alimentos
-      .filter(a => 
-        getMacroGroup(a) === grupoSelecionado && 
-        a.name !== alimentoSelecionado.name &&
-        a.calories > 0
-      )
-      .map(sub => {
-        // Fórmula: Qtd_B = Qtd_A × (kcal_A / kcal_B)
-        // Para 100g do alimento original, quanto do substituto é necessário?
-        const kcalSubPor100g = (sub.calories / sub.portion) * 100;
-        const qtdEquivalente = (kcalOriginalPor100g / kcalSubPor100g) * 100;
-        
-        return {
-          nome: sub.name,
-          quantidade: qtdEquivalente.toFixed(0),
-          nutrienteDominante: 'Kcal'
-        };
-      })
-      .sort((a, b) => Math.abs(parseFloat(a.quantidade) - 100) - Math.abs(parseFloat(b.quantidade) - 100))
-      .slice(0, 3); // Limitar a 3 substitutos
+    return listarSubstituicoesIsocaloricas(
+      alimentoSelecionado,
+      100,
+      'g',
+      alimentos,
+      { limit: 3 },
+    ).map((s) => ({
+      nome: s.alimento.name,
+      quantidade: s.quantidadeEquivalente.toFixed(0),
+      kcal: s.kcalEquivalente.toFixed(0),
+    }));
   }
 
   function getNutrienteBadgeColor(alimento: Food) {
@@ -127,7 +123,7 @@ const NutritionManager = () => {
           Lista de Alimentos e Substituições
         </h1>
         <p className="text-muted-foreground mt-2">
-          Alimentos com equivalências nutricionais automaticamente calculadas
+          Substituição isocalórica por grupo alimentar (planilha de equivalência)
         </p>
       </div>
 
@@ -142,11 +138,11 @@ const NutritionManager = () => {
                   <CardTitle className="text-lg font-semibold text-card-foreground">
                     {alimento.name}
                   </CardTitle>
-                  <Badge 
-                    variant="outline" 
+                  <Badge
+                    variant="outline"
                     className={getNutrienteBadgeColor(alimento)}
                   >
-                    {getMacroGroup(alimento)}
+                    {getSubstitutionCategoryLabel('', alimento)}
                   </Badge>
                 </div>
                 <div className="flex gap-4 text-sm text-muted-foreground">
@@ -178,7 +174,7 @@ const NutritionManager = () => {
                               {sub.quantidade} g/ml
                             </span>
                             <span className="text-xs text-muted-foreground">
-                              ({sub.nutrienteDominante})
+                              ({sub.kcal} kcal)
                             </span>
                           </div>
                         </div>

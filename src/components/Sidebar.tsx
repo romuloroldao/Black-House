@@ -58,6 +58,32 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
   const [coachAvatar, setCoachAvatar] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(true);
 
+  const getCoachFirstName = (email?: string | null) => {
+    const rawEmail = (email || "").trim().toLowerCase();
+    if (!rawEmail.includes("@")) return "Coach";
+
+    const localPart = rawEmail.split("@")[0] || "";
+    const normalized = localPart.replace(/[._-]+/g, " ").trim();
+    const firstChunk = normalized.split(" ").filter(Boolean)[0];
+
+    if (!firstChunk) return "Coach";
+    return firstChunk.charAt(0).toUpperCase() + firstChunk.slice(1);
+  };
+
+  const normalizeAvatarUrl = (raw: unknown): string | null => {
+    if (typeof raw !== "string") return null;
+    const value = raw.trim();
+    if (!value) return null;
+    if (value.startsWith("/api/")) {
+      const base = (import.meta.env.VITE_API_URL || "https://api.blackhouse.app.br").replace(/\/$/, "");
+      return `${base}${value}`;
+    }
+    if (/^http:\/\/localhost:3001/i.test(value)) {
+      return value.replace(/^http:\/\/localhost:3001/i, "https://api.blackhouse.app.br");
+    }
+    return value;
+  };
+
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
     checkMobile();
@@ -69,7 +95,7 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
     // DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001: Verificar user de forma defensiva
     // DESIGN-ROLE-MESSAGING-ISOLATION-001: Coaches NÃO devem fazer polling de notificações
     // DESIGN-CHECKPOINT-ASYNC-ERROR-SAFETY-001: Envolver chamadas async em try/catch
-    if (user && user.role === 'coach') {
+    if (user && (user.role === 'coach' || user.role === 'admin')) {
       // DESIGN-CHECKPOINT-ASYNC-ERROR-SAFETY-001: Capturar erros de loadCoachProfile
       loadCoachProfile().catch((error) => {
         console.warn('[DESIGN-CHECKPOINT-ASYNC-ERROR-SAFETY-001] Erro ao carregar perfil do coach (não crítico):', error);
@@ -107,14 +133,21 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
 
     // DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001: Get user name from email or use default
     // Proteção contra email undefined ou null
-    const email = user.email || '';
-    const fullName = email.split('@')[0] || 'Coach';
-    const firstName = fullName.split(' ')[0] || 'Coach';
-    setCoachName(firstName || 'Coach');
+    setCoachName(getCoachFirstName(user.email));
     
-    // REACT-API-RESILIENCE-FIX-008: Avatar será implementado via rota semântica futura
-    // Por enquanto, não carregar avatar (fallback para iniciais)
-    setCoachAvatar(null);
+    const profileResult = await apiClient.requestSafe<any>('/api/profiles/me');
+    if (profileResult.success) {
+      const displayName = String(profileResult.data?.display_name || '').trim();
+      if (displayName) {
+        const first = displayName.split(/\s+/).filter(Boolean)[0];
+        if (first) {
+          setCoachName(first.charAt(0).toUpperCase() + first.slice(1));
+        }
+      }
+      setCoachAvatar(normalizeAvatarUrl(profileResult.data?.avatar_url));
+    } else {
+      setCoachAvatar(null);
+    }
   };
 
   const loadNotifications = async () => {
@@ -281,7 +314,7 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
   };
 
   const SidebarContent = () => (
-    <div className="h-full bg-gradient-card flex flex-col transition-all duration-300 ease-in-out">
+    <div className="h-full bg-gradient-card flex flex-col transition-all duration-300 ease-in-out motion-reduce:transition-none">
       {/* Logo */}
       <div className="p-6 border-b border-border flex-shrink-0">
         <div className="flex items-center gap-3">
@@ -314,10 +347,10 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
                   <Button
                     variant={activeTab === item.id ? "premium" : "ghost"}
                     className={cn(
-                      "w-full justify-start text-left font-medium transition-all duration-300 ease-in-out",
+                      "w-full justify-start text-left font-medium transition-all duration-300 ease-in-out motion-reduce:transition-none",
                       activeTab === item.id 
-                        ? "bg-gradient-primary text-primary-foreground shadow-glow scale-105" 
-                        : "hover:bg-muted/50 hover:scale-102"
+                        ? "bg-gradient-primary text-primary-foreground shadow-glow motion-safe:scale-[1.02]" 
+                        : "hover:bg-muted/50 motion-safe:hover:scale-[1.01]"
                     )}
                     onClick={() => handleTabChange(item.id)}
                   >
@@ -345,7 +378,7 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
 
       {/* Coach Profile */}
       <div className="p-4 border-t border-border flex-shrink-0">
-        <div className="flex items-center gap-3 mb-4 p-2 rounded-lg hover:bg-muted/50 transition-colors">
+        <div className="flex items-center gap-3 mb-4 p-2 rounded-lg hover:bg-muted/50 transition-colors motion-reduce:transition-none">
           <div className="relative">
             <Avatar className="h-10 w-10">
               <AvatarImage src={coachAvatar || undefined} alt={coachName} />
@@ -409,7 +442,7 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
     <RouterSafeComponent
       fallback={
         <div className="w-64 h-full bg-gradient-card border-r border-border flex items-center justify-center">
-          <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full motion-safe:animate-spin" />
         </div>
       }
     >
@@ -420,18 +453,18 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
               <Button
                 variant="ghost"
                 size="icon"
-                className="fixed top-4 left-4 z-50 md:hidden transition-transform hover:scale-110 duration-200"
+                className="fixed top-4 left-4 z-50 md:hidden transition-transform duration-200 motion-safe:hover:scale-110 motion-reduce:transition-none"
               >
                 <Menu className="w-6 h-6" />
               </Button>
             </SheetTrigger>
-            <SheetContent side="left" className="p-0 w-64 transition-all duration-300 ease-in-out">
+            <SheetContent side="left" className="p-0 w-64 transition-all duration-300 ease-in-out motion-reduce:transition-none">
               <SidebarContent />
             </SheetContent>
           </Sheet>
         </>
       ) : (
-        <div className="w-64 h-full bg-gradient-card border-r border-border flex flex-col shadow-elevated transition-all duration-300 ease-in-out">
+        <div className="w-64 h-full bg-gradient-card border-r border-border flex flex-col shadow-elevated transition-all duration-300 ease-in-out motion-reduce:transition-none">
           <SidebarContent />
         </div>
       )}

@@ -7,7 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DateInputBR } from "@/components/ui/date-input-br";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, AlertCircle, CheckCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -280,6 +281,9 @@ export default function FinancialExceptionsManager() {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingId ? 'Editar' : 'Nova'} Exceção Financeira</DialogTitle>
+            <DialogDescription>
+              Defina tipo de exceção, descontos, período de vigência e observações.
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
@@ -349,21 +353,19 @@ export default function FinancialExceptionsManager() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="data_inicio">Data Início *</Label>
-                <Input
+                <DateInputBR
                   id="data_inicio"
-                  type="date"
                   value={formData.data_inicio}
-                  onChange={(e) => setFormData({...formData, data_inicio: e.target.value})}
+                  onChange={(value) => setFormData({...formData, data_inicio: value})}
                   required
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="data_fim">Data Fim</Label>
-                <Input
+                <DateInputBR
                   id="data_fim"
-                  type="date"
                   value={formData.data_fim}
-                  onChange={(e) => setFormData({...formData, data_fim: e.target.value})}
+                  onChange={(value) => setFormData({...formData, data_fim: value})}
                 />
               </div>
             </div>

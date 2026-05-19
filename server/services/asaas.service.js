@@ -3,9 +3,29 @@
 
 const axios = require('axios');
 
+function normalizeAsaasApiKey(raw) {
+    const value = String(raw ?? '')
+        .normalize('NFKC')
+        // Remove whitespace/control chars e zero-width comuns de copy/paste
+        .replace(/[\s\u0000-\u001F\u007F\u200B-\u200D\uFEFF]/g, '')
+        // Remove aspas/backticks acidentais no início/fim (copy/paste)
+        .replace(/^['"`]+|['"`]+$/g, '')
+        // Garante header-safe (Node): mantém apenas ASCII visível
+        .replace(/[^\x21-\x7E]/g, '')
+        .trim();
+
+    if (!value) {
+        const err = new Error('Chave API Asaas inválida ou vazia.');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    return value;
+}
+
 class AsaasService {
     constructor(apiKey, environment = 'production') {
-        this.apiKey = apiKey;
+        this.apiKey = normalizeAsaasApiKey(apiKey);
         this.environment = environment;
         this.baseURL = environment === 'production' 
             ? 'https://www.asaas.com/api/v3'
@@ -105,6 +125,24 @@ class AsaasService {
         } catch (error) {
             console.error('Erro ao buscar pagamento no Asaas:', error.response?.data || error.message);
             throw new Error(`Erro ao buscar pagamento no Asaas: ${error.message}`);
+        }
+    }
+
+    /**
+     * Verifica se a chave API e o ambiente (sandbox/produção) estão correctos.
+     */
+    async verifyConnection() {
+        try {
+            const response = await this.client.get('/customers', { params: { limit: 1 } });
+            return { ok: true, object: response.data?.object, totalCount: response.data?.totalCount };
+        } catch (error) {
+            const msg =
+                error.response?.data?.errors?.[0]?.description ||
+                error.response?.data?.message ||
+                error.message;
+            const err = new Error(msg || 'Falha ao contactar a API Asaas');
+            err.statusCode = error.response?.status;
+            throw err;
         }
     }
 

@@ -111,16 +111,27 @@ class DietRepository {
 
         const query = `
             INSERT INTO public.itens_dieta (
-                dieta_id, alimento_id, quantidade, refeicao
-            ) VALUES ${itens.map((_, i) => `($${i * 4 + 1}, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4})`).join(', ')}
-            RETURNING id, dieta_id, alimento_id, quantidade, refeicao
+                dieta_id, alimento_id, quantidade, unidade_quantidade, refeicao, dia_semana
+            ) VALUES ${itens.map((_, i) => {
+                const base = i * 6;
+                return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6})`;
+            }).join(', ')}
+            RETURNING id, dieta_id, alimento_id, quantidade, unidade_quantidade, refeicao, dia_semana
         `;
         
         const values = itens.flatMap(item => [
             item.dieta_id,
             item.alimento_id,
             item.quantidade,
-            item.refeicao
+            item.unidade_quantidade &&
+                typeof item.unidade_quantidade === 'string' &&
+                ['g', 'ml', 'un'].includes(item.unidade_quantidade.trim())
+                ? item.unidade_quantidade.trim()
+                : 'g',
+            item.refeicao,
+            item.dia_semana != null && String(item.dia_semana).trim() !== ''
+                ? String(item.dia_semana).trim()
+                : null
         ]);
         
         const result = await this.query(query, values);

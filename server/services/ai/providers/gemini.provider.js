@@ -7,7 +7,7 @@
 const logger = require('../../../utils/logger');
 
 class GeminiProvider {
-    constructor(apiKey, model = 'gemini-pro') {
+    constructor(apiKey, model = 'gemini-2.5-pro') {
         this.apiKey = apiKey;
         this.model = model;
         this.client = null;
@@ -34,13 +34,14 @@ class GeminiProvider {
     }
 
     /**
-     * Extrai dados estruturados do texto do PDF
+     * Extrai dados estruturados do texto do PDF ou do PDF original quando disponível
      * @param {string} pdfText - Texto extraído do PDF
      * @param {string} systemPrompt - Prompt do sistema
      * @param {string} userPrompt - Prompt do usuário
+     * @param {Buffer|null} pdfBuffer - PDF original para análise multimodal/layout-aware
      * @returns {Promise<Object>} Dados estruturados
      */
-    async extractStructuredData(pdfText, systemPrompt, userPrompt) {
+    async extractStructuredData(pdfText, systemPrompt, userPrompt, pdfBuffer = null) {
         if (!this.client) {
             this.initialize();
         }
@@ -55,8 +56,23 @@ class GeminiProvider {
                 }
             });
 
-            const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
-            const result = await model.generateContent(fullPrompt);
+            const fullPrompt = pdfBuffer
+                ? `${systemPrompt}\n\nAnalise o PDF anexado preservando a ordem visual das tabelas. Use o texto extraído abaixo apenas como apoio caso necessário:\n\n${pdfText}`
+                : `${systemPrompt}\n\n${userPrompt}`;
+
+            const parts = pdfBuffer
+                ? [
+                    { text: fullPrompt },
+                    {
+                        inlineData: {
+                            mimeType: 'application/pdf',
+                            data: pdfBuffer.toString('base64')
+                        }
+                    }
+                ]
+                : fullPrompt;
+
+            const result = await model.generateContent(parts);
             const response = await result.response;
             const content = response.text();
             

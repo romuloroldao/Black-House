@@ -5,15 +5,17 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { DateInputBR } from "./ui/date-input-br";
 import { Checkbox } from "./ui/checkbox";
 import { Calendar } from "./ui/calendar";
 import { toast } from "sonner";
 import { Calendar as CalendarIcon, Plus, Trash2, Users, Clock } from "lucide-react";
 import { Badge } from "./ui/badge";
 import { Alert, AlertDescription } from "./ui/alert";
+import { formatDateBR } from "@/lib/date-format";
 
 interface Turma {
   id: string;
@@ -210,7 +212,7 @@ export function EventsCalendar() {
             tipo: "novo_evento",
             titulo: `Novo evento: ${formData.titulo}`,
             mensagem: `Você foi convidado para o evento "${formData.titulo}" no dia ${new Date(formData.data_inicio).toLocaleDateString("pt-BR")}`,
-            link: "/student-portal?tab=calendar",
+            link: "calendar",
           }),
         });
       }
@@ -282,11 +284,7 @@ export function EventsCalendar() {
   });
 
   const formatDate = (date: string) => {
-    return new Date(date).toLocaleDateString("pt-BR", {
-      day: "2-digit",
-      month: "long",
-      year: "numeric",
-    });
+    return formatDateBR(date);
   };
 
   return (
@@ -308,6 +306,9 @@ export function EventsCalendar() {
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Criar Novo Evento</DialogTitle>
+              <DialogDescription>
+                Título, descrição, data, duração, recorrência, link e participantes ou turma.
+              </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
@@ -334,11 +335,10 @@ export function EventsCalendar() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="data_inicio">Data</Label>
-                  <Input
+                  <DateInputBR
                     id="data_inicio"
-                    type="date"
                     value={formData.data_inicio}
-                    onChange={(e) => setFormData({ ...formData, data_inicio: e.target.value })}
+                    onChange={(value) => setFormData({ ...formData, data_inicio: value })}
                     required
                   />
                 </div>

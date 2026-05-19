@@ -6,6 +6,7 @@
 // ============================================================================
 
 const logger = require('./logger');
+const { queryAlunoRowsFullForUser } = require('./aluno-resolve-by-user');
 
 /**
  * Role efectiva para RBAC: user_roles tem prioridade; se não existir linha,
@@ -24,6 +25,9 @@ async function resolveEffectiveRole(pool, userId) {
   }
   if (explicit === 'coach') {
     return 'coach';
+  }
+  if (explicit === 'admin') {
+    return 'admin';
   }
 
   const cp = await pool.query(
@@ -47,41 +51,25 @@ async function resolveEffectiveRole(pool, userId) {
  * @throws {Error} ALUNO_NOT_LINKED se aluno não encontrado
  */
 async function resolveAlunoOrFail(pool, userId) {
-  const query = `
-        SELECT 
-            a.id,
-            a.nome,
-            a.email,
-            a.telefone,
-            a.coach_id,
-            a.user_id,
-            a.avatar_url,
-            a.created_at,
-            u.email as user_email,
-            u.created_at as user_created_at
-        FROM public.alunos a
-        INNER JOIN app_auth.users u ON u.id = a.user_id
-        WHERE a.user_id = $1
-    `;
-
   try {
-    const result = await pool.query(query, [userId]);
+    const rows = await queryAlunoRowsFullForUser(pool, userId);
 
-    if (result.rows.length === 0) {
+    if (rows.length === 0) {
       const error = new Error('Aluno não vinculado a esta conta');
       error.code = 'ALUNO_NOT_LINKED';
       error.http_status = 403;
       throw error;
     }
 
-    return result.rows[0];
+    const row = rows[0];
+    const link =
+      row.linked_user_id != null ? row.linked_user_id : row.user_id != null ? row.user_id : userId;
+    return { ...row, user_id: link };
   } catch (error) {
-    // Se já tem código de erro, re-lançar
     if (error.code === 'ALUNO_NOT_LINKED') {
       throw error;
     }
 
-    // Logar erro inesperado
     logger.error('Erro ao resolver aluno', {
       userId,
       error: error.message,
@@ -205,6 +193,13 @@ async function resolveCoachOrFail(pool, userId) {
     }
 
     const role = await resolveEffectiveRole(pool, userId);
+
+    if (role === 'admin') {
+      return {
+        ...result.rows[0],
+        role: 'admin'
+      };
+    }
 
     if (role !== 'coach') {
       const error = new Error('Usuário não é um coach');

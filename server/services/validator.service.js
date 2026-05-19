@@ -92,7 +92,8 @@ class ValidatorService {
             errors.push('Objetivo da dieta excede 1000 caracteres');
         }
 
-        // Validar refeições
+        // Validar refeições (campos opcionais novos não são checados aqui;
+        // ficam a cargo do schema Zod canônico)
         if (dieta.refeicoes && Array.isArray(dieta.refeicoes)) {
             dieta.refeicoes.forEach((refeicao, idx) => {
                 if (!refeicao.nome || refeicao.nome.trim().length === 0) {
@@ -101,6 +102,14 @@ class ValidatorService {
 
                 if (refeicao.nome && refeicao.nome.length > 255) {
                     errors.push(`Refeição ${idx + 1}: nome excede 255 caracteres`);
+                }
+
+                if (refeicao.horario && String(refeicao.horario).length > 50) {
+                    errors.push(`Refeição ${idx + 1}: horário excede 50 caracteres`);
+                }
+
+                if (refeicao.observacao && String(refeicao.observacao).length > 1000) {
+                    errors.push(`Refeição ${idx + 1}: observação excede 1000 caracteres`);
                 }
 
                 if (refeicao.alimentos && Array.isArray(refeicao.alimentos)) {
@@ -113,8 +122,20 @@ class ValidatorService {
                             errors.push(`Refeição ${idx + 1}, Alimento ${aIdx + 1}: nome excede 255 caracteres`);
                         }
 
-                        if (!alimento.quantidade || alimento.quantidade.trim().length === 0) {
+                        const qtdRaw = alimento.quantidade;
+                        const qtdStr =
+                            qtdRaw === null || qtdRaw === undefined ? '' : String(qtdRaw).trim();
+
+                        if (!qtdStr) {
                             errors.push(`Refeição ${idx + 1}, Alimento ${aIdx + 1}: quantidade é obrigatória`);
+                        }
+
+                        if (Array.isArray(alimento.alternativas)) {
+                            alimento.alternativas.forEach((alt, altIdx) => {
+                                if (!alt.nome || alt.nome.trim().length === 0) {
+                                    errors.push(`Refeição ${idx + 1}, Alimento ${aIdx + 1}, Alternativa ${altIdx + 1}: nome é obrigatório`);
+                                }
+                            });
                         }
                     });
                 }

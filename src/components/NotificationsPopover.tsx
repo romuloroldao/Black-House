@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { Bell, Check, X, Users, Dumbbell, MessageSquare, Calendar, DollarSign } from "lucide-react";
+import { Bell, Check, X, Users, Dumbbell, MessageSquare, Calendar, DollarSign, ClipboardCheck } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
@@ -122,12 +122,27 @@ const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
 
   const getNotificationIcon = (tipo: string) => {
     switch (tipo) {
-      case 'aluno': return Users;
-      case 'treino': return Dumbbell;
-      case 'mensagem': return MessageSquare;
-      case 'agenda': return Calendar;
-      case 'pagamento': return DollarSign;
-      default: return Bell;
+      case 'aluno':
+        return Users;
+      case 'treino':
+      case 'workout_expiration_reminder':
+        return Dumbbell;
+      case 'mensagem':
+      case 'aviso':
+        return MessageSquare;
+      case 'agenda':
+      case 'event_reminder':
+      case 'novo_evento':
+      case 'evento_cancelado':
+        return Calendar;
+      case 'pagamento':
+      case 'payment_status':
+      case 'payment_reminder':
+        return DollarSign;
+      case 'checkin_reminder':
+        return ClipboardCheck;
+      default:
+        return Bell;
     }
   };
 

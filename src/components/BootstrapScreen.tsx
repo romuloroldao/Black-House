@@ -12,7 +12,7 @@ export const SplashScreen = () => {
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-background z-50">
       <div className="flex flex-col items-center gap-4">
-        <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full motion-safe:animate-spin" />
         <p className="text-sm text-muted-foreground">Carregando...</p>
       </div>
     </div>
@@ -42,7 +42,7 @@ export const BootstrapLoader = () => {
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-background z-50">
       <div className="flex flex-col items-center gap-4">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        <Loader2 className="w-8 h-8 text-primary motion-safe:animate-spin" />
         <p className="text-sm text-muted-foreground">{getMessage()}</p>
       </div>
     </div>
@@ -61,7 +61,7 @@ export const FatalError = ({ error }: { error: Error | null }) => {
         </p>
         <button
           onClick={() => window.location.reload()}
-          className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+          className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-md transition-colors hover:bg-primary/90 motion-reduce:transition-none"
         >
           Recarregar página
         </button>

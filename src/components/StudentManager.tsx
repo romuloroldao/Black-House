@@ -77,11 +77,16 @@ const StudentManager = () => {
   const navigate = useNavigate();
   
   const coachEndpoint = user?.id ? API_CONTRACT.alunos.byCoach() : undefined;
+  const profilesEndpoint = API_CONTRACT.profiles.list();
   
   // REACT-API-RESILIENCE-FIX-008: Usar hook resiliente para alunos
   const { data: alunosRaw, loading: loadingAlunos, error: errorAlunos, refetch: refetchAlunos } = useApiSafeList(
     () => apiClient.getAlunosByCoachSafe(),
     { autoFetch: isReady, endpointKey: coachEndpoint, availabilityKey: 'alunosByCoach' } // Só buscar quando DataContext estiver pronto
+  );
+  const { data: profilesRaw } = useApiSafeList(
+    () => apiClient.requestSafe<any[]>(profilesEndpoint),
+    { autoFetch: isReady, endpointKey: '/api/profiles' },
   );
   
   const [searchTerm, setSearchTerm] = useState("");
@@ -108,9 +113,34 @@ const StudentManager = () => {
     dia_cobranca: ""
   });
 
+  const normalizeAvatarUrl = (raw: unknown): string | undefined => {
+    if (typeof raw !== "string") return undefined;
+    const trimmed = raw.trim();
+    if (!trimmed) return undefined;
+    const apiBase = (import.meta.env.VITE_API_URL || "https://api.blackhouse.app.br").replace(/\/$/, "");
+
+    if (trimmed.startsWith("/api/")) {
+      return `${apiBase}${trimmed}`;
+    }
+    if (/^http:\/\/localhost:3001/i.test(trimmed)) {
+      return trimmed.replace(/^http:\/\/localhost:3001/i, "https://api.blackhouse.app.br");
+    }
+    return trimmed;
+  };
+
   // REACT-API-RESILIENCE-FIX-008: Processar alunos quando carregarem
   useEffect(() => {
     if (!loadingAlunos && alunosRaw.length > 0) {
+      const profilesByUserId = new Map<string, string>();
+      for (const profile of profilesRaw) {
+        const profileId = String(profile?.id || "").trim();
+        if (!profileId) continue;
+        const normalized = normalizeAvatarUrl(profile?.avatar_url);
+        if (normalized) {
+          profilesByUserId.set(profileId, normalized);
+        }
+      }
+
       // Get emails of all users with 'coach' role to exclude them from student list
       const coachEmails: string[] = [];
 
@@ -119,9 +149,20 @@ const StudentManager = () => {
         !coachEmails.includes(aluno.email?.toLowerCase())
       );
 
+      const deriveNameHintFromEmail = (addr?: string) => {
+        if (!addr || addr.includes("@blackhouse.local")) return null;
+        const local = addr.split("@")[0]?.replace(/[._-]+/g, " ").trim();
+        if (!local || local.length < 2) return null;
+        return local.replace(/\b\w/g, (c) => c.toUpperCase());
+      };
+
       const alunosFormatados: Student[] = filteredData.map(aluno => {
         const alunoId = aluno?.id || '';
-        const alunoNome = aluno?.nome || 'Sem nome';
+        const alunoEmailForName = aluno?.email || "";
+        const alunoNome =
+          (aluno?.nome && String(aluno.nome).trim()) ||
+          deriveNameHintFromEmail(alunoEmailForName) ||
+          "Sem nome";
         const alunoEmail = aluno?.email || '';
         const alunoTelefone = aluno?.telefone;
         const alunoCpfCnpj = aluno?.cpf_cnpj;
@@ -130,6 +171,10 @@ const StudentManager = () => {
         const alunoCreatedAt = aluno?.created_at;
         const alunoDataNascimento = aluno?.data_nascimento;
         const alunoPeso = aluno?.peso;
+        const alunoUserId = String(aluno?.user_id || aluno?.linked_user_id || "").trim();
+        const alunoAvatar =
+          normalizeAvatarUrl(aluno?.avatar_url) ||
+          (alunoUserId ? profilesByUserId.get(alunoUserId) : undefined);
 
         let joinDate = 'Data não disponível';
         try {
@@ -146,7 +191,7 @@ const StudentManager = () => {
           email: alunoEmail,
           phone: alunoTelefone || undefined,
           cpf_cnpj: alunoCpfCnpj || undefined,
-          avatar: '/api/placeholder/60/60',
+          avatar: alunoAvatar,
           status: 'active',
           plan: alunoPlano,
           goal: alunoObjetivo,
@@ -167,12 +212,38 @@ const StudentManager = () => {
       setStudents([]);
       setLoading(false);
     }
-  }, [alunosRaw, loadingAlunos]);
+  }, [alunosRaw, loadingAlunos, profilesRaw]);
 
   // Carregar email do coach
   useEffect(() => {
     if (!isReady || !user) return;
     setCoachEmail(user.email || "");
+  }, [isReady, user]);
+
+  // Carregar planos de pagamento para o select do modal de aluno.
+  useEffect(() => {
+    if (!isReady || !user) return;
+
+    let cancelled = false;
+    const loadPaymentPlans = async () => {
+      const plansResult = await apiClient.requestSafe<any[]>("/api/payment-plans");
+      if (cancelled) return;
+
+      if (plansResult.success && Array.isArray(plansResult.data)) {
+        const plans = plansResult.data
+          .filter((p) => p && p.id && p.nome)
+          .map((p) => ({ id: String(p.id), nome: String(p.nome) }));
+        setPaymentPlans(plans);
+        return;
+      }
+
+      setPaymentPlans([]);
+    };
+
+    loadPaymentPlans();
+    return () => {
+      cancelled = true;
+    };
   }, [isReady, user]);
 
   const handleDataChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -270,7 +341,6 @@ const StudentManager = () => {
               plano: newStudent.plano || null,
               data_nascimento:formatarDataParaAPI(newStudent.data_nascimento) || null,
               peso: newStudent.peso ? parseInt(newStudent.peso) : null,
-              user_id: user.id,
             }),
           },
         );
@@ -434,7 +504,11 @@ const StudentManager = () => {
   };
 
   const handleDeleteStudent = async (studentId: string) => {
-    if (!confirm("Tem certeza que deseja deletar este aluno?")) {
+    if (
+      !confirm(
+        "Tem certeza que deseja excluir este aluno? A ficha e o cadastro de acesso na plataforma serão removidos.",
+      )
+    ) {
       return;
     }
 
@@ -449,8 +523,8 @@ const StudentManager = () => {
     }
 
     toast({
-      title: "Aluno deletado!",
-      description: "O aluno foi removido com sucesso.",
+      title: "Aluno excluído",
+      description: "Ficha e credencial de acesso removidas da plataforma.",
     });
 
     refetchAlunos();
@@ -478,6 +552,38 @@ const StudentManager = () => {
     return 'bg-primary/80 text-primary-foreground';
   };
 
+  const resolveFriendlyPlanLabel = (rawPlan: string) => {
+    const planValue = String(rawPlan || "").trim();
+    if (!planValue) return "Sem plano";
+
+    const planById = paymentPlans.find((p) => p.id === planValue);
+    if (planById) return planById.nome;
+
+    const planByName = paymentPlans.find(
+      (p) => p.nome.toLowerCase() === planValue.toLowerCase(),
+    );
+    if (planByName) return planByName.nome;
+
+    // Evita expor UUID bruto no card (melhor UX para o coach).
+    const looksLikeUuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        planValue,
+      );
+    if (looksLikeUuid) return "Plano vinculado";
+
+    // Se vier URL por engano, mostrar forma amigável.
+    if (/^https?:\/\//i.test(planValue)) {
+      try {
+        const url = new URL(planValue);
+        return `${url.hostname}${url.pathname === "/" ? "" : url.pathname}`;
+      } catch {
+        return "Link configurado";
+      }
+    }
+
+    return planValue;
+  };
+
   // DESIGN-023-RUNTIME-CRASH-RESOLUTION-001: Guard defensivo - nunca executar .filter em dados possivelmente undefined
   const filteredStudents = (Array.isArray(students) ? students : []).filter(student => {
     // DESIGN-023: Optional chaining para acessos profundos
@@ -502,7 +608,7 @@ const StudentManager = () => {
   if (loading) {
     return (
       <div className="p-6 space-y-6">
-        <div className="animate-pulse">
+        <div className="motion-safe:animate-pulse">
           <div className="h-8 bg-muted rounded w-1/3 mb-4"></div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
             {[1, 2, 3].map(i => (
@@ -558,18 +664,19 @@ const StudentManager = () => {
                 Importar
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Importar Aluno</DialogTitle>
-                <DialogDescription>
-                  Faça upload de um PDF com os dados do aluno para importação
-                  automática
+            <DialogContent className="!flex max-h-[min(92vh,880px)] w-[min(96vw,56rem)] max-w-none flex-col gap-0 overflow-hidden border p-0 shadow-xl sm:rounded-xl">
+              <DialogHeader className="shrink-0 space-y-0 border-b px-4 py-3 text-left sm:px-6 sm:py-4">
+                <DialogTitle className="text-base sm:text-lg">Importar Aluno</DialogTitle>
+                <DialogDescription className="text-xs sm:text-sm">
+                  Envie a ficha em PDF, revise os dados e confirme a importação.
                 </DialogDescription>
               </DialogHeader>
-              <StudentImporter
-                onClose={() => setIsImportDialogOpen(false)}
-                onImportComplete={refetchAlunos}
-              />
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-3 sm:px-6 sm:pb-5">
+                <StudentImporter
+                  onClose={() => setIsImportDialogOpen(false)}
+                  onImportComplete={refetchAlunos}
+                />
+              </div>
             </DialogContent>
           </Dialog>
 
@@ -630,7 +737,7 @@ const StudentManager = () => {
         {Array.isArray(filteredStudents) && filteredStudents.length > 0 ? (
           filteredStudents.map((student) => {
             // DESIGN-023: Optional chaining para acessos profundos
-            const studentId = student?.id || "";
+            const studentId = (student?.id || "").trim();
             const studentName = student?.name || "Sem nome";
             const studentEmail = student?.email || "";
             const studentAvatar = student?.avatar;
@@ -657,7 +764,7 @@ const StudentManager = () => {
 
             return (
               <Card
-                key={studentId}
+                key={studentId || `${studentEmail}-${studentName}`}
                 className="bg-gradient-card border-0 shadow-card hover:shadow-elevated transition-smooth"
               >
                 <CardHeader className="pb-4">
@@ -686,7 +793,7 @@ const StudentManager = () => {
                       {studentStatus === "active" ? "Ativo" : "Inativo"}
                     </Badge>
                     <Badge className={getPlanColor(studentPlan)}>
-                      {studentPlan}
+                      {resolveFriendlyPlanLabel(studentPlan)}
                     </Badge>
                   </div>
 
@@ -754,6 +861,7 @@ const StudentManager = () => {
                       variant="outline"
                       size="sm"
                       className="flex-1"
+                      disabled={!studentId}
                       onClick={() => navigate(`/alunos/${studentId}`)}
                     >
                       <Eye className="w-4 h-4" />
@@ -822,9 +930,9 @@ const StudentManager = () => {
               <DialogTitle>
                 {editingStudent ? "Editar Aluno" : "Adicionar Novo Aluno"}
               </DialogTitle>
-              <p className="text-sm text-muted-foreground mt-2">
+              <DialogDescription className="mt-2">
                 * Campos obrigatórios. O CPF/CNPJ é obrigatório.
-              </p>
+              </DialogDescription>
             </DialogHeader>
 
             {/* Coach Link Badge */}

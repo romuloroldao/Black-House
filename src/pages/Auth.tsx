@@ -11,13 +11,25 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Progress } from '@/components/ui/progress';
 import logoWhite from '@/assets/logo-white.svg';
-import { Check, Eye, EyeOff, Mail, Lock, User, AlertCircle, Sparkles } from 'lucide-react';
+import { Check, Eye, EyeOff, Mail, Lock, User, AlertCircle, Sparkles, Scale, Ruler, CreditCard } from 'lucide-react';
 import { z } from 'zod';
+import { maskCPF, validateCPF, onlyNumbers } from '@/utils/MaskFormat';
 
 // Validation schemas
 const signUpSchema = z.object({
   nome: z.string().min(3, "Nome deve ter pelo menos 3 caracteres").max(100, "Nome muito longo"),
   email: z.string().email("Email inválido").max(255, "Email muito longo"),
+  cpf: z.string().min(1, "CPF é obrigatório").refine((val) => validateCPF(val), {
+    message: "CPF inválido",
+  }),
+  peso: z.string().min(1, "Peso é obrigatório").refine((val) => {
+    const n = Number(val);
+    return Number.isFinite(n) && n > 0 && n <= 500;
+  }, { message: "Informe um peso válido (1 a 500 kg)" }),
+  altura: z.string().min(1, "Altura é obrigatória").refine((val) => {
+    const n = Number(val);
+    return Number.isFinite(n) && n >= 100 && n <= 250;
+  }, { message: "Informe uma altura válida (100 a 250 cm)" }),
   password: z.string().min(6, "Senha deve ter pelo menos 6 caracteres").max(72, "Senha muito longa"),
   confirmPassword: z.string()
 }).refine((data) => data.password === data.confirmPassword, {
@@ -56,10 +68,18 @@ const Auth = () => {
   const [resetPasswordMode, setResetPasswordMode] = useState(false);
   const [forgotPasswordSuccess, setForgotPasswordSuccess] = useState(false);
   const [resetPasswordSuccess, setResetPasswordSuccess] = useState(false);
+  const [passwordResetToken, setPasswordResetToken] = useState<string | null>(null);
+  const [emailConfirmationInProgress, setEmailConfirmationInProgress] = useState(false);
+  const [emailConfirmationMessage, setEmailConfirmationMessage] = useState<string | null>(null);
+  const [emailConfirmationError, setEmailConfirmationError] = useState<string | null>(null);
+  const [signupCoachId, setSignupCoachId] = useState<string | null>(null);
   
   // Form states
   const [nome, setNome] = useState('');
   const [email, setEmail] = useState('');
+  const [cpf, setCpf] = useState('');
+  const [peso, setPeso] = useState('');
+  const [altura, setAltura] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -71,22 +91,78 @@ const Auth = () => {
 
   // REACT-AUTH-STATE-CONSISTENCY-FIX-007: Redirecionamento reativo baseado em estado
   useEffect(() => {
-    // Check if already authenticated
+    const searchParams = new URLSearchParams(window.location.search);
+    const coachFromQuery = searchParams.get('coach') || searchParams.get('coach_id');
+    if (coachFromQuery && /^[0-9a-f-]{36}$/i.test(coachFromQuery.trim())) {
+      setSignupCoachId(coachFromQuery.trim());
+      setActiveTab('signup');
+    }
+
+    const confirmFromQuery = searchParams.get('confirm_email');
+    if (confirmFromQuery) {
+      setEmailConfirmationInProgress(true);
+      setEmailConfirmationError(null);
+      setEmailConfirmationMessage(null);
+      setForgotPasswordMode(false);
+      setResetPasswordMode(false);
+      setActiveTab('signin');
+
+      (async () => {
+        try {
+          await apiClient.confirmEmail(confirmFromQuery);
+          setEmailConfirmationMessage('E-mail confirmado com sucesso. Agora você já pode fazer login.');
+          toast({
+            title: 'E-mail confirmado!',
+            description: 'Sua conta está ativa para login.',
+          });
+        } catch (error: any) {
+          const message =
+            error?.message ||
+            'Não foi possível confirmar o e-mail. Peça um novo link de confirmação.';
+          setEmailConfirmationError(message);
+          toast({
+            title: 'Falha ao confirmar email',
+            description: message,
+            variant: 'destructive',
+          });
+        } finally {
+          setEmailConfirmationInProgress(false);
+        }
+      })();
+
+      searchParams.delete('confirm_email');
+      const qs = searchParams.toString();
+      const clean = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
+      window.history.replaceState(null, '', clean);
+      return;
+    }
+
     if (user) {
       console.log('[REACT-AUTH-STATE-CONSISTENCY-FIX-007] Usuário autenticado detectado, redirecionando...');
       navigate('/');
+      return;
     }
 
-    // Check URL for password reset flow
+    const resetFromQuery = searchParams.get('reset');
+    if (resetFromQuery) {
+      setPasswordResetToken(resetFromQuery);
+      setResetPasswordMode(true);
+      searchParams.delete('reset');
+      const qs = searchParams.toString();
+      const clean = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
+      window.history.replaceState(null, '', clean);
+      return;
+    }
+
     const hashParams = new URLSearchParams(window.location.hash.substring(1));
     const type = hashParams.get('type');
     const accessToken = hashParams.get('access_token');
-    
     if (type === 'recovery' && accessToken) {
+      setPasswordResetToken(accessToken);
       setResetPasswordMode(true);
-      // TODO: Implementar reset de senha com token
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
     }
-  }, [navigate, user]);
+  }, [navigate, toast, user]);
 
   useEffect(() => {
     // Calculate password strength
@@ -117,7 +193,7 @@ const Auth = () => {
     setErrors({});
     
     // Validate
-    const result = signUpSchema.safeParse({ nome, email, password, confirmPassword });
+    const result = signUpSchema.safeParse({ nome, email, cpf, peso, altura, password, confirmPassword });
     if (!result.success) {
       const fieldErrors: Record<string, string> = {};
       result.error.errors.forEach((err) => {
@@ -132,18 +208,65 @@ const Auth = () => {
     try {
       setLoading(true);
       
-      await apiClient.signUp(email, password, { full_name: nome });
+      const data = await apiClient.signUp(email, password, {
+        full_name: nome,
+        cpf_cnpj: onlyNumbers(cpf),
+        peso: Number(peso),
+        altura: Number(altura),
+        ...(signupCoachId ? { coach_id: signupCoachId } : {}),
+      }) as {
+        email_confirmation_sent?: boolean;
+        dev_confirm_url?: string;
+        aluno_provisioned?: boolean;
+      };
 
+      const confirmationRequested = !!data?.email_confirmation_sent;
       setSignupSuccess(true);
       toast({
         title: "Conta criada com sucesso!",
-        description: "Você já pode fazer login.",
+        description: data?.dev_confirm_url
+          ? "Conta criada. Em desenvolvimento, copie o link de confirmação mostrado no console."
+          : confirmationRequested
+            ? "Enviamos um e-mail de confirmação. Confirme o e-mail para ativar sua conta (verifique também o spam)."
+            : "Conta criada. O servidor ainda não tem envio de e-mail configurado; peça ao suporte um link de confirmação ou use \"Reenviar confirmação\" quando o envio estiver ativo.",
       });
+      if (data?.dev_confirm_url) {
+        console.info('[DEV] Link de confirmação de e-mail:', data.dev_confirm_url);
+      }
       
     } catch (error: any) {
+      const backendFields = error?.fields as string[] | undefined;
+      if (Array.isArray(backendFields) && backendFields.length > 0) {
+        const fieldErrors: Record<string, string> = {};
+        const fieldLabels: Record<string, string> = {
+          nome: 'Nome é obrigatório',
+          email: 'Email é obrigatório',
+          cpf_cnpj: 'CPF é obrigatório',
+          peso: 'Peso é obrigatório',
+          altura: 'Altura é obrigatória',
+        };
+        for (const f of backendFields) {
+          const key = f === 'cpf_cnpj' ? 'cpf' : f;
+          fieldErrors[key] = fieldLabels[f] || error?.message || 'Campo obrigatório';
+        }
+        setErrors(fieldErrors);
+      }
+
       // DESIGN-API-CONNECTIVITY-GUARD-009: Tratamento diferenciado por tipo de erro
-      if (error.message.includes('já cadastrado') || error.message.includes('already registered')) {
-        setErrors({ email: 'Este email já está cadastrado' });
+      const msg = String(error?.message ?? '').toLowerCase();
+      const isDuplicateEmail =
+        msg.includes('já cadastrado') ||
+        msg.includes('email já') ||
+        msg.includes('already registered') ||
+        msg.includes('duplicate') ||
+        msg.includes('23505');
+      if (isDuplicateEmail) {
+        setErrors({ email: 'Este email já está cadastrado. Use a aba Entrar ou outro email.' });
+        toast({
+          title: 'Email já em uso',
+          description: 'Faça login nessa conta ou cadastre-se com outro email.',
+          variant: 'destructive',
+        });
         return;
       }
       
@@ -250,12 +373,44 @@ const Auth = () => {
   const resetForm = () => {
     setNome('');
     setEmail('');
+    setCpf('');
+    setPeso('');
+    setAltura('');
     setPassword('');
     setConfirmPassword('');
     setErrors({});
     setSignupSuccess(false);
     setForgotPasswordSuccess(false);
     setResetPasswordSuccess(false);
+    setPasswordResetToken(null);
+    setEmailConfirmationInProgress(false);
+    setEmailConfirmationMessage(null);
+    setEmailConfirmationError(null);
+  };
+
+  const handleResendConfirmation = async () => {
+    if (!email) return;
+    try {
+      setLoading(true);
+      const data = await apiClient.resendEmailConfirmation(email) as { dev_confirm_url?: string };
+      if (data?.dev_confirm_url) {
+        console.info('[DEV] Novo link de confirmação:', data.dev_confirm_url);
+      }
+      toast({
+        title: 'Reenvio solicitado',
+        description: data?.dev_confirm_url
+          ? 'Sem provedor de e-mail no backend (dev). Copie o link no console.'
+          : 'Se o e-mail existir e não estiver confirmado, enviamos um novo link.',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Erro ao reenviar confirmação',
+        description: error.message || 'Tente novamente em instantes.',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleForgotPassword = async (e: React.FormEvent) => {
@@ -277,35 +432,24 @@ const Auth = () => {
 
     try {
       setLoading(true);
-      const redirectUrl = `${window.location.origin}/auth`;
-      
-      // TODO: Implementar reset de senha na API
-      try {
-        await apiClient.resetPasswordForEmail(email, { redirectTo: redirectUrl });
-      } catch (error: any) {
-        // Se ainda não implementado, mostrar mensagem
-        if (error.message.includes('não implementado')) {
-          toast({
-            title: "Funcionalidade em desenvolvimento",
-            description: "Reset de senha será implementado em breve.",
-            variant: "destructive",
-          });
-          return;
-        }
-        throw error;
-      }
+      const data = (await apiClient.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth`,
+      })) as { ok?: boolean; message?: string; dev_reset_url?: string };
 
-      if (error) throw error;
+      if (data?.dev_reset_url) {
+        console.info('[DEV] Link de redefinição de senha:', data.dev_reset_url);
+      }
 
       setForgotPasswordSuccess(true);
       toast({
-        title: "Email enviado!",
-        description: "Verifique sua caixa de entrada para redefinir sua senha.",
+        title: data?.dev_reset_url ? 'Ambiente de desenvolvimento' : 'Pedido enviado',
+        description: data?.dev_reset_url
+          ? 'O e-mail não está configurado no servidor — copie o link no console (F12 → cadastro com [DEV]).'
+          : (data?.message || 'Se este e-mail estiver cadastrado, verifique a caixa de entrada (e o spam).'),
       });
-      
     } catch (error: any) {
       toast({
-        title: "Erro ao enviar email",
+        title: "Não foi possível concluir o pedido",
         description: error.message,
         variant: "destructive",
       });
@@ -333,22 +477,18 @@ const Auth = () => {
 
     try {
       setLoading(true);
-      
-      // TODO: Implementar update de senha na API
-      try {
-        await apiClient.updateUser({ password });
-      } catch (error: any) {
-        // Se ainda não implementado, mostrar mensagem
-        if (error.message.includes('não implementado')) {
-          toast({
-            title: "Funcionalidade em desenvolvimento",
-            description: "Alteração de senha será implementada em breve.",
-            variant: "destructive",
-          });
-          return;
-        }
-        throw error;
+
+      if (!passwordResetToken) {
+        toast({
+          title: "Link inválido ou expirado",
+          description: "Peça um novo e-mail em \"Esqueci minha senha\" ou abra o link completo do e-mail.",
+          variant: "destructive",
+        });
+        return;
       }
+
+      await apiClient.completePasswordReset(passwordResetToken, password);
+      setPasswordResetToken(null);
 
       setResetPasswordSuccess(true);
       toast({
@@ -389,12 +529,53 @@ const Auth = () => {
               onClick={() => { 
                 resetForm(); 
                 setResetPasswordMode(false);
+                setPasswordResetToken(null);
                 setActiveTab('signin'); 
               }}
               className="w-full"
             >
               Ir para Login
             </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (emailConfirmationInProgress || emailConfirmationMessage || emailConfirmationError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted p-4">
+        <Card className="w-full max-w-md border-primary/20">
+          <CardContent className="pt-8 pb-8 text-center space-y-6">
+            <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+              <Mail className="w-8 h-8 text-primary" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-foreground mb-2">
+                {emailConfirmationInProgress
+                  ? 'Confirmando o e-mail...'
+                  : emailConfirmationError
+                    ? 'Não foi possível confirmar'
+                    : 'E-mail confirmado!'}
+              </h2>
+              <p className="text-muted-foreground">
+                {emailConfirmationInProgress
+                  ? 'Estamos validando o link de confirmação.'
+                  : (emailConfirmationError || emailConfirmationMessage)}
+              </p>
+            </div>
+            {!emailConfirmationInProgress && (
+              <Button
+                onClick={() => {
+                  setEmailConfirmationMessage(null);
+                  setEmailConfirmationError(null);
+                  setActiveTab('signin');
+                }}
+                className="w-full"
+              >
+                Ir para Login
+              </Button>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -648,6 +829,14 @@ const Auth = () => {
               >
                 Ir para Login
               </Button>
+              <Button
+                variant="ghost"
+                onClick={handleResendConfirmation}
+                disabled={loading || !email}
+                className="w-full"
+              >
+                {loading ? 'Reenviando...' : 'Reenviar email de confirmação'}
+              </Button>
               <Button 
                 variant="ghost" 
                 onClick={() => setSignupSuccess(false)}
@@ -675,7 +864,7 @@ const Auth = () => {
                 className="h-20 w-auto"
               />
               <div className="absolute -right-2 -top-2">
-                <Sparkles className="w-5 h-5 text-primary animate-pulse" />
+                <Sparkles className="w-5 h-5 text-primary motion-safe:animate-pulse" />
               </div>
             </div>
           </div>
@@ -696,9 +885,9 @@ const Auth = () => {
               {activeTab === 'signin' ? 'Acessar sua conta' : 'Criar nova conta'}
             </CardTitle>
             <CardDescription>
-              {activeTab === 'signin' 
-                ? 'Entre com suas credenciais para continuar' 
-                : 'Preencha seus dados para começar'}
+              {activeTab === 'signin'
+                ? 'Entre com suas credenciais para continuar'
+                : 'Informe nome, e-mail, CPF, peso e altura para criar sua conta de acesso ao sistema.'}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -790,10 +979,17 @@ const Auth = () => {
               {/* Sign Up Form */}
               <TabsContent value="signup" className="mt-0">
                 <form onSubmit={handleSignUp} className="space-y-4">
+                  {signupCoachId && (
+                    <Alert className="border-primary/20 bg-primary/5">
+                      <AlertDescription className="text-sm">
+                        Cadastro vinculado ao seu coach. Após criar a conta, você aparecerá na lista de alunos dele.
+                      </AlertDescription>
+                    </Alert>
+                  )}
                   <div className="space-y-2">
                     <Label htmlFor="signup-nome" className="flex items-center gap-2">
                       <User className="w-4 h-4 text-muted-foreground" />
-                      Nome completo
+                      Nome completo *
                     </Label>
                     <Input
                       id="signup-nome"
@@ -802,6 +998,7 @@ const Auth = () => {
                       value={nome}
                       onChange={(e) => setNome(e.target.value)}
                       disabled={loading}
+                      required
                       className={errors.nome ? 'border-destructive' : ''}
                     />
                     {errors.nome && (
@@ -815,7 +1012,7 @@ const Auth = () => {
                   <div className="space-y-2">
                     <Label htmlFor="signup-email" className="flex items-center gap-2">
                       <Mail className="w-4 h-4 text-muted-foreground" />
-                      Email
+                      Email *
                     </Label>
                     <Input
                       id="signup-email"
@@ -824,6 +1021,7 @@ const Auth = () => {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       disabled={loading}
+                      required
                       className={errors.email ? 'border-destructive' : ''}
                     />
                     {errors.email && (
@@ -832,6 +1030,81 @@ const Auth = () => {
                         {errors.email}
                       </p>
                     )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="signup-cpf" className="flex items-center gap-2">
+                      <CreditCard className="w-4 h-4 text-muted-foreground" />
+                      CPF *
+                    </Label>
+                    <Input
+                      id="signup-cpf"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="000.000.000-00"
+                      value={cpf}
+                      onChange={(e) => setCpf(maskCPF(e.target.value))}
+                      disabled={loading}
+                      required
+                      className={errors.cpf ? 'border-destructive' : ''}
+                    />
+                    {errors.cpf && (
+                      <p className="text-xs text-destructive flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" />
+                        {errors.cpf}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="signup-peso" className="flex items-center gap-2">
+                        <Scale className="w-4 h-4 text-muted-foreground" />
+                        Peso (kg) *
+                      </Label>
+                      <Input
+                        id="signup-peso"
+                        type="number"
+                        min={1}
+                        max={500}
+                        placeholder="Ex: 75"
+                        value={peso}
+                        onChange={(e) => setPeso(e.target.value)}
+                        disabled={loading}
+                        required
+                        className={errors.peso ? 'border-destructive' : ''}
+                      />
+                      {errors.peso && (
+                        <p className="text-xs text-destructive flex items-center gap-1">
+                          <AlertCircle className="w-3 h-3" />
+                          {errors.peso}
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="signup-altura" className="flex items-center gap-2">
+                        <Ruler className="w-4 h-4 text-muted-foreground" />
+                        Altura (cm) *
+                      </Label>
+                      <Input
+                        id="signup-altura"
+                        type="number"
+                        min={100}
+                        max={250}
+                        placeholder="Ex: 175"
+                        value={altura}
+                        onChange={(e) => setAltura(e.target.value)}
+                        disabled={loading}
+                        required
+                        className={errors.altura ? 'border-destructive' : ''}
+                      />
+                      {errors.altura && (
+                        <p className="text-xs text-destructive flex items-center gap-1">
+                          <AlertCircle className="w-3 h-3" />
+                          {errors.altura}
+                        </p>
+                      )}
+                    </div>
                   </div>
 
                   <div className="space-y-2">

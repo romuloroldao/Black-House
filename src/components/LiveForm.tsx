@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
+import { DateInputBR } from "@/components/ui/date-input-br";
 import { 
   ArrowLeft, 
   Save, 
@@ -194,11 +195,10 @@ const LiveForm = ({ live, onBack, onSave }: LiveFormProps) => {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="date">Data</Label>
-                  <Input
+                  <DateInputBR
                     id="date"
-                    type="date"
                     value={formData.scheduledDate}
-                    onChange={(e) => setFormData({...formData, scheduledDate: e.target.value})}
+                    onChange={(value) => setFormData({...formData, scheduledDate: value})}
                   />
                 </div>
 

@@ -18,9 +18,9 @@ const StudentWorkoutsView = () => {
   const [expandedWorkouts, setExpandedWorkouts] = useState<Set<string>>(new Set());
   const [studentName, setStudentName] = useState<string>("");
 
-  const handleExportPdf = (treino: any) => {
+  const handleExportPdf = async (treino: any) => {
     try {
-      exportWorkoutToPdf({
+      await exportWorkoutToPdf({
         id: treino.id,
         nome: treino.nome,
         descricao: treino.descricao,
@@ -94,7 +94,7 @@ const StudentWorkoutsView = () => {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
-          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full motion-safe:animate-spin mx-auto mb-4" />
           <p className="text-muted-foreground">Carregando treinos...</p>
         </div>
       </div>
@@ -128,7 +128,7 @@ const StudentWorkoutsView = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <div>
         <h1 className="text-3xl font-bold mb-2">Meus Treinos</h1>
         <p className="text-muted-foreground">

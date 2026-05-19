@@ -22,10 +22,13 @@ const ImportController = require('./controllers/import.controller');
 const WebSocketService = require('./services/websocket.service');
 const NotificationService = require('./services/notification.service');
 const AsaasService = require('./services/asaas.service');
+const { decryptCoachAsaasApiKey } = require('./utils/asaas-coach-secret-crypto');
 const JobsRunner = require('./jobs');
 const createWebhookRouter = require('./routes/webhooks');
 const createHealthRouter = require('./routes/health');
-const { authLimiter, apiLimiter, webhookLimiter, uploadLimiter } = require('./middleware/rate-limiter');
+const { authLimiter, apiLimiter, webhookLimiter, uploadLimiter, forgotPasswordLimiter, resetPasswordSubmitLimiter } = require('./middleware/rate-limiter');
+const { sendPasswordResetEmail } = require('./utils/send-password-reset-email');
+const { sendEmailConfirmation } = require('./utils/send-email-confirmation');
 const { errorHandler, notFoundHandler } = require('./middleware/error-handler');
 const requestLogger = require('./middleware/request-logger');
 const logger = require('./utils/logger');
@@ -36,6 +39,11 @@ const { extractDatabaseIdentity } = require('./utils/db-identity');
 const { createDomainSchemaGuard } = require('./utils/domain-schema-guard');
 const { resolveEffectiveRole } = require('./utils/identity-resolver');
 const { assertFullSchema } = require('./utils/schema-completo-validator');
+const {
+    getActiveFinancialException,
+    getStudentPaymentStatus,
+    applyFinancialExceptionToAmount,
+} = require('./utils/financial-status');
 // dotenv já foi carregado no topo do arquivo
 
 // INFRA-03: Logar BOOT_ID no logger também
@@ -50,6 +58,7 @@ logger.info('🔥 INFRA-03: Servidor iniciando', {
 
 const app = express();
 const httpServer = http.createServer(app);
+app.set('trust proxy', 1);
 
 // Validar secrets na inicialização
 try {
@@ -376,65 +385,75 @@ if (process.env.ASAAS_WEBHOOK_TOKEN) {
 // Middleware de autenticação
 // RBAC-01: Middleware de autenticação com role e payment_status
 const authenticate = async (req, res, next) => {
-    const token = req.headers.authorization?.replace('Bearer ', '');
-    
+    const authHeader = req.headers.authorization;
+    const token =
+        typeof authHeader === 'string' && authHeader.trim()
+            ? authHeader.trim().replace(/^Bearer\s+/i, '').trim() || null
+            : null;
+
     if (!token) {
         return res.status(401).json({ error: 'Token não fornecido' });
     }
-    
+
+    let decoded;
     try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        
-        // Buscar usuário com role e payment_status
+        decoded = jwt.verify(token, JWT_SECRET);
+    } catch (jwtErr) {
+        const name = jwtErr?.name || '';
+        logger.warn('Autenticação: JWT rejeitado', { name, message: jwtErr?.message });
+        if (name === 'TokenExpiredError') {
+            return res.status(401).json({
+                error: 'Sessão expirada. Faça login novamente.',
+                error_code: 'TOKEN_EXPIRED'
+            });
+        }
+        return res.status(401).json({
+            error: 'Token inválido ou corrompido.',
+            error_code: 'JWT_INVALID'
+        });
+    }
+
+    const userId = decoded.userId ?? decoded.sub;
+    if (userId == null || userId === '') {
+        logger.warn('Autenticação: payload JWT sem userId', { keys: Object.keys(decoded || {}) });
+        return res.status(401).json({ error: 'Token inválido', error_code: 'JWT_MISSING_USER_ID' });
+    }
+
+    try {
         const userResult = await pool.query(
             'SELECT u.id, u.email, u.created_at FROM app_auth.users u WHERE u.id = $1',
-            [decoded.userId]
+            [userId]
         );
-        
+
         if (userResult.rows.length === 0) {
             return res.status(401).json({ error: 'Usuário não encontrado' });
         }
-        
+
         const user = userResult.rows[0];
         const role = await resolveEffectiveRole(pool, user.id);
-        
-        // Buscar payment_status para alunos (OVERDUE ou PENDING_AFTER_DUE_DATE)
+
         let payment_status = null;
         if (role === 'aluno') {
-            const paymentResult = await pool.query(
-                `SELECT 
-                    CASE 
-                        WHEN status = 'OVERDUE' THEN 'OVERDUE'
-                        WHEN status = 'PENDING' AND due_date < CURRENT_DATE THEN 'PENDING_AFTER_DUE_DATE'
-                        ELSE 'CURRENT'
-                    END as payment_status
-                FROM public.asaas_payments 
-                WHERE aluno_id IN (
-                    SELECT id FROM public.alunos WHERE email = $1
-                )
-                AND (status = 'OVERDUE' OR (status = 'PENDING' AND due_date < CURRENT_DATE))
-                LIMIT 1`,
-                [user.email]
-            );
-            
-            if (paymentResult.rows.length > 0) {
-                payment_status = paymentResult.rows[0].payment_status;
-            } else {
-                payment_status = 'CURRENT';
-            }
+            const financialStatus = await getStudentPaymentStatus(pool, { email: user.email });
+            payment_status = financialStatus.payment_status;
         }
-        
-        // Adicionar role e payment_status ao req.user
+
         req.user = {
             ...user,
             role,
             payment_status: payment_status
         };
-        
+
         next();
     } catch (error) {
-        logger.error('Erro na autenticação', { error: error.message, stack: error.stack });
-        return res.status(401).json({ error: 'Token inválido' });
+        logger.error('Erro na autenticação (base de dados / role)', {
+            error: error.message,
+            stack: error.stack
+        });
+        return res.status(503).json({
+            error: 'Serviço temporariamente indisponível. Tente novamente.',
+            error_code: 'AUTH_DB_ERROR'
+        });
     }
 };
 
@@ -516,8 +535,18 @@ app.use('/health', createHealthRouter(pool, websocketService, jobsRunner, app));
 
 // Registro (com rate limiting)
 app.post('/auth/signup', authLimiter, async (req, res) => {
-    const { email, password } = req.body;
-    
+    const { email, password, full_name: fullName, coach_id: coachIdRaw } = req.body;
+
+    const { validateAlunoSignupProfile } = require('./utils/aluno-signup-validation');
+    const profileValidation = validateAlunoSignupProfile(req.body);
+    if (!profileValidation.ok) {
+        return res.status(400).json({
+            error: profileValidation.error,
+            fields: profileValidation.fields,
+        });
+    }
+    const signupProfile = profileValidation.data;
+
     try {
         // Criar usuário no app_auth
         const result = await pool.query(
@@ -526,6 +555,41 @@ app.post('/auth/signup', authLimiter, async (req, res) => {
         );
         
         const userId = result.rows[0].create_user;
+
+        const signupName = signupProfile.nome || fullName || req.body?.nome;
+        if (signupName && String(signupName).trim()) {
+            try {
+                const { persistUserDisplayName } = require('./utils/user-display-name');
+                await persistUserDisplayName(pool, userId, String(signupName).trim());
+            } catch (nameErr) {
+                logger.warn('signup.persist_display_name.failed', {
+                    userId,
+                    error: nameErr.message,
+                });
+            }
+        }
+
+        try {
+            await pool.query(
+                `UPDATE app_auth.users
+                 SET raw_user_meta_data = COALESCE(raw_user_meta_data, '{}'::jsonb) || $2::jsonb,
+                     updated_at = NOW()
+                 WHERE id = $1`,
+                [
+                    userId,
+                    JSON.stringify({
+                        signup_cpf_cnpj: signupProfile.cpf_cnpj,
+                        signup_peso: signupProfile.peso,
+                        signup_altura: signupProfile.altura,
+                    }),
+                ],
+            );
+        } catch (metaErr) {
+            logger.warn('signup.persist_profile_meta.failed', {
+                userId,
+                error: metaErr.message,
+            });
+        }
         
         // SECURITY-01: Criar automaticamente role "aluno" para todos os novos usuários
         // Por segurança, TODOS os usuários são criados como "aluno" por padrão
@@ -596,6 +660,63 @@ app.post('/auth/signup', authLimiter, async (req, res) => {
             }
         }
         
+        // Disparar confirmação de email (token próprio de confirmação, 24h).
+        // Se não houver provider de email, em dev devolvemos o link no payload.
+        let emailConfirmationProvider = 'none';
+        let devConfirmUrl = null;
+        try {
+            const confirmationToken = jwt.sign(
+                { sub: userId, typ: 'email_confirm' },
+                JWT_SECRET,
+                { expiresIn: '24h' }
+            );
+            const confirmUrl = `${getFrontendBaseUrl()}/auth?confirm_email=${encodeURIComponent(confirmationToken)}`;
+            const sent = await sendEmailConfirmation({ to: email, confirmUrl });
+            emailConfirmationProvider = sent.provider;
+            if (process.env.NODE_ENV !== 'production' && sent.provider === 'none') {
+                devConfirmUrl = confirmUrl;
+            }
+        } catch (mailError) {
+            logger.error('signup.confirmation_email.failed', {
+                userId,
+                email,
+                error: mailError.message
+            });
+        }
+
+        // Cria ficha em public.alunos quando o cadastro veio com link do coach (?coach=uuid).
+        let alunoProvision = null;
+        try {
+            const { provisionAlunoForUser, isValidCoachId } = require('./utils/aluno-signup-provision');
+            const coachId = isValidCoachId(coachIdRaw) ? String(coachIdRaw).trim() : null;
+            if (coachId) {
+                alunoProvision = await provisionAlunoForUser(pool, {
+                    userId,
+                    email,
+                    fullName: signupProfile.nome,
+                    coachId,
+                    cpf_cnpj: signupProfile.cpf_cnpj,
+                    peso: signupProfile.peso,
+                    altura: signupProfile.altura,
+                });
+                if (alunoProvision) {
+                    logger.info('signup.aluno_provisioned', {
+                        userId,
+                        email,
+                        coachId,
+                        alunoId: alunoProvision.alunoId,
+                        created: alunoProvision.created,
+                    });
+                }
+            }
+        } catch (provisionErr) {
+            logger.error('signup.aluno_provision_failed', {
+                userId,
+                email,
+                error: provisionErr.message,
+            });
+        }
+
         // RBAC-01: JWT inclui role e payment_status (CURRENT para novo usuário)
         const token = jwt.sign({ 
             userId,
@@ -603,10 +724,17 @@ app.post('/auth/signup', authLimiter, async (req, res) => {
             payment_status: 'CURRENT' // Novo usuário sempre adimplente
         }, JWT_SECRET, { expiresIn: '7d' });
         
-        res.json({ 
+        const payload = {
             user: { id: userId, email },
-            token 
-        });
+            token,
+            email_confirmation_sent: emailConfirmationProvider !== 'none',
+            aluno_provisioned: !!alunoProvision,
+        };
+        if (devConfirmUrl) {
+            payload.dev_confirm_url = devConfirmUrl;
+        }
+
+        res.json(payload);
     } catch (error) {
         logger.error('Erro ao criar usuário', {
             email,
@@ -686,7 +814,7 @@ app.post('/auth/login', authLimiter, async (req, res) => {
         
         const role = await resolveEffectiveRole(pool, user_id);
         
-        // Buscar payment_status para alunos
+        // Buscar payment_status para alunos, respeitando exceções financeiras ativas.
         let payment_status = 'CURRENT';
         if (role === 'aluno') {
             const userEmailResult = await pool.query(
@@ -696,25 +824,8 @@ app.post('/auth/login', authLimiter, async (req, res) => {
             
             if (userEmailResult.rows.length > 0) {
                 const email = userEmailResult.rows[0].email;
-                const paymentResult = await pool.query(
-                    `SELECT 
-                        CASE 
-                            WHEN status = 'OVERDUE' THEN 'OVERDUE'
-                            WHEN status = 'PENDING' AND due_date < CURRENT_DATE THEN 'PENDING_AFTER_DUE_DATE'
-                            ELSE 'CURRENT'
-                        END as payment_status
-                    FROM public.asaas_payments 
-                    WHERE aluno_id IN (
-                        SELECT id FROM public.alunos WHERE email = $1
-                    )
-                    AND (status = 'OVERDUE' OR (status = 'PENDING' AND due_date < CURRENT_DATE))
-                    LIMIT 1`,
-                    [email]
-                );
-                
-                if (paymentResult.rows.length > 0) {
-                    payment_status = paymentResult.rows[0].payment_status;
-                }
+                const financialStatus = await getStudentPaymentStatus(pool, { email });
+                payment_status = financialStatus.payment_status;
             }
         }
         
@@ -753,7 +864,17 @@ app.post('/auth/login', authLimiter, async (req, res) => {
         });
         
         // Retornar 401 para credenciais inválidas, 500 para outros erros
-        const statusCode = error.message?.includes('Credenciais') || error.message?.includes('inválid') ? 401 : 500;
+        const msg = String(error.message || '').toLowerCase();
+        const isCredError =
+            msg.includes('credenciais') ||
+            msg.includes('inválid') ||
+            msg.includes('invalid') ||
+            msg.includes('senha incorreta') ||
+            msg.includes('wrong password') ||
+            msg.includes('email não encontrado') ||
+            msg.includes('usuario nao encontrado') ||
+            msg.includes('usuário não encontrado');
+        const statusCode = isCredError ? 401 : 500;
         res.status(statusCode).json({ 
             error: error.message || 'Erro ao fazer login',
             error_code: 'LOGIN_ERROR',
@@ -788,7 +909,11 @@ app.get('/auth/user-by-id', authenticate, async (req, res) => {
         }
 
         const result = await pool.query(
-            'SELECT id, email, created_at FROM app_auth.users WHERE id = $1',
+            `SELECT u.id, u.email, u.created_at, u.email_confirmed_at,
+                    cp.nome_completo AS coach_nome_completo
+             FROM app_auth.users u
+             LEFT JOIN public.coach_profiles cp ON cp.user_id = u.id
+             WHERE u.id = $1`,
             [user_id]
         );
 
@@ -796,13 +921,330 @@ app.get('/auth/user-by-id', authenticate, async (req, res) => {
             return res.status(404).json({ error: 'Usuário não encontrado' });
         }
 
-        res.json(result.rows[0]);
+        const row = result.rows[0];
+        res.json({
+            id: row.id,
+            email: row.email,
+            created_at: row.created_at,
+            email_confirmed_at: row.email_confirmed_at,
+            coach_nome_completo: row.coach_nome_completo || null,
+        });
     } catch (error) {
         logger.error('Erro ao buscar usuário por ID', {
             error: error.message,
             user_id: req.query.user_id
         });
         res.status(500).json({ error: 'Erro ao buscar usuário' });
+    }
+});
+
+// Confirmar email com token (link enviado no signup/reenvio)
+app.post('/auth/confirm-email', authLimiter, async (req, res) => {
+    try {
+        const token = req.body?.token;
+        if (!token || typeof token !== 'string') {
+            return res.status(400).json({ error: 'Token é obrigatório', error_code: 'MISSING_TOKEN' });
+        }
+
+        let decoded;
+        try {
+            decoded = jwt.verify(token, JWT_SECRET);
+        } catch (e) {
+            return res.status(400).json({
+                error: 'Link inválido ou expirado. Solicite um novo email de confirmação.',
+                error_code: 'INVALID_OR_EXPIRED_TOKEN'
+            });
+        }
+
+        if (decoded.typ !== 'email_confirm' || !decoded.sub) {
+            return res.status(400).json({
+                error: 'Token inválido para confirmação de email',
+                error_code: 'WRONG_TOKEN_TYPE'
+            });
+        }
+
+        const upd = await pool.query(
+            `UPDATE app_auth.users
+             SET email_confirmed_at = COALESCE(email_confirmed_at, NOW())
+             WHERE id = $1
+             RETURNING id, email, email_confirmed_at`,
+            [decoded.sub]
+        );
+
+        if (upd.rows.length === 0) {
+            return res.status(404).json({ error: 'Usuário não encontrado', error_code: 'USER_NOT_FOUND' });
+        }
+
+        return res.json({ ok: true, message: 'Email confirmado com sucesso.' });
+    } catch (error) {
+        logger.error('confirm_email.error', { error: error.message });
+        return res.status(500).json({ error: 'Erro ao confirmar email' });
+    }
+});
+
+// Reenviar confirmação (sempre resposta genérica para não revelar existência de conta)
+app.post('/auth/resend-confirmation', forgotPasswordLimiter, async (req, res) => {
+    const genericOk = {
+        ok: true,
+        message: 'Se este e-mail estiver cadastrado, enviamos um novo link de confirmação.'
+    };
+
+    try {
+        const emailRaw = req.body?.email;
+        if (!emailRaw || typeof emailRaw !== 'string') {
+            return res.status(400).json({ error: 'Email é obrigatório', error_code: 'MISSING_EMAIL' });
+        }
+        const email = emailRaw.trim().toLowerCase();
+        if (!email.includes('@')) {
+            return res.status(400).json({ error: 'Email inválido', error_code: 'INVALID_EMAIL' });
+        }
+
+        const found = await pool.query(
+            'SELECT id, email_confirmed_at FROM app_auth.users WHERE email = $1',
+            [email]
+        );
+        if (found.rows.length === 0) {
+            return res.json(genericOk);
+        }
+
+        const user = found.rows[0];
+        if (user.email_confirmed_at) {
+            return res.json({ ...genericOk, already_confirmed: true });
+        }
+
+        const token = jwt.sign(
+            { sub: user.id, typ: 'email_confirm' },
+            JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+        const confirmUrl = `${getFrontendBaseUrl()}/auth?confirm_email=${encodeURIComponent(token)}`;
+
+        let sendResult = { provider: 'none' };
+        try {
+            sendResult = await sendEmailConfirmation({ to: email, confirmUrl });
+        } catch (mailErr) {
+            logger.error('resend_confirmation.mail_failed', { email, error: mailErr.message });
+            return res.status(502).json({
+                error: 'Não foi possível enviar o email de confirmação. Tente novamente mais tarde.',
+                error_code: 'MAIL_SEND_FAILED'
+            });
+        }
+
+        if (sendResult.provider === 'none') {
+            if (process.env.NODE_ENV !== 'production') {
+                return res.json({ ...genericOk, dev_confirm_url: confirmUrl });
+            }
+            logger.warn('resend_confirmation.mail_transport_missing');
+            return res.status(503).json({
+                error: 'O envio de email não está configurado no servidor. Contacte o suporte.',
+                error_code: 'MAIL_NOT_CONFIGURED'
+            });
+        }
+
+        return res.json({ ...genericOk });
+    } catch (error) {
+        logger.error('resend_confirmation.error', { error: error.message });
+        return res.status(500).json({ error: 'Erro ao reenviar confirmação' });
+    }
+});
+
+function getFrontendBaseUrl() {
+    const raw = process.env.FRONTEND_URL || process.env.PUBLIC_APP_URL || 'https://blackhouse.app.br';
+    return String(raw).replace(/\/$/, '');
+}
+
+// Esqueci minha senha — gera JWT de uso único (1h) e envia email se Resend/SMTP configurado
+app.post('/auth/forgot-password', forgotPasswordLimiter, async (req, res) => {
+    const genericOk = {
+        ok: true,
+        message: 'Se este e-mail estiver cadastrado, enviamos instruções para redefinir a senha.'
+    };
+
+    try {
+        const emailRaw = req.body?.email;
+        if (!emailRaw || typeof emailRaw !== 'string') {
+            return res.status(400).json({
+                error: 'Email é obrigatório',
+                error_code: 'MISSING_EMAIL'
+            });
+        }
+        const email = emailRaw.trim().toLowerCase();
+        if (!email.includes('@')) {
+            return res.status(400).json({
+                error: 'Email inválido',
+                error_code: 'INVALID_EMAIL'
+            });
+        }
+
+        const found = await pool.query('SELECT id FROM app_auth.users WHERE email = $1', [email]);
+
+        if (found.rows.length === 0) {
+            logger.info('password_reset.request.unknown_email', { email });
+            return res.json(genericOk);
+        }
+
+        const userId = found.rows[0].id;
+        const token = jwt.sign(
+            { sub: userId, typ: 'pwd_reset' },
+            JWT_SECRET,
+            { expiresIn: '1h' }
+        );
+
+        const base = getFrontendBaseUrl();
+        const resetUrl = `${base}/auth?reset=${encodeURIComponent(token)}`;
+
+        let sendResult = { provider: 'none' };
+        try {
+            sendResult = await sendPasswordResetEmail({ to: email, resetUrl });
+        } catch (mailErr) {
+            logger.error('password_reset.mail_failed', { email, error: mailErr.message });
+            return res.status(502).json({
+                error: 'Não foi possível enviar o email de recuperação. Tente novamente mais tarde.',
+                error_code: 'MAIL_SEND_FAILED'
+            });
+        }
+
+        if (sendResult.provider === 'none') {
+            if (process.env.NODE_ENV !== 'production') {
+                logger.info('password_reset.dev_fallback_no_mail_transport', { email });
+                return res.json({ ...genericOk, dev_reset_url: resetUrl });
+            }
+            logger.warn('password_reset.mail_transport_missing');
+            return res.status(503).json({
+                error: 'O envio de email não está configurado no servidor. Contacte o suporte.',
+                error_code: 'MAIL_NOT_CONFIGURED'
+            });
+        }
+
+        const payload = { ...genericOk };
+
+        logger.info('password_reset.request.sent', {
+            email,
+            provider: sendResult.provider
+        });
+
+        return res.json(payload);
+    } catch (error) {
+        logger.error('password_reset.request.error', { error: error.message });
+        return res.status(500).json({ error: 'Erro ao processar pedido' });
+    }
+});
+
+// Concluir redefinição com token recebido por email
+app.post('/auth/reset-password', resetPasswordSubmitLimiter, async (req, res) => {
+    try {
+        const { token, password } = req.body || {};
+        if (!token || typeof token !== 'string') {
+            return res.status(400).json({
+                error: 'Token é obrigatório',
+                error_code: 'MISSING_TOKEN'
+            });
+        }
+        if (!password || typeof password !== 'string' || password.length < 6) {
+            return res.status(400).json({
+                error: 'Senha deve ter pelo menos 6 caracteres',
+                error_code: 'WEAK_PASSWORD'
+            });
+        }
+
+        let decoded;
+        try {
+            decoded = jwt.verify(token, JWT_SECRET);
+        } catch (e) {
+            return res.status(400).json({
+                error: 'Link inválido ou expirado. Peça um novo email de recuperação.',
+                error_code: 'INVALID_OR_EXPIRED_TOKEN'
+            });
+        }
+
+        if (decoded.typ !== 'pwd_reset' || !decoded.sub) {
+            return res.status(400).json({
+                error: 'Token inválido para redefinição de senha',
+                error_code: 'WRONG_TOKEN_TYPE'
+            });
+        }
+
+        const userId = decoded.sub;
+        const upd = await pool.query(
+            'UPDATE app_auth.users SET password_hash = app_auth.hash_password($1) WHERE id = $2 RETURNING id',
+            [password, userId]
+        );
+
+        if (upd.rows.length === 0) {
+            return res.status(404).json({
+                error: 'Utilizador não encontrado',
+                error_code: 'USER_NOT_FOUND'
+            });
+        }
+
+        await pool.query('DELETE FROM app_auth.sessions WHERE user_id = $1', [userId]);
+
+        logger.info('password_reset.complete', { userId });
+
+        return res.json({ ok: true, message: 'Senha atualizada com sucesso.' });
+    } catch (error) {
+        logger.error('password_reset.complete.error', { error: error.message });
+        return res.status(500).json({ error: 'Erro ao atualizar senha' });
+    }
+});
+
+// Alterar senha estando autenticado (Configurações / SettingsManager)
+app.post('/auth/change-password', authenticate, authLimiter, async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body || {};
+        if (!currentPassword || typeof currentPassword !== 'string') {
+            return res.status(400).json({
+                error: 'Senha atual é obrigatória',
+                error_code: 'MISSING_CURRENT_PASSWORD',
+            });
+        }
+        if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
+            return res.status(400).json({
+                error: 'A nova senha deve ter pelo menos 6 caracteres',
+                error_code: 'WEAK_PASSWORD',
+            });
+        }
+
+        const userId = req.user.id;
+        const hashRow = await pool.query(
+            'SELECT password_hash FROM app_auth.users WHERE id = $1',
+            [userId],
+        );
+        if (hashRow.rows.length === 0) {
+            return res.status(404).json({ error: 'Utilizador não encontrado', error_code: 'USER_NOT_FOUND' });
+        }
+        const passwordHash = hashRow.rows[0].password_hash;
+
+        const verify = await pool.query('SELECT app_auth.verify_password($1, $2) AS ok', [
+            currentPassword,
+            passwordHash,
+        ]);
+        if (!verify.rows[0]?.ok) {
+            return res.status(401).json({
+                error: 'A senha atual está incorreta',
+                error_code: 'INVALID_CURRENT_PASSWORD',
+            });
+        }
+
+        const upd = await pool.query(
+            'UPDATE app_auth.users SET password_hash = app_auth.hash_password($1) WHERE id = $2 RETURNING id',
+            [newPassword, userId],
+        );
+        if (upd.rows.length === 0) {
+            return res.status(404).json({ error: 'Utilizador não encontrado', error_code: 'USER_NOT_FOUND' });
+        }
+
+        try {
+            await pool.query('DELETE FROM app_auth.sessions WHERE user_id = $1', [userId]);
+        } catch (sessErr) {
+            logger.warn('password_change.sessions_cleanup_skipped', { error: sessErr.message, userId });
+        }
+
+        logger.info('password_change.complete', { userId });
+        return res.json({ ok: true, message: 'Senha atualizada com sucesso.' });
+    } catch (error) {
+        logger.error('password_change.error', { error: error.message });
+        return res.status(500).json({ error: 'Erro ao atualizar senha' });
     }
 });
 
@@ -859,12 +1301,33 @@ app.get('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) => 
     console.warn('⚠️ Sintaxe PostgREST (select=, eq=, neq=) é FORBIDDEN. Migre para rotas semânticas.');
     
     const { table } = req.params;
+    const userRole = req.user?.role || 'aluno';
+    const userId = req.user?.id;
+    const userEmail = req.user?.email;
     const { select, order, limit, offset } = req.query;
+    if (table === 'fotos_alunos') {
+        return res.status(410).json({
+            error: 'Endpoint legado bloqueado para fotos_alunos',
+            error_code: 'LEGACY_ENDPOINT_BLOCKED',
+            message: 'Use a rota semântica /api/fotos-alunos.',
+        });
+    }
     
     try {
         let query = `SELECT ${select || '*'} FROM public.${table}`;
         const queryParams = [];
         let paramIndex = 1;
+        const tablesWithCoachId = new Set([
+            'feedbacks_alunos', 'alunos', 'treinos', 'videos', 'lives',
+            'payment_plans', 'planos_pagamento', 'financial_exceptions', 'expenses', 'recurring_charges_config',
+            'avisos', 'turmas', 'notificacoes', 'eventos', 'conversas', 'agenda_eventos',
+            'asaas_config', 'asaas_payments', 'relatorios', 'relatorio_templates', 'twilio_config',
+        ]);
+        const studentBlockedTables = new Set([
+            'payment_plans', 'planos_pagamento',
+            'financial_exceptions', 'expenses', 'recurring_charges_config',
+            'asaas_config', 'twilio_config',
+        ]);
         
         // Processar filtros (formato: campo.operador=valor)
         const filters = [];
@@ -930,6 +1393,42 @@ app.get('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) => 
                 }
             }
         }
+
+        // HARDENING: aluno não acede a tabelas de gestão financeira do coach pela rota legada.
+        if (userRole === 'aluno' && studentBlockedTables.has(table)) {
+            return res.status(403).json({
+                error: 'Acesso negado',
+                error_code: 'ROLE_FORBIDDEN',
+                message: `A tabela ${table} não está disponível para o perfil aluno.`,
+            });
+        }
+
+        // HARDENING: em tabelas com coach_id, coach só enxerga os próprios dados por padrão.
+        const hasCoachFilterInQuery = Object.keys(req.query || {}).some(
+            (k) => k === 'coach_id' || k.startsWith('coach_id.')
+        );
+        if (userRole === 'coach' && tablesWithCoachId.has(table) && !hasCoachFilterInQuery) {
+            filters.push(`coach_id = $${paramIndex}`);
+            queryParams.push(userId);
+            paramIndex++;
+        }
+
+        // HARDENING: aluno em asaas_payments só enxerga as suas cobranças.
+        if (userRole === 'aluno' && table === 'asaas_payments') {
+            const alunoRow = await pool.query(
+                'SELECT id FROM public.alunos WHERE email = $1 LIMIT 1',
+                [userEmail]
+            );
+            if (alunoRow.rows.length === 0) {
+                return res.status(403).json({
+                    error: 'Aluno não vinculado',
+                    error_code: 'ALUNO_NOT_LINKED',
+                });
+            }
+            filters.push(`aluno_id = $${paramIndex}`);
+            queryParams.push(alunoRow.rows[0].id);
+            paramIndex++;
+        }
         
         if (filters.length > 0) {
             query += ` WHERE ${filters.join(' AND ')}`;
@@ -966,6 +1465,13 @@ app.post('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) =>
     const { table } = req.params;
     const data = req.body;
     const userId = req.user?.id; // ID do usuário autenticado
+    if (table === 'fotos_alunos') {
+        return res.status(410).json({
+            error: 'Endpoint legado bloqueado para fotos_alunos',
+            error_code: 'LEGACY_ENDPOINT_BLOCKED',
+            message: 'Use a rota semântica /api/fotos-alunos.',
+        });
+    }
     
     // Declarar variáveis no escopo da função para uso no catch
     let filteredData = {};
@@ -976,48 +1482,63 @@ app.post('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) =>
         // Filtrar campos que não devem ser inseridos (id, created_at têm defaults)
         const fieldsToExclude = ['id', 'created_at', 'updated_at'];
         
-        // COACH-01: Sempre usar userId autenticado para coach_id em todas as tabelas que têm esse campo
-        // Por segurança, sempre substituir coach_id pelo userId do usuário autenticado
-        // Nota: alunos_treinos NÃO tem coluna coach_id (ver migração 20251016132724)
-        const tablesWithCoachId = ['feedbacks_alunos', 'alunos', 'fotos_alunos', 'treinos', 'videos', 'lives', 
-                                    'payment_plans', 'financial_exceptions', 'expenses', 'recurring_charges_config'];
+        // COACH-01: coach_id = userId autenticado (coach/admin). Exceção: fotos_alunos — coach_id vem de alunos.coach_id
+        // Nota: alunos_treinos NÃO tem coluna coach_id
+        const tablesWithCoachId = [
+            'feedbacks_alunos', 'alunos', 'treinos', 'videos', 'lives',
+            'payment_plans', 'planos_pagamento', 'financial_exceptions', 'expenses', 'recurring_charges_config',
+            'avisos', 'turmas', 'notificacoes', 'eventos', 'conversas', 'agenda_eventos',
+            'asaas_config', 'asaas_payments', 'relatorios', 'relatorio_templates', 'twilio_config',
+        ];
+        const tablesAllowingCoachIdColumn = new Set([...tablesWithCoachId]);
         
-        // COACH-01: Apenas processar coach_id se o campo estiver presente nos dados OU se a tabela requer
-        if ('coach_id' in data) {
-            // Se coach_id foi fornecido, sempre substituir por userId autenticado
-            const originalCoachId = data.coach_id;
-            data.coach_id = userId;
-            
-            if (originalCoachId !== userId && 
-                originalCoachId !== '00000000-0000-0000-0000-000000000000' &&
-                originalCoachId !== null && 
-                originalCoachId !== undefined) {
-                logger.warn('COACH-01: coach_id fornecido substituído por userId autenticado', {
-                    table,
-                    originalCoachId,
-                    userId
-                });
-            } else {
-                logger.debug('COACH-01: coach_id definido para userId autenticado', {
+        const rowsToProcess = Array.isArray(data) ? data : [data];
+        if (rowsToProcess.length === 0) {
+            return res.status(400).json({ error: 'Nenhum registro para inserir' });
+        }
+
+        const insertedRows = [];
+        for (const rawRow of rowsToProcess) {
+            if (!rawRow || typeof rawRow !== 'object' || Array.isArray(rawRow)) {
+                return res.status(400).json({ error: 'Cada item deve ser um objecto' });
+            }
+            const rowData = { ...rawRow };
+
+            const skipCoach01 = table === 'fotos_alunos';
+
+            // COACH-01: Apenas processar coach_id se o campo estiver presente nos dados OU se a tabela requer
+            if (!skipCoach01 && 'coach_id' in rowData) {
+                const originalCoachId = rowData.coach_id;
+                rowData.coach_id = userId;
+                
+                if (originalCoachId !== userId && 
+                    originalCoachId !== '00000000-0000-0000-0000-000000000000' &&
+                    originalCoachId !== null && 
+                    originalCoachId !== undefined) {
+                    logger.warn('COACH-01: coach_id fornecido substituído por userId autenticado', {
+                        table,
+                        originalCoachId,
+                        userId
+                    });
+                } else {
+                    logger.debug('COACH-01: coach_id definido para userId autenticado', {
+                        table,
+                        userId
+                    });
+                }
+            } else if (!skipCoach01 && tablesWithCoachId.includes(table)) {
+                rowData.coach_id = userId;
+                logger.debug('COACH-01: coach_id adicionado (userId autenticado)', {
                     table,
                     userId
                 });
             }
-        } else if (tablesWithCoachId.includes(table)) {
-            // Se a tabela requer coach_id mas não foi fornecido, adicionar
-            // Mas apenas se a tabela realmente tem a coluna (não adicionar para alunos_treinos)
-            data.coach_id = userId;
-            logger.debug('COACH-01: coach_id adicionado (userId autenticado)', {
-                table,
-                userId
-            });
-        }
         
-        filteredData = Object.entries(data)
+        filteredData = Object.entries(rowData)
             .filter(([key]) => {
                 // FILTER-01: Filtrar campos que não existem na tabela
                 // Remover coach_id se a tabela não tem essa coluna
-                if (key === 'coach_id' && !tablesWithCoachId.includes(table)) {
+                if (key === 'coach_id' && !tablesAllowingCoachIdColumn.has(table)) {
                     logger.debug('FILTER-01: Removendo coach_id de tabela que não tem essa coluna', {
                         table,
                         key
@@ -1155,7 +1676,10 @@ app.post('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) =>
         });
         
         const result = await pool.query(query, values);
-        res.json(result.rows[0]);
+        insertedRows.push(result.rows[0]);
+        }
+
+        res.json(insertedRows.length === 1 ? insertedRows[0] : insertedRows);
     } catch (error) {
         logger.error('Erro ao inserir registro', {
             table,
@@ -1176,6 +1700,13 @@ app.patch('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) =
     console.warn(`⚠️ DEPRECATED: PATCH /rest/v1/${req.params.table} está deprecated. Use rotas semânticas /api/*`);
     const { table } = req.params;
     const { id, ...data } = req.body;
+    if (table === 'fotos_alunos') {
+        return res.status(410).json({
+            error: 'Endpoint legado bloqueado para fotos_alunos',
+            error_code: 'LEGACY_ENDPOINT_BLOCKED',
+            message: 'Use a rota semântica /api/fotos-alunos.',
+        });
+    }
     
     // Gerar request ID para rastreamento end-to-end
     const requestId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -1440,6 +1971,13 @@ app.delete('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) 
     console.warn(`⚠️ DEPRECATED: DELETE /rest/v1/${req.params.table} está deprecated. Use rotas semânticas /api/*`);
     const { table } = req.params;
     const { id } = req.query;
+    if (table === 'fotos_alunos') {
+        return res.status(410).json({
+            error: 'Endpoint legado bloqueado para fotos_alunos',
+            error_code: 'LEGACY_ENDPOINT_BLOCKED',
+            message: 'Use a rota semântica /api/fotos-alunos.',
+        });
+    }
     
     if (!id) {
         return res.status(400).json({ error: 'ID é obrigatório para deletar' });
@@ -1531,6 +2069,74 @@ app.delete('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) 
                 await client.query('BEGIN');
                 
                 logger.info('Iniciando deleção de aluno com dependências', { alunoId: id });
+
+                const { loadAlunoAuthTargets, deleteAuthUserForAluno } = require('./utils/delete-aluno-complete');
+                const authTargets = await loadAlunoAuthTargets(client, id);
+
+                const deleteOptionalAlunoDependency = async (tableName) => {
+                    const existsResult = await client.query(
+                        `
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = $1
+                              AND column_name = 'aluno_id'
+                        ) AS exists
+                        `,
+                        [tableName]
+                    );
+
+                    if (!existsResult.rows[0]?.exists) {
+                        logger.info(`${tableName} ignorado na deleção de aluno (tabela/coluna aluno_id ausente)`, {
+                            alunoId: id
+                        });
+                        return 0;
+                    }
+
+                    const result = await client.query(
+                        `DELETE FROM public.${tableName} WHERE aluno_id = $1`,
+                        [id]
+                    );
+                    logger.info(`${tableName} deletados`, { count: result.rowCount || 0 });
+                    return result.rowCount || 0;
+                };
+
+                const deleteOptionalByRelatedAluno = async (tableName, fkColumn, parentTableName) => {
+                    const existsResult = await client.query(
+                        `
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = $1
+                              AND column_name = $2
+                        ) AS exists
+                        `,
+                        [tableName, fkColumn]
+                    );
+
+                    if (!existsResult.rows[0]?.exists) {
+                        logger.info(`${tableName} ignorado na deleção de aluno (tabela/coluna ${fkColumn} ausente)`, {
+                            alunoId: id
+                        });
+                        return 0;
+                    }
+
+                    const result = await client.query(
+                        `
+                        DELETE FROM public.${tableName}
+                        WHERE ${fkColumn} IN (
+                            SELECT id
+                            FROM public.${parentTableName}
+                            WHERE aluno_id = $1
+                        )
+                        `,
+                        [id]
+                    );
+                    logger.info(`${tableName} deletados`, { count: result.rowCount || 0 });
+                    return result.rowCount || 0;
+                };
                 
                 // Deletar todas as dependências em ordem (mesmo que tenham ON DELETE CASCADE, vamos garantir)
                 // 1. itens_dieta (via dietas)
@@ -1539,6 +2145,8 @@ app.delete('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) 
                 if (dietasIds.length > 0) {
                     await client.query('DELETE FROM itens_dieta WHERE dieta_id = ANY($1)', [dietasIds]);
                     logger.info('itens_dieta deletados', { count: dietasIds.length });
+                    await client.query('DELETE FROM dieta_farmacos WHERE dieta_id = ANY($1)', [dietasIds]);
+                    logger.info('dieta_farmacos deletados', { count: dietasIds.length });
                 }
                 
                 // 2. dietas
@@ -1565,100 +2173,57 @@ app.delete('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) 
                 const asaasCustomersResult = await client.query('DELETE FROM asaas_customers WHERE aluno_id = $1 RETURNING id', [id]);
                 logger.info('asaas_customers deletados', { count: asaasCustomersResult.rows.length });
                 
-                // 8. turmas_alunos (se existir)
-                try {
-                    const turmasAlunosResult = await client.query('DELETE FROM turmas_alunos WHERE aluno_id = $1 RETURNING id', [id]);
-                    logger.info('turmas_alunos deletados', { count: turmasAlunosResult.rows.length });
-                } catch (turmasError) {
-                    // Tabela pode não existir, ignorar erro
-                    if (!turmasError.message.includes('does not exist')) {
-                        logger.warn('Erro ao deletar turmas_alunos (pode não existir)', { error: turmasError.message });
-                    }
-                }
+                // Dependências indiretas: precisam sair antes dos pais.
+                await deleteOptionalByRelatedAluno('mensagens', 'conversa_id', 'conversas');
+                await deleteOptionalByRelatedAluno('relatorio_feedbacks', 'relatorio_id', 'relatorios');
+                await deleteOptionalByRelatedAluno('relatorio_midias', 'relatorio_id', 'relatorios');
+
+                // 8+. Dependências opcionais: checar existência antes do DELETE.
+                // Em PostgreSQL, qualquer erro dentro de uma transação aborta toda a
+                // transação, mesmo quando capturado por try/catch no Node.
+                await deleteOptionalAlunoDependency('agenda_eventos');
+                await deleteOptionalAlunoDependency('turmas_alunos');
                 
-                // 9. eventos_participantes (se existir)
-                try {
-                    const eventosParticipantesResult = await client.query('DELETE FROM eventos_participantes WHERE aluno_id = $1 RETURNING id', [id]);
-                    logger.info('eventos_participantes deletados', { count: eventosParticipantesResult.rows.length });
-                } catch (eventosError) {
-                    // Tabela pode não existir, ignorar erro
-                    if (!eventosError.message.includes('does not exist')) {
-                        logger.warn('Erro ao deletar eventos_participantes (pode não existir)', { error: eventosError.message });
-                    }
-                }
+                await deleteOptionalAlunoDependency('eventos_participantes');
                 
-                // 10. avisos_destinatarios (se existir)
-                try {
-                    const avisosDestinatariosResult = await client.query('DELETE FROM avisos_destinatarios WHERE aluno_id = $1 RETURNING id', [id]);
-                    logger.info('avisos_destinatarios deletados', { count: avisosDestinatariosResult.rows.length });
-                } catch (avisosError) {
-                    // Tabela pode não existir, ignorar erro
-                    if (!avisosError.message.includes('does not exist')) {
-                        logger.warn('Erro ao deletar avisos_destinatarios (pode não existir)', { error: avisosError.message });
-                    }
-                }
+                await deleteOptionalAlunoDependency('avisos_destinatarios');
                 
-                // 11. weekly_checkins (se existir)
-                try {
-                    const weeklyCheckinsResult = await client.query('DELETE FROM weekly_checkins WHERE aluno_id = $1 RETURNING id', [id]);
-                    logger.info('weekly_checkins deletados', { count: weeklyCheckinsResult.rows.length });
-                } catch (checkinsError) {
-                    // Tabela pode não existir, ignorar erro
-                    if (!checkinsError.message.includes('does not exist')) {
-                        logger.warn('Erro ao deletar weekly_checkins (pode não existir)', { error: checkinsError.message });
-                    }
-                }
+                await deleteOptionalAlunoDependency('weekly_checkins');
+
+                await deleteOptionalAlunoDependency('checkin_reminders');
                 
-                // 12. progressos (se existir)
-                try {
-                    const progressosResult = await client.query('DELETE FROM progressos WHERE aluno_id = $1 RETURNING id', [id]);
-                    logger.info('progressos deletados', { count: progressosResult.rows.length });
-                } catch (progressosError) {
-                    // Tabela pode não existir, ignorar erro
-                    if (!progressosError.message.includes('does not exist')) {
-                        logger.warn('Erro ao deletar progressos (pode não existir)', { error: progressosError.message });
-                    }
-                }
+                await deleteOptionalAlunoDependency('progressos');
                 
-                // 13. avaliacoes (se existir)
-                try {
-                    const avaliacoesResult = await client.query('DELETE FROM avaliacoes WHERE aluno_id = $1 RETURNING id', [id]);
-                    logger.info('avaliacoes deletadas', { count: avaliacoesResult.rows.length });
-                } catch (avaliacoesError) {
-                    // Tabela pode não existir, ignorar erro
-                    if (!avaliacoesError.message.includes('does not exist')) {
-                        logger.warn('Erro ao deletar avaliacoes (pode não existir)', { error: avaliacoesError.message });
-                    }
-                }
+                await deleteOptionalAlunoDependency('avaliacoes');
                 
-                // 14. recurring_charges_config (se existir)
-                try {
-                    const recurringChargesResult = await client.query('DELETE FROM recurring_charges_config WHERE aluno_id = $1 RETURNING id', [id]);
-                    logger.info('recurring_charges_config deletados', { count: recurringChargesResult.rows.length });
-                } catch (recurringError) {
-                    // Tabela pode não existir, ignorar erro
-                    if (!recurringError.message.includes('does not exist')) {
-                        logger.warn('Erro ao deletar recurring_charges_config (pode não existir)', { error: recurringError.message });
-                    }
-                }
+                await deleteOptionalAlunoDependency('recurring_charges_config');
+
+                await deleteOptionalAlunoDependency('recurring_charges');
                 
-                // 15. financial_exceptions (se existir)
-                try {
-                    const financialExceptionsResult = await client.query('DELETE FROM financial_exceptions WHERE aluno_id = $1 RETURNING id', [id]);
-                    logger.info('financial_exceptions deletados', { count: financialExceptionsResult.rows.length });
-                } catch (financialError) {
-                    // Tabela pode não existir, ignorar erro
-                    if (!financialError.message.includes('does not exist')) {
-                        logger.warn('Erro ao deletar financial_exceptions (pode não existir)', { error: financialError.message });
-                    }
-                }
+                await deleteOptionalAlunoDependency('financial_exceptions');
+
+                await deleteOptionalAlunoDependency('lembretes_eventos');
+
+                await deleteOptionalAlunoDependency('notificacoes');
+
+                await deleteOptionalAlunoDependency('perfil_nutricional');
+
+                await deleteOptionalAlunoDependency('relatorio_feedbacks');
+
+                await deleteOptionalAlunoDependency('relatorios');
+
+                await deleteOptionalAlunoDependency('conversas');
                 
                 // 16. Deletar o aluno (finalmente)
                 await client.query('DELETE FROM public.alunos WHERE id = $1', [id]);
+
+                // 17. Remover credencial da plataforma (evita reaparecer em cadastros pendentes)
+                const authRemoved = await deleteAuthUserForAluno(client, authTargets);
                 
                 await client.query('COMMIT');
                 logger.info('Aluno deletado com sucesso (todas as dependências removidas)', { 
                     alunoId: id,
+                    credencialRemovida: authRemoved.removed,
                     dependenciasRemovidas: {
                         dietas: dietasResult.rows.length,
                         itens_dieta: dietasIds.length,
@@ -1731,6 +2296,28 @@ app.post('/storage/v1/object/:bucket/*', authenticate, upload.single('file'), (r
     res.json({ path: filePath });
 });
 
+// Compatibilidade: URLs antigas guardadas como {API}/storage/avatars/:file (sem /api/uploads)
+app.get('/storage/avatars/:filename', (req, res) => {
+    try {
+        const safeName = path.basename(String(req.params.filename || ''));
+        if (!safeName) {
+            return res.status(400).json({ error: 'Parâmetros inválidos' });
+        }
+        const avatarsDir = path.resolve(__dirname, 'storage', 'avatars');
+        const filePath = path.resolve(avatarsDir, safeName);
+        if (!filePath.startsWith(avatarsDir)) {
+            return res.status(400).json({ error: 'Parâmetros inválidos' });
+        }
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ error: 'Arquivo não encontrado' });
+        }
+        res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+        return res.sendFile(filePath);
+    } catch (error) {
+        return res.status(500).json({ error: error.message });
+    }
+});
+
 app.get('/storage/v1/object/public/:bucket/*', (req, res) => {
     const filePath = path.join(__dirname, 'storage', req.params.bucket, req.params[0]);
     res.sendFile(filePath);
@@ -1779,6 +2366,20 @@ app.post('/api/import/confirm', authenticate, (req, res) => {
         });
         if (!res.headersSent) {
             res.status(500).json({ success: false, error: err.message || 'Erro ao confirmar importação' });
+        }
+    });
+});
+
+// Reimportar só a dieta para aluno já cadastrado (PDF já parseado no frontend)
+app.post('/api/import/confirm-diet', authenticate, (req, res) => {
+    importController.confirmDietForAluno(req, res).catch((err) => {
+        const logger = require('./utils/logger');
+        logger.error('Erro não capturado em confirmDietForAluno', {
+            error: err.message,
+            stack: err.stack,
+        });
+        if (!res.headersSent) {
+            res.status(500).json({ success: false, error: err.message || 'Erro ao reimportar dieta' });
         }
     });
 });
@@ -1889,24 +2490,86 @@ app.post('/api/payments/create-asaas', authenticate, async (req, res) => {
         }
 
         const aluno = alunoResult.rows[0];
+        const activeException = await getActiveFinancialException(pool, aluno.id);
+        const amountDecision = applyFinancialExceptionToAmount(value, activeException);
+
+        if (!amountDecision.shouldCharge) {
+            logger.info('payments.create_asaas.skipped_by_financial_exception', {
+                alunoId: aluno.id,
+                coachId: req.user.id,
+                exceptionType: activeException?.tipo || null,
+                reason: amountDecision.reason,
+                originalValue: amountDecision.originalValue,
+            });
+
+            return res.status(409).json({
+                success: false,
+                error: activeException
+                    ? `Aluno possui exceção financeira ativa (${activeException.tipo}). Cobrança não será gerada.`
+                    : 'Valor inválido para cobrança.',
+                error_code: activeException ? 'FINANCIAL_EXCEPTION_ACTIVE' : 'INVALID_PAYMENT_VALUE',
+                active_exception: activeException,
+            });
+        }
+
+        const effectiveValue = amountDecision.value;
+        const effectiveDescription = amountDecision.reason === 'financial_exception_desconto'
+            ? `${description || `Pagamento - ${aluno.nome}`} (desconto financeiro aplicado)`
+            : description;
 
         let payment = null;
         let asaasPaymentData = null;
 
-        // Se Asaas Service estiver disponível, criar pagamento no Asaas
-        if (asaasService) {
+        let effectiveAsaas = asaasService;
+        try {
+            const cfgResult = await pool.query(
+                'SELECT asaas_api_key, is_sandbox FROM public.asaas_config WHERE coach_id = $1 LIMIT 1',
+                [req.user.id],
+            );
+            if (
+                cfgResult.rows.length > 0 &&
+                cfgResult.rows[0].asaas_api_key &&
+                String(cfgResult.rows[0].asaas_api_key).trim()
+            ) {
+                const row = cfgResult.rows[0];
+                let plainKey = '';
+                try {
+                    plainKey = decryptCoachAsaasApiKey(row.asaas_api_key);
+                } catch (decErr) {
+                    logger.error('payments.create_asaas.decrypt_coach_key_failed', {
+                        error: decErr.message,
+                        coach_id: req.user.id,
+                    });
+                    return res.status(503).json({
+                        success: false,
+                        error:
+                            'Configure ASAAS_COACH_SECRETS_KEY no servidor para usar a chave Asaas guardada, ou atualize a chave nas Configurações.',
+                        error_code: 'ASAAS_SECRET_DECRYPT_FAILED',
+                    });
+                }
+                effectiveAsaas = new AsaasService(
+                    plainKey,
+                    row.is_sandbox ? 'sandbox' : 'production',
+                );
+            }
+        } catch (cfgErr) {
+            logger.warn('payments.create_asaas.config_lookup_failed', { error: cfgErr.message });
+        }
+
+        // Chave por coach (asaas_config) ou variável de ambiente global
+        if (effectiveAsaas) {
             try {
                 // Criar pagamento completo no Asaas
-                const result = await asaasService.createCompletePayment({
+                const result = await effectiveAsaas.createCompletePayment({
                     alunoId: aluno.id,
                     alunoNome: aluno.nome,
                     alunoEmail: aluno.email || `${aluno.nome.toLowerCase().replace(/\s+/g, '.')}@aluno.temp`,
                     alunoCpf: aluno.cpf || null,
                     alunoTelefone: aluno.telefone || null,
-                    value: parseFloat(value),
+                    value: effectiveValue,
                     billingType: billingType,
                     dueDate: dueDate,
-                    description: description || `Pagamento - ${aluno.nome}`
+                    description: effectiveDescription || `Pagamento - ${aluno.nome}`
                 });
 
                 asaasPaymentData = result.payment;
@@ -1930,10 +2593,10 @@ app.post('/api/payments/create-asaas', authenticate, async (req, res) => {
                     [
                         alunoId,
                         req.user.id,
-                        parseFloat(value),
+                        effectiveValue,
                         billingType,
                         dueDate,
-                        description || null,
+                        effectiveDescription || null,
                         asaasPaymentData.id,
                         result.customer.id,
                         asaasPaymentData.pix?.copyPaste || null,
@@ -1976,7 +2639,7 @@ app.post('/api/payments/create-asaas', authenticate, async (req, res) => {
                         asaas_customer_id
                     ) VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7, $8)
                     RETURNING *`,
-                    [alunoId, req.user.id, parseFloat(value), billingType, dueDate, description || null, tempPaymentId, tempCustomerId]
+                    [alunoId, req.user.id, effectiveValue, billingType, dueDate, effectiveDescription || null, tempPaymentId, tempCustomerId]
                 );
                 payment = paymentResult.rows[0];
                 
@@ -2006,7 +2669,7 @@ app.post('/api/payments/create-asaas', authenticate, async (req, res) => {
                     asaas_customer_id
                 ) VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7, $8)
                 RETURNING *`,
-                [alunoId, req.user.id, parseFloat(value), billingType, dueDate, description || null, tempPaymentId, tempCustomerId]
+                [alunoId, req.user.id, effectiveValue, billingType, dueDate, effectiveDescription || null, tempPaymentId, tempCustomerId]
             );
             payment = paymentResult.rows[0];
             

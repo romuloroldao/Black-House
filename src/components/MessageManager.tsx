@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Send, MessageSquare, Search, Plus, UserPlus } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -262,7 +262,7 @@ const MessageManager = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
-        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full motion-safe:animate-spin" />
       </div>
     );
   }
@@ -287,6 +287,9 @@ const MessageManager = () => {
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Iniciar Nova Conversa</DialogTitle>
+                  <DialogDescription>
+                    Busque e selecione um aluno para abrir uma nova conversa.
+                  </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4">
                   <div className="relative">

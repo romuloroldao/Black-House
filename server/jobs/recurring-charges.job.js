@@ -2,6 +2,10 @@
 // Gera cobranças recorrentes automaticamente
 
 const cron = require('node-cron');
+const {
+    getActiveFinancialException,
+    applyFinancialExceptionToAmount,
+} = require('../utils/financial-status');
 
 class RecurringChargesJob {
     constructor(pool, asaasService) {
@@ -57,6 +61,22 @@ class RecurringChargesJob {
 
             for (const recurring of recurringResult.rows) {
                 try {
+                    const activeException = await getActiveFinancialException(this.pool, recurring.aluno_id);
+                    const amountDecision = applyFinancialExceptionToAmount(recurring.value, activeException);
+
+                    if (!amountDecision.shouldCharge) {
+                        console.log(
+                            `[RecurringChargesJob] Cobrança ignorada para aluno ${recurring.aluno_id}: ${amountDecision.reason}`
+                        );
+                        await this.pool.query(
+                            `UPDATE public.recurring_charges
+                             SET last_charge_date = CURRENT_DATE
+                             WHERE id = $1`,
+                            [recurring.id]
+                        );
+                        continue;
+                    }
+
                     // Calcular data de vencimento (dia do mês configurado)
                     const dueDate = new Date();
                     dueDate.setDate(recurring.due_day || 10); // Default: dia 10
@@ -67,10 +87,12 @@ class RecurringChargesJob {
                     // Criar pagamento via Asaas
                     const payment = await this.asaasService.createPayment({
                         alunoId: recurring.aluno_id,
-                        value: recurring.value,
+                        value: amountDecision.value,
                         billingType: recurring.billing_type || 'BOLETO',
                         dueDate: dueDate.toISOString().split('T')[0],
-                        description: recurring.description || `Cobrança recorrente - ${recurring.aluno_nome}`
+                        description: amountDecision.reason === 'financial_exception_desconto'
+                            ? `${recurring.description || `Cobrança recorrente - ${recurring.aluno_nome}`} (desconto financeiro aplicado)`
+                            : recurring.description || `Cobrança recorrente - ${recurring.aluno_nome}`
                     });
 
                     // Atualizar última data de cobrança

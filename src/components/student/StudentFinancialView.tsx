@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { apiClient } from "@/lib/api-client";
+import { getPlanoAlunoLegivel } from "@/lib/aluno-display";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDataContext } from "@/contexts/DataContext";
 import { DollarSign, CreditCard, Calendar, Download } from "lucide-react";
@@ -81,7 +82,7 @@ const StudentFinancialView = () => {
             <CreditCard className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{alunoData?.plano || "Premium"}</div>
+            <div className="text-2xl font-bold break-words">{getPlanoAlunoLegivel(alunoData)}</div>
             <p className="text-xs text-muted-foreground mt-1">Ativo</p>
           </CardContent>
         </Card>

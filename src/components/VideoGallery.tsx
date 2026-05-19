@@ -282,7 +282,7 @@ const VideoGallery = () => {
   if (loadingVideos) {
     return (
       <div className="p-6 space-y-6">
-        <div className="animate-pulse">
+        <div className="motion-safe:animate-pulse">
           <div className="h-8 bg-muted rounded w-1/3 mb-4"></div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
             {[1, 2, 3].map(i => (
@@ -300,8 +300,11 @@ const VideoGallery = () => {
       <Dialog open={!!videoToWatch} onOpenChange={() => setVideoToWatch(null)}>
         <DialogContent className="max-w-5xl">
           <DialogHeader>
-            <DialogTitle>{videoToWatch?.title}</DialogTitle>
-            <DialogDescription>{videoToWatch?.description}</DialogDescription>
+            <DialogTitle>{videoToWatch?.title?.trim() || "Reproduzir vídeo"}</DialogTitle>
+            <DialogDescription>
+              {videoToWatch?.description?.trim() ||
+                "Reprodução do conteúdo do YouTube na plataforma."}
+            </DialogDescription>
           </DialogHeader>
           <div className="aspect-video w-full">
             <iframe

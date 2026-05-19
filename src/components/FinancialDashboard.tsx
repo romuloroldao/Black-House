@@ -7,6 +7,7 @@ import { DollarSign, TrendingUp, TrendingDown, AlertCircle, Users, CheckCircle, 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { formatDateBR } from "@/lib/date-format";
 
 interface PaymentData {
   id: string;
@@ -206,16 +207,15 @@ export default function FinancialDashboard() {
   };
 
   const getMonthlyData = (): MonthlyData[] => {
-    const monthlyMap = new Map<string, { receitas: number; despesas: number }>();
+    const monthlyMap = new Map<string, { receitas: number; despesas: number; label: string }>();
 
     payments.forEach((p) => {
       if (p.status === "RECEIVED") {
-        const month = new Date(p.due_date).toLocaleDateString("pt-BR", {
-          month: "short",
-          year: "2-digit",
-        });
-        const current = monthlyMap.get(month) || { receitas: 0, despesas: 0 };
-        monthlyMap.set(month, {
+        const d = new Date(p.due_date);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        const label = formatDateBR(new Date(d.getFullYear(), d.getMonth(), 1));
+        const current = monthlyMap.get(key) || { receitas: 0, despesas: 0, label };
+        monthlyMap.set(key, {
           ...current,
           receitas: current.receitas + Number(p.value),
         });
@@ -224,12 +224,11 @@ export default function FinancialDashboard() {
 
     expenses.forEach((e) => {
       if (e.status === "pago") {
-        const month = new Date(e.data_vencimento).toLocaleDateString("pt-BR", {
-          month: "short",
-          year: "2-digit",
-        });
-        const current = monthlyMap.get(month) || { receitas: 0, despesas: 0 };
-        monthlyMap.set(month, {
+        const d = new Date(e.data_vencimento);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        const label = formatDateBR(new Date(d.getFullYear(), d.getMonth(), 1));
+        const current = monthlyMap.get(key) || { receitas: 0, despesas: 0, label };
+        monthlyMap.set(key, {
           ...current,
           despesas: current.despesas + Number(e.valor),
         });
@@ -237,13 +236,15 @@ export default function FinancialDashboard() {
     });
 
     return Array.from(monthlyMap.entries())
-      .map(([month, data]) => ({
-        month,
+      .map(([monthKey, data]) => ({
+        month: data.label,
+        monthKey,
         receitas: data.receitas,
         despesas: data.despesas,
         lucro: data.receitas - data.despesas,
       }))
-      .sort((a, b) => a.month.localeCompare(b.month));
+      .sort((a, b) => a.monthKey.localeCompare(b.monthKey))
+      .map(({ month, receitas, despesas, lucro }) => ({ month, receitas, despesas, lucro }));
   };
 
   const getCategoryData = () => {
@@ -421,7 +422,7 @@ export default function FinancialDashboard() {
 
         <TabsContent value="students" className="space-y-4">
           {/* Métricas de Alunos */}
-          <div className="grid gap-4 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total de Alunos</CardTitle>

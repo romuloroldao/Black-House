@@ -24,7 +24,11 @@ import {
   Mail,
   FileText,
   Users,
-  ArrowRight
+  ArrowRight,
+  UserPlus,
+  Copy,
+  Clock,
+  Trash2
 } from "lucide-react";
 
 interface Aluno {
@@ -33,6 +37,8 @@ interface Aluno {
   email: string;
   cpf_cnpj: string | null;
   coach_id: string | null;
+  coach_email?: string | null;
+  coach_nome?: string | null;
   user_id?: string | null; // FONTE DE VERDADE: vínculo com credencial de usuário (opcional para compatibilidade)
 }
 
@@ -41,6 +47,13 @@ interface UserRole {
   user_id: string;
   role: string;
   email?: string;
+}
+
+interface UnlinkedRegistration {
+  user_id: string;
+  email: string;
+  created_at?: string;
+  email_confirmed_at?: string | null;
 }
 
 export default function UserLinkingManager() {
@@ -53,6 +66,13 @@ export default function UserLinkingManager() {
   const [selectedAluno, setSelectedAluno] = useState<Aluno | null>(null);
   const [selectedCredential, setSelectedCredential] = useState<string>("");
   const [linking, setLinking] = useState(false);
+  const [cadastrosPendentes, setCadastrosPendentes] = useState<UnlinkedRegistration[]>([]);
+  const [adoptingUserId, setAdoptingUserId] = useState<string | null>(null);
+  const [dismissingUserId, setDismissingUserId] = useState<string | null>(null);
+  const [coaches, setCoaches] = useState<Array<{ user_id: string; email?: string }>>([]);
+  const [adoptCoachId, setAdoptCoachId] = useState<string>("");
+
+  const isAdmin = user?.role === "admin";
 
   useEffect(() => {
     if (user) {
@@ -66,15 +86,37 @@ export default function UserLinkingManager() {
     setLoading(true);
     try {
       // Buscar alunos do coach
-      const alunosResult = await apiClient.requestSafe<any[]>('/api/alunos');
+      const alunosEndpoint = isAdmin ? '/api/alunos/by-coach' : '/api/alunos';
+      const alunosResult = await apiClient.requestSafe<any[]>(alunosEndpoint);
       const rolesResult = await apiClient.requestSafe<any[]>('/api/user-roles');
+      const unlinkedResult = await apiClient.requestSafe<UnlinkedRegistration[]>(
+        '/api/alunos/unlinked-registrations'
+      );
 
       const alunosData = alunosResult.success && Array.isArray(alunosResult.data) ? alunosResult.data : [];
       const rolesData = rolesResult.success && Array.isArray(rolesResult.data) ? rolesResult.data : [];
 
-      const alunosFiltrados = alunosData
-        .filter((a: any) => a.coach_id === user.id)
-        .sort((a: any, b: any) => String(a?.nome || '').localeCompare(String(b?.nome || '')));
+      const alunosFiltrados = (isAdmin
+        ? alunosData
+        : alunosData.filter((a: any) => a.coach_id === user.id)
+      ).sort((a: any, b: any) => String(a?.nome || '').localeCompare(String(b?.nome || '')));
+
+      if (isAdmin) {
+        const coachRoles = rolesData.filter((r: any) => r.role === "coach");
+        const coachesComEmail: Array<{ user_id: string; email?: string }> = [];
+        for (const c of coachRoles) {
+          try {
+            const coachUser = await apiClient.getUserById(c.user_id);
+            coachesComEmail.push({ user_id: c.user_id, email: coachUser?.email });
+          } catch {
+            coachesComEmail.push({ user_id: c.user_id });
+          }
+        }
+        setCoaches(coachesComEmail);
+        if (!adoptCoachId && coachesComEmail[0]?.user_id) {
+          setAdoptCoachId(coachesComEmail[0].user_id);
+        }
+      }
 
       const rolesFiltradas = rolesData.filter((r: any) => r.role === "aluno");
 
@@ -97,8 +139,14 @@ export default function UserLinkingManager() {
         }
       }
 
+      const unlinkedData =
+        unlinkedResult.success && Array.isArray(unlinkedResult.data)
+          ? unlinkedResult.data
+          : [];
+
       setAlunos(alunosFiltrados);
       setUsuarios(usuariosComEmail);
+      setCadastrosPendentes(unlinkedData);
     } catch (error) {
       console.error("Erro ao carregar dados:", error);
       toast.error("Erro ao carregar dados");
@@ -110,6 +158,39 @@ export default function UserLinkingManager() {
   // Verifica se um aluno está vinculado a uma credencial
   // DESIGN-LINK-ALUNO-USER-001: FONTE DE VERDADE é user_id (não linked_user_id)
   // FALLBACK: Se user_id não existe (migração pendente), usar correspondência de email
+  const isImportPlaceholderEmail = (email?: string | null) => {
+    if (!email) return true;
+    const v = email.trim().toLowerCase();
+    return v.endsWith('@blackhouse.local') || v.startsWith('import-');
+  };
+
+  const deriveNameHintFromEmail = (addr?: string) => {
+    if (!addr || addr.includes("@blackhouse.local")) return null;
+    const local = addr.split("@")[0]?.replace(/[._-]+/g, " ").trim();
+    if (!local || local.length < 2) return null;
+    return local.replace(/\b\w/g, (c) => c.toUpperCase());
+  };
+
+  const getDisplayName = (aluno: Aluno) => {
+    if (aluno.nome && String(aluno.nome).trim()) return String(aluno.nome).trim();
+    const cred = aluno.user_id ? usuarios.find((u) => u.user_id === aluno.user_id) : null;
+    return deriveNameHintFromEmail(cred?.email || aluno.email) || "Sem nome";
+  };
+
+  const getDisplayEmail = (aluno: Aluno) => {
+    if (aluno.user_id && isImportPlaceholderEmail(aluno.email)) {
+      const cred = usuarios.find((u) => u.user_id === aluno.user_id);
+      if (cred?.email) return cred.email;
+    }
+    return aluno.email || '-';
+  };
+
+  const getCoachLabel = (aluno: Aluno) => {
+    if (aluno.coach_nome) return aluno.coach_nome;
+    if (aluno.coach_email) return aluno.coach_email;
+    return '—';
+  };
+
   const isLinked = (aluno: Aluno) => {
     // Prioridade 1: user_id existe e não é null (campo canônico)
     if (aluno.user_id !== null && aluno.user_id !== undefined) {
@@ -182,6 +263,67 @@ export default function UserLinkingManager() {
     setIsLinkDialogOpen(true);
   };
 
+  const signupInviteUrl =
+    !isAdmin && typeof window !== "undefined" && user?.id
+      ? `${window.location.origin}/auth?coach=${encodeURIComponent(user.id)}`
+      : "";
+
+  const handleCopyInviteLink = async () => {
+    if (!signupInviteUrl) return;
+    try {
+      await navigator.clipboard.writeText(signupInviteUrl);
+      toast.success("Link de cadastro copiado!");
+    } catch {
+      toast.error("Não foi possível copiar o link");
+    }
+  };
+
+  const handleDismissRegistration = async (reg: UnlinkedRegistration) => {
+    if (
+      !confirm(
+        `Remover o cadastro de ${reg.email} da plataforma? A pessoa precisará criar conta novamente para acessar.`,
+      )
+    ) {
+      return;
+    }
+    setDismissingUserId(reg.user_id);
+    try {
+      await apiClient.request("/api/alunos/dismiss-registration", {
+        method: "POST",
+        body: JSON.stringify({ userIdToDismiss: reg.user_id }),
+      });
+      toast.success(`Cadastro de ${reg.email} removido.`);
+      carregarDados();
+    } catch (error: any) {
+      toast.error("Erro ao remover cadastro: " + (error.message || "Erro desconhecido"));
+    } finally {
+      setDismissingUserId(null);
+    }
+  };
+
+  const handleAdoptRegistration = async (reg: UnlinkedRegistration) => {
+    if (isAdmin && !adoptCoachId) {
+      toast.error("Selecione o coach responsável antes de criar a ficha.");
+      return;
+    }
+    setAdoptingUserId(reg.user_id);
+    try {
+      await apiClient.request("/api/alunos/adopt-registration", {
+        method: "POST",
+        body: JSON.stringify({
+          userIdToLink: reg.user_id,
+          ...(isAdmin ? { assignCoachId: adoptCoachId } : {}),
+        }),
+      });
+      toast.success(`Ficha criada para ${reg.email}`);
+      carregarDados();
+    } catch (error: any) {
+      toast.error("Erro ao criar ficha: " + (error.message || "Erro desconhecido"));
+    } finally {
+      setAdoptingUserId(null);
+    }
+  };
+
   const handleLink = async () => {
     if (!selectedAluno || !selectedCredential) return;
     
@@ -247,7 +389,7 @@ export default function UserLinkingManager() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+        <RefreshCw className="h-8 w-8 motion-safe:animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -256,13 +398,29 @@ export default function UserLinkingManager() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h2 className="text-2xl font-bold flex items-center gap-2">
+        <h2 className="text-2xl font-bold flex items-center gap-2 flex-wrap">
           <Link2 className="w-6 h-6 text-primary" />
           Vincular Usuários Importados
+          {isAdmin && (
+            <Badge variant="outline" className="text-xs border-primary/40 text-primary">
+              Super Admin — visão global
+            </Badge>
+          )}
         </h2>
         <p className="text-muted-foreground mt-1">
-          Associe usuários importados via upload de ficha às credenciais criadas
+          Associe fichas importadas às credenciais ou adote cadastros feitos pelo link de convite
         </p>
+        {signupInviteUrl && (
+          <div className="mt-4 flex flex-col sm:flex-row gap-2 sm:items-center">
+            <code className="text-xs bg-muted px-3 py-2 rounded-md flex-1 truncate">
+              {signupInviteUrl}
+            </code>
+            <Button type="button" variant="outline" size="sm" onClick={handleCopyInviteLink}>
+              <Copy className="w-4 h-4 mr-2" />
+              Copiar link de cadastro
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Stats Cards */}
@@ -302,8 +460,113 @@ export default function UserLinkingManager() {
         </Card>
       </div>
 
+      {cadastrosPendentes.length > 0 && (
+        <Card className="border-amber-500/30">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <UserPlus className="w-5 h-5 text-amber-500" />
+              Cadastros na plataforma ({cadastrosPendentes.length})
+            </CardTitle>
+            <CardDescription>
+              Alunos que criaram conta mas ainda não têm ficha.
+              {isAdmin ? " Selecione o coach e clique em criar ficha." : " Clique em criar ficha para aparecerem na lista abaixo."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {isAdmin && coaches.length > 0 && (
+              <div className="flex flex-col sm:flex-row gap-2 sm:items-center max-w-md">
+                <label className="text-sm font-medium shrink-0">Coach responsável:</label>
+                <Select value={adoptCoachId} onValueChange={setAdoptCoachId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecionar coach" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {coaches.map((c) => (
+                      <SelectItem key={c.user_id} value={c.user_id}>
+                        {c.email || c.user_id.slice(0, 8)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <ScrollArea className="h-[280px]">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Data</TableHead>
+                    <TableHead>Email confirmado</TableHead>
+                    <TableHead className="text-right">Ação</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {cadastrosPendentes.map((reg) => (
+                    <TableRow key={reg.user_id}>
+                      <TableCell className="font-medium">{reg.email}</TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {reg.created_at
+                          ? new Date(reg.created_at).toLocaleString("pt-BR")
+                          : "—"}
+                      </TableCell>
+                      <TableCell>
+                        {reg.email_confirmed_at ? (
+                          <Badge variant="default" className="bg-primary/20 text-primary border-primary/30">
+                            <Check className="w-3 h-3 mr-1" />
+                            Sim
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary">
+                            <Clock className="w-3 h-3 mr-1" />
+                            Pendente
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleDismissRegistration(reg)}
+                            disabled={dismissingUserId === reg.user_id || adoptingUserId === reg.user_id}
+                            title="Remove só o cadastro na plataforma (sem ficha)"
+                          >
+                            {dismissingUserId === reg.user_id ? (
+                              <RefreshCw className="w-4 h-4 motion-safe:animate-spin" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => handleAdoptRegistration(reg)}
+                            disabled={adoptingUserId === reg.user_id || dismissingUserId === reg.user_id}
+                          >
+                            {adoptingUserId === reg.user_id ? (
+                              <>
+                                <RefreshCw className="w-4 h-4 mr-1 motion-safe:animate-spin" />
+                                Criando...
+                              </>
+                            ) : (
+                              <>
+                                <UserPlus className="w-4 h-4 mr-1" />
+                                Criar ficha
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Empty State */}
-      {alunos.length === 0 ? (
+      {alunos.length === 0 && cadastrosPendentes.length === 0 ? (
         <Card>
           <CardContent className="py-16 text-center">
             <div className="mx-auto w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
@@ -311,7 +574,7 @@ export default function UserLinkingManager() {
             </div>
             <h3 className="text-lg font-medium mb-2">Nenhum usuário importado</h3>
             <p className="text-muted-foreground mb-6 max-w-md mx-auto">
-              Faça upload de fichas de alunos para importá-los e depois vincule às credenciais criadas.
+              Compartilhe o link de cadastro acima ou importe fichas para vincular alunos.
             </p>
             <Button>
               <FileText className="w-4 h-4 mr-2" />
@@ -343,6 +606,7 @@ export default function UserLinkingManager() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Nome</TableHead>
+                      {isAdmin && <TableHead>Coach</TableHead>}
                       <TableHead>Documento</TableHead>
                       <TableHead>Email</TableHead>
                       <TableHead>Status</TableHead>
@@ -353,14 +617,17 @@ export default function UserLinkingManager() {
                     {alunosFiltrados.map((aluno) => (
                       <TableRow key={aluno.id}>
                         <TableCell className="font-medium">
-                          {aluno.nome || "Sem nome"}
+                          {getDisplayName(aluno)}
                         </TableCell>
+                        {isAdmin && (
+                          <TableCell className="text-sm text-muted-foreground">
+                            {getCoachLabel(aluno)}
+                          </TableCell>
+                        )}
                         <TableCell>
                           {aluno.cpf_cnpj || "-"}
                         </TableCell>
-                        <TableCell>
-                          {aluno.email || "-"}
-                        </TableCell>
+                        <TableCell>{getDisplayEmail(aluno)}</TableCell>
                         <TableCell>
                           {getStatusBadge(aluno)}
                         </TableCell>
@@ -433,7 +700,7 @@ export default function UserLinkingManager() {
                 <div className="flex items-center gap-2 text-sm">
                   <Users className="w-4 h-4 text-muted-foreground" />
                   <span className="text-muted-foreground">Usuário:</span>
-                  <span className="font-medium">{selectedAluno.nome || "Sem nome"}</span>
+                  <span className="font-medium">{getDisplayName(selectedAluno)}</span>
                 </div>
                 {selectedAluno.cpf_cnpj && (
                   <div className="flex items-center gap-2 text-sm">
@@ -498,7 +765,7 @@ export default function UserLinkingManager() {
             >
               {linking ? (
                 <>
-                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  <RefreshCw className="w-4 h-4 mr-2 motion-safe:animate-spin" />
                   Vinculando...
                 </>
               ) : (

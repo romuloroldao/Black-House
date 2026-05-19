@@ -28,8 +28,8 @@ interface ComboboxProps {
 }
 
 // Função para normalizar texto (remover acentos e caracteres especiais)
-const normalizeText = (text: string) => {
-  return text
+const normalizeText = (text: string | null | undefined) => {
+  return String(text ?? '')
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "") // Remove acentos
@@ -88,7 +88,7 @@ export function Combobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-        <Command>
+        <Command shouldFilter={false}>
           <CommandInput 
             placeholder={searchPlaceholder} 
             value={searchValue}

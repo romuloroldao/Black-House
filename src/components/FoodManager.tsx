@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import { Plus, Search, Edit, Trash2, Apple, AlertCircle, Calculator, Upload, Download, FileSpreadsheet, ClipboardCheck, Merge } from "lucide-react";
 import FoodReviewManager from "./FoodReviewManager";
 import * as XLSX from 'xlsx';
-import { Food, getAllFoodsSafe, getMacroGroup } from "@/lib/foodService";
+import { Food, getAllFoodsSafe, getMacroGroup, kcalFromMacrosFood } from "@/lib/foodService";
 
 type Alimento = Food;
 
@@ -54,7 +54,7 @@ export default function FoodManager() {
     const ptn = parseFloat(formData.protein) || 0;
     const lip = parseFloat(formData.fat) || 0;
     
-    return (cho * 4) + (ptn * 4) + (lip * 9);
+    return kcalFromMacrosFood(ptn, cho, lip, 0);
   };
 
   // Verifica se há inconsistência entre calorias informadas e calculadas
@@ -102,50 +102,47 @@ Batata doce,100,86,20,1.6,0.1`;
   // Determinar tipo automaticamente
   const determinarTipo = (nome: string, proteina: number, carboidrato: number, gordura: number): string => {
     const nomeLower = nome.toLowerCase();
-    
-    // Frutas
-    const frutas = ['banana', 'maçã', 'laranja', 'limão', 'manga', 'mamão', 'melão', 'melancia', 'uva', 
-                    'morango', 'abacaxi', 'pêra', 'pêssego', 'ameixa', 'acerola', 'kiwi', 'goiaba',
-                    'maracujá', 'tangerina', 'mexerica', 'graviola', 'jabuticaba', 'jaca', 'caju'];
-    if (frutas.some(f => nomeLower.includes(f))) {
+
+    if (['óleo', 'azeite', 'margarina'].some((k) => nomeLower.includes(k)) || gordura >= 80) {
+      return 'Óleos e Gorduras';
+    }
+    if (['castanha', 'amendoim', 'noz', 'semente', 'chia', 'linhaça', 'pistache', 'avelã'].some((k) => nomeLower.includes(k))) {
+      return 'Oleaginosas e Sementes';
+    }
+    if (['feijão', 'lentilha', 'grão de bico', 'ervilha', 'feijao'].some((k) => nomeLower.includes(k))) {
+      return 'Feijão e Leguminosas';
+    }
+    if (['leite', 'queijo', 'iogurte', 'requeijão', 'ricota', 'whey'].some((k) => nomeLower.includes(k))) {
+      return 'Leite e Derivados';
+    }
+    if (['pão', 'pao ', 'macarr', 'tapioca', 'cuscuz', 'pipoca', 'torrada'].some((k) => nomeLower.includes(k))) {
+      return 'Pães e Variedades';
+    }
+    if (['aveia', 'granola', 'farelo'].some((k) => nomeLower.includes(k))) {
+      return 'Fibras A';
+    }
+    if (['abacate', 'coco'].some((k) => nomeLower.includes(k)) && gordura > 8) {
+      return 'Frutas Oleosas';
+    }
+    if (['banana', 'maçã', 'maca', 'laranja', 'manga', 'uva', 'morango', 'abacaxi', 'melão', 'melancia'].some((k) => nomeLower.includes(k))) {
       return 'Frutas';
     }
-    
-    // Vegetais e Legumes
-    const vegetais = ['alface', 'brócolis', 'couve', 'espinafre', 'repolho', 'rúcula', 'agrião', 
-                      'tomate', 'cenoura', 'beterraba', 'pepino', 'cebola', 'alho', 'pimentão',
-                      'abobrinha', 'berinjela', 'quiabo', 'vagem', 'chuchu', 'jiló', 'palmito',
-                      'abóbora', 'acelga', 'chicória', 'almeirão'];
-    if (vegetais.some(v => nomeLower.includes(v))) {
-      return 'Vegetais';
+    if (['suco'].some((k) => nomeLower.includes(k))) {
+      return 'Sucos Naturais e Integrais';
     }
-    
-    // Laticínios
-    const laticinios = ['leite', 'queijo', 'iogurte', 'requeijão', 'manteiga', 'creme de leite',
-                        'ricota', 'mussarela', 'cottage', 'petit suisse', 'doce de leite'];
-    if (laticinios.some(l => nomeLower.includes(l))) {
-      return 'Laticínios';
+    if (['alface', 'tomate', 'pepino', 'rúcula', 'agrião', 'repolho', 'couve', 'espinafre'].some((k) => nomeLower.includes(k))) {
+      return 'Vegetais A (livres para consumo)';
     }
-    
-    // Proteínas (carnes, peixes, ovos)
-    const proteinas = ['carne', 'frango', 'peixe', 'atum', 'salmão', 'camarão', 'sardinha', 
-                       'ovo', 'peru', 'lingüiça', 'linguiça', 'hambúrguer', 'bacon', 'presunto',
-                       'salame', 'fígado', 'coração', 'moela', 'lombo', 'filé', 'peito',
-                       'coxa', 'sobrecoxa', 'acém', 'patinho', 'alcatra', 'picanha', 'costela',
-                       'lagarto', 'maminha', 'cupim', 'músculo', 'whey'];
-    if (proteinas.some(p => nomeLower.includes(p)) || (proteina > 15 && carboidrato < 10)) {
-      return 'Proteínas';
+    if (['cenoura', 'beterraba', 'abóbora', 'abobrinha', 'berinjela', 'brócolis', 'vagem'].some((k) => nomeLower.includes(k))) {
+      return 'Vegetais B';
     }
-    
-    // Lipídios (gorduras, óleos, oleaginosas)
-    const lipidios = ['óleo', 'azeite', 'margarina', 'castanha', 'amendoim', 'abacate',
-                      'gergelim', 'linhaça', 'amêndoa', 'coco', 'pasta de amendoim'];
-    if (lipidios.some(l => nomeLower.includes(l)) || gordura > 40) {
-      return 'Lipídeos';
+    if (['carne', 'frango', 'peixe', 'ovo', 'presunto', 'peru', 'whey', 'atum', 'salmão'].some((k) => nomeLower.includes(k)) || (proteina > 15 && carboidrato < 10)) {
+      return 'Carnes e Proteínas';
     }
-    
-    // Carboidratos (default - pães, arroz, massas, tubérculos)
-    return 'Carboidratos';
+    if (['arroz', 'batata', 'mandioca', 'milho', 'macarr', 'inhame', 'mandioquinha'].some((k) => nomeLower.includes(k))) {
+      return 'Cereais, Raízes, Tubérculos e Frutos';
+    }
+    return 'Cereais, Raízes, Tubérculos e Frutos';
   };
 
   // Determinar origem da proteína
@@ -281,7 +278,7 @@ Batata doce,100,86,20,1.6,0.1`;
       // Buscar alimentos existentes para evitar duplicatas
       const existingResult = await getAllFoodsSafe();
       const existingFoods = existingResult.success && Array.isArray(existingResult.data) ? existingResult.data : [];
-      const existingNames = new Set(existingFoods.map(f => f.name.toLowerCase()));
+      const existingNames = new Set(existingFoods.map(f => String(f.name || '').toLowerCase()));
 
       // Filtrar apenas alimentos novos
       const novosAlimentos = importPreview.filter(item => 
@@ -456,7 +453,7 @@ Batata doce,100,86,20,1.6,0.1`;
   };
 
   const filteredAlimentos = alimentos.filter((alimento) => {
-    const matchesSearch = alimento.name.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = String(alimento.name || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = selectedCategory === "all" || getMacroGroup(alimento) === selectedCategory;
     return matchesSearch && matchesCategory;
   });

@@ -32,6 +32,16 @@ class SecretsValidator {
             errors.push('ASAAS_API_KEY não configurado mas ENABLE_ASAAS=true');
         }
 
+        // Chaves Asaas por coach (Configurações) — cifrado na BD
+        if (process.env.NODE_ENV === 'production') {
+            const coachKey = process.env.ASAAS_COACH_SECRETS_KEY;
+            if (!coachKey || String(coachKey).length < 32) {
+                logger.warn(
+                    '[secrets] Produção sem ASAAS_COACH_SECRETS_KEY (≥32 caracteres): integração por coach será rejeitada ao guardar chave até configurar esta variável.',
+                );
+            }
+        }
+
         // Webhook token (se webhooks habilitados)
         if (process.env.ENABLE_WEBHOOKS === 'true' && !process.env.ASAAS_WEBHOOK_TOKEN) {
             errors.push('ASAAS_WEBHOOK_TOKEN não configurado mas ENABLE_WEBHOOKS=true');

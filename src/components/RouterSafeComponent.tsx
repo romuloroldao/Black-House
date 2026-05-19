@@ -23,7 +23,7 @@ export const RouterSafeComponent = ({ children, fallback }: RouterSafeComponentP
   if (!isInRouterContext) {
     return fallback || (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full motion-safe:animate-spin" />
       </div>
     );
   }

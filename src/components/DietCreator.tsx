@@ -13,7 +13,15 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Textarea } from '@/components/ui/textarea';
 import { Plus, Trash2, Calculator, Users, Pill } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { Food, getAllFoodsSafe, getMacroGroup } from '@/lib/foodService';
+import {
+  Food,
+  getAllFoodsSafe,
+  macroScaleFactor,
+  QuantityUnit,
+} from '@/lib/foodService';
+import { listarSubstituicoesIsocaloricas } from '@/lib/foodEquivalence';
+import { getAlunoDisplayName } from '@/lib/aluno-display';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 type Alimento = Food;
 
@@ -28,6 +36,8 @@ interface ItemRefeicao {
   id: string;
   alimento_id: string;
   quantidade: number;
+  /** Base da quantidade vs `food.portion` (ver macroScaleFactor em foodService). */
+  unidade_quantidade: QuantityUnit;
   refeicao: string;
   alimento?: Alimento;
 }
@@ -48,6 +58,12 @@ interface DietCreatorProps {
   dietaId?: string;
 }
 
+function normalizeUnidadeItem(raw: unknown): QuantityUnit {
+  const s = String(raw ?? 'g').toLowerCase().trim();
+  if (s === 'ml' || s === 'un') return s;
+  return 'g';
+}
+
 const DietCreator = ({ dietaId }: DietCreatorProps) => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -62,6 +78,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
     { nome: 'Jantar', itens: [] }
   ]);
   const [farmacos, setFarmacos] = useState<Farmaco[]>([]);
+  const [editingDietaId, setEditingDietaId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
@@ -101,10 +118,37 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
     try {
       setLoading(true);
 
-      // Carregar dados da dieta
-      const dietaResult = await apiClient.requestSafe<any>(`/api/dietas/${dietaId}`);
-      const dieta = dietaResult.success ? dietaResult.data : null;
-      if (!dieta) throw new Error('Dieta não encontrada');
+      // O parâmetro da rota pode ser ID da dieta OU ID do aluno.
+      // Primeiro tenta por ID da dieta; se não encontrar, tenta pela dieta mais recente do aluno.
+      let dieta: any = null;
+      let dietaIdResolvido: string | null = null;
+
+      const dietaByIdResult = await apiClient.requestSafe<any>(`/api/dietas/${dietaId}`);
+      if (dietaByIdResult.success && dietaByIdResult.data) {
+        dieta = dietaByIdResult.data;
+        dietaIdResolvido = dieta.id;
+      } else {
+        const dietasAlunoResult = await apiClient.requestSafe<any[]>(`/api/dietas?aluno_id=${dietaId}`);
+        const dietasAluno = dietasAlunoResult.success && Array.isArray(dietasAlunoResult.data)
+          ? dietasAlunoResult.data
+          : [];
+        const maisRecente = dietasAluno.sort(
+          (a, b) => new Date(b.data_criacao || 0).getTime() - new Date(a.data_criacao || 0).getTime()
+        )[0] || null;
+
+        if (maisRecente) {
+          dieta = maisRecente;
+          dietaIdResolvido = maisRecente.id;
+        }
+      }
+
+      if (!dieta || !dietaIdResolvido) {
+        // Sem dieta existente: tratar rota como criação para aluno específico.
+        setEditingDietaId(null);
+        setSelectedAluno(dietaId);
+        return;
+      }
+      setEditingDietaId(dietaIdResolvido);
 
       // Buscar dados do aluno separadamente (joins não suportados ainda)
       const alunoResult = await apiClient.requestSafe<any>(`/api/alunos/${dieta.aluno_id}`);
@@ -112,8 +156,8 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
 
       // Carregar itens da dieta e fármacos
       const [itensRes, farmacosRes] = await Promise.all([
-        apiClient.requestSafe<any[]>(`/api/itens-dieta?dieta_id=${dietaId}`),
-        apiClient.requestSafe<any[]>(`/api/dieta-farmacos?dieta_id=${dietaId}`)
+        apiClient.requestSafe<any[]>(`/api/itens-dieta?dieta_id=${dietaIdResolvido}`),
+        apiClient.requestSafe<any[]>(`/api/dieta-farmacos?dieta_id=${dietaIdResolvido}`)
       ]);
 
       const itens = itensRes.success && Array.isArray(itensRes.data) ? itensRes.data : [];
@@ -158,6 +202,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
             id: item.id,
             alimento_id: item.alimento_id || '',
             quantidade: typeof item.quantidade === 'string' ? parseFloat(item.quantidade) || 0 : (item.quantidade || 0),
+            unidade_quantidade: normalizeUnidadeItem(item.unidade_quantidade),
             refeicao: nomeRefeicao,
             alimento: item.alimentos as Alimento
           }));
@@ -196,6 +241,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
       id: Math.random().toString(36).substr(2, 9),
       alimento_id: '',
       quantidade: 100,
+      unidade_quantidade: 'g',
       refeicao: refeicoes[refeicaoIndex].nome
     };
 
@@ -274,43 +320,21 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
 
   const calcularSubstituicoes = (item: ItemRefeicao): Array<{nome: string, quantidade: number, nutriente: string}> => {
     if (!item.alimento) return [];
-    
-    const alimento = item.alimento;
-    
-    // Garantir que valores sejam números
-    const quantidade = typeof item.quantidade === 'string' ? parseFloat(item.quantidade) || 0 : (item.quantidade || 0);
-    const quantidadeRef = alimento.portion || 100;
-    const kcalRef = alimento.calories || 0;
-    
-    // Calcular kcal do alimento atual na quantidade especificada
-    const fatorAtual = quantidade / quantidadeRef;
-    const kcalAtual = kcalRef * fatorAtual;
-    
-    if (kcalAtual === 0) return [];
+    const quantidade = typeof item.quantidade === 'string'
+      ? parseFloat(item.quantidade) || 0
+      : (item.quantidade || 0);
 
-    return alimentos
-      .filter(a => 
-        getMacroGroup(a) === getMacroGroup(alimento) && 
-        a.id !== alimento.id &&
-        a.calories > 0
-      )
-      .map(sub => {
-        // Fórmula: Qtd_B = (kcal_A / (kcal_B / qtd_ref_B)) 
-        // Ou seja: quanto do substituto para ter as mesmas kcal
-        const subKcalRef = sub.calories || 0;
-        const subQtdRef = sub.portion || 100;
-        
-        const kcalSubPorGrama = subKcalRef / subQtdRef;
-        const qtdEquivalente = kcalAtual / kcalSubPorGrama;
-        
-        return {
-          nome: sub.name,
-          quantidade: Math.round(qtdEquivalente),
-          nutriente: 'Kcal'
-        };
-      })
-      .sort((a, b) => Math.abs(a.quantidade - quantidade) - Math.abs(b.quantidade - quantidade))
-      .slice(0, 3);
+    return listarSubstituicoesIsocaloricas(
+      item.alimento,
+      quantidade,
+      item.unidade_quantidade || 'g',
+      alimentos,
+      { limit: 3 },
+    ).map((s) => ({
+      nome: s.alimento.name,
+      quantidade: Math.round(s.quantidadeEquivalente),
+      nutriente: `${s.kcalEquivalente.toFixed(0)} kcal`,
+    }));
   };
 
   const calcularTotaisRefeicao = (refeicao: Refeicao) => {
@@ -320,8 +344,8 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
       // Garantir que quantidade seja número
       const quantidade = typeof item.quantidade === 'string' ? parseFloat(item.quantidade) || 0 : (item.quantidade || 0);
       const quantidadeRef = item.alimento.portion || 100;
-      
-      const fator = quantidade / quantidadeRef;
+
+      const fator = macroScaleFactor(quantidade, item.unidade_quantidade, quantidadeRef);
       
       // Garantir que valores nutricionais sejam números
       const kcal = item.alimento.calories || 0;
@@ -352,7 +376,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
 
   const salvarDieta = async () => {
     // Se estamos editando uma dieta existente, não precisa validar aluno/nome
-    if (!dietaId) {
+    if (!editingDietaId) {
       if (!selectedAluno || !dietName) {
         toast({
           variant: "destructive",
@@ -364,7 +388,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
     }
 
     try {
-      let dietaIdAtual = dietaId;
+      let dietaIdAtual = editingDietaId;
 
       // Se não há dietaId, criar nova dieta
       if (!dietaIdAtual) {
@@ -419,6 +443,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
             dieta_id: dietaIdAtual,
             alimento_id: item.alimento_id,
             quantidade: item.quantidade,
+            unidade_quantidade: item.unidade_quantidade || 'g',
             refeicao: refeicao.nome
           }))
       );
@@ -455,11 +480,11 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
 
       toast({
         title: "Sucesso!",
-        description: dietaId ? "Dieta atualizada com sucesso" : "Dieta criada com sucesso"
+        description: editingDietaId ? "Dieta atualizada com sucesso" : "Dieta criada com sucesso"
       });
 
       // Se estamos editando, voltar para a lista de dietas
-      if (dietaId) {
+      if (editingDietaId) {
         setTimeout(() => {
           navigate('/?tab=nutrition');
         }, 1000);
@@ -488,7 +513,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
   if (loading) {
     return (
       <div className="p-6">
-        <div className="animate-pulse space-y-4">
+        <div className="motion-safe:animate-pulse space-y-4">
           <div className="h-8 bg-muted rounded w-1/3"></div>
           <div className="h-4 bg-muted rounded w-1/2"></div>
         </div>
@@ -519,10 +544,10 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
             <div className="space-y-2">
               <Label htmlFor="aluno">Aluno</Label>
               <Combobox
-                options={alunos.map(aluno => ({
+                options={alunos.map((aluno) => ({
                   value: aluno.id,
-                  label: aluno.nome,
-                  description: aluno.objetivo
+                  label: getAlunoDisplayName(aluno),
+                  description: aluno.objetivo?.trim() || undefined,
                 }))}
                 value={selectedAluno}
                 onSelect={setSelectedAluno}
@@ -702,8 +727,8 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
               <CardContent className="space-y-4">
                 {refeicao.itens.map((item, itemIndex) => (
                   <div key={item.id} className="border rounded-lg p-4 space-y-3">
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                      <div className="space-y-2">
+                    <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+                      <div className="space-y-2 md:col-span-2">
                         <Label>Alimento</Label>
                         <Combobox
                           options={alimentos.map(alimento => ({
@@ -719,23 +744,50 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
                         />
                       </div>
 
-                      <div className="space-y-2">
-                        <Label>Quantidade (g/ml)</Label>
-                        <Input
-                          type="number"
-                          value={item.quantidade}
-                          onChange={(e) => atualizarItem(refeicaoIndex, itemIndex, 'quantidade', Number(e.target.value))}
-                        />
+                      <div className="space-y-2 md:col-span-2">
+                        <Label>Quantidade e unidade</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            type="number"
+                            className="flex-1"
+                            value={item.quantidade}
+                            onChange={(e) =>
+                              atualizarItem(refeicaoIndex, itemIndex, 'quantidade', Number(e.target.value))
+                            }
+                          />
+                          <Select
+                            value={item.unidade_quantidade}
+                            onValueChange={(v: QuantityUnit) =>
+                              atualizarItem(refeicaoIndex, itemIndex, 'unidade_quantidade', v)
+                            }
+                          >
+                            <SelectTrigger className="w-[100px]">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="g">g</SelectItem>
+                              <SelectItem value="ml">ml</SelectItem>
+                              <SelectItem value="un">un.</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Mesma base que a porção do alimento (100g/100ml ou 1 un.).
+                        </p>
                       </div>
 
                       <div className="space-y-2">
                         <Label>Calorias</Label>
                         <div className="flex items-center h-10 px-3 border rounded-md bg-muted">
                           {item.alimento ? (() => {
-                            const qtd = typeof item.quantidade === 'string' ? parseFloat(item.quantidade) || 0 : (item.quantidade || 0);
+                            const qtd =
+                              typeof item.quantidade === 'string'
+                                ? parseFloat(item.quantidade) || 0
+                                : item.quantidade || 0;
                             const kcalRef = item.alimento.calories || 0;
                             const qtdRef = item.alimento.portion || 100;
-                            return Math.round((kcalRef * qtd) / qtdRef);
+                            const f = macroScaleFactor(qtd, item.unidade_quantidade, qtdRef);
+                            return Math.round(kcalRef * f);
                           })() : 0}
                         </div>
                       </div>

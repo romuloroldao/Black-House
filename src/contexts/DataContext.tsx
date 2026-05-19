@@ -73,7 +73,7 @@ export const DataContextProvider = ({ children }: { children: ReactNode }) => {
             role: role,
             email: user.email || '',
             tenant_id: user.id,
-            capabilities: role === 'coach' 
+            capabilities: role === 'coach' || role === 'admin'
               ? ['read:alunos', 'write:alunos', 'read:stats']
               : ['read:own_data', 'read:own_diet', 'read:own_workouts']
           };
@@ -122,7 +122,7 @@ export const DataContextProvider = ({ children }: { children: ReactNode }) => {
       role: role,
       email: user.email,
       tenant_id: user.id, // Por enquanto, usar user_id como tenant_id
-      capabilities: role === 'coach' 
+      capabilities: role === 'coach' || role === 'admin'
         ? ['read:alunos', 'write:alunos', 'read:stats']
         : ['read:own_data', 'read:own_diet', 'read:own_workouts']
     };

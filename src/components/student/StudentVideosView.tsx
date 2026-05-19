@@ -2,15 +2,17 @@ import { useEffect, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Play, Search, Clock } from "lucide-react";
+import { Play, Search, Clock, ExternalLink } from "lucide-react";
 
 const StudentVideosView = () => {
   const { user } = useAuth();
   const [videos, setVideos] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [coachId, setCoachId] = useState<string | null>(null);
+  const [videoToWatch, setVideoToWatch] = useState<any | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -55,8 +57,46 @@ const StudentVideosView = () => {
     video.categoria.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const openVideo = (video: any) => {
+    if (!video?.youtube_id) return;
+    setVideoToWatch(video);
+  };
+
   return (
     <div className="space-y-6">
+      <Dialog open={!!videoToWatch} onOpenChange={(open) => !open && setVideoToWatch(null)}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>{videoToWatch?.titulo?.trim() || "Reproduzir vídeo"}</DialogTitle>
+            <DialogDescription>
+              {videoToWatch?.descricao?.trim() || "Conteúdo enviado pelo seu coach."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="aspect-video w-full">
+            <iframe
+              width="100%"
+              height="100%"
+              src={`https://www.youtube.com/embed/${videoToWatch?.youtube_id}?autoplay=1`}
+              title={videoToWatch?.titulo || "Vídeo do coach"}
+              frameBorder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+              className="rounded-lg"
+            />
+          </div>
+          {videoToWatch?.youtube_id && (
+            <a
+              href={`https://www.youtube.com/watch?v=${videoToWatch.youtube_id}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+            >
+              Abrir no YouTube <ExternalLink className="h-4 w-4" />
+            </a>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <div>
         <h1 className="text-3xl font-bold mb-2">Galeria de Vídeos</h1>
         <p className="text-muted-foreground">
@@ -87,18 +127,31 @@ const StudentVideosView = () => {
       ) : (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {filteredVideos.map((video) => (
-            <Card key={video.id} className="shadow-card hover:shadow-glow transition-shadow cursor-pointer group">
+            <Card
+              key={video.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => openVideo(video)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  openVideo(video);
+                }
+              }}
+              className="shadow-card hover:shadow-glow transition-shadow motion-reduce:transition-none cursor-pointer group focus:outline-none focus:ring-2 focus:ring-primary"
+            >
               <div className="relative aspect-video bg-muted overflow-hidden rounded-t-lg">
                 <img
                   src={`https://img.youtube.com/vi/${video.youtube_id}/maxresdefault.jpg`}
                   alt={video.titulo}
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                  className="w-full h-full object-cover transition-transform motion-reduce:transition-none motion-safe:group-motion-safe:hover:scale-105"
                   onError={(e) => {
                     e.currentTarget.src = `https://img.youtube.com/vi/${video.youtube_id}/hqdefault.jpg`;
                   }}
                 />
-                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Play className="h-12 w-12 text-white" />
+                <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity motion-reduce:transition-none">
+                  <Play className="h-12 w-12 text-white mb-2" />
+                  <span className="text-white text-sm font-medium">Assistir vídeo</span>
                 </div>
                 {video.duracao && (
                   <Badge variant="default" className="absolute bottom-2 right-2">

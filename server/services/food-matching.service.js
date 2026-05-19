@@ -1,10 +1,44 @@
 // Food Matching Service
 // Implementa algoritmo de matching de alimentos com prioridades
 
+const { normalizeOrigemPtn, kcalFromMacros, roundNutrient } = require('../utils/nutrition-alimento-utils');
+
 class FoodMatchingService {
     constructor(repository, tipoAlimentoRepository = null) {
         this.repository = repository;
         this.tipoAlimentoRepository = tipoAlimentoRepository;
+        this._importBatchActive = false;
+        this._importBatchAlimentos = null;
+    }
+
+    /**
+     * Inicia janela de import em massa: uma única leitura da lista para similaridade,
+     * com atualização incremental quando novos alimentos são criados.
+     */
+    beginImportBatch() {
+        this._importBatchActive = true;
+        this._importBatchAlimentos = null;
+    }
+
+    endImportBatch() {
+        this._importBatchActive = false;
+        this._importBatchAlimentos = null;
+    }
+
+    async _loadAlimentosForSimilarity() {
+        if (this._importBatchActive) {
+            if (!this._importBatchAlimentos) {
+                this._importBatchAlimentos = await this.repository.findAllAlimentos();
+            }
+            return this._importBatchAlimentos;
+        }
+        return this.repository.findAllAlimentos();
+    }
+
+    _registerAlimentoInBatchCache(row) {
+        if (!this._importBatchActive || !row?.nome) return;
+        if (!this._importBatchAlimentos) return;
+        this._importBatchAlimentos.push({ id: row.id, nome: row.nome });
     }
 
     /**
@@ -58,7 +92,7 @@ class FoodMatchingService {
         }
 
         // 4. MATCH POR SIMILARIDADE - busca alimento mais específico (menor diferença)
-        const alimentos = await this.repository.findAllAlimentos();
+        const alimentos = await this._loadAlimentosForSimilarity();
         const matchSimilar = this._findSimilarMatch(nomeNormalizado, alimentos);
         if (matchSimilar) {
             console.log(`Match por similaridade: "${nomeAlimento}" → "${matchSimilar.nome}"`);
@@ -82,79 +116,44 @@ class FoodMatchingService {
     }
 
     /**
-     * Retorna mapeamentos específicos para alimentos comuns
-     * IMPORTANTE: Estes mapeamentos são usados apenas quando não há match exato
-     * O nome original do alimento é sempre preservado quando possível
+     * Retorna mapeamentos específicos para alimentos comuns.
+     *
+     * IMPORTANTE: estes mapeamentos só são consultados quando NÃO há match exato
+     * (original ou normalizado). Mantemos apenas variações ortográficas/redundantes
+     * para o mesmo item — NÃO convertemos sinônimos para um nome canônico
+     * diferente, pois isso descaracteriza a ficha original do aluno.
+     *
+     * Ex.: "frango" NÃO vira "peito de frango"; "ovo cozido" NÃO vira
+     * "ovo inteiro". Cada um continua sendo criado/buscado com o nome original.
      */
     _getMapeamentosEspecificos() {
         return {
-            // Ovos - mapear apenas variações comuns
-            'ovo cozido': 'ovo inteiro',
-            'ovo frito': 'ovo inteiro',
-            'ovo mexido': 'ovo inteiro',
-            'ovos': 'ovo inteiro',
-            
-            // Pães - preservar "pão de forma tradicional" como está
-            'pao de forma tradicional': 'pao de forma',
-            'pao forma': 'pao de forma',
-            'pao frances': 'pao frances',
-            'pao': 'pao frances', // apenas se for genérico "pão"
-            
-            // Frango - preservar variações específicas
-            'peito de frango': 'peito de frango',
-            'frango grelhado': 'peito de frango',
-            'frango cozido': 'peito de frango',
-            'frango desfiado': 'peito de frango',
-            'frango': 'peito de frango', // apenas se for genérico
-            
-            // Arroz
+            // Variações ortográficas comuns (com/sem acento, plural/singular)
+            'whey': 'whey protein',
+            'pao de forma tradicional': 'pao de forma tradicional',
             'arroz branco': 'arroz branco',
-            'arroz': 'arroz branco', // apenas se for genérico
-            
-            // Feijão
             'feijao carioca cozido': 'feijao carioca cozido',
-            'feijao carioca': 'feijao carioca cozido',
-            'feijao': 'feijao carioca cozido', // apenas se for genérico
-            
-            // Batatas
-            'batata doce': 'batata doce',
-            'batata inglesa': 'batata inglesa',
-            'batata': 'batata inglesa', // apenas se for genérico
-            
-            // Frutas
             'banana prata': 'banana prata',
-            'banana': 'banana prata', // apenas se for genérico
-            'maca': 'maca',
-            'laranja': 'laranja',
-            'morango': 'morango',
-            
-            // Carnes
+            'peito de frango': 'peito de frango',
             'carne bovina patinho sem gordura grelhado': 'carne bovina patinho sem gordura grelhado',
-            'patinho': 'carne bovina patinho sem gordura grelhado',
-            'carne vermelha magra': 'carne bovina patinho sem gordura grelhado',
-            'carne': 'carne bovina patinho sem gordura grelhado', // apenas se for genérico
-            
-            // Vegetais
-            'abobrinha': 'abobrinha',
-            'cenoura': 'cenoura',
-            'tomate': 'tomate',
-            'alface': 'alface',
-            'brocolis': 'brocolis',
-            
-            // Laticínios
+            'patinho': 'patinho',
             'requeijao': 'requeijao',
             'mussarela': 'mussarela',
-            'queijo': 'mussarela', // apenas se for genérico
-            'leite': 'leite',
-            'iogurte': 'iogurte',
-            
-            // Outros
-            'whey protein': 'whey protein',
-            'whey': 'whey protein',
             'aveia': 'aveia',
             'macarrao': 'macarrao',
             'tapioca': 'tapioca'
         };
+    }
+
+    /**
+     * Exige que todos os tokens significativos (>=3 chars) de `innerNorm` apareçam em `outerNorm`.
+     */
+    _tokensConsistent(outerNorm, innerNorm) {
+        const tokens = innerNorm.split(' ').filter((t) => t.length >= 3);
+        if (tokens.length === 0) {
+            return innerNorm.length < 3 || outerNorm.includes(innerNorm);
+        }
+        return tokens.every((t) => outerNorm.includes(t));
     }
 
     /**
@@ -163,33 +162,40 @@ class FoodMatchingService {
      * NÃO converte para variação diferente - busca o mais próximo possível
      */
     _findSimilarMatch(nomeNormalizado, alimentos) {
+        if (!nomeNormalizado || nomeNormalizado.length < 3) {
+            return null;
+        }
+
         let melhorMatch = null;
         let menorDiff = Infinity;
 
         for (const alimento of alimentos) {
             const nomeAlimentoNorm = this._normalizeText(alimento.nome);
 
-            // Match exato normalizado (já foi verificado antes, mas verifica novamente)
             if (nomeAlimentoNorm === nomeNormalizado) {
-                return alimento; // Retorna imediatamente se for exato
+                return alimento;
             }
 
-            // Se o nome do banco contém o nome buscado (alimento do banco é mais específico)
-            if (nomeAlimentoNorm.includes(nomeNormalizado)) {
+            // Nome no BD contém a ficha (BD mais específico)
+            if (
+                nomeAlimentoNorm.includes(nomeNormalizado) &&
+                this._tokensConsistent(nomeAlimentoNorm, nomeNormalizado)
+            ) {
                 const diff = nomeAlimentoNorm.length - nomeNormalizado.length;
-                // Prioriza matches com menor diferença (mais específico)
-                if (diff < menorDiff && diff <= 20) {
+                if (diff < menorDiff && diff <= 28) {
                     menorDiff = diff;
                     melhorMatch = alimento;
                 }
             }
 
-            // Se o nome buscado contém o nome do banco (nome buscado é mais específico)
-            // Isso é menos preferível, mas ainda aceitável
-            if (nomeNormalizado.includes(nomeAlimentoNorm) && nomeAlimentoNorm.length >= 5) {
+            // Ficha contém nome do BD (BD mais genérico): só com base razoável
+            if (
+                nomeNormalizado.includes(nomeAlimentoNorm) &&
+                nomeAlimentoNorm.length >= 6 &&
+                this._tokensConsistent(nomeNormalizado, nomeAlimentoNorm)
+            ) {
                 const diff = nomeNormalizado.length - nomeAlimentoNorm.length;
-                // Só aceita se a diferença for pequena (nome do banco não é muito genérico)
-                if (diff < menorDiff && diff <= 10) {
+                if (diff < menorDiff && diff <= 14) {
                     menorDiff = diff;
                     melhorMatch = alimento;
                 }
@@ -240,8 +246,14 @@ class FoodMatchingService {
             throw error;
         }
         
-        const origemPtn = this._inferirOrigemPtn(nomeAlimento);
-        const valoresNutr = this._inferirValoresNutricionais(nomeAlimento);
+        const origemPtn = normalizeOrigemPtn(this._inferirOrigemPtn(nomeAlimento));
+        const valoresMeta = this._inferirValoresNutricionaisMeta(nomeAlimento);
+        const { confidence, ...valoresNutr } = valoresMeta;
+        const alcoolGramas = 0;
+        const kcalCalculada = roundNutrient(
+            kcalFromMacros(valoresNutr.ptn, valoresNutr.cho, valoresNutr.lip, alcoolGramas),
+            1
+        );
 
         // Verifica se já existe um alimento similar antes de criar
         const existente = await this.repository.findAlimentoSimilar(nomeAlimento);
@@ -250,20 +262,29 @@ class FoodMatchingService {
             return existente.id;
         }
 
+        const infoMeta = {
+            origem: 'importacao_automatica',
+            confianca_estimativa_nutricao: confidence,
+            nota: 'Valores estimados por heurística no nome; rever no gestor de alimentos.'
+        };
+        const info_adicional = JSON.stringify(infoMeta);
+
         // ALIM-01: Inserir alimento com FK válida
         const novoAlimento = await this.repository.createAlimento({
             nome: nomeAlimento.trim(),
             tipo_id: tipoId,
             origem_ptn: origemPtn,
             quantidade_referencia_g: 100,
-            kcal_por_referencia: valoresNutr.kcal,
+            kcal_por_referencia: kcalCalculada,
             ptn_por_referencia: valoresNutr.ptn,
             cho_por_referencia: valoresNutr.cho,
             lip_por_referencia: valoresNutr.lip,
-            info_adicional: 'Criado automaticamente via importação de ficha',
+            alcool_por_referencia: alcoolGramas,
+            info_adicional,
             autor: userId
         });
 
+        this._registerAlimentoInBatchCache(novoAlimento);
         console.log(`Novo alimento criado: "${nomeAlimento}" com tipo_id=${tipoId} e valores estimados`);
         return novoAlimento.id;
     }
@@ -346,32 +367,40 @@ class FoodMatchingService {
     }
 
     /**
+     * Estimativa nutricional + nível de confiança (heurística).
+     * @returns {{ kcal: number, ptn: number, cho: number, lip: number, confidence: 'media'|'baixa' }}
+     */
+    _inferirValoresNutricionaisMeta(nome) {
+        const nomeNorm = this._normalizeText(nome);
+
+        if (/frango|carne|peixe|ovo|atum|whey|peito/.test(nomeNorm)) {
+            return { kcal: 165, ptn: 31, cho: 0, lip: 3.6, confidence: 'media' };
+        }
+        if (/arroz|batata|pao|macarrao|aveia|tapioca/.test(nomeNorm)) {
+            return { kcal: 130, ptn: 2.7, cho: 28, lip: 0.3, confidence: 'media' };
+        }
+        if (/azeite|oleo|manteiga|castanha|amendoim/.test(nomeNorm)) {
+            return { kcal: 884, ptn: 0, cho: 0, lip: 100, confidence: 'media' };
+        }
+        if (/banana|maca|laranja|fruta|morango/.test(nomeNorm)) {
+            return { kcal: 52, ptn: 0.3, cho: 14, lip: 0.2, confidence: 'media' };
+        }
+        if (/alface|tomate|brocolis|cenoura|vegetal/.test(nomeNorm)) {
+            return { kcal: 25, ptn: 2, cho: 4, lip: 0.4, confidence: 'media' };
+        }
+        if (/leite|queijo|iogurte|requeijao/.test(nomeNorm)) {
+            return { kcal: 42, ptn: 3.4, cho: 5, lip: 1, confidence: 'media' };
+        }
+
+        return { kcal: 100, ptn: 10, cho: 10, lip: 5, confidence: 'baixa' };
+    }
+
+    /**
      * Infere valores nutricionais estimados
      */
     _inferirValoresNutricionais(nome) {
-        const nomeNorm = this._normalizeText(nome);
-
-        // Valores por 100g
-        if (/frango|carne|peixe|ovo|atum|whey|peito/.test(nomeNorm)) {
-            return { kcal: 165, ptn: 31, cho: 0, lip: 3.6 }; // Proteínas
-        }
-        if (/arroz|batata|pao|macarrao|aveia|tapioca/.test(nomeNorm)) {
-            return { kcal: 130, ptn: 2.7, cho: 28, lip: 0.3 }; // Carboidratos
-        }
-        if (/azeite|oleo|manteiga|castanha|amendoim/.test(nomeNorm)) {
-            return { kcal: 884, ptn: 0, cho: 0, lip: 100 }; // Lipídeos
-        }
-        if (/banana|maca|laranja|fruta|morango/.test(nomeNorm)) {
-            return { kcal: 52, ptn: 0.3, cho: 14, lip: 0.2 }; // Frutas
-        }
-        if (/alface|tomate|brocolis|cenoura|vegetal/.test(nomeNorm)) {
-            return { kcal: 25, ptn: 2, cho: 4, lip: 0.4 }; // Vegetais
-        }
-        if (/leite|queijo|iogurte|requeijao/.test(nomeNorm)) {
-            return { kcal: 42, ptn: 3.4, cho: 5, lip: 1 }; // Laticínios
-        }
-
-        return { kcal: 100, ptn: 10, cho: 10, lip: 5 }; // Default
+        const { confidence: _c, ...rest } = this._inferirValoresNutricionaisMeta(nome);
+        return rest;
     }
 }
 

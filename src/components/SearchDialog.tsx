@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -163,6 +164,9 @@ const SearchDialog = ({ open, onOpenChange, onNavigate }: SearchDialogProps) => 
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Buscar</DialogTitle>
+          <DialogDescription>
+            Pesquise alunos, treinos, vídeos ou dietas por nome ou texto.
+          </DialogDescription>
         </DialogHeader>
         
         <div className="relative">

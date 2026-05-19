@@ -59,9 +59,35 @@ const uploadLimiter = rateLimit({
     legacyHeaders: false
 });
 
+// Pedidos "esqueci minha senha" (por IP)
+const forgotPasswordLimiter = rateLimit({
+    windowMs: parseInt(process.env.RATE_LIMIT_FORGOT_WINDOW_MS) || 60 * 60 * 1000,
+    max: parseInt(process.env.RATE_LIMIT_FORGOT_MAX) || 8,
+    message: {
+        error: 'Muitos pedidos de recuperação de senha. Tente novamente mais tarde.'
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => process.env.NODE_ENV === 'development'
+});
+
+// Submissões de nova senha com token (por IP)
+const resetPasswordSubmitLimiter = rateLimit({
+    windowMs: parseInt(process.env.RATE_LIMIT_RESET_SUBMIT_WINDOW_MS) || 60 * 60 * 1000,
+    max: parseInt(process.env.RATE_LIMIT_RESET_SUBMIT_MAX) || 20,
+    message: {
+        error: 'Muitas tentativas de redefinição. Tente novamente mais tarde.'
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => process.env.NODE_ENV === 'development'
+});
+
 module.exports = {
     authLimiter,
     apiLimiter,
     webhookLimiter,
-    uploadLimiter
+    uploadLimiter,
+    forgotPasswordLimiter,
+    resetPasswordSubmitLimiter
 };

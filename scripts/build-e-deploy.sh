@@ -3,7 +3,9 @@
 
 set -e
 
-PROJECT_DIR="${1:-/root/Black-House}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_DIR="${1:-$REPO_ROOT}"
 
 if [ ! -d "$PROJECT_DIR" ]; then
     echo "⚠️  Diretório do projeto não encontrado: $PROJECT_DIR"

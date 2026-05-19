@@ -1,5 +1,9 @@
 // Diet Service
-// Lógica de negócio para criação de dietas, refeições e itens
+// Lógica de negócio para criação de dietas, refeições e itens.
+//
+// IMPRECISÃO-004: agora propaga horário/observação/dia_semana/plano para o item
+// (quando suportado pelo schema da tabela) e parseia quantidades complexas
+// preservando o número numérico e a unidade textual.
 
 class DietService {
     constructor(dietRepository, foodMatchingService) {
@@ -9,13 +13,28 @@ class DietService {
 
     /**
      * Cria dieta completa (dieta + refeições + itens + fármacos + suplementos)
-     * @param {Object} dietaData - Dados da dieta
-     * @param {string} alunoId - ID do aluno
-     * @param {string} userId - ID do usuário (para criação automática de alimentos)
-     * @returns {Promise<Object>} Dieta criada com estatísticas
+     * @param {Object} dietaData
+     * @param {string} alunoId
+     * @param {string} userId
+     * @returns {Promise<{dieta:Object, stats:Object}>}
      */
     async createDietaCompleta(dietaData, alunoId, userId) {
-        // Criar dieta
+        if (this.foodMatchingService?.beginImportBatch) {
+            this.foodMatchingService.beginImportBatch();
+        }
+        try {
+            return await this._createDietaCompletaInternal(dietaData, alunoId, userId);
+        } finally {
+            if (this.foodMatchingService?.endImportBatch) {
+                this.foodMatchingService.endImportBatch();
+            }
+        }
+    }
+
+    /**
+     * @private
+     */
+    async _createDietaCompletaInternal(dietaData, alunoId, userId) {
         const dieta = await this.dietRepository.createDieta({
             nome: dietaData.nome || 'Plano Alimentar Importado',
             objetivo: dietaData.objetivo || null,
@@ -28,19 +47,19 @@ class DietService {
             itens_criados: 0,
             alimentos_criados: [],
             farmacos_criados: 0,
-            suplementos_criados: 0
+            suplementos_criados: 0,
+            alternativas_criadas: 0
         };
 
-        // Processar refeições e itens
         if (dietaData.refeicoes && dietaData.refeicoes.length > 0) {
             const itensToInsert = [];
-            
+
             for (const refeicao of dietaData.refeicoes) {
                 if (!refeicao.alimentos || refeicao.alimentos.length === 0) {
                     continue;
                 }
 
-                const refeicaoNome = this._mapRefeicaoName(refeicao.nome);
+                const refeicaoNome = this._buildRefeicaoLabel(refeicao);
                 stats.refeicoes_criadas++;
 
                 for (const alimento of refeicao.alimentos) {
@@ -48,40 +67,61 @@ class DietService {
                         continue;
                     }
 
-                    // Encontrar ou criar alimento
                     const alimentoId = await this.foodMatchingService.findOrCreateAlimento(
                         alimento.nome,
                         userId
                     );
 
                     if (alimentoId) {
-                        // Parse quantidade
                         const quantidade = this._parseQuantidade(alimento.quantidade);
 
-                        itensToInsert.push({
+        itensToInsert.push({
                             dieta_id: dieta.id,
                             alimento_id: alimentoId,
                             quantidade: quantidade,
-                            refeicao: refeicaoNome
+                            unidade_quantidade: 'g',
+                            refeicao: refeicaoNome,
+                            dia_semana: refeicao.dia_semana || null
                         });
 
-                        // Marcar alimento como criado (será verificado depois se necessário)
                         if (!stats.alimentos_criados.includes(alimento.nome)) {
-                            // Verificar se foi criado verificando se existe no banco
-                            // Por enquanto, apenas adiciona à lista de processados
+                            // Apenas trackeia processados; a verificação real
+                            // de criação fica no FoodMatchingService.
+                        }
+
+                        // Alternativas (substitutos): inseridas como itens
+                        // adicionais marcando "[Substituto]" no nome da refeição
+                        // para o coach poder distinguir e editar depois.
+                        if (Array.isArray(alimento.alternativas) && alimento.alternativas.length > 0) {
+                            for (const alt of alimento.alternativas) {
+                                if (!alt.nome || !alt.nome.trim()) continue;
+                                const altId = await this.foodMatchingService.findOrCreateAlimento(
+                                    alt.nome,
+                                    userId
+                                );
+                                if (!altId) continue;
+                                itensToInsert.push({
+                                    dieta_id: dieta.id,
+                                    alimento_id: altId,
+                                    quantidade: this._parseQuantidade(alt.quantidade || alimento.quantidade),
+                                    unidade_quantidade: 'g',
+                                    refeicao: `${refeicaoNome} (Substituto)`,
+                                    dia_semana: refeicao.dia_semana || null
+                                });
+                                stats.alternativas_criadas++;
+                            }
                         }
                     }
                 }
             }
 
-            // Inserir itens em lote
             if (itensToInsert.length > 0) {
                 await this.dietRepository.createItensDieta(itensToInsert);
                 stats.itens_criados = itensToInsert.length;
             }
         }
 
-        // Processar fármacos
+        // Fármacos
         if (dietaData.farmacos && dietaData.farmacos.length > 0) {
             const farmacosToInsert = dietaData.farmacos
                 .filter(f => f.nome && f.nome.trim())
@@ -89,7 +129,7 @@ class DietService {
                     dieta_id: dieta.id,
                     nome: f.nome.trim(),
                     dosagem: f.dosagem || '',
-                    observacao: f.observacao || null
+                    observacao: this._composeObservacao(f.observacao, f.horario, 'Fármaco')
                 }));
 
             if (farmacosToInsert.length > 0) {
@@ -98,7 +138,7 @@ class DietService {
             }
         }
 
-        // Processar suplementos
+        // Suplementos
         if (dietaData.suplementos && dietaData.suplementos.length > 0) {
             const suplementosToInsert = dietaData.suplementos
                 .filter(s => s.nome && s.nome.trim())
@@ -106,7 +146,7 @@ class DietService {
                     dieta_id: dieta.id,
                     nome: s.nome.trim(),
                     dosagem: s.dosagem || '',
-                    observacao: s.observacao || 'Suplemento'
+                    observacao: this._composeObservacao(s.observacao, s.horario, 'Suplemento')
                 }));
 
             if (suplementosToInsert.length > 0) {
@@ -122,18 +162,36 @@ class DietService {
     }
 
     /**
-     * Mapeia nome de refeição para formato padrão
+     * Compõe nome legível da refeição incluindo plano/horário entre parênteses
+     * quando estes existirem na ficha original.
+     *
+     * Ex.: "Almoço (Plano A) - 12:00"
+     */
+    _buildRefeicaoLabel(refeicao) {
+        const base = this._mapRefeicaoName(refeicao.nome);
+        const extras = [];
+        if (refeicao.plano && String(refeicao.plano).trim()) {
+            extras.push(String(refeicao.plano).trim());
+        }
+        if (refeicao.horario && String(refeicao.horario).trim()) {
+            extras.push(String(refeicao.horario).trim());
+        }
+        if (extras.length === 0) return base;
+        return `${base} (${extras.join(' • ')})`;
+    }
+
+    /**
+     * Mapeia nome de refeição para formato padrão. Usado apenas para nomes
+     * "puros" sem decoração; nomes customizados pelo coach são preservados.
      */
     _mapRefeicaoName(nome) {
-        const nomeNormalizado = nome.toLowerCase().trim();
+        const nomeNormalizado = (nome || '').toLowerCase().trim();
 
-        // Extrai número se existir
         const matchNumero = nomeNormalizado.match(/(?:refeição|refeicao|ref)\s*(\d+)/);
         if (matchNumero) {
             return `Refeição ${matchNumero[1]}`;
         }
 
-        // Mapeia nomes tradicionais conforme especificação
         const mappings = {
             'café da manhã': 'Refeição 1',
             'cafe da manha': 'Refeição 1',
@@ -146,29 +204,73 @@ class DietService {
             'jantar': 'Refeição 5',
             'ceia': 'Refeição 6',
             'pré-treino': 'Refeição 7',
+            'pre-treino': 'Refeição 7',
             'pre treino': 'Refeição 7',
             'pós-treino': 'Refeição 8',
+            'pos-treino': 'Refeição 8',
             'pos treino': 'Refeição 8'
         };
 
-        return mappings[nomeNormalizado] || nome;
+        return mappings[nomeNormalizado] || (nome || 'Refeição');
     }
 
     /**
-     * Parse quantidade de string para número
-     * Ex: "100g" -> 100, "2 unidades" -> 2
+     * Parseia quantidade textual para número (double precision em itens_dieta).
+     * Aceita: "100g", "200 ml", "2 unidades", "30~40g" (média), "1/2 xícara (60g)".
      */
     _parseQuantidade(quantidadeStr) {
-        if (!quantidadeStr) {
-            return 100; // Default
+        if (!quantidadeStr) return 100;
+
+        const str = String(quantidadeStr).trim();
+
+        // 1) Faixa "30~40g" ou "30-40g" -> média
+        const rangeMatch = str.match(/(\d+[.,]?\d*)\s*[~\-–—]\s*(\d+[.,]?\d*)/);
+        if (rangeMatch) {
+            const a = parseFloat(rangeMatch[1].replace(',', '.'));
+            const b = parseFloat(rangeMatch[2].replace(',', '.'));
+            if (!isNaN(a) && !isNaN(b)) return (a + b) / 2;
         }
 
-        const match = quantidadeStr.match(/[\d.,]+/);
-        if (match) {
-            return parseFloat(match[0].replace(',', '.'));
+        // 2) Valor entre parênteses com "g" ou "ml" -> prioriza
+        const parenMatch = str.match(/\((\d+[.,]?\d*)\s*(?:g|ml)\)/i);
+        if (parenMatch) {
+            const v = parseFloat(parenMatch[1].replace(',', '.'));
+            if (!isNaN(v)) return v;
         }
 
-        return 100; // Default
+        // 3) Fração simples "1/2" -> 0.5 multiplicado pelo número seguinte se houver
+        const fracMatch = str.match(/^(\d+)\s*\/\s*(\d+)/);
+        if (fracMatch) {
+            const num = parseFloat(fracMatch[1]);
+            const den = parseFloat(fracMatch[2]);
+            if (den !== 0) {
+                return num / den;
+            }
+        }
+
+        // 4) Primeiro número da string
+        const numMatch = str.match(/[\d]+[.,]?\d*/);
+        if (numMatch) return parseFloat(numMatch[0].replace(',', '.'));
+
+        return 100;
+    }
+
+    /**
+     * Combina observação + horário num único campo (já que dieta_farmacos
+     * não tem coluna "horario" no schema atual).
+     */
+    _composeObservacao(observacao, horario, fallback = null) {
+        const partes = [];
+        if (horario && String(horario).trim()) {
+            partes.push(`Horário: ${String(horario).trim()}`);
+        }
+        if (observacao && String(observacao).trim()) {
+            partes.push(String(observacao).trim());
+        }
+        if (partes.length === 0) {
+            return fallback;
+        }
+        return partes.join(' — ');
     }
 }
 

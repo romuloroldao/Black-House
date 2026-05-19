@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,24 +8,34 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
-import { ArrowRight, Info } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { ArrowRight, Info, Search } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Food, getMacroGroup } from "@/lib/foodService";
-
-interface Substituicao {
-  alimento: Food;
-  quantidadeEquivalente: number;
-  criterio: "kcal" | "cho";
-  formula: string;
-}
+import {
+  Food,
+  macroScaleFactor,
+  quantityUnitLabel,
+  getSubstitutionCategoryLabel,
+  normalizeFood,
+} from "@/lib/foodService";
+import {
+  canSubstitute,
+  kcalPorPorcao,
+  listarSubstituicoesIsocaloricas,
+  type SubstituicaoIsocalorica,
+} from "@/lib/foodEquivalence";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { cn } from "@/lib/utils";
+import { apiClient } from "@/lib/api-client";
+import { API_CONTRACT } from "@/contracts/api-contract";
 
 interface FoodSubstitutionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   alimentoAtual: Food | null;
   quantidadeAtual: number;
+  unidadeQuantidade?: string;
   alimentosDisponiveis: Food[];
   onSubstituir: (novoAlimentoId: string, novaQuantidade: number) => void;
 }
@@ -35,76 +45,93 @@ export default function FoodSubstitutionDialog({
   onOpenChange,
   alimentoAtual,
   quantidadeAtual,
+  unidadeQuantidade = "g",
   alimentosDisponiveis,
   onSubstituir,
 }: FoodSubstitutionDialogProps) {
-  const [criterio, setCriterio] = useState<"kcal" | "cho">("kcal");
-  const [substituicoes, setSubstituicoes] = useState<Substituicao[]>([]);
+  const [substituicoes, setSubstituicoes] = useState<SubstituicaoIsocalorica[]>([]);
   const [selectedSubstituicao, setSelectedSubstituicao] = useState<string>("");
+  const [busca, setBusca] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const nomeAlimentoAtual = alimentoAtual?.name || "Alimento atual";
+  const unLabel = quantityUnitLabel(unidadeQuantidade);
+  const kcalAtual = alimentoAtual
+    ? kcalPorPorcao(alimentoAtual, quantidadeAtual, unidadeQuantidade)
+    : 0;
+  const grupoLabel = alimentoAtual
+    ? getSubstitutionCategoryLabel("", alimentoAtual)
+    : "";
+
+  const fatorAtual = alimentoAtual
+    ? macroScaleFactor(quantidadeAtual, unidadeQuantidade, alimentoAtual.portion)
+    : 0;
+  const choAtual = alimentoAtual ? alimentoAtual.carbs * fatorAtual : 0;
+  const ptnAtual = alimentoAtual ? alimentoAtual.protein * fatorAtual : 0;
+  const gorduraAtual = alimentoAtual ? alimentoAtual.fat * fatorAtual : 0;
 
   useEffect(() => {
-    if (alimentoAtual) {
-      calcularSubstituicoes();
-    }
-  }, [alimentoAtual, quantidadeAtual, criterio, alimentosDisponiveis]);
+    if (!open || !alimentoAtual) return;
+    setBusca("");
+    setSelectedSubstituicao("");
+    void carregarSubstituicoes();
+  }, [open, alimentoAtual, quantidadeAtual, unidadeQuantidade, alimentosDisponiveis]);
 
-  const calcularSubstituicoes = () => {
+  const carregarSubstituicoes = async () => {
     if (!alimentoAtual) return;
-
-    // Calcular valores do alimento atual para a quantidade especificada
-    const fatorAtual = quantidadeAtual / alimentoAtual.portion;
-    const kcalAtual = alimentoAtual.calories * fatorAtual;
-    const choAtual = alimentoAtual.carbs * fatorAtual;
-
-    // Filtrar alimentos do mesmo tipo/grupo
-    const grupoAtual = getMacroGroup(alimentoAtual);
-    const alimentosDoMesmoGrupo = alimentosDisponiveis.filter(
-      (alimento) =>
-        getMacroGroup(alimento) === grupoAtual &&
-        alimento.id !== alimentoAtual.id
-    );
-
-    // Calcular substituições
-    const novasSubstituicoes: Substituicao[] = alimentosDoMesmoGrupo
-      .filter((alimento) => {
-        if (criterio === "kcal") return alimento.calories > 0;
-        return alimento.carbs > 0;
-      })
-      .map((alimento) => {
-        let quantidadeEquivalente: number;
-        let formula: string;
-
-        if (criterio === "kcal") {
-          // Fórmula correta: Qtd_B = kcal_A / (kcal_B / qtd_ref_B)
-          const kcalSubPorGrama = alimento.calories / alimento.portion;
-          quantidadeEquivalente = kcalAtual / kcalSubPorGrama;
-          formula = `${kcalAtual.toFixed(1)} kcal ÷ ${kcalSubPorGrama.toFixed(2)} kcal/g = ${quantidadeEquivalente.toFixed(0)}g`;
-        } else {
-          // Fórmula correta: Qtd_B = CHO_A / (CHO_B / qtd_ref_B)
-          const choSubPorGrama = alimento.carbs / alimento.portion;
-          quantidadeEquivalente = choAtual === 0 || choSubPorGrama === 0 
-            ? 0 
-            : choAtual / choSubPorGrama;
-          formula = `${choAtual.toFixed(1)}g CHO ÷ ${choSubPorGrama.toFixed(2)}g CHO/g = ${quantidadeEquivalente.toFixed(0)}g`;
-        }
-
-        return {
-          alimento,
-          quantidadeEquivalente,
-          criterio,
-          formula,
-        };
+    setLoading(true);
+    try {
+      const url = API_CONTRACT.alimentos.substituicoes(alimentoAtual.id, {
+        quantidade: quantidadeAtual,
+        unidade: unidadeQuantidade,
+        limit: 100,
       });
+      const res = await apiClient.requestSafe<{
+        substituicoes: Array<{
+          alimento: Food;
+          quantidadeEquivalente: number;
+          kcalReferencia: number;
+          kcalEquivalente: number;
+          formula: string;
+        }>;
+      }>(url);
 
-    // Ordenar por proximidade de quantidade à original
-    novasSubstituicoes.sort((a, b) => {
-      const diffA = Math.abs(a.quantidadeEquivalente - quantidadeAtual);
-      const diffB = Math.abs(b.quantidadeEquivalente - quantidadeAtual);
-      return diffA - diffB;
-    });
+      if (res.success && Array.isArray(res.data?.substituicoes)) {
+        setSubstituicoes(
+          res.data.substituicoes.map((s) => ({
+            alimento: normalizeFood(s.alimento),
+            quantidadeEquivalente: s.quantidadeEquivalente,
+            kcalReferencia: s.kcalReferencia,
+            kcalEquivalente: s.kcalEquivalente,
+            formula: s.formula,
+          })),
+        );
+        setLoading(false);
+        return;
+      }
+    } catch {
+      /* fallback local */
+    }
 
-    setSubstituicoes(novasSubstituicoes.slice(0, 5)); // Top 5
+    setSubstituicoes(
+      listarSubstituicoesIsocaloricas(
+        alimentoAtual,
+        quantidadeAtual,
+        unidadeQuantidade,
+        alimentosDisponiveis,
+        { limit: 100 },
+      ),
+    );
+    setLoading(false);
   };
+
+  const filtradas = useMemo(() => {
+    const q = busca.trim().toLowerCase();
+    if (!q) return substituicoes;
+    return substituicoes.filter((s) =>
+      (s.alimento.name || "").toLowerCase().includes(q),
+    );
+  }, [substituicoes, busca]);
 
   const handleSubstituir = () => {
     const substituicao = substituicoes.find((s) => s.alimento.id === selectedSubstituicao);
@@ -116,96 +143,117 @@ export default function FoodSubstitutionDialog({
 
   if (!alimentoAtual) return null;
 
+  const substituicaoIndisponivel = !canSubstitute(alimentoAtual);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Substituir Alimento</DialogTitle>
+          <DialogTitle>Substituir alimento</DialogTitle>
           <DialogDescription>
-            Alimento atual: <strong>{alimentoAtual.nome}</strong> ({quantidadeAtual}g)
+            Equivalência <strong>isocalórica</strong> no grupo{" "}
+            <strong>{grupoLabel}</strong>.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label>Critério de Equivalência</Label>
-            <RadioGroup value={criterio} onValueChange={(value) => setCriterio(value as "kcal" | "cho")}>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="kcal" id="kcal" />
-                <Label htmlFor="kcal" className="font-normal">
-                  Por Calorias (kcal) - Melhor para controle energético total
-                </Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="cho" id="cho" />
-                <Label htmlFor="cho" className="font-normal">
-                  Por Carboidratos (CHO) - Melhor para controle glicêmico
-                </Label>
-              </div>
-            </RadioGroup>
+        <div className="space-y-5">
+          <div className="rounded-lg border bg-muted/20 p-4">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Referência</p>
+            <p className="text-lg font-semibold text-foreground">{nomeAlimentoAtual}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Badge variant="secondary">
+                {quantidadeAtual}
+                {unLabel}
+              </Badge>
+              <Badge variant="outline">{kcalAtual.toFixed(0)} kcal</Badge>
+              <Badge variant="outline">CHO {choAtual.toFixed(1)}g</Badge>
+              <Badge variant="outline">PTN {ptnAtual.toFixed(1)}g</Badge>
+              <Badge variant="outline">LIP {gorduraAtual.toFixed(1)}g</Badge>
+            </div>
           </div>
 
           <Alert>
             <Info className="h-4 w-4" />
             <AlertDescription>
-              {criterio === "kcal"
-                ? "Fórmula: Quantidade B = Quantidade A × (kcal A / kcal B)"
-                : "Fórmula: Quantidade B = Quantidade A × (CHO A / CHO B)"}
+              Mesmo grupo alimentar; quantidade ajustada para manter as mesmas calorias da porção de referência.
             </AlertDescription>
           </Alert>
 
-          {substituicoes.length === 0 ? (
+          {substituicaoIndisponivel ? (
             <p className="text-center text-muted-foreground py-8">
-              Nenhuma substituição disponível do mesmo grupo alimentar.
+              Grupo livre ou sem calorias — substituição isocalórica não se aplica.
             </p>
           ) : (
-            <RadioGroup value={selectedSubstituicao} onValueChange={setSelectedSubstituicao}>
-              <div className="space-y-3">
-                {substituicoes.map((sub) => (
-                  <div
-                    key={sub.alimento.id}
-                    className="flex items-center space-x-3 border rounded-lg p-3 hover:bg-muted/50 transition-colors"
-                  >
-                    <RadioGroupItem value={sub.alimento.id} id={sub.alimento.id} />
-                    <Label
-                      htmlFor={sub.alimento.id}
-                      className="flex-1 cursor-pointer font-normal space-y-1"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">{sub.alimento.nome}</span>
-                        <Badge variant="secondary" className="text-xs">
-                          {sub.quantidadeEquivalente.toFixed(0)}g
-                        </Badge>
-                        <Badge variant="outline" className="text-xs">
-                          {getMacroGroup(sub.alimento)}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-muted-foreground">{sub.formula}</p>
-                      <div className="flex gap-4 text-xs">
-                        <span>
-                          {((sub.alimento.calories / sub.alimento.portion) * sub.quantidadeEquivalente).toFixed(1)} kcal
-                        </span>
-                        <span>
-                          CHO: {((sub.alimento.carbs / sub.alimento.portion) * sub.quantidadeEquivalente).toFixed(1)}g
-                        </span>
-                        <span>
-                          PTN: {((sub.alimento.protein / sub.alimento.portion) * sub.quantidadeEquivalente).toFixed(1)}g
-                        </span>
-                      </div>
-                    </Label>
-                  </div>
-                ))}
+            <>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar substituto no grupo..."
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                  className="pl-9"
+                />
               </div>
-            </RadioGroup>
+
+              {loading ? (
+                <p className="text-center text-muted-foreground py-6">A calcular equivalências...</p>
+              ) : filtradas.length === 0 ? (
+                <p className="text-center text-muted-foreground py-8">
+                  Nenhum substituto neste grupo.
+                </p>
+              ) : (
+                <RadioGroup value={selectedSubstituicao} onValueChange={setSelectedSubstituicao}>
+                  <div className="space-y-3 max-h-[40vh] overflow-y-auto pr-1">
+                    {filtradas.map((sub, index) => (
+                      <div
+                        key={sub.alimento.id}
+                        className={cn(
+                          "rounded-xl border p-4 transition-all",
+                          selectedSubstituicao === sub.alimento.id
+                            ? "border-primary bg-primary/5 ring-1 ring-primary/40"
+                            : "hover:bg-muted/40",
+                        )}
+                      >
+                        <div className="flex items-start gap-3">
+                          <RadioGroupItem value={sub.alimento.id} id={sub.alimento.id} className="mt-1" />
+                          <Label htmlFor={sub.alimento.id} className="flex-1 cursor-pointer font-normal space-y-2">
+                            {index === 0 && <Badge className="text-xs">Melhor ajuste</Badge>}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-base font-semibold">{sub.alimento.name}</span>
+                              <Badge variant="secondary">
+                                {sub.quantidadeEquivalente.toFixed(1)}
+                                {unLabel}
+                              </Badge>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+                              <span className="rounded-md border px-2 py-1">
+                                {sub.kcalEquivalente.toFixed(0)} kcal
+                              </span>
+                              <span className="rounded-md border px-2 py-1">
+                                ref. {sub.kcalReferencia.toFixed(0)} kcal
+                              </span>
+                              <span className="rounded-md border px-2 py-1 text-muted-foreground">
+                                {sub.alimento.calories} kcal/100g
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground">{sub.formula}</p>
+                          </Label>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </RadioGroup>
+              )}
+            </>
           )}
 
           <div className="flex gap-2 justify-end pt-4">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleSubstituir} disabled={!selectedSubstituicao}>
+            <Button onClick={handleSubstituir} disabled={!selectedSubstituicao || substituicaoIndisponivel}>
               <ArrowRight className="w-4 h-4 mr-2" />
-              Substituir
+              Confirmar
             </Button>
           </div>
         </div>

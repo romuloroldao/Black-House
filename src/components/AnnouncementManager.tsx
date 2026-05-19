@@ -5,7 +5,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Checkbox } from "./ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
@@ -172,7 +172,7 @@ export function AnnouncementManager() {
               tipo: "aviso",
               titulo: formData.titulo,
               mensagem: formData.mensagem,
-              link: "/student-portal?tab=messages",
+              link: "messages",
             }),
           });
         }
@@ -194,7 +194,7 @@ export function AnnouncementManager() {
             tipo: "aviso",
             titulo: formData.titulo,
             mensagem: formData.mensagem,
-            link: "/student-portal?tab=messages",
+            link: "messages",
           }),
         });
       }
@@ -221,7 +221,7 @@ export function AnnouncementManager() {
               tipo: "aviso",
               titulo: formData.titulo,
               mensagem: formData.mensagem,
-              link: "/student-portal?tab=messages",
+              link: "messages",
             }),
           });
         }
@@ -281,6 +281,9 @@ export function AnnouncementManager() {
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Criar Novo Aviso</DialogTitle>
+              <DialogDescription>
+                Escolha o público (alunos, turmas ou todos), redija título e mensagem e opcionalmente um anexo.
+              </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>

@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDataContext } from "@/contexts/DataContext";
-import { User, Save, Camera, Loader2 } from "lucide-react";
+import { User, Save, Camera, Loader2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { DateInputBR } from "@/components/ui/date-input-br";
 
 const StudentProfileView = () => {
   const { user } = useAuth();
@@ -17,6 +18,7 @@ const StudentProfileView = () => {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
     nome: "",
     email: "",
@@ -26,33 +28,65 @@ const StudentProfileView = () => {
     objetivo: "",
   });
 
+  useEffect(() => {
+    if (!isReady || !user) return;
+
+    let isMounted = true;
+
+    const loadProfileData = async () => {
+      const [alunoResult, profileResult] = await Promise.all([
+        apiClient.getMeSafe(),
+        apiClient.getProfileSafe(),
+      ]);
+
+      const aluno = alunoResult.success ? alunoResult.data : null;
+      const profile = profileResult.success ? profileResult.data : null;
+
+      if (!isMounted) return;
+
+      setFormData({
+        nome: aluno?.nome || "",
+        email: user.email || "",
+        telefone: aluno?.telefone || "",
+        data_nascimento: (aluno?.data_nascimento || "").split("T")[0] || "",
+        peso: aluno?.peso ? String(aluno.peso) : "",
+        objetivo: aluno?.objetivo || "",
+      });
+
+      setAvatarUrl(profile?.avatar_url || null);
+    };
+
+    loadProfileData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isReady, user?.id, user?.email]);
+
   // DESIGN-023-RUNTIME-CRASH-RESOLUTION-001: Guard defensivo - componente NÃO renderiza fora de READY
   // DESIGN-FRONTEND-HERMETIC-BOOTSTRAP-AND-ASSET-FIX-021: Componente só monta quando DataContext === READY
   if (!isReady) {
     return null;
   }
 
-  // DESIGN-FRONTEND-HERMETIC-BOOTSTRAP-AND-ASSET-FIX-021: Removido useEffect que fazia fetch em mount
-  // Dados devem ser carregados sob demanda ou via props/contexto
-  // useEffect removido - loadProfileData() e loadAvatar() não são mais chamados automaticamente
-
-  // DESIGN-FRONTEND-HERMETIC-BOOTSTRAP-AND-ASSET-FIX-021: loadProfileData() e loadAvatar() removidos
-  // Dados devem ser carregados sob demanda ou via props/contexto, não em mount
-  // Essas funções podem ser recriadas como handlers de eventos se necessário
-
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || !user) return;
+    if (!file || !user) {
+      event.target.value = "";
+      return;
+    }
 
     // Validate file type
     if (!file.type.startsWith("image/")) {
       toast.error("Por favor, selecione uma imagem válida");
+      event.target.value = "";
       return;
     }
 
     // Validate file size (max 5MB)
     if (file.size > 5 * 1024 * 1024) {
       toast.error("A imagem deve ter no máximo 5MB");
+      event.target.value = "";
       return;
     }
 
@@ -87,6 +121,7 @@ const StudentProfileView = () => {
       toast.error("Erro ao atualizar avatar: " + error.message);
     } finally {
       setUploadingAvatar(false);
+      event.target.value = "";
     }
   };
 
@@ -125,6 +160,10 @@ const StudentProfileView = () => {
     }
 
     toast.success("Perfil atualizado com sucesso!");
+    const profileResult = await apiClient.getProfileSafe();
+    if (profileResult.success) {
+      setAvatarUrl(profileResult.data?.avatar_url || null);
+    }
     setLoading(false);
   };
 
@@ -157,7 +196,7 @@ const StudentProfileView = () => {
   };
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="min-w-0 space-y-6 max-w-2xl">
       <div>
         <h1 className="text-3xl font-bold mb-2">Meu Perfil</h1>
         <p className="text-muted-foreground">
@@ -174,7 +213,7 @@ const StudentProfileView = () => {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center gap-6">
+          <div className="flex flex-col items-start gap-6 sm:flex-row sm:items-center">
             <div className="relative">
               <Avatar className="h-24 w-24">
                 {/* DESIGN-023: Optional chaining para acessos profundos */}
@@ -185,11 +224,11 @@ const StudentProfileView = () => {
               </Avatar>
               {uploadingAvatar && (
                 <div className="absolute inset-0 flex items-center justify-center bg-background/80 rounded-full">
-                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                  <Loader2 className="h-6 w-6 motion-safe:animate-spin text-primary" />
                 </div>
               )}
             </div>
-            <div className="space-y-2">
+            <div className="w-full space-y-2 sm:w-auto">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -197,14 +236,36 @@ const StudentProfileView = () => {
                 onChange={handleAvatarUpload}
                 className="hidden"
               />
-              <Button
-                variant="outline"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploadingAvatar}
-              >
-                <Camera className="h-4 w-4 mr-2" />
-                {uploadingAvatar ? "Enviando..." : "Alterar Foto"}
-              </Button>
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="user"
+                onChange={handleAvatarUpload}
+                className="hidden"
+              />
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full sm:w-auto"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingAvatar}
+                >
+                  <Upload className="h-4 w-4 mr-2" />
+                  {uploadingAvatar ? "Enviando..." : "Escolher da galeria"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full sm:w-auto"
+                  onClick={() => cameraInputRef.current?.click()}
+                  disabled={uploadingAvatar}
+                >
+                  <Camera className="h-4 w-4 mr-2" />
+                  {uploadingAvatar ? "Enviando..." : "Tirar foto"}
+                </Button>
+              </div>
               <p className="text-xs text-muted-foreground">
                 JPG, PNG ou GIF. Máximo 5MB.
               </p>
@@ -255,11 +316,10 @@ const StudentProfileView = () => {
 
             <div className="space-y-2">
               <Label htmlFor="data_nascimento">Data de Nascimento</Label>
-              <Input
+              <DateInputBR
                 id="data_nascimento"
-                type="date"
                 value={formData?.data_nascimento || ''}
-                onChange={(e) => setFormData({ ...formData, data_nascimento: e.target.value })}
+                onChange={(value) => setFormData({ ...formData, data_nascimento: value })}
               />
             </div>
 

@@ -7,13 +7,21 @@
 
 const express = require('express');
 const router = express.Router();
-const { resolveAlunoOrFail, resolveCoachByAluno, validateAlunoBelongsToCoach } = require('../utils/identity-resolver');
-const { validateUUIDParam } = require('../utils/uuid-validator');
+const {
+  resolveAlunoOrFail: fetchAlunoByUserId,
+  resolveCoachByAluno,
+  validateAlunoBelongsToCoach,
+} = require('../utils/identity-resolver');
+const { queryAlunoRowsFullForUser } = require('../utils/aluno-resolve-by-user');
+const { validateUUIDParam, isValidUUID } = require('../utils/uuid-validator');
 const resolveAlunoOrFailMiddleware = require('../middleware/resolveAlunoOrFail');
 const resolveCoachOrFailMiddleware = require('../middleware/resolveCoachOrFail');
 const validateRole = require('../middleware/validateRole');
 const createAlimentosRouter = require('./alimentos');
 const createUploadsRouter = require('./uploads');
+const { deleteUserByUserRoleId } = require('../utils/deleteUserByUserRoleId');
+const AsaasService = require('../services/asaas.service');
+const { encryptCoachAsaasApiKey, decryptCoachAsaasApiKey } = require('../utils/asaas-coach-secret-crypto');
 
 // ============================================================================
 // MIDDLEWARES
@@ -26,6 +34,47 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
   // ============================================================================
   const resolveAlunoOrFail = resolveAlunoOrFailMiddleware(pool);
   const resolveCoachOrFail = resolveCoachOrFailMiddleware(pool);
+
+  /** Aluno canónico para o utilizador (BD com ou sem coluna linked_user_id). */
+  async function getAlunoRowForAuthUser(userId) {
+    const rows = await queryAlunoRowsFullForUser(pool, userId);
+    return rows[0] || null;
+  }
+
+  let weeklyCheckinsColCache = null;
+  let weeklyCheckinsColCacheAt = 0;
+  async function loadWeeklyCheckinsColumns() {
+    const now = Date.now();
+    if (weeklyCheckinsColCache && now - weeklyCheckinsColCacheAt < 60000) {
+      return weeklyCheckinsColCache;
+    }
+    const r = await pool.query(
+      `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'weekly_checkins'`,
+    );
+    weeklyCheckinsColCache = new Set(r.rows.map((x) => x.column_name));
+    weeklyCheckinsColCacheAt = now;
+    return weeklyCheckinsColCache;
+  }
+
+  /** Só resolve `req.aluno` quando o utilizador é aluno (coach/admin ignoram). */
+  function requireAlunoWhenStudent() {
+    return (req, res, next) => {
+      if (req.user?.role === 'aluno') {
+        return resolveAlunoOrFail(req, res, next);
+      }
+      return next();
+    };
+  }
+
+  /** Normaliza vínculo para o JSON (sempre user_id no contrato da API). */
+  function alunoRowWithCanonicalUserId(row) {
+    if (!row) return row;
+    const link = row.link_user_id != null ? row.link_user_id
+      : row.linked_user_id != null ? row.linked_user_id
+      : row.user_id;
+    const { link_user_id: _drop, ...rest } = row;
+    return { ...rest, user_id: link };
+  }
 
   // ROTAS: ALIMENTOS (montadas antes de rotas paramétricas)
   router.use('/alimentos', createAlimentosRouter(pool, authenticate, domainSchemaGuard));
@@ -43,8 +92,29 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
   // DESIGN-GUARD-RAILS-ROLE-ACCESS-003: Rota apenas para alunos
   router.get('/alunos/me', authenticate, domainSchemaGuard, validateRole(['aluno']), resolveAlunoOrFail, async (req, res) => {
     try {
-      // req.aluno já está anexado pelo middleware resolveAlunoOrFail
-      res.json(req.aluno);
+      const aluno = { ...req.aluno };
+      const raw = aluno.plano != null ? String(aluno.plano).trim() : '';
+      if (raw) {
+        const looksUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw);
+        try {
+          if (looksUuid) {
+            const pr = await pool.query(
+              'SELECT nome FROM public.payment_plans WHERE id = $1::uuid LIMIT 1',
+              [raw]
+            );
+            if (pr.rows[0]?.nome) {
+              aluno.plano_nome = pr.rows[0].nome;
+            } else {
+              aluno.plano_nome = 'Plano de pagamento';
+            }
+          } else {
+            aluno.plano_nome = raw;
+          }
+        } catch {
+          aluno.plano_nome = looksUuid ? 'Plano de pagamento' : raw;
+        }
+      }
+      res.json(aluno);
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
@@ -53,9 +123,211 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
   // POST /api/alunos/link-user - Vincula usuário existente a aluno importado
   // DESIGN-GUARD-RAILS-ROLE-ACCESS-003: Rota apenas para coaches
   // DESIGN-LINK-ALUNO-USER-001: Rota semântica para vínculo aluno ↔ user
-  router.post('/alunos/link-user', authenticate, domainSchemaGuard, validateRole(['coach']), resolveCoachOrFail, async (req, res) => {
+  const { getAlunoUserLinkColumn } = require('../utils/aluno-link-column');
+
+  const {
+    provisionAlunoForUser,
+    listUnlinkedRegistrations,
+    isValidCoachId,
+  } = require('../utils/aluno-signup-provision');
+
+  // GET /api/alunos/unlinked-registrations — cadastros na plataforma sem ficha
+  router.get(
+    '/alunos/unlinked-registrations',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    resolveCoachOrFail,
+    async (req, res) => {
+      try {
+        const rows = await listUnlinkedRegistrations(pool, { limit: 150 });
+        res.json(rows);
+      } catch (error) {
+        console.error('Erro ao listar cadastros sem ficha:', error);
+        res.status(500).json({ error: 'Erro ao listar cadastros pendentes', error_code: 'UNLINKED_LIST_ERROR' });
+      }
+    },
+  );
+
+  // DELETE /api/alunos/dismiss-registration — remove cadastro sem ficha (credencial órfã)
+  router.post(
+    '/alunos/dismiss-registration',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    resolveCoachOrFail,
+    async (req, res) => {
+      try {
+        const { userIdToDismiss } = req.body || {};
+        if (!userIdToDismiss || !isValidUUID(String(userIdToDismiss))) {
+          return res.status(400).json({
+            error: 'userIdToDismiss é obrigatório e deve ser UUID válido',
+            error_code: 'INVALID_USER_ID',
+          });
+        }
+
+        const linkCol = await getAlunoUserLinkColumn(pool);
+        const stillHasAluno = await pool.query(
+          `SELECT id FROM public.alunos WHERE ${linkCol} = $1 LIMIT 1`,
+          [userIdToDismiss],
+        );
+        if (stillHasAluno.rows.length > 0) {
+          return res.status(409).json({
+            error: 'Este utilizador ainda tem ficha de aluno. Exclua pela gestão de alunos.',
+            error_code: 'ALUNO_STILL_EXISTS',
+            aluno_id: stillHasAluno.rows[0].id,
+          });
+        }
+
+        const userRow = await pool.query(
+          'SELECT id, email FROM app_auth.users WHERE id = $1',
+          [userIdToDismiss],
+        );
+        if (userRow.rows.length === 0) {
+          return res.status(404).json({ error: 'Usuário não encontrado', error_code: 'USER_NOT_FOUND' });
+        }
+
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          const { deleteAuthUserForAluno } = require('../utils/delete-aluno-complete');
+          const removed = await deleteAuthUserForAluno(client, {
+            email: userRow.rows[0].email,
+            authUserId: userIdToDismiss,
+          });
+          await client.query('COMMIT');
+          if (!removed.removed) {
+            return res.status(400).json({
+              error: 'Não foi possível remover este cadastro (perfil protegido ou inexistente).',
+              error_code: 'DISMISS_FAILED',
+            });
+          }
+          res.json({ success: true, message: 'Cadastro removido da plataforma.' });
+        } catch (txErr) {
+          await client.query('ROLLBACK');
+          throw txErr;
+        } finally {
+          client.release();
+        }
+      } catch (error) {
+        console.error('Erro ao dispensar cadastro:', error);
+        res.status(500).json({ error: 'Erro ao remover cadastro', error_code: 'DISMISS_ERROR' });
+      }
+    },
+  );
+
+  // POST /api/alunos/adopt-registration — coach cria ficha e vincula cadastro existente
+  router.post(
+    '/alunos/adopt-registration',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    resolveCoachOrFail,
+    async (req, res) => {
+      try {
+        const { userIdToLink, full_name: fullName } = req.body || {};
+        const coachId = req.user.id;
+
+        if (!userIdToLink || !isValidCoachId(userIdToLink)) {
+          return res.status(400).json({
+            error: 'userIdToLink é obrigatório e deve ser um UUID válido',
+            error_code: 'INVALID_USER_ID',
+          });
+        }
+
+        const userResult = await pool.query(
+          'SELECT id, email, email_confirmed_at FROM app_auth.users WHERE id = $1',
+          [userIdToLink],
+        );
+        if (userResult.rows.length === 0) {
+          return res.status(404).json({ error: 'Usuário não encontrado', error_code: 'USER_NOT_FOUND' });
+        }
+
+        const roleCheck = await pool.query(
+          `SELECT 1 FROM public.user_roles WHERE user_id = $1 AND role = 'aluno'`,
+          [userIdToLink],
+        );
+        if (roleCheck.rows.length === 0) {
+          return res.status(400).json({
+            error: 'Usuário não possui perfil de aluno na plataforma',
+            error_code: 'NOT_STUDENT_ROLE',
+          });
+        }
+
+        const linkCol = await getAlunoUserLinkColumn(pool);
+        const alreadyLinked = await pool.query(
+          `SELECT id, coach_id, nome FROM public.alunos WHERE ${linkCol} = $1`,
+          [userIdToLink],
+        );
+        if (alreadyLinked.rows.length > 0) {
+          const row = alreadyLinked.rows[0];
+          if (req.user.role !== 'admin' && row.coach_id && String(row.coach_id) !== String(coachId)) {
+            return res.status(409).json({
+              error: 'Este cadastro já está vinculado a outro coach',
+              error_code: 'ALREADY_LINKED_OTHER_COACH',
+              aluno_id: row.id,
+            });
+          }
+          return res.status(200).json({
+            success: true,
+            message: 'Cadastro já possui ficha vinculada',
+            aluno: alunoRowWithCanonicalUserId({ ...row, link_user_id: userIdToLink }),
+          });
+        }
+
+        let targetCoachId = coachId;
+        if (req.user.role === 'admin') {
+          const assign = req.body?.assignCoachId || req.body?.coach_id;
+          if (!assign || !isValidCoachId(String(assign))) {
+            return res.status(400).json({
+              error: 'assignCoachId é obrigatório para admin ao adotar cadastro',
+              error_code: 'MISSING_COACH_ID',
+            });
+          }
+          targetCoachId = String(assign).trim();
+        }
+
+        const provisioned = await provisionAlunoForUser(pool, {
+          userId: userIdToLink,
+          email: userResult.rows[0].email,
+          fullName,
+          coachId: targetCoachId,
+        });
+
+        if (!provisioned) {
+          return res.status(500).json({
+            error: 'Não foi possível criar a ficha do aluno',
+            error_code: 'PROVISION_FAILED',
+          });
+        }
+
+        const alunoRow = await pool.query(
+          `SELECT * FROM public.alunos WHERE id = $1`,
+          [provisioned.alunoId],
+        );
+
+        res.status(provisioned.created ? 201 : 200).json({
+          success: true,
+          message: provisioned.created
+            ? 'Ficha criada e cadastro vinculado com sucesso'
+            : 'Cadastro vinculado à ficha existente',
+          aluno: alunoRowWithCanonicalUserId(alunoRow.rows[0]),
+          created: provisioned.created,
+        });
+      } catch (error) {
+        console.error('Erro ao adotar cadastro:', error);
+        res.status(500).json({
+          error: 'Erro ao adotar cadastro',
+          error_code: 'ADOPT_ERROR',
+        });
+      }
+    },
+  );
+
+  router.post('/alunos/link-user', authenticate, domainSchemaGuard, validateRole(['coach', 'admin']), resolveCoachOrFail, async (req, res) => {
     try {
       const { importedAlunoId, userIdToLink } = req.body;
+      const linkCol = await getAlunoUserLinkColumn(pool);
 
       // Validações de entrada
       if (!importedAlunoId || !userIdToLink) {
@@ -65,8 +337,8 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
         });
       }
 
-      // Validar UUIDs
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      // Validar UUIDs (qualquer versão RFC — não apenas v4)
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       if (!uuidRegex.test(importedAlunoId) || !uuidRegex.test(userIdToLink)) {
         return res.status(400).json({
           error: 'importedAlunoId e userIdToLink devem ser UUIDs válidos',
@@ -75,10 +347,11 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
       }
 
       const coachId = req.user.id;
+      const isAdmin = req.user.role === 'admin';
 
       // DESIGN-LINK-ALUNO-USER-001: Validação 1 - Aluno existe e pertence ao coach
       const alunoResult = await pool.query(
-        'SELECT id, coach_id, user_id, linked_user_id FROM public.alunos WHERE id = $1',
+        `SELECT id, coach_id, ${linkCol} AS link_user_id FROM public.alunos WHERE id = $1`,
         [importedAlunoId]
       );
 
@@ -91,21 +364,25 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
 
       const aluno = alunoResult.rows[0];
 
-      // DESIGN-LINK-ALUNO-USER-001: Validação 2 - Coach autorizado
-      if (aluno.coach_id !== coachId) {
-        return res.status(403).json({
-          error: 'Coach não autorizado a vincular este aluno',
-          error_code: 'FORBIDDEN'
-        });
+      // DESIGN-LINK-ALUNO-USER-001: Validação 2 - Coach autorizado (admin pode vincular qualquer aluno)
+      if (!isAdmin) {
+        const sessionCoachStr = String(coachId);
+        const alunoCoachStr = aluno.coach_id != null ? String(aluno.coach_id) : null;
+        if (alunoCoachStr !== null && alunoCoachStr !== sessionCoachStr) {
+          return res.status(403).json({
+            error: 'Coach não autorizado a vincular este aluno',
+            error_code: 'FORBIDDEN'
+          });
+        }
       }
 
       // DESIGN-LINK-ALUNO-USER-001: Validação 3 - Aluno ainda não vinculado
-      const alreadyLinked = aluno.user_id || aluno.linked_user_id;
+      const alreadyLinked = aluno.link_user_id;
       if (alreadyLinked) {
         return res.status(409).json({
           error: 'Aluno já está vinculado a um usuário',
           error_code: 'ALUNO_ALREADY_LINKED',
-          linked_user_id: alreadyLinked
+          user_id: alreadyLinked
         });
       }
 
@@ -122,18 +399,26 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
         });
       }
 
-      // Cenário 1: só permitir unificação após confirmação de email
+      // Cenário 1 (opcional): exigir confirmação de email antes do vínculo.
+      // Por padrão, NÃO bloquear (muitos cenários operacionais usam convites/importação antes da confirmação).
       const user = userResult.rows[0];
-      if (!user.email_confirmed_at) {
+      const requireConfirmedEmailForLinking = process.env.REQUIRE_EMAIL_CONFIRMED_FOR_LINKING === 'true';
+      if (requireConfirmedEmailForLinking && !user.email_confirmed_at) {
         return res.status(403).json({
           error: 'Confirme o seu e-mail antes de ser vinculado pelo coach.',
           error_code: 'EMAIL_NOT_CONFIRMED'
         });
       }
+      if (!user.email_confirmed_at) {
+        console.warn('[LINK-ALUNO-USER] Vinculando usuário sem email confirmado (permitido por configuração)', {
+          user_id: userIdToLink,
+          imported_aluno_id: importedAlunoId
+        });
+      }
 
       // DESIGN-LINK-ALUNO-USER-001: Validação 5 - User não está vinculado a outro aluno
       const existingLink = await pool.query(
-        'SELECT id, nome FROM public.alunos WHERE user_id = $1 OR linked_user_id = $1',
+        `SELECT id, nome FROM public.alunos WHERE ${linkCol} = $1`,
         [userIdToLink]
       );
 
@@ -146,19 +431,47 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
         });
       }
 
-      // DESIGN-LINK-ALUNO-USER-001: Realizar vínculo
+      // Atribuir coach ao aluno órfão (coach_id nulo) ao vincular; admin sem coach no registo pode enviar assignCoachId (UUID)
+      const coachFallbackForOrphan = (() => {
+        if (!isAdmin) {
+          return coachId;
+        }
+        if (aluno.coach_id != null) {
+          return null;
+        }
+        const assign = req.body?.assignCoachId;
+        if (assign && uuidRegex.test(String(assign))) {
+          return String(assign);
+        }
+        return null;
+      })();
+
+      const { emailAfterLink } = require('../utils/aluno-email-utils');
+      const { resolveUserDisplayName, nomeAfterLink } = require('../utils/user-display-name');
+      const alunoEmailRow = await pool.query(
+        'SELECT email, nome FROM public.alunos WHERE id = $1',
+        [importedAlunoId],
+      );
+      const resolvedEmail = emailAfterLink(alunoEmailRow.rows[0]?.email, user.email);
+      const displayName = await resolveUserDisplayName(pool, userIdToLink);
+      const resolvedNome = nomeAfterLink(alunoEmailRow.rows[0]?.nome, displayName);
+
+      // DESIGN-LINK-ALUNO-USER-001: Realizar vínculo + sincronizar e-mail e nome da credencial
       const updateResult = await pool.query(
         `UPDATE public.alunos 
-                 SET user_id = $1, linked_user_id = $1, updated_at = now()
+                 SET ${linkCol} = $1,
+                     coach_id = COALESCE(coach_id, $3::uuid),
+                     email = $4,
+                     nome = COALESCE(NULLIF(TRIM(nome), ''), $5)
                  WHERE id = $2
-                 RETURNING id, user_id, coach_id, nome, email`,
-        [userIdToLink, importedAlunoId]
+                 RETURNING id, ${linkCol} AS link_user_id, coach_id, nome, email`,
+        [userIdToLink, importedAlunoId, coachFallbackForOrphan, resolvedEmail, resolvedNome]
       );
 
       res.status(200).json({
         success: true,
         message: 'Aluno vinculado ao usuário com sucesso',
-        aluno: updateResult.rows[0]
+        aluno: alunoRowWithCanonicalUserId(updateResult.rows[0])
       });
 
     } catch (error) {
@@ -190,7 +503,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
       }
 
       // Campos permitidos para atualização
-      const allowedFields = ['nome', 'email', 'telefone', 'cpf_cnpj', 'data_nascimento', 'peso', 'objetivo', 'plano', 'status'];
+      const allowedFields = ['nome', 'email', 'telefone', 'cpf_cnpj', 'data_nascimento', 'peso', 'altura', 'objetivo', 'plano', 'status'];
 
       const updateFields = [];
       const queryParams = [];
@@ -225,16 +538,35 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
 
   // GET /api/alunos/by-coach - Lista alunos do coach autenticado
   // DESIGN-GUARD-RAILS-ROLE-ACCESS-003: Rota apenas para coaches
-  router.get('/alunos/by-coach', authenticate, domainSchemaGuard, validateRole(['coach']), resolveCoachOrFail, async (req, res) => {
+  router.get('/alunos/by-coach', authenticate, domainSchemaGuard, validateRole(['coach', 'admin']), resolveCoachOrFail, async (req, res) => {
     try {
-      const query = `
-                SELECT * FROM public.alunos 
-                WHERE coach_id = $1
-                ORDER BY created_at DESC
-            `;
+      let result;
+      const alunoSelectWithDisplayName = `
+          SELECT a.*,
+                 COALESCE(
+                   NULLIF(TRIM(a.nome), ''),
+                   INITCAP(REPLACE(SPLIT_PART(COALESCE(a.email, ''), '@', 1), '.', ' '))
+                 ) AS nome_exibicao,
+                 coach_u.email AS coach_email,
+                 cp.nome_completo AS coach_nome
+          FROM public.alunos a
+          LEFT JOIN app_auth.users coach_u ON coach_u.id = a.coach_id
+          LEFT JOIN public.coach_profiles cp ON cp.user_id = a.coach_id`;
 
-      const result = await pool.query(query, [req.user.id]);
-      res.json(result.rows);
+      if (req.user.role === 'admin') {
+        result = await pool.query(
+          `${alunoSelectWithDisplayName}
+          ORDER BY nome_exibicao ASC NULLS LAST, a.created_at DESC NULLS LAST`,
+        );
+      } else {
+        result = await pool.query(
+          `${alunoSelectWithDisplayName}
+          WHERE a.coach_id = $1
+          ORDER BY nome_exibicao ASC NULLS LAST, a.created_at DESC NULLS LAST`,
+          [req.user.id],
+        );
+      }
+      res.json(result.rows.map(alunoRowWithCanonicalUserId));
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
@@ -259,9 +591,11 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
         paramIndex++;
       }
 
-      // Filtro por user_id (BLACKHOUSE-DOMAIN-ALUNO-COACH-004)
+      // Filtro por credencial (query user_id) — compatível com BD sem coluna linked_user_id
       if (user_id) {
-        whereConditions.push(`user_id = $${paramIndex}`);
+        whereConditions.push(
+          `EXISTS (SELECT 1 FROM app_auth.users u WHERE u.id = $${paramIndex} AND LOWER(TRIM(COALESCE(u.email, ''))) = LOWER(TRIM(COALESCE(a.email, ''))))`
+        );
         queryParams.push(user_id);
         paramIndex++;
       }
@@ -284,7 +618,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
             `;
 
       const result = await pool.query(query, queryParams);
-      res.json(result.rows);
+      res.json(result.rows.map(alunoRowWithCanonicalUserId));
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
@@ -297,6 +631,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
   // POST /api/alunos - Criar aluno
   router.post('/alunos', authenticate, domainSchemaGuard, async (req, res) => {
     try {
+      const linkCol = await getAlunoUserLinkColumn(pool);
       const {
         nome,
         email,
@@ -306,16 +641,18 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
         peso,
         objetivo,
         plano,
-        user_id
+        user_id,
+        linked_user_id: linkedUserIdBody
       } = req.body;
 
       // Coaches só podem criar alunos para si mesmos
       const coach_id = req.user.role === 'coach' ? req.user.id : req.body.coach_id;
+      const linkUserId = linkedUserIdBody != null ? linkedUserIdBody : user_id;
 
       const query = `
                 INSERT INTO public.alunos (
                     coach_id,
-                    user_id,
+                    ${linkCol},
                     nome,
                     email,
                     telefone,
@@ -330,7 +667,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
 
       const result = await pool.query(query, [
         coach_id,
-        user_id,
+        linkUserId || null,
         nome || null,
         email || '',
         telefone || null,
@@ -341,9 +678,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
         plano || null
       ]);
 
-      // BLACKHOUSE-DOMAIN-ALUNO-COACH-004: user_id sempre é fornecido (obrigatório)
-
-      res.status(201).json(result.rows[0]);
+      res.status(201).json(alunoRowWithCanonicalUserId(result.rows[0]));
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
@@ -366,7 +701,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
   // ============================================================================
 
   // GET /api/payment-plans - Listar planos de pagamento
-  router.get('/payment-plans', authenticate, domainSchemaGuard, async (req, res) => {
+  router.get('/payment-plans', authenticate, domainSchemaGuard, validateRole(['coach', 'admin']), async (req, res) => {
     try {
       const whereConditions = [];
       const queryParams = [];
@@ -408,7 +743,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
   });
 
   // GET /api/payment-plans/:id - Buscar plano por ID
-  router.get('/payment-plans/:id', authenticate, domainSchemaGuard, validateUUIDParam('id'), async (req, res) => {
+  router.get('/payment-plans/:id', authenticate, domainSchemaGuard, validateRole(['coach', 'admin']), validateUUIDParam('id'), async (req, res) => {
     try {
       const { id } = req.params;
 
@@ -435,7 +770,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
   });
 
   // POST /api/payment-plans - Criar plano de pagamento
-  router.post('/payment-plans', authenticate, domainSchemaGuard, async (req, res) => {
+  router.post('/payment-plans', authenticate, domainSchemaGuard, validateRole(['coach', 'admin']), async (req, res) => {
     try {
       const {
         nome,
@@ -483,7 +818,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
   });
 
   // PATCH /api/payment-plans/:id - Atualizar plano
-  router.patch('/payment-plans/:id', authenticate, domainSchemaGuard, validateUUIDParam('id'), async (req, res) => {
+  router.patch('/payment-plans/:id', authenticate, domainSchemaGuard, validateRole(['coach', 'admin']), validateUUIDParam('id'), async (req, res) => {
     try {
       const { id } = req.params;
 
@@ -532,7 +867,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
   });
 
   // DELETE /api/payment-plans/:id - Deletar plano
-  router.delete('/payment-plans/:id', authenticate, domainSchemaGuard, validateUUIDParam('id'), async (req, res) => {
+  router.delete('/payment-plans/:id', authenticate, domainSchemaGuard, validateRole(['coach', 'admin']), validateUUIDParam('id'), async (req, res) => {
     try {
       const { id } = req.params;
 
@@ -555,63 +890,1863 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
     }
   });
 
+  // GET /api/asaas-payments — coach (seus pagamentos), admin (todos), aluno (só os seus)
+  router.get(
+    '/asaas-payments',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'aluno']),
+    requireAlunoWhenStudent(),
+    async (req, res) => {
+      try {
+        if (req.user.role === 'admin') {
+          const r = await pool.query(
+            'SELECT * FROM public.asaas_payments ORDER BY created_at DESC NULLS LAST, due_date DESC'
+          );
+          return res.json(r.rows);
+        }
+        if (req.user.role === 'coach') {
+          const r = await pool.query(
+            'SELECT * FROM public.asaas_payments WHERE coach_id = $1 ORDER BY created_at DESC NULLS LAST, due_date DESC',
+            [req.user.id]
+          );
+          return res.json(r.rows);
+        }
+        const aluno = req.aluno;
+        const r = await pool.query(
+          'SELECT * FROM public.asaas_payments WHERE aluno_id = $1 ORDER BY created_at DESC NULLS LAST, due_date DESC',
+          [aluno.id]
+        );
+        return res.json(r.rows);
+      } catch (error) {
+        if (error.code === 'ALUNO_NOT_LINKED') {
+          return res.status(403).json({
+            error: 'Aluno não vinculado',
+            error_code: 'ALUNO_NOT_LINKED',
+          });
+        }
+        console.error('Erro ao listar asaas_payments:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao listar pagamentos' });
+      }
+    }
+  );
+
+  function sanitizeAsaasConfigRow(row) {
+    if (!row) return null;
+    return {
+      id: row.id,
+      coach_id: row.coach_id,
+      is_sandbox: row.is_sandbox,
+      webhook_url: row.webhook_url,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      has_api_key: !!(row.asaas_api_key && String(row.asaas_api_key).trim()),
+    };
+  }
+
+  // GET /api/asaas-config — coach (a sua), admin (?coach_id=)
+  router.get(
+    '/asaas-config',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      try {
+        if (req.user.role === 'admin') {
+          const coachId = req.query.coach_id;
+          if (coachId) {
+            const r = await pool.query(
+              'SELECT * FROM public.asaas_config WHERE coach_id = $1 LIMIT 1',
+              [coachId],
+            );
+            return res.json(r.rows.map(sanitizeAsaasConfigRow).filter(Boolean));
+          }
+          const r = await pool.query(
+            'SELECT * FROM public.asaas_config ORDER BY updated_at DESC NULLS LAST LIMIT 200',
+          );
+          return res.json(r.rows.map(sanitizeAsaasConfigRow));
+        }
+        const r = await pool.query(
+          'SELECT * FROM public.asaas_config WHERE coach_id = $1 LIMIT 1',
+          [req.user.id],
+        );
+        return res.json(r.rows.map(sanitizeAsaasConfigRow).filter(Boolean));
+      } catch (error) {
+        console.error('Erro ao listar asaas_config:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao listar configuração Asaas' });
+      }
+    },
+  );
+
+  router.post(
+    '/asaas-config',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      try {
+        const { asaas_api_key, is_sandbox, webhook_url } = req.body || {};
+        const key = asaas_api_key != null ? String(asaas_api_key).trim() : '';
+        if (!key) {
+          return res.status(400).json({
+            error: 'asaas_api_key é obrigatória',
+            error_code: 'MISSING_API_KEY',
+          });
+        }
+
+        let coachId = req.user.id;
+        if (req.user.role === 'admin') {
+          if (!req.body.coach_id) {
+            return res.status(400).json({
+              error: 'coach_id é obrigatório para admin',
+              error_code: 'MISSING_COACH_ID',
+            });
+          }
+          coachId = req.body.coach_id;
+        }
+
+        const sandbox = is_sandbox !== undefined ? Boolean(is_sandbox) : true;
+        const wh = webhook_url != null && String(webhook_url).trim() !== '' ? String(webhook_url).trim() : null;
+
+        let storedKey;
+        try {
+          storedKey = encryptCoachAsaasApiKey(key);
+        } catch (encErr) {
+          return res.status(400).json({
+            error: encErr.message || 'Não foi possível guardar a chave com segurança.',
+            error_code: 'SECRET_ENCRYPTION_CONFIG',
+          });
+        }
+
+        const ins = await pool.query(
+          `INSERT INTO public.asaas_config (coach_id, is_sandbox, webhook_url, asaas_api_key)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (coach_id) DO UPDATE SET
+             is_sandbox = EXCLUDED.is_sandbox,
+             webhook_url = COALESCE(EXCLUDED.webhook_url, public.asaas_config.webhook_url),
+             asaas_api_key = EXCLUDED.asaas_api_key,
+             updated_at = now()
+           RETURNING *`,
+          [coachId, sandbox, wh, storedKey],
+        );
+        return res.status(201).json(sanitizeAsaasConfigRow(ins.rows[0]));
+      } catch (error) {
+        console.error('Erro ao gravar asaas_config:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao gravar configuração Asaas' });
+      }
+    },
+  );
+
+  router.patch(
+    '/asaas-config/:id',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const cur = await pool.query('SELECT * FROM public.asaas_config WHERE id = $1', [id]);
+        if (cur.rows.length === 0) {
+          return res.status(404).json({ error: 'Configuração não encontrada', error_code: 'NOT_FOUND' });
+        }
+        if (req.user.role === 'coach' && String(cur.rows[0].coach_id) !== String(req.user.id)) {
+          return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+
+        const allowed = new Set(['is_sandbox', 'webhook_url', 'asaas_api_key']);
+        const updateFields = [];
+        const queryParams = [];
+        let paramIndex = 1;
+
+        for (const key of Object.keys(req.body || {})) {
+          if (!allowed.has(key) || req.body[key] === undefined) continue;
+          let val = req.body[key];
+          if (key === 'asaas_api_key') {
+            val = String(val).trim();
+            if (val === '') continue;
+            try {
+              val = encryptCoachAsaasApiKey(val);
+            } catch (encErr) {
+              return res.status(400).json({
+                error: encErr.message || 'Não foi possível guardar a chave com segurança.',
+                error_code: 'SECRET_ENCRYPTION_CONFIG',
+              });
+            }
+          }
+          if (key === 'is_sandbox') {
+            val = Boolean(val);
+          }
+          if (key === 'webhook_url' && val != null) {
+            val = String(val).trim() || null;
+          }
+          updateFields.push(`${key} = $${paramIndex}`);
+          queryParams.push(val);
+          paramIndex++;
+        }
+
+        if (updateFields.length === 0) {
+          return res.status(400).json({ error: 'Nenhum campo para atualizar', error_code: 'NO_FIELDS' });
+        }
+
+        queryParams.push(id);
+        const q = `UPDATE public.asaas_config SET ${updateFields.join(', ')}, updated_at = now() WHERE id = $${paramIndex} RETURNING *`;
+        const result = await pool.query(q, queryParams);
+        return res.json(sanitizeAsaasConfigRow(result.rows[0]));
+      } catch (error) {
+        console.error('Erro ao atualizar asaas_config:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao atualizar configuração Asaas' });
+      }
+    },
+  );
+
+  // POST — testar chave (campo opcional usa config guardada).
+  router.post(
+    '/asaas-config/verify-connection',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      let apiKeyPlain = '';
+      let sandbox = true;
+      try {
+        const body = req.body || {};
+
+        const inlineKey =
+          typeof body.asaas_api_key === 'string' ? String(body.asaas_api_key).trim() : '';
+        if (inlineKey) {
+          apiKeyPlain = inlineKey;
+          sandbox = body.is_sandbox !== undefined ? Boolean(body.is_sandbox) : true;
+        } else {
+          let coachRowId = req.user.id;
+          if (req.user.role === 'admin') {
+            if (!body.coach_id) {
+              return res.status(400).json({
+                error: 'Informe coach_id ou asaas_api_key no corpo.',
+                error_code: 'MISSING_COACH_OR_KEY',
+              });
+            }
+            coachRowId = body.coach_id;
+          }
+          const r = await pool.query(
+            'SELECT asaas_api_key, is_sandbox FROM public.asaas_config WHERE coach_id = $1 LIMIT 1',
+            [coachRowId],
+          );
+          if (r.rows.length === 0 || !r.rows[0].asaas_api_key) {
+            return res.status(400).json({
+              error: 'Nenhuma chave configurada. Guarde a chave primeiro ou envie asaas_api_key no pedido.',
+              error_code: 'NO_STORED_KEY',
+            });
+          }
+          try {
+            apiKeyPlain = decryptCoachAsaasApiKey(r.rows[0].asaas_api_key);
+          } catch (decErr) {
+            return res.status(503).json({
+              error:
+                decErr.message ||
+                'Não foi possível ler a chave guardada. Verifique ASAAS_COACH_SECRETS_KEY no servidor.',
+              error_code: 'DECRYPT_FAILED',
+            });
+          }
+          sandbox = Boolean(r.rows[0].is_sandbox);
+          if (body.is_sandbox !== undefined) sandbox = Boolean(body.is_sandbox);
+        }
+
+        if (!apiKeyPlain) {
+          return res.status(400).json({ error: 'Chave API em falta', error_code: 'MISSING_API_KEY' });
+        }
+
+        const svc = new AsaasService(apiKeyPlain, sandbox ? 'sandbox' : 'production');
+        const ping = await svc.verifyConnection();
+
+        return res.json({
+          ok: true,
+          environment: sandbox ? 'sandbox' : 'production',
+          asaas: { object: ping.object, totalCount: ping.totalCount },
+        });
+      } catch (error) {
+        const msg = error.message || 'Falha ao validar conexão com Asaas';
+        const normalizedMsg = String(msg).toLowerCase();
+
+        // Erro comum: chave válida, mas usada no ambiente errado (sandbox/prod).
+        const looksLikeEnvironmentMismatch =
+          normalizedMsg.includes('não pertence a este ambiente') ||
+          normalizedMsg.includes('nao pertence a este ambiente') ||
+          normalizedMsg.includes('does not belong to this environment');
+
+        if (looksLikeEnvironmentMismatch && apiKeyPlain) {
+          const suggestedSandbox = !sandbox;
+          try {
+            const retrySvc = new AsaasService(
+              apiKeyPlain,
+              suggestedSandbox ? 'sandbox' : 'production',
+            );
+            await retrySvc.verifyConnection();
+            return res.status(409).json({
+              ok: false,
+              error:
+                'A chave de API está correta, mas pertence ao outro ambiente do Asaas. Altere o modo e teste novamente.',
+              error_code: 'ASAAS_ENV_MISMATCH',
+              current_environment: sandbox ? 'sandbox' : 'production',
+              suggested_environment: suggestedSandbox ? 'sandbox' : 'production',
+            });
+          } catch {
+            // segue para tratamento padrão abaixo
+          }
+        }
+
+        const status =
+          error.statusCode && error.statusCode >= 400 && error.statusCode < 500 ? error.statusCode : 502;
+        return res.status(status).json({
+          ok: false,
+          error: msg,
+          error_code: 'ASAAS_VERIFY_FAILED',
+        });
+      }
+    },
+  );
+
+  function sanitizeTwilioConfigRow(row) {
+    if (!row) return null;
+    return {
+      id: row.id,
+      coach_id: row.coach_id,
+      account_sid: row.account_sid,
+      // Nunca devolver auth_token em texto para o frontend.
+      auth_token: null,
+      has_auth_token: !!(row.auth_token && String(row.auth_token).trim()),
+      whatsapp_from: row.whatsapp_from,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    };
+  }
+
+  // GET /api/twilio-config — coach (a sua), admin (?coach_id=)
+  router.get(
+    '/twilio-config',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      try {
+        if (req.user.role === 'admin') {
+          const coachId = req.query.coach_id;
+          if (coachId) {
+            const r = await pool.query(
+              'SELECT * FROM public.twilio_config WHERE coach_id = $1 LIMIT 1',
+              [coachId],
+            );
+            return res.json(r.rows.map(sanitizeTwilioConfigRow).filter(Boolean));
+          }
+          const r = await pool.query(
+            'SELECT * FROM public.twilio_config ORDER BY updated_at DESC NULLS LAST LIMIT 200',
+          );
+          return res.json(r.rows.map(sanitizeTwilioConfigRow));
+        }
+        const r = await pool.query(
+          'SELECT * FROM public.twilio_config WHERE coach_id = $1 LIMIT 1',
+          [req.user.id],
+        );
+        return res.json(r.rows.map(sanitizeTwilioConfigRow).filter(Boolean));
+      } catch (error) {
+        console.error('Erro ao listar twilio_config:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao listar configuração Twilio' });
+      }
+    },
+  );
+
+  router.post(
+    '/twilio-config',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      try {
+        const body = req.body || {};
+        let coachId = req.user.id;
+        if (req.user.role === 'admin') {
+          if (!body.coach_id) {
+            return res.status(400).json({
+              error: 'coach_id é obrigatório para admin',
+              error_code: 'MISSING_COACH_ID',
+            });
+          }
+          coachId = body.coach_id;
+        }
+
+        const accountSid =
+          body.account_sid != null && String(body.account_sid).trim() !== ''
+            ? String(body.account_sid).trim()
+            : null;
+        const authToken =
+          body.auth_token != null && String(body.auth_token).trim() !== ''
+            ? String(body.auth_token).trim()
+            : null;
+        const whatsappFrom =
+          body.whatsapp_from != null && String(body.whatsapp_from).trim() !== ''
+            ? String(body.whatsapp_from).trim()
+            : null;
+
+        if (!accountSid || !authToken || !whatsappFrom) {
+          return res.status(400).json({
+            error: 'account_sid, auth_token e whatsapp_from são obrigatórios',
+            error_code: 'MISSING_FIELDS',
+          });
+        }
+
+        const cur = await pool.query(
+          'SELECT id FROM public.twilio_config WHERE coach_id = $1 LIMIT 1',
+          [coachId],
+        );
+        if (cur.rows.length > 0) {
+          const upd = await pool.query(
+            `UPDATE public.twilio_config
+             SET account_sid = $1, auth_token = $2, whatsapp_from = $3, updated_at = now()
+             WHERE id = $4
+             RETURNING *`,
+            [accountSid, authToken, whatsappFrom, cur.rows[0].id],
+          );
+          return res.status(200).json(sanitizeTwilioConfigRow(upd.rows[0]));
+        }
+
+        const ins = await pool.query(
+          `INSERT INTO public.twilio_config (coach_id, account_sid, auth_token, whatsapp_from)
+           VALUES ($1, $2, $3, $4)
+           RETURNING *`,
+          [coachId, accountSid, authToken, whatsappFrom],
+        );
+        return res.status(201).json(sanitizeTwilioConfigRow(ins.rows[0]));
+      } catch (error) {
+        console.error('Erro ao gravar twilio_config:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao gravar configuração Twilio' });
+      }
+    },
+  );
+
+  router.patch(
+    '/twilio-config/:id',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const cur = await pool.query('SELECT * FROM public.twilio_config WHERE id = $1', [id]);
+        if (cur.rows.length === 0) {
+          return res.status(404).json({ error: 'Configuração não encontrada', error_code: 'NOT_FOUND' });
+        }
+        if (req.user.role === 'coach' && String(cur.rows[0].coach_id) !== String(req.user.id)) {
+          return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+
+        const allowed = new Set(['account_sid', 'auth_token', 'whatsapp_from']);
+        const updateFields = [];
+        const queryParams = [];
+        let paramIndex = 1;
+
+        for (const key of Object.keys(req.body || {})) {
+          if (!allowed.has(key) || req.body[key] === undefined) continue;
+          const val = String(req.body[key] ?? '').trim();
+          if (!val) continue;
+          updateFields.push(`${key} = $${paramIndex}`);
+          queryParams.push(val);
+          paramIndex++;
+        }
+
+        if (updateFields.length === 0) {
+          return res.status(400).json({ error: 'Nenhum campo para atualizar', error_code: 'NO_FIELDS' });
+        }
+
+        queryParams.push(id);
+        const q = `UPDATE public.twilio_config SET ${updateFields.join(', ')}, updated_at = now() WHERE id = $${paramIndex} RETURNING *`;
+        const result = await pool.query(q, queryParams);
+        return res.json(sanitizeTwilioConfigRow(result.rows[0]));
+      } catch (error) {
+        console.error('Erro ao atualizar twilio_config:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao atualizar configuração Twilio' });
+      }
+    },
+  );
+
+  // ============================================================================
+  // ROTAS: EXCEÇÕES FINANCEIRAS (financial_exceptions)
+  // ============================================================================
+
+  router.get(
+    '/financial-exceptions',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'aluno']),
+    requireAlunoWhenStudent(),
+    async (req, res) => {
+      try {
+        if (req.user.role === 'admin') {
+          const r = await pool.query(
+            'SELECT * FROM public.financial_exceptions ORDER BY created_at DESC NULLS LAST'
+          );
+          return res.json(r.rows);
+        }
+        if (req.user.role === 'coach') {
+          const r = await pool.query(
+            'SELECT * FROM public.financial_exceptions WHERE coach_id = $1 ORDER BY created_at DESC NULLS LAST',
+            [req.user.id]
+          );
+          return res.json(r.rows);
+        }
+        const aluno = req.aluno;
+        const r = await pool.query(
+          'SELECT * FROM public.financial_exceptions WHERE aluno_id = $1 ORDER BY created_at DESC NULLS LAST',
+          [aluno.id]
+        );
+        return res.json(r.rows);
+      } catch (error) {
+        if (error.code === 'ALUNO_NOT_LINKED') {
+          return res.status(403).json({ error: 'Aluno não vinculado', error_code: 'ALUNO_NOT_LINKED' });
+        }
+        console.error('Erro ao listar financial_exceptions:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao listar exceções' });
+      }
+    }
+  );
+
+  const FINANCIAL_EXCEPTION_TIPOS = new Set(['isento', 'desconto', 'acordo_pagamento', 'bolsa']);
+
+  router.post(
+    '/financial-exceptions',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      try {
+        const {
+          aluno_id,
+          motivo,
+          tipo,
+          valor_desconto,
+          percentual_desconto,
+          data_inicio,
+          data_fim,
+          observacoes,
+          ativo,
+        } = req.body;
+
+        if (!aluno_id || !motivo || !tipo || !data_inicio) {
+          return res.status(400).json({
+            error: 'aluno_id, motivo, tipo e data_inicio são obrigatórios',
+            error_code: 'MISSING_FIELDS',
+          });
+        }
+        if (!FINANCIAL_EXCEPTION_TIPOS.has(tipo)) {
+          return res.status(400).json({ error: 'tipo inválido', error_code: 'INVALID_TIPO' });
+        }
+
+        let coachId = req.user.id;
+        if (req.user.role === 'admin') {
+          if (!req.body.coach_id) {
+            return res.status(400).json({ error: 'coach_id é obrigatório para admin', error_code: 'MISSING_COACH_ID' });
+          }
+          coachId = req.body.coach_id;
+        }
+
+        const own = await pool.query('SELECT id FROM public.alunos WHERE id = $1 AND coach_id = $2', [
+          aluno_id,
+          coachId,
+        ]);
+        if (own.rows.length === 0) {
+          return res.status(403).json({
+            error: 'Aluno não encontrado ou não pertence a este coach',
+            error_code: 'ALUNO_NOT_BELONGS_TO_COACH',
+          });
+        }
+
+        const ins = await pool.query(
+          `INSERT INTO public.financial_exceptions (
+            coach_id, aluno_id, motivo, tipo, valor_desconto, percentual_desconto,
+            data_inicio, data_fim, observacoes, ativo
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10, true))
+          RETURNING *`,
+          [
+            coachId,
+            aluno_id,
+            String(motivo).trim(),
+            tipo,
+            valor_desconto != null ? valor_desconto : null,
+            percentual_desconto != null ? percentual_desconto : null,
+            data_inicio,
+            data_fim || null,
+            observacoes != null ? String(observacoes) : null,
+            ativo !== false,
+          ]
+        );
+        return res.status(201).json(ins.rows[0]);
+      } catch (error) {
+        console.error('Erro ao criar financial_exception:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao criar exceção' });
+      }
+    }
+  );
+
+  router.patch(
+    '/financial-exceptions/:id',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const cur = await pool.query('SELECT * FROM public.financial_exceptions WHERE id = $1', [id]);
+        if (cur.rows.length === 0) {
+          return res.status(404).json({ error: 'Exceção não encontrada', error_code: 'NOT_FOUND' });
+        }
+        const row = cur.rows[0];
+        if (req.user.role === 'coach' && String(row.coach_id) !== String(req.user.id)) {
+          return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+
+        const allowed = new Set([
+          'motivo',
+          'tipo',
+          'valor_desconto',
+          'percentual_desconto',
+          'data_inicio',
+          'data_fim',
+          'observacoes',
+          'ativo',
+        ]);
+        const updates = {};
+        for (const [k, v] of Object.entries(req.body || {})) {
+          if (allowed.has(k)) {
+            if (k === 'tipo' && v != null && !FINANCIAL_EXCEPTION_TIPOS.has(String(v))) {
+              return res.status(400).json({ error: 'tipo inválido', error_code: 'INVALID_TIPO' });
+            }
+            updates[k] = v;
+          }
+        }
+        if (Object.keys(updates).length === 0) {
+          return res.status(400).json({ error: 'Nenhum campo válido', error_code: 'NO_FIELDS' });
+        }
+
+        const keys = Object.keys(updates);
+        const vals = Object.values(updates);
+        const setClause = keys.map((col, i) => `${col} = $${i + 1}`).join(', ');
+        const r = await pool.query(
+          `UPDATE public.financial_exceptions SET ${setClause}, updated_at = now() WHERE id = $${keys.length + 1} RETURNING *`,
+          [...vals, id]
+        );
+        return res.json(r.rows[0]);
+      } catch (error) {
+        console.error('Erro ao atualizar financial_exception:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao atualizar exceção' });
+      }
+    }
+  );
+
+  router.delete(
+    '/financial-exceptions/:id',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const cur = await pool.query('SELECT coach_id FROM public.financial_exceptions WHERE id = $1', [id]);
+        if (cur.rows.length === 0) {
+          return res.status(404).json({ error: 'Exceção não encontrada', error_code: 'NOT_FOUND' });
+        }
+        if (req.user.role === 'coach' && String(cur.rows[0].coach_id) !== String(req.user.id)) {
+          return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+        await pool.query('DELETE FROM public.financial_exceptions WHERE id = $1', [id]);
+        return res.json({ ok: true });
+      } catch (error) {
+        console.error('Erro ao apagar financial_exception:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao apagar exceção' });
+      }
+    }
+  );
+
+  // ============================================================================
+  // ROTAS: DESPESAS (expenses)
+  // ============================================================================
+
+  const EXPENSE_STATUS = new Set(['pendente', 'pago', 'atrasado', 'cancelado']);
+  const EXPENSE_FREQ = new Set(['mensal', 'trimestral', 'semestral', 'anual']);
+
+  router.get(
+    '/expenses',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      try {
+        if (req.user.role === 'admin') {
+          const r = await pool.query(
+            'SELECT * FROM public.expenses ORDER BY data_vencimento DESC NULLS LAST, created_at DESC'
+          );
+          return res.json(r.rows);
+        }
+        const r = await pool.query(
+          'SELECT * FROM public.expenses WHERE coach_id = $1 ORDER BY data_vencimento DESC NULLS LAST, created_at DESC',
+          [req.user.id]
+        );
+        return res.json(r.rows);
+      } catch (error) {
+        console.error('Erro ao listar expenses:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao listar despesas' });
+      }
+    }
+  );
+
+  router.post(
+    '/expenses',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      try {
+        const {
+          descricao,
+          valor,
+          categoria,
+          data_vencimento,
+          data_pagamento,
+          status,
+          forma_pagamento,
+          observacoes,
+          recorrente,
+          frequencia_recorrencia,
+        } = req.body;
+
+        if (!descricao || valor == null || !categoria || !data_vencimento) {
+          return res.status(400).json({
+            error: 'descricao, valor, categoria e data_vencimento são obrigatórios',
+            error_code: 'MISSING_FIELDS',
+          });
+        }
+        const st = status || 'pendente';
+        if (!EXPENSE_STATUS.has(st)) {
+          return res.status(400).json({ error: 'status inválido', error_code: 'INVALID_STATUS' });
+        }
+
+        let coachId = req.user.id;
+        if (req.user.role === 'admin') {
+          if (!req.body.coach_id) {
+            return res.status(400).json({ error: 'coach_id é obrigatório para admin', error_code: 'MISSING_COACH_ID' });
+          }
+          coachId = req.body.coach_id;
+        }
+
+        const rec = Boolean(recorrente);
+        let freq = frequencia_recorrencia || null;
+        if (rec && freq && !EXPENSE_FREQ.has(String(freq))) {
+          return res.status(400).json({ error: 'frequencia_recorrencia inválida', error_code: 'INVALID_FREQ' });
+        }
+        if (!rec) {
+          freq = null;
+        }
+
+        const ins = await pool.query(
+          `INSERT INTO public.expenses (
+            coach_id, descricao, valor, categoria, data_vencimento, data_pagamento,
+            status, forma_pagamento, observacoes, recorrente, frequencia_recorrencia
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          RETURNING *`,
+          [
+            coachId,
+            String(descricao).trim(),
+            valor,
+            String(categoria).trim(),
+            data_vencimento,
+            data_pagamento || null,
+            st,
+            forma_pagamento != null ? String(forma_pagamento) : null,
+            observacoes != null ? String(observacoes) : null,
+            rec,
+            freq,
+          ]
+        );
+        return res.status(201).json(ins.rows[0]);
+      } catch (error) {
+        console.error('Erro ao criar expense:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao criar despesa' });
+      }
+    }
+  );
+
+  router.patch(
+    '/expenses/:id',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const cur = await pool.query('SELECT coach_id FROM public.expenses WHERE id = $1', [id]);
+        if (cur.rows.length === 0) {
+          return res.status(404).json({ error: 'Despesa não encontrada', error_code: 'NOT_FOUND' });
+        }
+        if (req.user.role === 'coach' && String(cur.rows[0].coach_id) !== String(req.user.id)) {
+          return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+
+        const allowed = new Set([
+          'descricao',
+          'valor',
+          'categoria',
+          'data_vencimento',
+          'data_pagamento',
+          'status',
+          'forma_pagamento',
+          'observacoes',
+          'recorrente',
+          'frequencia_recorrencia',
+        ]);
+        const updates = {};
+        for (const [k, v] of Object.entries(req.body || {})) {
+          if (!allowed.has(k)) continue;
+          if (k === 'status' && v != null && !EXPENSE_STATUS.has(String(v))) {
+            return res.status(400).json({ error: 'status inválido', error_code: 'INVALID_STATUS' });
+          }
+          if (k === 'frequencia_recorrencia' && v != null && !EXPENSE_FREQ.has(String(v))) {
+            return res.status(400).json({ error: 'frequencia_recorrencia inválida', error_code: 'INVALID_FREQ' });
+          }
+          updates[k] = v;
+        }
+        if (Object.keys(updates).length === 0) {
+          return res.status(400).json({ error: 'Nenhum campo válido', error_code: 'NO_FIELDS' });
+        }
+
+        const keys = Object.keys(updates);
+        const vals = Object.values(updates);
+        const setClause = keys.map((col, i) => `${col} = $${i + 1}`).join(', ');
+        const r = await pool.query(
+          `UPDATE public.expenses SET ${setClause}, updated_at = now() WHERE id = $${keys.length + 1} RETURNING *`,
+          [...vals, id]
+        );
+        return res.json(r.rows[0]);
+      } catch (error) {
+        console.error('Erro ao atualizar expense:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao atualizar despesa' });
+      }
+    }
+  );
+
+  router.delete(
+    '/expenses/:id',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const cur = await pool.query('SELECT coach_id FROM public.expenses WHERE id = $1', [id]);
+        if (cur.rows.length === 0) {
+          return res.status(404).json({ error: 'Despesa não encontrada', error_code: 'NOT_FOUND' });
+        }
+        if (req.user.role === 'coach' && String(cur.rows[0].coach_id) !== String(req.user.id)) {
+          return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+        await pool.query('DELETE FROM public.expenses WHERE id = $1', [id]);
+        return res.json({ ok: true });
+      } catch (error) {
+        console.error('Erro ao apagar expense:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao apagar despesa' });
+      }
+    }
+  );
+
+  // ============================================================================
+  // ROTAS: AGENDA EVENTOS (public.agenda_eventos)
+  // ============================================================================
+
+  const AGENDA_TIPO = new Set(['retorno', 'ajuste_dieta', 'alteracao_treino', 'avaliacao', 'outro']);
+  const AGENDA_STATUS = new Set(['pendente', 'concluido', 'cancelado']);
+  const AGENDA_PRIORIDADE = new Set(['baixa', 'normal', 'alta']);
+
+  router.get(
+    '/agenda-eventos',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'aluno']),
+    requireAlunoWhenStudent(),
+    async (req, res) => {
+      try {
+        if (req.user.role === 'admin') {
+          const r = await pool.query(
+            `SELECT * FROM public.agenda_eventos ORDER BY data_evento ASC, hora_evento ASC NULLS LAST, created_at DESC LIMIT 500`,
+          );
+          return res.json(r.rows);
+        }
+        if (req.user.role === 'coach') {
+          const r = await pool.query(
+            `SELECT * FROM public.agenda_eventos WHERE coach_id = $1 ORDER BY data_evento ASC, hora_evento ASC NULLS LAST, created_at DESC`,
+            [req.user.id],
+          );
+          return res.json(r.rows);
+        }
+        const r = await pool.query(
+          `SELECT * FROM public.agenda_eventos WHERE aluno_id = $1 ORDER BY data_evento ASC, hora_evento ASC NULLS LAST, created_at DESC`,
+          [req.aluno.id],
+        );
+        return res.json(r.rows);
+      } catch (error) {
+        return res.status(500).json({ error: error.message || 'Erro ao listar agenda' });
+      }
+    },
+  );
+
+  router.post(
+    '/agenda-eventos',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      try {
+        const {
+          titulo,
+          descricao,
+          data_evento,
+          hora_evento,
+          tipo,
+          status,
+          prioridade,
+          aluno_id,
+          notificacao_enviada,
+        } = req.body;
+
+        if (!titulo || !data_evento || !tipo) {
+          return res.status(400).json({
+            error: 'titulo, data_evento e tipo são obrigatórios',
+            error_code: 'MISSING_FIELDS',
+          });
+        }
+        const tipoNorm = String(tipo);
+        if (!AGENDA_TIPO.has(tipoNorm)) {
+          return res.status(400).json({ error: 'tipo inválido', error_code: 'INVALID_TIPO' });
+        }
+        const st = status != null ? String(status) : 'pendente';
+        if (!AGENDA_STATUS.has(st)) {
+          return res.status(400).json({ error: 'status inválido', error_code: 'INVALID_STATUS' });
+        }
+        const pr = prioridade != null ? String(prioridade) : 'normal';
+        if (!AGENDA_PRIORIDADE.has(pr)) {
+          return res.status(400).json({ error: 'prioridade inválida', error_code: 'INVALID_PRIORIDADE' });
+        }
+
+        let coachId = req.user.id;
+        if (req.user.role === 'admin') {
+          if (!req.body.coach_id) {
+            return res.status(400).json({ error: 'coach_id é obrigatório para admin', error_code: 'MISSING_COACH_ID' });
+          }
+          coachId = req.body.coach_id;
+        }
+
+        if (aluno_id) {
+          const own = await pool.query(
+            `SELECT id FROM public.alunos WHERE id = $1 AND coach_id = $2`,
+            [aluno_id, coachId],
+          );
+          if (own.rows.length === 0) {
+            return res.status(400).json({
+              error: 'aluno_id inválido ou não pertence ao coach',
+              error_code: 'INVALID_ALUNO',
+            });
+          }
+        }
+
+        const ins = await pool.query(
+          `INSERT INTO public.agenda_eventos (
+            coach_id, aluno_id, titulo, descricao, data_evento, hora_evento,
+            tipo, status, prioridade, notificacao_enviada
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          RETURNING *`,
+          [
+            coachId,
+            aluno_id || null,
+            String(titulo).trim(),
+            descricao != null ? String(descricao) : null,
+            data_evento,
+            hora_evento || null,
+            tipoNorm,
+            st,
+            pr,
+            Boolean(notificacao_enviada),
+          ],
+        );
+        return res.status(201).json(ins.rows[0]);
+      } catch (error) {
+        console.error('Erro ao criar agenda_evento:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao criar evento' });
+      }
+    },
+  );
+
+  router.patch(
+    '/agenda-eventos/:id',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const cur = await pool.query('SELECT coach_id FROM public.agenda_eventos WHERE id = $1', [id]);
+        if (cur.rows.length === 0) {
+          return res.status(404).json({ error: 'Evento não encontrado', error_code: 'NOT_FOUND' });
+        }
+        if (req.user.role === 'coach' && String(cur.rows[0].coach_id) !== String(req.user.id)) {
+          return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+
+        const allowed = new Set([
+          'titulo',
+          'descricao',
+          'data_evento',
+          'hora_evento',
+          'tipo',
+          'status',
+          'prioridade',
+          'notificacao_enviada',
+          'aluno_id',
+        ]);
+        if (req.user.role === 'admin') {
+          allowed.add('coach_id');
+        }
+
+        const updateFields = [];
+        const queryParams = [];
+        let paramIndex = 1;
+
+        for (const key of Object.keys(req.body || {})) {
+          if (!allowed.has(key) || req.body[key] === undefined) continue;
+          let val = req.body[key];
+          if (key === 'tipo' && !AGENDA_TIPO.has(String(val))) {
+            return res.status(400).json({ error: 'tipo inválido', error_code: 'INVALID_TIPO' });
+          }
+          if (key === 'status' && !AGENDA_STATUS.has(String(val))) {
+            return res.status(400).json({ error: 'status inválido', error_code: 'INVALID_STATUS' });
+          }
+          if (key === 'prioridade' && !AGENDA_PRIORIDADE.has(String(val))) {
+            return res.status(400).json({ error: 'prioridade inválida', error_code: 'INVALID_PRIORIDADE' });
+          }
+          if (key === 'notificacao_enviada') {
+            val = Boolean(val);
+          }
+          if (key === 'aluno_id' && val != null) {
+            const cid = cur.rows[0].coach_id;
+            const own = await pool.query(`SELECT id FROM public.alunos WHERE id = $1 AND coach_id = $2`, [val, cid]);
+            if (own.rows.length === 0) {
+              return res.status(400).json({
+                error: 'aluno_id inválido ou não pertence ao coach do evento',
+                error_code: 'INVALID_ALUNO',
+              });
+            }
+          }
+          if (key === 'coach_id' && req.user.role === 'admin') {
+            updateFields.push(`${key} = $${paramIndex}`);
+            queryParams.push(val);
+            paramIndex++;
+            continue;
+          }
+          if (key === 'coach_id') continue;
+
+          updateFields.push(`${key} = $${paramIndex}`);
+          queryParams.push(val);
+          paramIndex++;
+        }
+
+        if (updateFields.length === 0) {
+          return res.status(400).json({ error: 'Nenhum campo para atualizar', error_code: 'NO_FIELDS' });
+        }
+
+        queryParams.push(id);
+        const q = `UPDATE public.agenda_eventos SET ${updateFields.join(', ')}, updated_at = now() WHERE id = $${paramIndex} RETURNING *`;
+        const result = await pool.query(q, queryParams);
+        return res.json(result.rows[0]);
+      } catch (error) {
+        console.error('Erro ao atualizar agenda_evento:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao atualizar evento' });
+      }
+    },
+  );
+
+  router.delete(
+    '/agenda-eventos/:id',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const cur = await pool.query('SELECT coach_id FROM public.agenda_eventos WHERE id = $1', [id]);
+        if (cur.rows.length === 0) {
+          return res.status(404).json({ error: 'Evento não encontrado', error_code: 'NOT_FOUND' });
+        }
+        if (req.user.role === 'coach' && String(cur.rows[0].coach_id) !== String(req.user.id)) {
+          return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+        await pool.query('DELETE FROM public.agenda_eventos WHERE id = $1', [id]);
+        return res.json({ ok: true });
+      } catch (error) {
+        console.error('Erro ao apagar agenda_evento:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao apagar evento' });
+      }
+    },
+  );
+
+  // ============================================================================
+  // ROTAS: EVENTOS DE TURMA / CALENDÁRIO (public.eventos + eventos_participantes)
+  // Usado pelo EventsCalendar; distinto de agenda_eventos (retornos, etc.).
+  // ============================================================================
+
+  router.get(
+    '/eventos',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'aluno']),
+    async (req, res) => {
+      try {
+        if (req.user.role === 'admin') {
+          const r = await pool.query(
+            `SELECT * FROM public.eventos ORDER BY data_inicio ASC, hora_inicio ASC NULLS LAST, created_at DESC LIMIT 500`,
+          );
+          return res.json(r.rows);
+        }
+        if (req.user.role === 'coach') {
+          const r = await pool.query(
+            `SELECT * FROM public.eventos WHERE coach_id = $1 ORDER BY data_inicio ASC, hora_inicio ASC NULLS LAST, created_at DESC`,
+            [req.user.id],
+          );
+          return res.json(r.rows);
+        }
+        const aluno = await getAlunoRowForAuthUser(req.user.id);
+        if (!aluno) {
+          return res.json([]);
+        }
+        const r = await pool.query(
+          `SELECT DISTINCT e.* FROM public.eventos e
+           INNER JOIN public.eventos_participantes ep ON ep.evento_id = e.id
+           WHERE ep.aluno_id = $1
+           ORDER BY e.data_inicio ASC, e.hora_inicio ASC NULLS LAST`,
+          [aluno.id],
+        );
+        return res.json(r.rows);
+      } catch (error) {
+        console.error('Erro ao listar eventos:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao listar eventos' });
+      }
+    },
+  );
+
+  router.post(
+    '/eventos',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      try {
+        const {
+          titulo,
+          descricao,
+          data_inicio,
+          hora_inicio,
+          duracao_minutos,
+          recorrencia,
+          link_online,
+          turma_id,
+        } = req.body;
+
+        if (!titulo || !data_inicio || !hora_inicio) {
+          return res.status(400).json({
+            error: 'titulo, data_inicio e hora_inicio são obrigatórios',
+            error_code: 'MISSING_FIELDS',
+          });
+        }
+
+        let coachId = req.user.id;
+        if (req.user.role === 'admin') {
+          if (!req.body.coach_id) {
+            return res.status(400).json({ error: 'coach_id é obrigatório para admin', error_code: 'MISSING_COACH_ID' });
+          }
+          coachId = req.body.coach_id;
+        } else if (req.body.coach_id && String(req.body.coach_id) !== String(req.user.id)) {
+          return res.status(403).json({ error: 'coach_id inválido', error_code: 'FORBIDDEN' });
+        }
+
+        let turmaId = turma_id || null;
+        if (turmaId) {
+          const tr = await pool.query(`SELECT coach_id FROM public.turmas WHERE id = $1`, [turmaId]);
+          if (tr.rows.length === 0) {
+            return res.status(400).json({ error: 'turma_id inválido', error_code: 'INVALID_TURMA' });
+          }
+          if (String(tr.rows[0].coach_id) !== String(coachId)) {
+            return res.status(403).json({ error: 'Turma não pertence ao coach', error_code: 'FORBIDDEN' });
+          }
+        }
+
+        const dur = duracao_minutos != null ? parseInt(String(duracao_minutos), 10) : 60;
+        const rec = recorrencia != null ? String(recorrencia) : 'unica';
+
+        const ins = await pool.query(
+          `INSERT INTO public.eventos (
+            coach_id, turma_id, titulo, descricao, data_inicio, hora_inicio,
+            duracao_minutos, recorrencia, link_online
+          ) VALUES ($1, $2, $3, $4, $5::timestamptz, $6::time, $7, $8, $9)
+          RETURNING *`,
+          [
+            coachId,
+            turmaId,
+            String(titulo).trim(),
+            descricao != null ? String(descricao) : null,
+            data_inicio,
+            hora_inicio,
+            Number.isFinite(dur) && dur > 0 ? dur : 60,
+            rec,
+            link_online != null && String(link_online).trim() !== '' ? String(link_online).trim() : null,
+          ],
+        );
+        return res.status(201).json(ins.rows[0]);
+      } catch (error) {
+        console.error('Erro ao criar evento:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao criar evento' });
+      }
+    },
+  );
+
+  router.patch(
+    '/eventos/:id',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const cur = await pool.query('SELECT coach_id FROM public.eventos WHERE id = $1', [id]);
+        if (cur.rows.length === 0) {
+          return res.status(404).json({ error: 'Evento não encontrado', error_code: 'NOT_FOUND' });
+        }
+        if (req.user.role === 'coach' && String(cur.rows[0].coach_id) !== String(req.user.id)) {
+          return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+
+        const allowed = new Set([
+          'titulo',
+          'descricao',
+          'data_inicio',
+          'hora_inicio',
+          'duracao_minutos',
+          'recorrencia',
+          'recorrencia_config',
+          'link_online',
+          'turma_id',
+          'status',
+        ]);
+        if (req.user.role === 'admin') {
+          allowed.add('coach_id');
+        }
+
+        const updateFields = [];
+        const queryParams = [];
+        let paramIndex = 1;
+
+        for (const key of Object.keys(req.body || {})) {
+          if (!allowed.has(key) || req.body[key] === undefined) continue;
+          if (key === 'coach_id' && req.user.role !== 'admin') continue;
+
+          if (key === 'turma_id') {
+            const val = req.body[key];
+            if (val != null) {
+              const tr = await pool.query(`SELECT coach_id FROM public.turmas WHERE id = $1`, [val]);
+              if (tr.rows.length === 0) {
+                return res.status(400).json({ error: 'turma_id inválido', error_code: 'INVALID_TURMA' });
+              }
+              const cid = cur.rows[0].coach_id;
+              if (String(tr.rows[0].coach_id) !== String(cid)) {
+                return res.status(403).json({ error: 'Turma não pertence ao coach do evento', error_code: 'FORBIDDEN' });
+              }
+            }
+          }
+
+          const val = req.body[key];
+          if (key === 'data_inicio') {
+            updateFields.push(`${key} = $${paramIndex}::timestamptz`);
+          } else if (key === 'hora_inicio') {
+            updateFields.push(`${key} = $${paramIndex}::time`);
+          } else if (key === 'recorrencia_config') {
+            updateFields.push(`${key} = $${paramIndex}::jsonb`);
+          } else {
+            updateFields.push(`${key} = $${paramIndex}`);
+          }
+          queryParams.push(val);
+          paramIndex++;
+        }
+
+        if (updateFields.length === 0) {
+          return res.status(400).json({ error: 'Nenhum campo para atualizar', error_code: 'NO_FIELDS' });
+        }
+
+        queryParams.push(id);
+        const q = `UPDATE public.eventos SET ${updateFields.join(', ')}, updated_at = now() WHERE id = $${paramIndex} RETURNING *`;
+        const result = await pool.query(q, queryParams);
+        return res.json(result.rows[0]);
+      } catch (error) {
+        console.error('Erro ao atualizar evento:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao atualizar evento' });
+      }
+    },
+  );
+
+  router.get(
+    '/eventos-participantes',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'aluno']),
+    async (req, res) => {
+      try {
+        const eventoId = req.query.evento_id;
+        if (req.user.role === 'admin') {
+          let q = `SELECT ep.* FROM public.eventos_participantes ep`;
+          const params = [];
+          if (eventoId) {
+            q += ` WHERE ep.evento_id = $1`;
+            params.push(eventoId);
+          }
+          q += ` ORDER BY ep.created_at DESC LIMIT 2000`;
+          const r = await pool.query(q, params);
+          return res.json(r.rows);
+        }
+        if (req.user.role === 'coach') {
+          let q = `SELECT ep.* FROM public.eventos_participantes ep
+            INNER JOIN public.eventos e ON e.id = ep.evento_id
+            WHERE e.coach_id = $1`;
+          const params = [req.user.id];
+          if (eventoId) {
+            q += ` AND ep.evento_id = $2`;
+            params.push(eventoId);
+          }
+          q += ` ORDER BY ep.created_at DESC LIMIT 2000`;
+          const r = await pool.query(q, params);
+          return res.json(r.rows);
+        }
+        const aluno = await getAlunoRowForAuthUser(req.user.id);
+        if (!aluno) {
+          return res.json([]);
+        }
+        let q = `SELECT ep.* FROM public.eventos_participantes ep WHERE ep.aluno_id = $1`;
+        const params = [aluno.id];
+        if (eventoId) {
+          q += ` AND ep.evento_id = $2`;
+          params.push(eventoId);
+        }
+        q += ` ORDER BY ep.created_at DESC`;
+        const r = await pool.query(q, params);
+        return res.json(r.rows);
+      } catch (error) {
+        console.error('Erro ao listar eventos_participantes:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao listar participantes' });
+      }
+    },
+  );
+
+  router.post(
+    '/eventos-participantes',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const rows = Array.isArray(req.body) ? req.body : [];
+        if (rows.length === 0) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Corpo deve ser um array não vazio', error_code: 'INVALID_BODY' });
+        }
+
+        const inserted = [];
+        for (const row of rows) {
+          const evId = row.evento_id;
+          const alunoId = row.aluno_id;
+          if (!evId || !alunoId) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'cada item precisa de evento_id e aluno_id', error_code: 'MISSING_FIELDS' });
+          }
+
+          const ev = await client.query('SELECT coach_id FROM public.eventos WHERE id = $1', [evId]);
+          if (ev.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'evento_id inválido', error_code: 'INVALID_EVENTO' });
+          }
+          const coachId = ev.rows[0].coach_id;
+          if (req.user.role === 'coach' && String(coachId) !== String(req.user.id)) {
+            await client.query('ROLLBACK');
+            return res.status(403).json({ error: 'Acesso negado ao evento', error_code: 'FORBIDDEN' });
+          }
+
+          const al = await client.query('SELECT coach_id FROM public.alunos WHERE id = $1', [alunoId]);
+          if (al.rows.length === 0 || String(al.rows[0].coach_id) !== String(coachId)) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'aluno_id inválido para este evento', error_code: 'INVALID_ALUNO' });
+          }
+
+          const ins = await client.query(
+            `INSERT INTO public.eventos_participantes (evento_id, aluno_id) VALUES ($1, $2) RETURNING *`,
+            [evId, alunoId],
+          );
+          inserted.push(ins.rows[0]);
+        }
+        await client.query('COMMIT');
+        return res.status(201).json(inserted);
+      } catch (error) {
+        try {
+          await client.query('ROLLBACK');
+        } catch (_) {
+          /* ignore */
+        }
+        console.error('Erro ao criar eventos_participantes:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao criar participantes' });
+      } finally {
+        client.release();
+      }
+    },
+  );
+
+  // ============================================================================
+  // ROTAS: RELATÓRIOS (public.relatorios + feedbacks + mídias)
+  // ============================================================================
+
+  const RELATORIO_STATUS = new Set(['rascunho', 'enviado', 'visualizado']);
+
+  async function fetchRelatorioById(pool, id) {
+    const r = await pool.query('SELECT * FROM public.relatorios WHERE id = $1', [id]);
+    return r.rows[0] || null;
+  }
+
+  async function userCanAccessRelatorio(req, rel) {
+    if (!rel) return false;
+    if (req.user.role === 'admin') return true;
+    if (req.user.role === 'coach') return String(rel.coach_id) === String(req.user.id);
+    if (req.user.role === 'aluno') {
+      const row = await getAlunoRowForAuthUser(req.user.id);
+      return !!row && String(rel.aluno_id) === String(row.id);
+    }
+    return false;
+  }
+
+  router.get(
+    '/relatorios',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'aluno']),
+    requireAlunoWhenStudent(),
+    async (req, res) => {
+      try {
+        if (req.user.role === 'admin') {
+          const r = await pool.query(
+            `SELECT * FROM public.relatorios ORDER BY created_at DESC LIMIT 2000`,
+          );
+          return res.json(r.rows);
+        }
+        if (req.user.role === 'coach') {
+          const r = await pool.query(
+            `SELECT * FROM public.relatorios WHERE coach_id = $1 ORDER BY created_at DESC`,
+            [req.user.id],
+          );
+          return res.json(r.rows);
+        }
+        const r = await pool.query(`SELECT * FROM public.relatorios WHERE aluno_id = $1 ORDER BY created_at DESC`, [
+          req.aluno.id,
+        ]);
+        return res.json(r.rows);
+      } catch (error) {
+        return res.status(500).json({ error: error.message || 'Erro ao listar relatórios' });
+      }
+    },
+  );
+
+  router.get(
+    '/relatorios/:id',
+    authenticate,
+    domainSchemaGuard,
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const rel = await fetchRelatorioById(pool, req.params.id);
+        if (!rel) {
+          return res.status(404).json({ error: 'Relatório não encontrado', error_code: 'NOT_FOUND' });
+        }
+        if (!(await userCanAccessRelatorio(req, rel))) {
+          return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+        return res.json(rel);
+      } catch (error) {
+        return res.status(500).json({ error: error.message || 'Erro ao buscar relatório' });
+      }
+    },
+  );
+
+  router.post(
+    '/relatorios',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      try {
+        const {
+          titulo,
+          aluno_id,
+          periodo_inicio,
+          periodo_fim,
+          observacoes,
+          template_id,
+          dados,
+          metricas,
+        } = req.body;
+
+        if (!titulo || !aluno_id || !periodo_inicio || !periodo_fim) {
+          return res.status(400).json({
+            error: 'titulo, aluno_id, periodo_inicio e periodo_fim são obrigatórios',
+            error_code: 'MISSING_FIELDS',
+          });
+        }
+
+        let coachId = req.user.id;
+        if (req.user.role === 'admin') {
+          if (!req.body.coach_id) {
+            return res.status(400).json({ error: 'coach_id é obrigatório para admin', error_code: 'MISSING_COACH_ID' });
+          }
+          coachId = req.body.coach_id;
+        }
+
+        const own = await pool.query(`SELECT id FROM public.alunos WHERE id = $1 AND coach_id = $2`, [
+          aluno_id,
+          coachId,
+        ]);
+        if (own.rows.length === 0) {
+          return res.status(400).json({
+            error: 'aluno_id inválido ou não pertence ao coach',
+            error_code: 'INVALID_ALUNO',
+          });
+        }
+
+        const ins = await pool.query(
+          `INSERT INTO public.relatorios (
+            coach_id, aluno_id, template_id, titulo, periodo_inicio, periodo_fim,
+            dados, observacoes, metricas, status
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::jsonb, 'rascunho')
+          RETURNING *`,
+          [
+            coachId,
+            aluno_id,
+            template_id || null,
+            String(titulo).trim(),
+            periodo_inicio,
+            periodo_fim,
+            dados != null ? JSON.stringify(dados) : '{}',
+            observacoes != null ? String(observacoes) : null,
+            metricas != null ? JSON.stringify(metricas) : '{}',
+          ],
+        );
+        return res.status(201).json(ins.rows[0]);
+      } catch (error) {
+        console.error('Erro ao criar relatório:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao criar relatório' });
+      }
+    },
+  );
+
+  router.patch(
+    '/relatorios/:id',
+    authenticate,
+    domainSchemaGuard,
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const rel = await fetchRelatorioById(pool, id);
+        if (!rel) {
+          return res.status(404).json({ error: 'Relatório não encontrado', error_code: 'NOT_FOUND' });
+        }
+
+        if (req.user.role === 'aluno') {
+          if (!(await userCanAccessRelatorio(req, rel))) {
+            return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+          }
+          const keys = Object.keys(req.body || {});
+          const bad = keys.filter((k) => !['status', 'visualizado_em'].includes(k));
+          if (bad.length > 0) {
+            return res.status(403).json({ error: 'Aluno só pode atualizar status e visualizado_em', error_code: 'FORBIDDEN' });
+          }
+          if (req.body.status !== undefined && !RELATORIO_STATUS.has(String(req.body.status))) {
+            return res.status(400).json({ error: 'status inválido', error_code: 'INVALID_STATUS' });
+          }
+        } else if (req.user.role === 'coach') {
+          if (String(rel.coach_id) !== String(req.user.id)) {
+            return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+          }
+        } else if (req.user.role !== 'admin') {
+          return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+
+        const coachIdForAlunoCheck = rel.coach_id;
+        const allowedCoach = new Set([
+          'titulo',
+          'aluno_id',
+          'periodo_inicio',
+          'periodo_fim',
+          'observacoes',
+          'template_id',
+          'dados',
+          'metricas',
+          'status',
+          'enviado_em',
+          'visualizado_em',
+        ]);
+        const allowedAluno = new Set(['status', 'visualizado_em']);
+        const allowed = req.user.role === 'aluno' ? allowedAluno : allowedCoach;
+
+        const updateFields = [];
+        const queryParams = [];
+        let paramIndex = 1;
+
+        for (const key of Object.keys(req.body || {})) {
+          if (!allowed.has(key) || req.body[key] === undefined) continue;
+          if (key === 'status' && !RELATORIO_STATUS.has(String(req.body[key]))) {
+            return res.status(400).json({ error: 'status inválido', error_code: 'INVALID_STATUS' });
+          }
+          if (key === 'aluno_id' && req.user.role !== 'aluno') {
+            const own = await pool.query(`SELECT id FROM public.alunos WHERE id = $1 AND coach_id = $2`, [
+              req.body[key],
+              coachIdForAlunoCheck,
+            ]);
+            if (own.rows.length === 0) {
+              return res.status(400).json({
+                error: 'aluno_id inválido ou não pertence ao coach do relatório',
+                error_code: 'INVALID_ALUNO',
+              });
+            }
+          }
+          let val = req.body[key];
+          if (key === 'dados' || key === 'metricas') {
+            val = JSON.stringify(val);
+            updateFields.push(`${key} = $${paramIndex}::jsonb`);
+          } else {
+            updateFields.push(`${key} = $${paramIndex}`);
+          }
+          queryParams.push(val);
+          paramIndex++;
+        }
+
+        if (updateFields.length === 0) {
+          return res.status(400).json({ error: 'Nenhum campo para atualizar', error_code: 'NO_FIELDS' });
+        }
+
+        queryParams.push(id);
+        const q = `UPDATE public.relatorios SET ${updateFields.join(', ')}, updated_at = now() WHERE id = $${paramIndex} RETURNING *`;
+        const result = await pool.query(q, queryParams);
+        return res.json(result.rows[0]);
+      } catch (error) {
+        console.error('Erro ao atualizar relatório:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao atualizar relatório' });
+      }
+    },
+  );
+
+  router.delete(
+    '/relatorios/:id',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const rel = await fetchRelatorioById(pool, id);
+        if (!rel) {
+          return res.status(404).json({ error: 'Relatório não encontrado', error_code: 'NOT_FOUND' });
+        }
+        if (req.user.role === 'coach' && String(rel.coach_id) !== String(req.user.id)) {
+          return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+        await pool.query('DELETE FROM public.relatorio_midias WHERE relatorio_id = $1', [id]);
+        await pool.query('DELETE FROM public.relatorio_feedbacks WHERE relatorio_id = $1', [id]);
+        await pool.query('DELETE FROM public.relatorios WHERE id = $1', [id]);
+        return res.json({ ok: true });
+      } catch (error) {
+        console.error('Erro ao apagar relatório:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao apagar relatório' });
+      }
+    },
+  );
+
+  router.get(
+    '/relatorio-feedbacks',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'aluno']),
+    requireAlunoWhenStudent(),
+    async (req, res) => {
+      try {
+        const rid = req.query.relatorio_id;
+        if (!rid || !isValidUUID(rid)) {
+          return res.status(400).json({ error: 'relatorio_id (UUID) é obrigatório', error_code: 'MISSING_RELATORIO_ID' });
+        }
+        const rel = await fetchRelatorioById(pool, rid);
+        if (!rel) {
+          return res.status(404).json({ error: 'Relatório não encontrado', error_code: 'NOT_FOUND' });
+        }
+        if (!(await userCanAccessRelatorio(req, rel))) {
+          return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+        const r = await pool.query(
+          `SELECT * FROM public.relatorio_feedbacks WHERE relatorio_id = $1 ORDER BY created_at DESC`,
+          [rid],
+        );
+        return res.json(r.rows);
+      } catch (error) {
+        return res.status(500).json({ error: error.message || 'Erro ao listar feedbacks' });
+      }
+    },
+  );
+
+  router.post(
+    '/relatorio-feedbacks',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['aluno']),
+    resolveAlunoOrFail,
+    async (req, res) => {
+      try {
+        const { relatorio_id, aluno_id, comentario } = req.body || {};
+        if (!relatorio_id || !isValidUUID(relatorio_id) || !comentario || String(comentario).trim() === '') {
+          return res.status(400).json({
+            error: 'relatorio_id e comentario são obrigatórios',
+            error_code: 'MISSING_FIELDS',
+          });
+        }
+        if (String(aluno_id) !== String(req.aluno.id)) {
+          return res.status(403).json({ error: 'aluno_id inconsistente', error_code: 'FORBIDDEN' });
+        }
+        const rel = await fetchRelatorioById(pool, relatorio_id);
+        if (!rel || String(rel.aluno_id) !== String(req.aluno.id)) {
+          return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+        const ins = await pool.query(
+          `INSERT INTO public.relatorio_feedbacks (relatorio_id, aluno_id, comentario) VALUES ($1, $2, $3) RETURNING *`,
+          [relatorio_id, req.aluno.id, String(comentario).trim()],
+        );
+        return res.status(201).json(ins.rows[0]);
+      } catch (error) {
+        console.error('Erro ao criar feedback:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao criar feedback' });
+      }
+    },
+  );
+
+  router.get(
+    '/relatorio-midias',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'aluno']),
+    requireAlunoWhenStudent(),
+    async (req, res) => {
+      try {
+        const rid = req.query.relatorio_id;
+        if (!rid || !isValidUUID(rid)) {
+          return res.status(400).json({ error: 'relatorio_id (UUID) é obrigatório', error_code: 'MISSING_RELATORIO_ID' });
+        }
+        const rel = await fetchRelatorioById(pool, rid);
+        if (!rel) {
+          return res.status(404).json({ error: 'Relatório não encontrado', error_code: 'NOT_FOUND' });
+        }
+        if (!(await userCanAccessRelatorio(req, rel))) {
+          return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+        const r = await pool.query(
+          `SELECT * FROM public.relatorio_midias WHERE relatorio_id = $1 ORDER BY ordem ASC NULLS LAST, created_at ASC`,
+          [rid],
+        );
+        return res.json(r.rows);
+      } catch (error) {
+        return res.status(500).json({ error: error.message || 'Erro ao listar mídias' });
+      }
+    },
+  );
+
+  router.post(
+    '/relatorio-midias',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      try {
+        const { relatorio_id, tipo, url, legenda, ordem } = req.body || {};
+        if (!relatorio_id || !isValidUUID(relatorio_id) || !tipo || !url) {
+          return res.status(400).json({
+            error: 'relatorio_id, tipo e url são obrigatórios',
+            error_code: 'MISSING_FIELDS',
+          });
+        }
+        const t = String(tipo);
+        if (t !== 'foto' && t !== 'video') {
+          return res.status(400).json({ error: 'tipo deve ser foto ou video', error_code: 'INVALID_TIPO' });
+        }
+        const rel = await fetchRelatorioById(pool, relatorio_id);
+        if (!rel) {
+          return res.status(404).json({ error: 'Relatório não encontrado', error_code: 'NOT_FOUND' });
+        }
+        if (req.user.role === 'coach' && String(rel.coach_id) !== String(req.user.id)) {
+          return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+        const ins = await pool.query(
+          `INSERT INTO public.relatorio_midias (relatorio_id, tipo, url, legenda, ordem) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+          [relatorio_id, t, String(url), legenda != null ? String(legenda) : null, ordem != null ? Number(ordem) : 0],
+        );
+        return res.status(201).json(ins.rows[0]);
+      } catch (error) {
+        console.error('Erro ao criar mídia:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao criar mídia' });
+      }
+    },
+  );
+
+  router.delete(
+    '/relatorio-midias',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      try {
+        const rid = req.query.relatorio_id;
+        if (!rid || !isValidUUID(rid)) {
+          return res.status(400).json({ error: 'relatorio_id (UUID) é obrigatório', error_code: 'MISSING_RELATORIO_ID' });
+        }
+        const rel = await fetchRelatorioById(pool, rid);
+        if (!rel) {
+          return res.status(404).json({ error: 'Relatório não encontrado', error_code: 'NOT_FOUND' });
+        }
+        if (req.user.role === 'coach' && String(rel.coach_id) !== String(req.user.id)) {
+          return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+        await pool.query('DELETE FROM public.relatorio_midias WHERE relatorio_id = $1', [rid]);
+        return res.json({ ok: true });
+      } catch (error) {
+        console.error('Erro ao apagar mídias:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao apagar mídias' });
+      }
+    },
+  );
+
   // ============================================================================
   // ROTAS: NOTIFICAÇÕES
   // ============================================================================
-
-  // GET /api/notificacoes - Notificações do aluno autenticado
-  // DESIGN-GUARD-RAILS-ROLE-ACCESS-003: Rota apenas para alunos
-  router.get('/notificacoes', authenticate, domainSchemaGuard, validateRole(['aluno']), resolveAlunoOrFail, async (req, res) => {
-    try {
-      const aluno = req.aluno; // Já resolvido pelo middleware
-
-      // Query explícita - sem sintaxe PostgREST
-      let query = `
-                SELECT 
-                    id,
-                    aluno_id,
-                    coach_id,
-                    titulo,
-                    mensagem,
-                    tipo,
-                    link,
-                    lida,
-                    created_at,
-                    updated_at
-                FROM public.notificacoes
-                WHERE aluno_id = $1
-            `;
-      const queryParams = [aluno.id];
-      let paramIndex = 2;
-
-      // Filtros opcionais (sem sintaxe PostgREST)
-      if (req.query.lida !== undefined) {
-        query += ` AND lida = $${paramIndex}`;
-        queryParams.push(req.query.lida === 'true');
-        paramIndex++;
-      }
-
-      if (req.query.tipo) {
-        query += ` AND tipo = $${paramIndex}`;
-        queryParams.push(req.query.tipo);
-        paramIndex++;
-      }
-
-      query += ` ORDER BY created_at DESC`;
-
-      if (req.query.limit) {
-        query += ` LIMIT $${paramIndex}`;
-        queryParams.push(parseInt(req.query.limit));
-      } else {
-        query += ` LIMIT 100`;
-      }
-
-      const result = await pool.query(query, queryParams);
-      res.json(result.rows);
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  });
 
   // GET /api/notificacoes/:id - Buscar notificação por ID
   router.get('/notificacoes/:id', authenticate, domainSchemaGuard, validateUUIDParam('id'), async (req, res) => {
@@ -631,18 +2766,20 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
 
       // Verificar permissão
       const notificacao = result.rows[0];
-      if (req.user.role === 'coach' && notificacao.coach_id !== req.user.id) {
+      if (req.user.role === 'coach' && String(notificacao.coach_id) !== String(req.user.id)) {
         return res.status(403).json({ error: 'Acesso negado' });
       }
 
-      if (req.user.role === 'aluno' && notificacao.aluno_id) {
-        const alunoResult = await pool.query(
-          'SELECT id FROM public.alunos WHERE COALESCE(user_id, linked_user_id) = $1',
-          [req.user.id]
-        );
-
-        if (alunoResult.rows.length === 0 || alunoResult.rows[0].id !== notificacao.aluno_id) {
+      if (req.user.role === 'aluno') {
+        if (!notificacao.aluno_id) {
           return res.status(403).json({ error: 'Acesso negado' });
+        }
+        const alunoRow = await getAlunoRowForAuthUser(req.user.id);
+        if (!alunoRow || String(alunoRow.id) !== String(notificacao.aluno_id)) {
+          return res.status(403).json({
+            error: 'Acesso negado',
+            error_code: !alunoRow ? 'ALUNO_NOT_LINKED' : undefined,
+          });
         }
       }
 
@@ -691,7 +2828,56 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
         link || null
       ]);
 
-      res.status(201).json(result.rows[0]);
+      const created = result.rows[0];
+
+      if (aluno_id) {
+        try {
+          const { getAuthUserIdForAluno } = require('../utils/aluno-auth-user');
+          const { sendStudentNotificationEmail } = require('../utils/send-student-notification-email');
+          const studentUserId = await getAuthUserIdForAluno(pool, aluno_id);
+          if (studentUserId) {
+            const emailRow = await pool.query(
+              'SELECT email FROM app_auth.users WHERE id = $1 LIMIT 1',
+              [studentUserId],
+            );
+            const nomeRow = await pool.query(
+              'SELECT nome FROM public.alunos WHERE id = $1 LIMIT 1',
+              [aluno_id],
+            );
+            const emailType = ['aviso', 'novo_evento', 'evento_cancelado', 'event_reminder'].includes(
+              String(tipo || ''),
+            )
+              ? String(tipo)
+              : 'aviso';
+            const linkTab =
+              link && String(link).trim() && !String(link).includes('/')
+                ? String(link).trim()
+                : link && String(link).includes('tab=')
+                  ? String(link).split('tab=')[1]?.split('&')[0] || 'messages'
+                  : 'messages';
+
+            await sendStudentNotificationEmail({
+              to: emailRow.rows[0]?.email,
+              type: emailType,
+              context: {
+                title: titulo,
+                message: mensagem,
+                linkTab,
+                alunoNome: nomeRow.rows[0]?.nome,
+                eventTitle: titulo,
+              },
+            });
+          }
+        } catch (mailErr) {
+          console.warn('notificacoes.create.email_failed', {
+            aluno_id,
+            tipo,
+            error: mailErr.message,
+          });
+        }
+      }
+
+      res.status(201).json(created);
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
@@ -716,7 +2902,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
 
       // Coaches podem atualizar suas próprias notificações
       // Alunos podem apenas marcar como lida
-      if (req.user.role === 'coach' && notificacao.coach_id !== req.user.id) {
+      if (req.user.role === 'coach' && String(notificacao.coach_id) !== String(req.user.id)) {
         return res.status(403).json({ error: 'Acesso negado' });
       }
 
@@ -726,13 +2912,12 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
           return res.status(403).json({ error: 'Alunos só podem marcar notificações como lida' });
         }
 
-        const alunoResult = await pool.query(
-          'SELECT id FROM public.alunos WHERE COALESCE(user_id, linked_user_id) = $1',
-          [req.user.id]
-        );
-
-        if (alunoResult.rows.length === 0 || alunoResult.rows[0].id !== notificacao.aluno_id) {
-          return res.status(403).json({ error: 'Acesso negado' });
+        const alunoRow = await getAlunoRowForAuthUser(req.user.id);
+        if (!alunoRow || String(alunoRow.id) !== String(notificacao.aluno_id)) {
+          return res.status(403).json({
+            error: 'Acesso negado',
+            error_code: !alunoRow ? 'ALUNO_NOT_LINKED' : undefined,
+          });
         }
       }
 
@@ -791,7 +2976,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
         return res.status(403).json({ error: 'Apenas coaches podem deletar notificações' });
       }
 
-      if (notificacaoCheck.rows[0].coach_id !== req.user.id) {
+      if (req.user.role === 'coach' && String(notificacaoCheck.rows[0].coach_id) !== String(req.user.id)) {
         return res.status(403).json({ error: 'Acesso negado' });
       }
 
@@ -819,25 +3004,23 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
       let queryParams = [];
       let paramIndex = 1;
 
-      if (req.user.role === 'coach') {
+      if (req.user.role === 'admin') {
+        query = 'SELECT * FROM public.notificacoes WHERE 1=1';
+        queryParams = [];
+        paramIndex = 1;
+      } else if (req.user.role === 'coach') {
         // Coach vê suas próprias notificações
         query = 'SELECT * FROM public.notificacoes WHERE coach_id = $1';
         queryParams.push(req.user.id);
         paramIndex++;
       } else if (req.user.role === 'aluno') {
-        // Aluno vê suas próprias notificações (via linked_user_id)
-        try {
-          const aluno = await resolveAlunoOrFail(pool, req.user.id);
-          query = 'SELECT * FROM public.notificacoes WHERE aluno_id = $1';
-          queryParams.push(aluno.id);
-          paramIndex++;
-        } catch (error) {
-          if (error.code === 'ALUNO_NOT_LINKED') {
-            // Aluno não vinculado - retornar lista vazia ao invés de erro
-            return res.json([]);
-          }
-          throw error;
+        const alunoRow = await getAlunoRowForAuthUser(req.user.id);
+        if (!alunoRow) {
+          return res.json([]);
         }
+        query = 'SELECT * FROM public.notificacoes WHERE aluno_id = $1';
+        queryParams.push(alunoRow.id);
+        paramIndex++;
       } else {
         return res.status(403).json({ error: 'Acesso negado' });
       }
@@ -865,15 +3048,108 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
       const result = await pool.query(query, queryParams);
       res.json(result.rows);
     } catch (error) {
-      if (error.code === 'ALUNO_NOT_LINKED') {
-        return res.status(403).json({
-          error: 'Aluno não vinculado',
-          error_code: 'ALUNO_NOT_LINKED'
-        });
-      }
       res.status(500).json({ error: error.message });
     }
   });
+
+  // ============================================================================
+  // ROTAS: USER ROLES (admin — apenas coach)
+  // ============================================================================
+
+  router.get(
+    '/user-roles',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    resolveCoachOrFail,
+    async (req, res) => {
+      try {
+        const result = await pool.query(`
+          SELECT id, user_id, role, created_at
+          FROM public.user_roles
+          ORDER BY created_at DESC NULLS LAST
+        `);
+        res.json(result.rows);
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
+  router.patch(
+    '/user-roles/:id',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    resolveCoachOrFail,
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const { role } = req.body || {};
+        if (role !== 'coach' && role !== 'aluno' && role !== 'admin') {
+          return res.status(400).json({
+            error: 'role deve ser "coach", "aluno" ou "admin"',
+            error_code: 'INVALID_ROLE',
+          });
+        }
+
+        const existing = await pool.query(
+          'SELECT id, user_id, role FROM public.user_roles WHERE id = $1',
+          [req.params.id],
+        );
+        if (existing.rows.length === 0) {
+          return res.status(404).json({ error: 'Role não encontrada', error_code: 'ROLE_NOT_FOUND' });
+        }
+
+        if (existing.rows[0].role === 'admin' && role !== 'admin' && req.user.role !== 'admin') {
+          return res.status(403).json({
+            error: 'Apenas super admin pode alterar papel de outro admin',
+            error_code: 'FORBIDDEN',
+          });
+        }
+
+        if (existing.rows[0].role === 'coach' && role !== 'coach') {
+          const coachCount = await pool.query(
+            `SELECT COUNT(*)::int AS n FROM public.user_roles WHERE role = 'coach'`,
+          );
+          if (coachCount.rows[0].n <= 1) {
+            return res.status(400).json({
+              error: 'Não é possível alterar o papel do último coach do sistema.',
+              error_code: 'LAST_COACH',
+            });
+          }
+        }
+
+        const result = await pool.query(
+          `UPDATE public.user_roles SET role = $1::user_role WHERE id = $2 RETURNING id, user_id, role, created_at`,
+          [role, req.params.id],
+        );
+        res.json(result.rows[0]);
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
+  router.delete(
+    '/user-roles/:id',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    resolveCoachOrFail,
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const out = await deleteUserByUserRoleId(pool, req.params.id);
+        if (!out.ok) {
+          return res.status(out.status).json(out.body);
+        }
+        res.json(out.body);
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    },
+  );
 
   // GET /api/profiles/me - Perfil do usuário logado
   router.get('/profiles/me', authenticate, async (req, res) => {
@@ -884,6 +3160,8 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
                 SELECT 
                     p.id,
                     p.avatar_url,
+                    p.display_name,
+                    p.phone,
                     p.created_at,
                     p.updated_at,
                     u.email,
@@ -904,7 +3182,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
       // Se for aluno, incluir dados do aluno
       if (req.user.role === 'aluno') {
         try {
-          const aluno = await resolveAlunoOrFail(pool, userId);
+          const aluno = await fetchAlunoByUserId(pool, userId);
           result.rows[0].aluno = aluno;
         } catch (error) {
           if (error.code === 'ALUNO_NOT_LINKED') {
@@ -922,6 +3200,111 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
       res.status(500).json({ error: error.message });
     }
   });
+
+  // PATCH /api/profiles/me — atualiza perfil do utilizador autenticado (avatar, nome, telefone)
+  router.patch('/profiles/me', authenticate, async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+
+      const prev = await pool.query(
+        `SELECT avatar_url, display_name, phone FROM public.profiles WHERE id = $1`,
+        [userId],
+      );
+      const row = prev.rows[0] || {};
+
+      const hasKey = (k) => Object.prototype.hasOwnProperty.call(body, k);
+
+      let nextAvatar = row.avatar_url ?? null;
+      if (hasKey('avatar_url')) {
+        const v = body.avatar_url;
+        nextAvatar = v == null || String(v).trim() === '' ? null : String(v).trim();
+      }
+
+      let nextDisplay = row.display_name ?? null;
+      if (hasKey('display_name')) {
+        const v = body.display_name;
+        nextDisplay = v == null || String(v).trim() === '' ? null : String(v).trim();
+      }
+
+      let nextPhone = row.phone ?? null;
+      if (hasKey('phone')) {
+        const v = body.phone;
+        nextPhone = v == null || String(v).trim() === '' ? null : String(v).trim();
+      }
+
+      await pool.query(
+        `INSERT INTO public.profiles (id, avatar_url, display_name, phone, updated_at)
+         VALUES ($1, $2, $3, $4, now())
+         ON CONFLICT (id)
+         DO UPDATE SET
+           avatar_url = EXCLUDED.avatar_url,
+           display_name = EXCLUDED.display_name,
+           phone = EXCLUDED.phone,
+           updated_at = now()`,
+        [userId, nextAvatar, nextDisplay, nextPhone],
+      );
+
+      const out = await pool.query(
+        `SELECT 
+            p.id,
+            p.avatar_url,
+            p.display_name,
+            p.phone,
+            p.created_at,
+            p.updated_at,
+            u.email,
+            u.created_at as user_created_at,
+            COALESCE(ur.role, 'aluno') as role
+         FROM public.profiles p
+         RIGHT JOIN app_auth.users u ON u.id = p.id
+         LEFT JOIN public.user_roles ur ON ur.user_id = u.id
+         WHERE u.id = $1`,
+        [userId],
+      );
+
+      if (out.rows.length === 0) {
+        return res.status(404).json({ error: 'Perfil não encontrado' });
+      }
+
+      if (req.user.role === 'aluno') {
+        try {
+          const aluno = await fetchAlunoByUserId(pool, userId);
+          out.rows[0].aluno = aluno;
+        } catch (error) {
+          if (error.code === 'ALUNO_NOT_LINKED') {
+            out.rows[0].aluno = null;
+            out.rows[0].aluno_linked = false;
+          } else {
+            throw error;
+          }
+        }
+      }
+
+      return res.json(out.rows[0]);
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
+  });
+
+  // GET /api/profiles — lista perfis (avatar) para painel admin do coach
+  router.get(
+    '/profiles',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach']),
+    resolveCoachOrFail,
+    async (req, res) => {
+      try {
+        const result = await pool.query(
+          `SELECT id, avatar_url, created_at, updated_at FROM public.profiles ORDER BY created_at DESC`,
+        );
+        res.json(result.rows);
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    },
+  );
 
   // ============================================================================
   // ROTA: /api/me - Buscar identidade do usuário/aluno atual
@@ -955,7 +3338,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
       // VPS-NATIVE-ARCH-ALUNOS-COACH-001: Usar resolveAlunoOrFail para garantir aluno canônico
       if (userRole === 'aluno') {
         try {
-          const aluno = await resolveAlunoOrFail(pool, userId);
+          const aluno = await fetchAlunoByUserId(pool, userId);
           userData.aluno = aluno;
         } catch (error) {
           if (error.code === 'ALUNO_NOT_LINKED') {
@@ -973,6 +3356,181 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
       res.status(500).json({ error: error.message });
     }
   });
+
+  // ============================================================================
+  // ROTA: /api/fotos-alunos — fotos de progresso (sem /rest/v1/fotos_alunos)
+  // ============================================================================
+
+  router.get(
+    '/fotos-alunos',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['aluno', 'coach', 'admin']),
+    requireAlunoWhenStudent(),
+    async (req, res) => {
+      try {
+        const alunoId = req.query.aluno_id;
+        if (!alunoId || !isValidUUID(String(alunoId))) {
+          return res.status(400).json({
+            error: 'aluno_id é obrigatório e deve ser um UUID válido',
+            error_code: 'INVALID_ALUNO_ID',
+          });
+        }
+
+        if (req.user.role === 'admin') {
+          const r = await pool.query(
+            `SELECT f.id, f.aluno_id, a.coach_id, f.url, f.descricao, f.created_at
+             FROM public.fotos_alunos f
+             LEFT JOIN public.alunos a ON a.id = f.aluno_id
+             WHERE f.aluno_id = $1
+             ORDER BY f.created_at DESC NULLS LAST`,
+            [alunoId],
+          );
+          return res.json(r.rows);
+        }
+
+        if (req.user.role === 'coach') {
+          const ok = await validateAlunoBelongsToCoach(pool, alunoId, req.user.id);
+          if (!ok) {
+            return res.status(403).json({ error: 'Sem permissão para este aluno', error_code: 'FORBIDDEN' });
+          }
+          const r = await pool.query(
+            `SELECT f.id, f.aluno_id, a.coach_id, f.url, f.descricao, f.created_at
+             FROM public.fotos_alunos f
+             LEFT JOIN public.alunos a ON a.id = f.aluno_id
+             WHERE f.aluno_id = $1
+             ORDER BY f.created_at DESC NULLS LAST`,
+            [alunoId],
+          );
+          return res.json(r.rows);
+        }
+
+        if (req.aluno.id !== alunoId) {
+          return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+        }
+        const r = await pool.query(
+          `SELECT f.id, f.aluno_id, a.coach_id, f.url, f.descricao, f.created_at
+           FROM public.fotos_alunos f
+           LEFT JOIN public.alunos a ON a.id = f.aluno_id
+           WHERE f.aluno_id = $1
+           ORDER BY f.created_at DESC NULLS LAST`,
+          [alunoId],
+        );
+        return res.json(r.rows);
+      } catch (error) {
+        return res.status(500).json({ error: error.message || 'Erro ao listar fotos' });
+      }
+    },
+  );
+
+  router.post(
+    '/fotos-alunos',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['aluno']),
+    resolveAlunoOrFail,
+    async (req, res) => {
+      try {
+        const { aluno_id: alunoIdBody, url, descricao } = req.body || {};
+        if (!alunoIdBody || !url) {
+          return res.status(400).json({
+            error: 'aluno_id e url são obrigatórios',
+            error_code: 'MISSING_FIELDS',
+          });
+        }
+        if (!isValidUUID(String(alunoIdBody))) {
+          return res.status(400).json({ error: 'aluno_id inválido', error_code: 'INVALID_UUID' });
+        }
+        if (req.aluno.id !== alunoIdBody) {
+          return res.status(403).json({
+            error: 'aluno_id não corresponde ao seu perfil',
+            error_code: 'ALUNO_MISMATCH',
+          });
+        }
+        const ins = await pool.query(
+          `INSERT INTO public.fotos_alunos (aluno_id, url, descricao)
+           VALUES ($1, $2, $3)
+           RETURNING id, aluno_id, coach_id, url, descricao, created_at`,
+          [
+            alunoIdBody,
+            String(url),
+            descricao != null ? String(descricao) : null,
+          ],
+        );
+        return res.status(201).json(ins.rows[0]);
+      } catch (error) {
+        return res.status(500).json({ error: error.message || 'Erro ao registar foto' });
+      }
+    },
+  );
+
+  router.delete(
+    '/fotos-alunos/:id',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['aluno']),
+    resolveAlunoOrFail,
+    async (req, res) => {
+      try {
+        const fotoId = req.params.id;
+        if (!isValidUUID(String(fotoId))) {
+          return res.status(400).json({ error: 'ID inválido', error_code: 'INVALID_UUID' });
+        }
+        const sel = await pool.query(
+          `SELECT id, aluno_id FROM public.fotos_alunos WHERE id = $1`,
+          [fotoId],
+        );
+        if (sel.rows.length === 0) {
+          return res.status(404).json({ error: 'Foto não encontrada', error_code: 'NOT_FOUND' });
+        }
+        if (sel.rows[0].aluno_id !== req.aluno.id) {
+          return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+        }
+        await pool.query(`DELETE FROM public.fotos_alunos WHERE id = $1`, [fotoId]);
+        return res.json({ message: 'Deletado com sucesso' });
+      } catch (error) {
+        return res.status(500).json({ error: error.message || 'Erro ao eliminar foto' });
+      }
+    },
+  );
+
+  // ============================================================================
+  // ROTA: /api/weekly-checkins — listagem (alias semântico para o dashboard)
+  // ============================================================================
+
+  router.get(
+    '/weekly-checkins',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['aluno', 'coach', 'admin']),
+    requireAlunoWhenStudent(),
+    async (req, res) => {
+      try {
+        if (req.user.role === 'admin') {
+          const r = await pool.query(
+            `SELECT * FROM public.weekly_checkins ORDER BY created_at DESC NULLS LAST LIMIT 500`,
+          );
+          return res.json(r.rows);
+        }
+        if (req.user.role === 'coach') {
+          const r = await pool.query(
+            `SELECT w.* FROM public.weekly_checkins w
+             INNER JOIN public.alunos a ON a.id = w.aluno_id AND a.coach_id = $1
+             ORDER BY w.created_at DESC NULLS LAST LIMIT 500`,
+            [req.user.id],
+          );
+          return res.json(r.rows);
+        }
+        const r = await pool.query(
+          `SELECT * FROM public.weekly_checkins WHERE aluno_id = $1 ORDER BY created_at DESC NULLS LAST`,
+          [req.aluno.id],
+        );
+        return res.json(r.rows);
+      } catch (error) {
+        return res.status(500).json({ error: error.message || 'Erro ao listar check-ins' });
+      }
+    },
+  );
 
   // ============================================================================
   // ROTA: /api/checkins - Validar e criar check-in semanal
@@ -1008,66 +3566,153 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
         });
       }
 
-      // Criar check-in com aluno_id correto
-      const checkinData = {
-        aluno_id: aluno.id,
-        ...req.body
-      };
+      const dbCols = await loadWeeklyCheckinsColumns();
+      const isLegacyWeekly = dbCols.has('adesao_dieta') && !dbCols.has('beliscou_fora_plano');
 
-      // Remover campos que não pertencem à tabela weekly_checkins
-      const allowedFields = [
-        'peso', 'nivel_energia', 'qualidade_sono', 'nivel_estresse',
-        'adesao_dieta', 'adesao_treino', 'observacoes', 'escala_bristol',
-        'data_checkin'
+      const CHECKIN_WRITABLE = new Set([
+        'beliscou_fora_plano',
+        'seguiu_plano_nota',
+        'apetite',
+        'treinou_todas_sessoes',
+        'desafiou_treinos',
+        'fez_cardio',
+        'seguiu_suplementacao',
+        'recursos_hormonais',
+        'ingeriu_agua_minima',
+        'exposicao_sol',
+        'pressao_arterial',
+        'glicemia',
+        'media_horas_sono',
+        'dificuldade_adormecer',
+        'acordou_noite',
+        'estresse_semana',
+        'lida_desafios',
+        'convivio_familiar',
+        'convivio_trabalho',
+        'postura_problemas',
+        'higiene_sono',
+        'autoestima',
+        'media_evacuacoes',
+        'formato_fezes',
+        'nao_cumpriu_porque',
+        'status',
+      ]);
+
+      const REQUIRED_CHECKIN = [
+        'beliscou_fora_plano',
+        'seguiu_plano_nota',
+        'apetite',
+        'treinou_todas_sessoes',
+        'desafiou_treinos',
+        'fez_cardio',
+        'seguiu_suplementacao',
+        'recursos_hormonais',
+        'ingeriu_agua_minima',
+        'exposicao_sol',
+        'media_horas_sono',
+        'dificuldade_adormecer',
+        'estresse_semana',
+        'lida_desafios',
+        'convivio_familiar',
+        'convivio_trabalho',
+        'postura_problemas',
+        'higiene_sono',
+        'autoestima',
+        'media_evacuacoes',
+        'formato_fezes',
       ];
 
-      const insertData = {};
-      for (const field of allowedFields) {
-        if (checkinData[field] !== undefined) {
-          insertData[field] = checkinData[field];
+      let columns;
+      let values;
+
+      if (isLegacyWeekly) {
+        const tipoToBristol = (t) => {
+          const m = String(t || '').match(/(\d)/);
+          return m ? parseInt(m[1], 10) : null;
+        };
+        const horasToQual = (h) => {
+          if (h === '6-8') return 8;
+          if (h === '5-6') return 6;
+          if (h === '4-5') return 4;
+          return 6;
+        };
+        const legacyRow = {};
+        if (dbCols.has('adesao_dieta')) {
+          const n = parseInt(String(req.body.seguiu_plano_nota), 10);
+          if (Number.isNaN(n)) {
+            return res.status(400).json({
+              error: 'seguiu_plano_nota inválido',
+              error_code: 'CHECKIN_MISSING_FIELDS',
+            });
+          }
+          legacyRow.adesao_dieta = n;
         }
+        if (dbCols.has('adesao_treino')) {
+          legacyRow.adesao_treino = req.body.treinou_todas_sessoes ? 8 : 3;
+        }
+        if (dbCols.has('escala_bristol') && req.body.formato_fezes) {
+          const b = tipoToBristol(req.body.formato_fezes);
+          if (b != null) legacyRow.escala_bristol = b;
+        }
+        if (dbCols.has('qualidade_sono') && req.body.media_horas_sono) {
+          legacyRow.qualidade_sono = horasToQual(req.body.media_horas_sono);
+        }
+        if (dbCols.has('nivel_estresse')) {
+          legacyRow.nivel_estresse = req.body.estresse_semana ? 8 : 3;
+        }
+        if (dbCols.has('nivel_energia') && req.body.autoestima != null) {
+          legacyRow.nivel_energia = parseInt(String(req.body.autoestima), 10);
+        }
+        if (dbCols.has('observacoes')) {
+          legacyRow.observacoes = req.body.nao_cumpriu_porque || null;
+        }
+        if (dbCols.has('data_checkin')) {
+          legacyRow.data_checkin = new Date().toISOString().slice(0, 10);
+        }
+        columns = Object.keys(legacyRow);
+        values = Object.values(legacyRow);
+        if (columns.length === 0) {
+          return res.status(400).json({
+            error: 'Schema de check-in legado não suportado nesta base',
+            error_code: 'CHECKIN_SCHEMA_UNSUPPORTED',
+          });
+        }
+      } else {
+        const insertData = {};
+        for (const key of CHECKIN_WRITABLE) {
+          if (req.body[key] === undefined) continue;
+          let v = req.body[key];
+          if (v === '') v = null;
+          insertData[key] = v;
+        }
+
+        if (insertData.seguiu_plano_nota != null) {
+          insertData.seguiu_plano_nota = parseInt(String(insertData.seguiu_plano_nota), 10);
+        }
+        if (insertData.autoestima != null) {
+          insertData.autoestima = parseInt(String(insertData.autoestima), 10);
+        }
+
+        for (const k of Object.keys(insertData)) {
+          if (!dbCols.has(k)) delete insertData[k];
+        }
+
+        const missing = REQUIRED_CHECKIN.filter(
+          (k) => insertData[k] === undefined || insertData[k] === null || insertData[k] === '',
+        );
+        if (missing.length > 0) {
+          return res.status(400).json({
+            error: 'Campos obrigatórios em falta no check-in',
+            error_code: 'CHECKIN_MISSING_FIELDS',
+            missing_fields: missing,
+          });
+        }
+
+        columns = Object.keys(insertData);
+        values = Object.values(insertData);
       }
 
-      // Mapear campos do formulário para campos do banco
-      const fieldMapping = {
-        'beliscou_fora_plano': null, // Não mapeia diretamente
-        'seguiu_plano_nota': 'adesao_dieta',
-        'apetite': null,
-        'treinou_todas_sessoes': null,
-        'desafiou_treinos': null,
-        'fez_cardio': null,
-        'seguiu_suplementacao': null,
-        'recursos_hormonais': null,
-        'ingeriu_agua_minima': null,
-        'exposicao_sol': null,
-        'pressao_arterial': null,
-        'glicemia': null,
-        'media_horas_sono': 'qualidade_sono',
-        'dificuldade_adormecer': null,
-        'acordou_noite': null,
-        'estresse_semana': 'nivel_estresse',
-        'lida_desafios': null,
-        'convivio_familiar': null,
-        'convivio_trabalho': null,
-        'postura_problemas': null,
-        'higiene_sono': null,
-        'autoestima': 'nivel_energia',
-        'media_evacuacoes': null,
-        'formato_fezes': 'escala_bristol',
-        'nao_cumpriu_porque': 'observacoes'
-      };
-
-      // Aplicar mapeamento
-      for (const [formField, dbField] of Object.entries(fieldMapping)) {
-        if (req.body[formField] !== undefined && dbField) {
-          insertData[dbField] = req.body[formField];
-        }
-      }
-
-      // Inserir check-in
-      const columns = Object.keys(insertData);
-      const values = Object.values(insertData);
-      const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
+      const placeholders = values.map((_, i) => `$${i + 2}`).join(', ');
 
       const query = `
                 INSERT INTO public.weekly_checkins (aluno_id, ${columns.join(', ')})
@@ -1095,48 +3740,151 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
   });
 
   // ============================================================================
-  // ROTAS: MENSAGENS (/api/messages)
+  // ROTAS: CONVERSAS + MENSAGENS
   // ============================================================================
-  // VPS-NATIVE-ARCH-ALUNOS-COACH-001
-  // Regras:
-  // - Aluno só fala com seu coach (coach_id inferido via aluno)
-  // - Coach só responde seus alunos (valida aluno pertence ao coach)
-  // - sender nunca vem do client sem validação
+  // Aluno: envia/recebe na sua conversa com o coach.
+  // Coach: lista conversas, responde alunos (conversa_id + conteúdo), lê todas as mensagens das suas conversas.
   // ============================================================================
 
-  // POST /api/mensagens - Aluno envia mensagem ao coach
-  // DESIGN-GUARD-RAILS-ROLE-ACCESS-003: Rota apenas para alunos
-  router.post('/mensagens', authenticate, domainSchemaGuard, validateRole(['aluno']), resolveAlunoOrFail, async (req, res) => {
+  // GET /api/conversas — coach e admin
+  router.get('/conversas', authenticate, domainSchemaGuard, validateRole(['coach', 'admin']), async (req, res) => {
     try {
-      // API-CONTRACT-001: Frontend NUNCA envia aluno_id ou user_id
-      const { aluno_id, user_id, conversa_id, conteudo } = req.body;
+      if (req.user.role === 'admin') {
+        const result = await pool.query(
+          'SELECT * FROM public.conversas ORDER BY ultima_mensagem_em DESC NULLS LAST, updated_at DESC'
+        );
+        return res.json(result.rows);
+      }
+      const result = await pool.query(
+        `SELECT * FROM public.conversas WHERE coach_id = $1
+         ORDER BY ultima_mensagem_em DESC NULLS LAST, updated_at DESC`,
+        [req.user.id]
+      );
+      return res.json(result.rows);
+    } catch (error) {
+      console.error('Erro ao listar conversas:', error);
+      return res.status(500).json({ error: error.message || 'Erro ao listar conversas' });
+    }
+  });
+
+  // POST /api/conversas — coach: criar ou devolver conversa com aluno do seu plantel
+  router.post('/conversas', authenticate, domainSchemaGuard, validateRole(['coach']), async (req, res) => {
+    try {
+      const { aluno_id: alunoIdBody } = req.body;
+      if (!alunoIdBody) {
+        return res.status(400).json({ error: 'aluno_id é obrigatório', error_code: 'MISSING_ALUNO_ID' });
+      }
+      const alunoRes = await pool.query('SELECT id, coach_id FROM public.alunos WHERE id = $1', [alunoIdBody]);
+      if (alunoRes.rows.length === 0) {
+        return res.status(404).json({ error: 'Aluno não encontrado', error_code: 'ALUNO_NOT_FOUND' });
+      }
+      if (String(alunoRes.rows[0].coach_id) !== String(req.user.id)) {
+        return res.status(403).json({ error: 'Aluno não pertence a este coach', error_code: 'FORBIDDEN' });
+      }
+      const ex = await pool.query(
+        'SELECT * FROM public.conversas WHERE aluno_id = $1 AND coach_id = $2',
+        [alunoIdBody, req.user.id]
+      );
+      if (ex.rows.length > 0) {
+        return res.status(200).json(ex.rows[0]);
+      }
+      const ins = await pool.query(
+        'INSERT INTO public.conversas (aluno_id, coach_id) VALUES ($1, $2) RETURNING *',
+        [alunoIdBody, req.user.id]
+      );
+      return res.status(201).json(ins.rows[0]);
+    } catch (error) {
+      console.error('Erro ao criar conversa:', error);
+      return res.status(500).json({ error: error.message || 'Erro ao criar conversa' });
+    }
+  });
+
+  // PATCH /api/conversas/:id — coach: atualizar última mensagem / metadados
+  router.patch('/conversas/:id', authenticate, domainSchemaGuard, validateRole(['coach']), validateUUIDParam('id'), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const c = await pool.query('SELECT * FROM public.conversas WHERE id = $1 AND coach_id = $2', [id, req.user.id]);
+      if (c.rows.length === 0) {
+        return res.status(404).json({ error: 'Conversa não encontrada', error_code: 'CONVERSA_NOT_FOUND' });
+      }
+      const allowed = new Set(['ultima_mensagem', 'ultima_mensagem_em']);
+      const updates = {};
+      for (const [k, v] of Object.entries(req.body || {})) {
+        if (allowed.has(k)) updates[k] = v;
+      }
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: 'Nenhum campo válido', error_code: 'NO_FIELDS' });
+      }
+      const keys = Object.keys(updates);
+      const vals = Object.values(updates);
+      const setClause = keys.map((col, i) => `${col} = $${i + 1}`).join(', ');
+      const r = await pool.query(
+        `UPDATE public.conversas SET ${setClause}, updated_at = now() WHERE id = $${keys.length + 1} RETURNING *`,
+        [...vals, id]
+      );
+      return res.json(r.rows[0]);
+    } catch (error) {
+      console.error('Erro ao atualizar conversa:', error);
+      return res.status(500).json({ error: error.message || 'Erro ao atualizar conversa' });
+    }
+  });
+
+  // POST /api/mensagens — aluno ou coach
+  router.post('/mensagens', authenticate, domainSchemaGuard, validateRole(['aluno', 'coach']), requireAlunoWhenStudent(), async (req, res) => {
+    try {
+      const { conversa_id, conteudo } = req.body;
 
       if (!conteudo || !conteudo.trim()) {
         return res.status(400).json({
           error: 'Conteúdo da mensagem é obrigatório',
-          error_code: 'CONTENT_REQUIRED'
+          error_code: 'CONTENT_REQUIRED',
         });
       }
 
-      const aluno = req.aluno; // Já resolvido pelo middleware
       const userId = req.user.id;
 
-      // Validar que aluno tem coach
+      if (req.user.role === 'coach') {
+        if (!conversa_id || typeof conversa_id !== 'string') {
+          return res.status(400).json({
+            error: 'conversa_id é obrigatório para o coach',
+            error_code: 'MISSING_CONVERSA_ID',
+          });
+        }
+        const convRes = await pool.query(
+          'SELECT id FROM public.conversas WHERE id = $1 AND coach_id = $2',
+          [conversa_id, userId]
+        );
+        if (convRes.rows.length === 0) {
+          return res.status(404).json({ error: 'Conversa não encontrada', error_code: 'CONVERSA_NOT_FOUND' });
+        }
+        const mensagemResult = await pool.query(
+          `INSERT INTO public.mensagens (conversa_id, remetente_id, conteudo, lida)
+           VALUES ($1, $2, $3, false)
+           RETURNING *`,
+          [conversa_id, userId, conteudo.trim()]
+        );
+        await pool.query(
+          'UPDATE public.conversas SET ultima_mensagem = $1, ultima_mensagem_em = now(), updated_at = now() WHERE id = $2',
+          [conteudo.trim(), conversa_id]
+        );
+        return res.status(201).json(mensagemResult.rows[0]);
+      }
+
+      const aluno = req.aluno;
+
       if (!aluno.coach_id) {
         return res.status(400).json({
           error: 'Aluno sem coach vinculado',
-          error_code: 'COACH_NOT_FOUND'
+          error_code: 'COACH_NOT_FOUND',
         });
       }
 
-      // Resolver ou criar conversa
       let conversa;
       if (conversa_id) {
-        // Validar UUID
         if (!conversa_id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)) {
           return res.status(400).json({
             error: 'conversa_id inválido',
-            error_code: 'INVALID_UUID'
+            error_code: 'INVALID_UUID',
           });
         }
 
@@ -1148,20 +3896,18 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
         if (conversaResult.rows.length === 0) {
           return res.status(404).json({
             error: 'Conversa não encontrada',
-            error_code: 'CONVERSA_NOT_FOUND'
+            error_code: 'CONVERSA_NOT_FOUND',
           });
         }
 
         conversa = conversaResult.rows[0];
       } else {
-        // Buscar ou criar conversa usando função helper
-        const conversaResult = await pool.query(
-          'SELECT * FROM public.get_or_create_conversa($1, $2)',
-          [aluno.id, aluno.coach_id]
-        );
+        const conversaResult = await pool.query('SELECT * FROM public.get_or_create_conversa($1, $2)', [
+          aluno.id,
+          aluno.coach_id,
+        ]);
 
         if (conversaResult.rows.length === 0) {
-          // Se função não retornar, criar manualmente
           let existingConversa = await pool.query(
             'SELECT * FROM public.conversas WHERE aluno_id = $1 AND coach_id = $2',
             [aluno.id, aluno.coach_id]
@@ -1181,87 +3927,100 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
         }
       }
 
-      // Destinatário é sempre o coach do aluno
-      const destinatarioId = aluno.coach_id;
-
-      // Inserir mensagem (remetente_id e destinatario_id sempre do backend)
       const mensagemResult = await pool.query(
-        `INSERT INTO public.mensagens (conversa_id, remetente_id, destinatario_id, conteudo, lida)
-                 VALUES ($1, $2, $3, $4, false)
-                 RETURNING *`,
-        [conversa.id, userId, destinatarioId, conteudo.trim()]
+        `INSERT INTO public.mensagens (conversa_id, remetente_id, conteudo, lida)
+         VALUES ($1, $2, $3, false)
+         RETURNING *`,
+        [conversa.id, userId, conteudo.trim()]
       );
 
-      // Atualizar última mensagem da conversa
       await pool.query(
-        'UPDATE public.conversas SET ultima_mensagem = $1, ultima_mensagem_em = now() WHERE id = $2',
+        'UPDATE public.conversas SET ultima_mensagem = $1, ultima_mensagem_em = now(), updated_at = now() WHERE id = $2',
         [conteudo.trim(), conversa.id]
       );
 
-      res.status(201).json(mensagemResult.rows[0]);
+      return res.status(201).json(mensagemResult.rows[0]);
     } catch (error) {
       if (error.code === 'ALUNO_NOT_LINKED') {
         return res.status(403).json({
           error: 'Aluno não vinculado',
           error_code: 'ALUNO_NOT_LINKED',
-          message: 'Seu perfil não está vinculado a um aluno.'
+          message: 'Seu perfil não está vinculado a um aluno.',
         });
       }
 
       console.error('Erro ao enviar mensagem:', error);
-      res.status(500).json({
+      return res.status(500).json({
         error: error.message || 'Erro ao enviar mensagem',
-        error_code: 'MESSAGE_SEND_ERROR'
+        error_code: 'MESSAGE_SEND_ERROR',
       });
     }
   });
 
-  // GET /api/mensagens - Lista mensagens do aluno autenticado
-  // DESIGN-GUARD-RAILS-ROLE-ACCESS-003: Rota apenas para alunos
-  router.get('/mensagens', authenticate, domainSchemaGuard, validateRole(['aluno']), resolveAlunoOrFail, async (req, res) => {
+  // GET /api/mensagens — aluno (sua conversa) ou coach (todas as mensagens ou filtro conversa_id)
+  router.get('/mensagens', authenticate, domainSchemaGuard, validateRole(['aluno', 'coach']), requireAlunoWhenStudent(), async (req, res) => {
     try {
-      const { conversaId, status } = req.query; // API-CONTRACT-001: query params semânticos
-      const userId = req.user.id;
-      const aluno = req.aluno; // Já resolvido pelo middleware
+      const { conversaId, conversa_id: conversaIdSnake, status } = req.query;
+      const qConversa = conversaId || conversaIdSnake;
 
-      // API-CONTRACT-001: Buscar conversa do aluno
-      const conversaResult = await pool.query(
-        'SELECT * FROM public.conversas WHERE aluno_id = $1 LIMIT 1',
-        [aluno.id]
-      );
+      if (req.user.role === 'coach') {
+        const coachId = req.user.id;
+        if (qConversa) {
+          const c = await pool.query('SELECT id FROM public.conversas WHERE id = $1 AND coach_id = $2', [
+            qConversa,
+            coachId,
+          ]);
+          if (c.rows.length === 0) {
+            return res.status(403).json({
+              error: 'Conversa não pertence a este coach',
+              error_code: 'CONVERSA_MISMATCH',
+            });
+          }
+          const mensagensResult = await pool.query(
+            `SELECT m.id, m.conversa_id, m.remetente_id, m.conteudo, m.lida, m.created_at
+             FROM public.mensagens m WHERE m.conversa_id = $1 ORDER BY m.created_at ASC`,
+            [qConversa]
+          );
+          return res.json(mensagensResult.rows);
+        }
+        const all = await pool.query(
+          `SELECT m.id, m.conversa_id, m.remetente_id, m.conteudo, m.lida, m.created_at
+           FROM public.mensagens m
+           INNER JOIN public.conversas c ON c.id = m.conversa_id
+           WHERE c.coach_id = $1
+           ORDER BY m.created_at ASC`,
+          [coachId]
+        );
+        return res.json(all.rows);
+      }
+
+      const aluno = req.aluno;
+
+      const conversaResult = await pool.query('SELECT * FROM public.conversas WHERE aluno_id = $1 LIMIT 1', [
+        aluno.id,
+      ]);
 
       if (conversaResult.rows.length === 0) {
-        // Aluno sem conversa - retornar lista vazia
         return res.json([]);
       }
 
       const conversa = conversaResult.rows[0];
 
-      // Construir query base
       let query = `
-                SELECT 
-                    m.id,
-                    m.conversa_id,
-                    m.remetente_id,
-                    m.destinatario_id,
-                    m.conteudo,
-                    m.lida,
-                    m.created_at
-                FROM public.mensagens m
-                WHERE m.conversa_id = $1
-            `;
+        SELECT m.id, m.conversa_id, m.remetente_id, m.conteudo, m.lida, m.created_at
+        FROM public.mensagens m
+        WHERE m.conversa_id = $1
+      `;
       const queryParams = [conversa.id];
       let paramIndex = 2;
 
-      // Filtro por conversaId (se fornecido)
-      if (conversaId && conversaId !== conversa.id) {
+      if (qConversa && qConversa !== conversa.id) {
         return res.status(403).json({
           error: 'Conversa não pertence ao aluno',
-          error_code: 'CONVERSA_MISMATCH'
+          error_code: 'CONVERSA_MISMATCH',
         });
       }
 
-      // Filtro por status (lida/não lida)
       if (status === 'lida' || status === 'true') {
         query += ` AND m.lida = $${paramIndex}`;
         queryParams.push(true);
@@ -1275,34 +4034,56 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
       query += ` ORDER BY m.created_at ASC`;
 
       const mensagensResult = await pool.query(query, queryParams);
-      res.json(mensagensResult.rows);
+      return res.json(mensagensResult.rows);
     } catch (error) {
       if (error.code === 'ALUNO_NOT_LINKED') {
         return res.status(403).json({
           error: 'Aluno não vinculado',
-          error_code: 'ALUNO_NOT_LINKED'
+          error_code: 'ALUNO_NOT_LINKED',
         });
       }
 
       console.error('Erro ao listar mensagens:', error);
-      res.status(500).json({
+      return res.status(500).json({
         error: error.message || 'Erro ao listar mensagens',
-        error_code: 'MESSAGES_LIST_ERROR'
+        error_code: 'MESSAGES_LIST_ERROR',
       });
     }
   });
 
-  // PATCH /api/mensagens/:id — aluno marca como lida mensagem recebida do coach (mesmo modelo conversa_id)
-  router.patch('/mensagens/:id', authenticate, domainSchemaGuard, validateRole(['aluno']), resolveAlunoOrFail, validateUUIDParam('id'), async (req, res) => {
+  // PATCH /api/mensagens/:id — aluno ou coach marca como lida mensagem recebida
+  router.patch('/mensagens/:id', authenticate, domainSchemaGuard, validateRole(['aluno', 'coach']), requireAlunoWhenStudent(), validateUUIDParam('id'), async (req, res) => {
     try {
       const { id } = req.params;
       const userId = req.user.id;
+
+      if (req.user.role === 'coach') {
+        const msgResult = await pool.query(
+          `SELECT m.id, m.remetente_id, m.conversa_id
+           FROM public.mensagens m
+           INNER JOIN public.conversas c ON c.id = m.conversa_id
+           WHERE m.id = $1 AND c.coach_id = $2`,
+          [id, userId]
+        );
+        if (msgResult.rows.length === 0) {
+          return res.status(404).json({ error: 'Mensagem não encontrada', error_code: 'MESSAGE_NOT_FOUND' });
+        }
+        const msg = msgResult.rows[0];
+        if (msg.remetente_id === userId) {
+          return res.status(403).json({
+            error: 'Não é possível marcar como lida a própria mensagem enviada',
+            error_code: 'CANNOT_MARK_OWN_MESSAGE',
+          });
+        }
+        const updateResult = await pool.query('UPDATE public.mensagens SET lida = true WHERE id = $1 RETURNING *', [id]);
+        return res.json(updateResult.rows[0]);
+      }
+
       const aluno = req.aluno;
 
-      const conversaResult = await pool.query(
-        'SELECT id FROM public.conversas WHERE aluno_id = $1 LIMIT 1',
-        [aluno.id]
-      );
+      const conversaResult = await pool.query('SELECT id FROM public.conversas WHERE aluno_id = $1 LIMIT 1', [
+        aluno.id,
+      ]);
       if (conversaResult.rows.length === 0) {
         return res.status(404).json({ error: 'Conversa não encontrada', error_code: 'CONVERSA_NOT_FOUND' });
       }
@@ -1319,23 +4100,20 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
       if (msg.remetente_id === userId) {
         return res.status(403).json({
           error: 'Não é possível marcar como lida a própria mensagem enviada',
-          error_code: 'CANNOT_MARK_OWN_MESSAGE'
+          error_code: 'CANNOT_MARK_OWN_MESSAGE',
         });
       }
 
-      const updateResult = await pool.query(
-        'UPDATE public.mensagens SET lida = true WHERE id = $1 RETURNING *',
-        [id]
-      );
-      res.json(updateResult.rows[0]);
+      const updateResult = await pool.query('UPDATE public.mensagens SET lida = true WHERE id = $1 RETURNING *', [id]);
+      return res.json(updateResult.rows[0]);
     } catch (error) {
       if (error.code === 'ALUNO_NOT_LINKED') {
         return res.status(403).json({ error: 'Aluno não vinculado', error_code: 'ALUNO_NOT_LINKED' });
       }
       console.error('Erro ao marcar mensagem como lida:', error);
-      res.status(500).json({
+      return res.status(500).json({
         error: error.message || 'Erro ao marcar mensagem como lida',
-        error_code: 'MESSAGE_UPDATE_ERROR'
+        error_code: 'MESSAGE_UPDATE_ERROR',
       });
     }
   });
@@ -1356,18 +4134,12 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
         return res.json(result.rows);
       }
 
-      const alunoResult = await pool.query(
-        `SELECT a.id, a.coach_id
-         FROM public.alunos a
-         WHERE COALESCE(a.user_id, a.linked_user_id) = $1`,
-        [req.user.id]
-      );
-
-      if (alunoResult.rows.length === 0 || !alunoResult.rows[0].coach_id) {
+      const alunoRow = await getAlunoRowForAuthUser(req.user.id);
+      if (!alunoRow || !alunoRow.coach_id) {
         return res.json([]);
       }
 
-      const coachId = alunoResult.rows[0].coach_id;
+      const coachId = alunoRow.coach_id;
       const result = await pool.query(
         `SELECT * FROM public.videos
          WHERE coach_id = $1

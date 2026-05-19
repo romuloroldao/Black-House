@@ -14,7 +14,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Edit, Trash2, AlertCircle, Check, X, Merge, Search, RefreshCw, ArrowLeft } from "lucide-react";
-import { Food, getAllFoodsSafe, getMacroGroup } from "@/lib/foodService";
+import { Food, getAllFoodsSafe, getMacroGroup, kcalFromMacrosFood } from "@/lib/foodService";
 
 type Alimento = Food & { created_at?: string | null };
 
@@ -72,8 +72,8 @@ export default function FoodReviewManager({ onBack }: Props) {
   };
 
   // Normaliza o nome do alimento para comparação
-  const normalizarNome = (nome: string): string => {
-    return nome
+  const normalizarNome = (nome: string | null | undefined): string => {
+    return String(nome || '')
       .toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
@@ -143,13 +143,14 @@ export default function FoodReviewManager({ onBack }: Props) {
 
   // Alimentos com valores suspeitos
   const alimentosSuspeitos = alimentos.filter(a => {
-    const kcalCalculada = (a.carbs * 4) + (a.protein * 4) + (a.fat * 9);
+    const alc = a.alcohol ?? 0;
+    const kcalCalculada = kcalFromMacrosFood(a.protein, a.carbs, a.fat, alc);
     const diferencaPerc = Math.abs(a.calories - kcalCalculada) / (kcalCalculada || 1) * 100;
-    return diferencaPerc > 15 || (a.carbs === 0 && a.protein === 0 && a.fat === 0);
+    return diferencaPerc > 15 || (a.carbs === 0 && a.protein === 0 && a.fat === 0 && alc === 0);
   });
 
   const filteredAlimentos = alimentosRecentes.filter(a =>
-    a.name.toLowerCase().includes(searchTerm.toLowerCase())
+    String(a.name || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const handleEdit = (alimento: Alimento) => {
@@ -265,7 +266,7 @@ export default function FoodReviewManager({ onBack }: Props) {
     const cho = parseFloat(formData.carbs) || 0;
     const ptn = parseFloat(formData.protein) || 0;
     const lip = parseFloat(formData.fat) || 0;
-    return (cho * 4) + (ptn * 4) + (lip * 9);
+    return kcalFromMacrosFood(ptn, cho, lip, 0);
   };
 
   const ajustarCaloriasAutomaticamente = () => {
@@ -285,7 +286,7 @@ export default function FoodReviewManager({ onBack }: Props) {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+        <RefreshCw className="h-8 w-8 motion-safe:animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -431,9 +432,12 @@ export default function FoodReviewManager({ onBack }: Props) {
                 </TableHeader>
                 <TableBody>
                   {alimentosSuspeitos.map((alimento) => {
-                    const kcalCalculada = (alimento.carbs * 4) + 
-                                          (alimento.protein * 4) + 
-                                          (alimento.fat * 9);
+                    const kcalCalculada = kcalFromMacrosFood(
+                      alimento.protein,
+                      alimento.carbs,
+                      alimento.fat,
+                      alimento.alcohol ?? 0,
+                    );
                     const diferenca = alimento.calories - kcalCalculada;
                     
                     return (

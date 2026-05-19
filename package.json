@@ -12,6 +12,9 @@
     "validate:no-supabase": "bash scripts/validate-no-supabase.sh",
     "generate:favicon": "node scripts/generate-favicon.js",
     "verify:api-contract": "node scripts/verify-api-contract.mjs",
+    "db:migrate": "node server/scripts/applyNutritionPatch.js",
+    "db:seed-equivalencia": "node server/scripts/seed-equivalencia-alimentar.js",
+    "db:reimport-diet": "node server/scripts/reimport-diet-from-pdf.js",
     "prebuild": "npm run validate:no-supabase && npm run verify:api-contract && npm run generate:favicon"
   },
   "dependencies": {

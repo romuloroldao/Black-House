@@ -252,7 +252,7 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
           <Button onClick={handleSave} className="shadow-glow" disabled={saving}>
             {saving ? (
               <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full motion-safe:animate-spin mr-2" />
                 Salvando...
               </>
             ) : (

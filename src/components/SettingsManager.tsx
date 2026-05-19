@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import UserRolesManager from "./UserRolesManager";
+import { API_CONTRACT } from "@/contracts/api-contract";
 
 const SettingsManager = () => {
   const { user } = useAuth();
@@ -34,6 +35,9 @@ const SettingsManager = () => {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [asaasConfig, setAsaasConfig] = useState<any>(null);
+  const [asaasApiKey, setAsaasApiKey] = useState("");
+  /** Alinhado com o servidor: true = sandbox Asaas */
+  const [asaasIsSandbox, setAsaasIsSandbox] = useState(true);
   const [twilioConfig, setTwilioConfig] = useState<any>(null);
   
   // Profile state
@@ -68,6 +72,15 @@ const SettingsManager = () => {
     loadTwilioConfig();
     loadProfile();
   }, [user]);
+
+  useEffect(() => {
+    if (asaasConfig && typeof asaasConfig.is_sandbox === "boolean") {
+      setAsaasIsSandbox(!!asaasConfig.is_sandbox);
+    }
+    if (!asaasConfig) {
+      setAsaasIsSandbox(true);
+    }
+  }, [asaasConfig]);
 
   const loadProfile = async () => {
     if (!user) return;
@@ -134,7 +147,8 @@ const SettingsManager = () => {
   const loadAsaasConfig = async () => {
     if (!user) return;
 
-    const result = await apiClient.requestSafe<any[]>(`/api/asaas-config?coach_id=${user.id}`);
+    const q = user.role === "admin" ? `?coach_id=${encodeURIComponent(user.id)}` : "";
+    const result = await apiClient.requestSafe<any[]>(`/api/asaas-config${q}`);
     const data = result.success && Array.isArray(result.data) ? result.data : [];
     const config = data.length > 0 ? data[0] : null;
     setAsaasConfig(config);
@@ -187,24 +201,138 @@ const SettingsManager = () => {
     }
   };
 
-  const handleAsaasToggle = async () => {
+  const persistAsaasSandbox = async (sandbox: boolean) => {
+    if (!asaasConfig?.id) {
+      setAsaasIsSandbox(sandbox);
+      return;
+    }
     setLoading(true);
     try {
-      if (asaasConfig) {
-        // Update existing config
-        const result = await apiClient.requestSafe(`/api/asaas-config/${asaasConfig.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ is_sandbox: !asaasConfig.is_sandbox }),
-        });
-        if (!result.success) {
-          throw new Error(result.error || 'Erro ao atualizar Asaas');
-        }
-
-        setAsaasConfig({ ...asaasConfig, is_sandbox: !asaasConfig.is_sandbox });
-        toast.success("Configuração Asaas atualizada!");
+      const result = await apiClient.requestSafe(`/api/asaas-config/${asaasConfig.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_sandbox: sandbox }),
+      });
+      if (!result.success) {
+        throw new Error(result.error || "Erro ao atualizar ambiente Asaas");
       }
+      setAsaasIsSandbox(sandbox);
+      setAsaasConfig((prev: any) => (prev ? { ...prev, is_sandbox: sandbox } : prev));
+      toast.success(sandbox ? "Modo sandbox ativo." : "Modo produção ativo.");
     } catch (error: any) {
-      toast.error("Erro ao atualizar Asaas: " + error.message);
+      toast.error(error?.message || "Erro ao atualizar ambiente Asaas");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyAsaasConnection = async () => {
+    if (!user) return;
+
+    const trimmed = asaasApiKey.trim();
+
+    const body: Record<string, unknown> = { is_sandbox: asaasIsSandbox };
+
+    if (user.role === "admin") {
+      body.coach_id = user.id;
+    }
+
+    if (trimmed) {
+      body.asaas_api_key = trimmed;
+    } else if (!asaasConfig?.has_api_key) {
+      toast.error("Cole uma chave API ou configure e guarde primeiro.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      type VerifyPayload = { ok?: boolean; environment?: string };
+      const result = await apiClient.requestSafe<VerifyPayload>(
+        API_CONTRACT.asaasConfig.verifyConnection(),
+        { method: "POST", body: JSON.stringify(body) },
+      );
+
+      if (!result.success) {
+        toast.error(result.error || "Erro ao testar conexão");
+        return;
+      }
+
+      if (result.data?.ok === true) {
+        const prod = result.data.environment === "production";
+        toast.success(
+          prod ? "Ligação OK com Asaas (produção)." : "Ligação OK com Asaas (sandbox).",
+        );
+        return;
+      }
+
+      toast.error("Validação incompleta. Confirme chave API e modo sandbox.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveAsaasConfig = async () => {
+    if (!user) return;
+    const key = asaasApiKey.trim();
+    if (!key) {
+      toast.error("Cole a chave API do Asaas (sandbox ou produção).");
+      return;
+    }
+    setLoading(true);
+    try {
+      const body: Record<string, unknown> = {
+        asaas_api_key: key,
+        is_sandbox: asaasIsSandbox,
+      };
+      if (user.role === "admin") {
+        body.coach_id = user.id;
+      }
+
+      const result = await apiClient.requestSafe<any>("/api/asaas-config", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      if (!result.success) {
+        throw new Error(result.error || "Erro ao guardar Asaas");
+      }
+      setAsaasApiKey("");
+      if (result.data && typeof result.data === "object") {
+        setAsaasConfig(result.data);
+      } else {
+        await loadAsaasConfig();
+      }
+      toast.success("Asaas configurado. Os pagamentos usarão esta chave.");
+    } catch (error: any) {
+      toast.error(error?.message || "Erro ao configurar Asaas");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateAsaasApiKey = async () => {
+    if (!user || !asaasConfig?.id) return;
+    const key = asaasApiKey.trim();
+    if (!key) {
+      toast.error("Introduza a nova chave API.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await apiClient.requestSafe(`/api/asaas-config/${asaasConfig.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ asaas_api_key: key }),
+      });
+      if (!result.success) {
+        throw new Error(result.error || "Erro ao atualizar chave");
+      }
+      setAsaasApiKey("");
+      if (result.data && typeof result.data === "object") {
+        setAsaasConfig(result.data);
+      } else {
+        await loadAsaasConfig();
+      }
+      toast.success("Chave API atualizada.");
+    } catch (error: any) {
+      toast.error(error?.message || "Erro ao atualizar chave");
     } finally {
       setLoading(false);
     }
@@ -273,28 +401,7 @@ const SettingsManager = () => {
 
     setLoading(true);
     try {
-      // Atualizar senha via API
-      // TODO: Implementar endpoint /auth/change-password no backend
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/auth/change-password`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiClient.getToken()}`,
-        },
-        body: JSON.stringify({
-          currentPassword: passwordData.currentPassword,
-          newPassword: passwordData.newPassword,
-        }),
-      });
-
-      if (!response.ok) {
-        // DESIGN-CHECKPOINT-ASYNC-ERROR-SAFETY-001: Substituir throw por toast + return
-        const error = await response.json().catch(() => ({ error: 'Erro ao alterar senha' }));
-        toast.error(error.error || 'Erro ao alterar senha');
-        setLoading(false);
-        return;
-      }
-
+      await apiClient.changePassword(passwordData.currentPassword, passwordData.newPassword);
       toast.success("Senha alterada com sucesso!");
       setPasswordDialogOpen(false);
       setPasswordData({
@@ -303,7 +410,7 @@ const SettingsManager = () => {
         confirmPassword: "",
       });
     } catch (error: any) {
-      toast.error("Erro ao alterar senha: " + error.message);
+      toast.error(error?.message || "Erro ao alterar senha");
     } finally {
       setLoading(false);
     }
@@ -368,7 +475,7 @@ const SettingsManager = () => {
                     className="absolute bottom-0 right-0 p-1.5 bg-primary text-primary-foreground rounded-full cursor-pointer hover:bg-primary/90 transition-colors"
                   >
                     {uploadingAvatar ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <Loader2 className="h-4 w-4 motion-safe:animate-spin" />
                     ) : (
                       <Camera className="h-4 w-4" />
                     )}
@@ -596,24 +703,108 @@ const SettingsManager = () => {
                   </div>
                   <p className="text-sm text-muted-foreground">
                     {asaasConfig
-                      ? "Integração configurada e ativa"
-                      : "Configure sua chave API do Asaas"}
+                      ? asaasConfig.has_api_key
+                        ? "Integração com chave API guardada (pagamentos usam esta conta)."
+                        : "Registo Asaas sem chave API — adicione uma chave abaixo."
+                      : "Configure sua chave API do Asaas (sandbox ou produção)."}
                   </p>
                 </div>
-                {asaasConfig && (
-                  <Button variant="outline" onClick={handleAsaasToggle} disabled={loading}>
-                    Alternar Modo
+                <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleVerifyAsaasConnection}
+                    disabled={loading || (!asaasApiKey.trim() && !asaasConfig?.has_api_key)}
+                  >
+                    Testar ligação
                   </Button>
-                )}
+                </div>
               </div>
+
+              <div className="flex items-center justify-between rounded-lg border p-4">
+                <div className="space-y-0.5">
+                  <Label htmlFor="asaas-sandbox">Sandbox (ambiente de testes Asaas)</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Desligue apenas com chave API de produção. O modo ativo aparece na etiqueta ao lado do título.
+                  </p>
+                </div>
+                <Switch
+                  id="asaas-sandbox"
+                  checked={asaasIsSandbox}
+                  onCheckedChange={(checked) => void persistAsaasSandbox(checked)}
+                  disabled={loading}
+                />
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                A chave é armazenada cifrada no servidor (AES-256-GCM) quando{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-[11px]">ASAAS_COACH_SECRETS_KEY</code>{" "}
+                está definido no backend (obrigatório em produção). Nunca é enviada de volta ao browser.
+              </p>
 
               {!asaasConfig && (
                 <>
                   <Separator />
                   <div className="space-y-2">
-                    <Label>Chave API Asaas</Label>
-                    <Input placeholder="Cole sua chave API aqui" type="password" />
-                    <Button className="mt-2">Configurar Asaas</Button>
+                    <Label htmlFor="asaas-api-key">Chave API Asaas</Label>
+                    <Input
+                      id="asaas-api-key"
+                      placeholder="Cole sua chave API aqui"
+                      type="password"
+                      autoComplete="off"
+                      value={asaasApiKey}
+                      onChange={(e) => setAsaasApiKey(e.target.value)}
+                    />
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      <Button
+                        type="button"
+                        onClick={handleVerifyAsaasConnection}
+                        disabled={loading || !asaasApiKey.trim()}
+                        variant="outline"
+                      >
+                        Testar antes de guardar
+                      </Button>
+                      <Button type="button" onClick={handleSaveAsaasConfig} disabled={loading}>
+                        {loading ? "A guardar…" : "Configurar Asaas"}
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
+              {asaasConfig && (
+                <>
+                  <Separator />
+                  <div className="space-y-2">
+                    <Label htmlFor="asaas-api-key-rotate">Nova chave API (opcional)</Label>
+                    <Input
+                      id="asaas-api-key-rotate"
+                      placeholder="Deixe vazio para manter a chave atual"
+                      type="password"
+                      autoComplete="off"
+                      value={asaasApiKey}
+                      onChange={(e) => setAsaasApiKey(e.target.value)}
+                    />
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleVerifyAsaasConnection}
+                        disabled={
+                          loading ||
+                          (!asaasConfig.has_api_key && !asaasApiKey.trim())
+                        }
+                      >
+                        Testar ligação
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={handleUpdateAsaasApiKey}
+                        disabled={loading || !asaasApiKey.trim()}
+                      >
+                        Atualizar chave API
+                      </Button>
+                    </div>
                   </div>
                 </>
               )}

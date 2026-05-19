@@ -15,6 +15,7 @@ const logger = require('../utils/logger');
  * 
  * Regras:
  * - Valida que req.user.role está em allowedRoles
+ * - `admin` (super admin) tem acesso a todas as rotas protegidas por este middleware
  * - Retorna 403 com ROLE_FORBIDDEN se role não permitido
  * - Frontend incorreto não quebra backend
  */
@@ -29,6 +30,11 @@ function validateRole(allowedRoles) {
                     error_code: 'UNAUTHENTICATED',
                     message: 'Token de autenticação inválido ou ausente.'
                 });
+            }
+
+            // Super admin: acesso total (ex.: romulo.roldao@gmail.com)
+            if (userRole === 'admin') {
+                return next();
             }
             
             if (!allowedRoles.includes(userRole)) {

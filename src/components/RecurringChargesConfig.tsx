@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, Calendar, DollarSign } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -274,6 +274,9 @@ export default function RecurringChargesConfig() {
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>{editingId ? 'Editar' : 'Nova'} Configuração</DialogTitle>
+            <DialogDescription>
+              Configure aluno, plano, valores, lembretes e se a cobrança recorrente está ativa.
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">

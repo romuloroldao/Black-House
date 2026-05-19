@@ -7,21 +7,211 @@ export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/alunos/by-coach',
     '/api/alunos/me',
     '/api/alunos/link-user',
+    '/api/alunos/unlinked-registrations',
+    '/api/alunos/adopt-registration',
+    '/api/alunos/dismiss-registration',
     '/api/alunos',
+    '/api/alunos/',
+    '/api/recurring-charges-config',
+    '/api/recurring-charges-config/',
+    '/api/alunos-treinos',
+    '/api/alunos-treinos/',
     '/api/alimentos',
+    '/api/alimentos/nutrition-audit',
+    '/api/dietas',
+    '/api/dietas/',
+    '/api/feedbacks-alunos',
+    '/api/feedbacks-alunos/',
+    '/api/fotos-alunos',
+    '/api/fotos-alunos/',
+    '/api/itens-dieta',
+    '/api/itens-dieta/',
+    '/api/dieta-farmacos',
+    '/api/dieta-farmacos/',
     '/api/mensagens',
+    '/api/conversas',
+    '/api/conversas/',
     '/api/notificacoes',
+    '/api/notificacoes/',
+    '/api/agenda-eventos',
+    '/api/agenda-eventos/',
+    '/api/eventos',
+    '/api/eventos/',
+    '/api/eventos-participantes',
+    '/api/eventos-participantes/',
+    '/api/relatorios',
+    '/api/relatorios/',
+    '/api/relatorio-feedbacks',
+    '/api/relatorio-feedbacks/',
+    '/api/relatorio-midias',
+    '/api/relatorio-midias/',
     '/api/payment-plans',
+    '/api/treinos',
     '/api/profiles/me',
     '/api/me',
     '/api/checkins',
+    '/api/weekly-checkins',
+    '/api/weekly-checkins/',
+    '/api/uploads/progress-photo',
+    '/api/uploads/storage/progress-photos',
+    '/api/uploads/storage/progress-photos/',
     '/api/videos',
     '/api/lives',
     '/api/uploads/avatar',
     '/api/import/parse-pdf',
     '/api/import/confirm',
     '/api/payments/create-asaas',
+    '/api/asaas-payments',
+    '/api/asaas-config',
+    '/api/asaas-config/',
+    '/api/asaas-config/verify-connection',
+    '/api/twilio-config',
+    '/api/twilio-config/',
+    '/api/financial-exceptions',
+    '/api/financial-exceptions/',
+    '/api/expenses',
+    '/api/expenses/',
+    '/api/user-roles',
+    '/api/profiles',
+    '/api/avisos',
+    '/api/avisos/',
+    '/api/turmas',
+    '/api/turmas/',
+    '/api/turmas-alunos',
+    '/api/turmas-alunos/',
+    '/api/avisos-destinatarios',
+    '/api/avisos-destinatarios/',
+    '/auth/confirm-email',
+    '/auth/resend-confirmation',
+    '/auth/forgot-password',
+    '/auth/reset-password',
+    '/auth/change-password',
 ]);
+
+type LegacyMapResult = { endpoint: string; unwrapFirstRow: boolean };
+
+/** DELETE /rest/v1 usa `?id=` (Express); o mapeamento legado usa `id.eq` como no GET. */
+function rewriteRestV1UrlForDelete(restPath: string): string {
+    if (!restPath.startsWith('/rest/v1/')) return restPath;
+    const qIndex = restPath.indexOf('?');
+    if (qIndex === -1) return restPath;
+    const path = restPath.slice(0, qIndex);
+    const params = new URLSearchParams(restPath.slice(qIndex + 1));
+    const idEq = params.get('id.eq');
+    if (idEq != null && idEq !== '') {
+        params.delete('id.eq');
+        if (!params.has('id')) {
+            params.set('id', idEq);
+        }
+    }
+    const q = params.toString();
+    return q ? `${path}?${q}` : path;
+}
+
+/** Extrai UUID do filtro PostgREST `id.eq=` na URL /rest/v1/... (usado pelo PATCH legado). */
+function extractIdEqFromRestPath(restPath: string): string | null {
+    const qIndex = restPath.indexOf('?');
+    if (qIndex === -1) return null;
+    const params = new URLSearchParams(restPath.slice(qIndex + 1));
+    const raw = params.get('id.eq');
+    return raw ? decodeURIComponent(raw) : null;
+}
+
+function normalizeLegacyQueryToRest(query: string): string {
+    if (!query) return '';
+    const src = new URLSearchParams(query.startsWith('?') ? query.slice(1) : query);
+    const out = new URLSearchParams();
+
+    for (const [key, value] of src.entries()) {
+        if (['select', 'order', 'limit', 'offset'].includes(key)) {
+            out.append(key, value);
+            continue;
+        }
+        // Se já veio no formato PostgREST (campo.operador), manter.
+        if (key.includes('.')) {
+            out.append(key, value);
+            continue;
+        }
+        // Legado /api usa query simples (?aluno_id=...), converter para eq.
+        out.append(`${key}.eq`, value);
+    }
+
+    const serialized = out.toString();
+    return serialized ? `?${serialized}` : '';
+}
+
+function mapLegacyApiToRestV1(endpoint: string): LegacyMapResult {
+    const normalized = normalizeEndpoint(endpoint);
+    const hasQuery = endpoint.includes('?');
+    const rawQuery = hasQuery ? endpoint.slice(endpoint.indexOf('?')) : '';
+    const query = normalizeLegacyQueryToRest(rawQuery);
+
+    const byIdToQuery = (table: string, id: string) => ({
+        endpoint: `/rest/v1/${table}?id.eq=${encodeURIComponent(id)}`,
+        unwrapFirstRow: true,
+    });
+
+    let match = normalized.match(/^\/api\/alunos\/([^/]+)$/);
+    if (match && !['me', 'by-coach', 'link-user', 'unlinked-registrations', 'adopt-registration', 'dismiss-registration'].includes(match[1])) {
+        return byIdToQuery('alunos', match[1]);
+    }
+
+    match = normalized.match(/^\/api\/treinos\/([^/]+)$/);
+    if (match) return byIdToQuery('treinos', match[1]);
+
+    match = normalized.match(/^\/api\/dietas\/([^/]+)$/);
+    if (match) return byIdToQuery('dietas', match[1]);
+
+    match = normalized.match(/^\/api\/alunos-treinos\/([^/]+)$/);
+    if (match) return byIdToQuery('alunos_treinos', match[1]);
+
+    match = normalized.match(/^\/api\/feedbacks-alunos\/([^/]+)$/);
+    if (match) return byIdToQuery('feedbacks_alunos', match[1]);
+
+    match = normalized.match(/^\/api\/recurring-charges-config\/([^/]+)$/);
+    if (match) return byIdToQuery('recurring_charges_config', match[1]);
+
+    match = normalized.match(/^\/api\/itens-dieta\/([^/]+)$/);
+    if (match) return byIdToQuery('itens_dieta', match[1]);
+
+    match = normalized.match(/^\/api\/dieta-farmacos\/([^/]+)$/);
+    if (match) return byIdToQuery('dieta_farmacos', match[1]);
+
+    match = normalized.match(/^\/api\/avisos\/([^/]+)$/);
+    if (match) return byIdToQuery('avisos', match[1]);
+
+    match = normalized.match(/^\/api\/turmas\/([^/]+)$/);
+    if (match) return byIdToQuery('turmas', match[1]);
+
+    match = normalized.match(/^\/api\/turmas-alunos\/([^/]+)$/);
+    if (match) return byIdToQuery('turmas_alunos', match[1]);
+
+    match = normalized.match(/^\/api\/avisos-destinatarios\/([^/]+)$/);
+    if (match) return byIdToQuery('avisos_destinatarios', match[1]);
+
+    const tableMap: Record<string, string> = {
+        '/api/treinos': 'treinos',
+        '/api/dietas': 'dietas',
+        '/api/alunos-treinos': 'alunos_treinos',
+        '/api/feedbacks-alunos': 'feedbacks_alunos',
+        '/api/recurring-charges-config': 'recurring_charges_config',
+        '/api/itens-dieta': 'itens_dieta',
+        '/api/dieta-farmacos': 'dieta_farmacos',
+        '/api/avisos': 'avisos',
+        '/api/turmas': 'turmas',
+        '/api/turmas-alunos': 'turmas_alunos',
+        '/api/avisos-destinatarios': 'avisos_destinatarios',
+    };
+
+    if (tableMap[normalized]) {
+        return {
+            endpoint: `/rest/v1/${tableMap[normalized]}${query}`,
+            unwrapFirstRow: false,
+        };
+    }
+
+    return { endpoint, unwrapFirstRow: false };
+}
 
 export function isEndpointAllowed(endpoint: string) {
     const normalized = normalizeEndpoint(endpoint);
@@ -165,19 +355,43 @@ class ApiClient {
     private fatalBlockedEndpoints: Set<string> = new Set();
 
     constructor() {
-        this.token = localStorage.getItem('auth_token');
+        const raw = localStorage.getItem('auth_token');
+        this.token =
+            raw == null ? null : String(raw).trim().replace(/^Bearer\s+/i, '').trim() || null;
     }
 
     setToken(token: string | null) {
-        this.token = token;
         if (token) {
-            localStorage.setItem('auth_token', token);
+            const cleaned = String(token).trim().replace(/^Bearer\s+/i, '').trim();
+            this.token = cleaned || null;
+            if (this.token) {
+                localStorage.setItem('auth_token', this.token);
+            } else {
+                localStorage.removeItem('auth_token');
+            }
         } else {
+            this.token = null;
             localStorage.removeItem('auth_token');
         }
     }
 
+    /** JWT cru (sem prefixo Bearer, sem espaços) — útil para multipart e WebSocket. */
     getToken() {
+        const storedToken = localStorage.getItem('auth_token');
+        if (storedToken == null) {
+            this.token = null;
+            return null;
+        }
+        const cleaned = String(storedToken).trim().replace(/^Bearer\s+/i, '').trim() || null;
+        this.token = cleaned;
+        if (cleaned !== storedToken && typeof localStorage !== 'undefined') {
+            try {
+                if (cleaned) localStorage.setItem('auth_token', cleaned);
+                else localStorage.removeItem('auth_token');
+            } catch {
+                /* quota / modo privado */
+            }
+        }
         return this.token;
     }
 
@@ -270,15 +484,38 @@ class ApiClient {
             ...options.headers as Record<string, string>,
         };
 
-        if (this.token) {
-            headers['Authorization'] = `Bearer ${this.token}`;
+        const activeToken = this.getToken();
+        if (activeToken) {
+            headers['Authorization'] = `Bearer ${activeToken}`;
         }
 
         try {
-            const url = endpoint.startsWith('http') ? endpoint : `${API_URL}${endpoint}`;
+            const mapped = mapLegacyApiToRestV1(endpoint);
+            let effectiveEndpoint = mapped.endpoint;
+            const method = (options.method || 'GET').toUpperCase();
+            if (method === 'DELETE') {
+                effectiveEndpoint = rewriteRestV1UrlForDelete(effectiveEndpoint);
+            }
+            const url = effectiveEndpoint.startsWith('http') ? effectiveEndpoint : `${API_URL}${effectiveEndpoint}`;
+            let body = options.body;
+            // PATCH /rest/v1/:table exige `id` no body (SECURITY-01 no servidor); o mapeamento legado só põe id.eq na query.
+            if (method === 'PATCH' && effectiveEndpoint.startsWith('/rest/v1/')) {
+                const restId = extractIdEqFromRestPath(effectiveEndpoint);
+                if (restId && typeof body === 'string' && body.trim()) {
+                    try {
+                        const parsed = JSON.parse(body) as Record<string, unknown>;
+                        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.id == null) {
+                            body = JSON.stringify({ id: restId, ...parsed });
+                        }
+                    } catch {
+                        /* body não-JSON: não alterar */
+                    }
+                }
+            }
             const response = await fetch(url, {
                 ...options,
                 headers,
+                body,
             });
 
             if (!response.ok) {
@@ -311,6 +548,9 @@ class ApiClient {
                 }
                 const backendError = new Error(text);
                 (backendError as any).status = response.status;
+                if (Array.isArray(errObj.fields)) {
+                    (backendError as any).fields = errObj.fields;
+                }
                 let errorType = ErrorType.BACKEND;
                 if (response.status === 401 || response.status === 403) {
                     errorType = ErrorType.AUTH;
@@ -330,7 +570,11 @@ class ApiClient {
                 throw backendError;
             }
 
-            return response.json();
+            const payload = await response.json();
+            if (mapped.unwrapFirstRow && Array.isArray(payload)) {
+                return payload[0] ?? null;
+            }
+            return payload;
         } catch (error) {
             // DESIGN-API-CONNECTIVITY-GUARD-009: Capturar erros de rede/TLS
             // Se já é um erro de backend (tem status), re-lançar
@@ -349,7 +593,17 @@ class ApiClient {
     }
 
     // Auth
-    async signUp(email: string, password: string, metadata?: { full_name?: string }) {
+    async signUp(
+        email: string,
+        password: string,
+        metadata?: {
+            full_name?: string;
+            coach_id?: string;
+            cpf_cnpj?: string;
+            peso?: number;
+            altura?: number;
+        },
+    ) {
         const data = await this.request('/auth/signup', {
             method: 'POST',
             body: JSON.stringify({ email, password, ...metadata }),
@@ -382,18 +636,60 @@ class ApiClient {
     }
 
     async getUserById(userId: string) {
-        return this.request(`/auth/user-by-id?user_id=${userId}`);
+        const q = `user_id=${encodeURIComponent(userId)}`;
+        return this.request(`/auth/user-by-id?${q}`);
     }
 
-    // Reset password (requer implementação na API)
-    async resetPasswordForEmail(email: string, options?: { redirectTo?: string }) {
-        // TODO: Implementar endpoint na API
-        throw new Error('Reset password ainda não implementado na API');
+    /** Esqueci minha senha — envia email com link (Resend ou SMTP no servidor). */
+    async requestPasswordReset(email: string) {
+        return this.request(API_CONTRACT.auth.forgotPassword(), {
+            method: 'POST',
+            body: JSON.stringify({ email }),
+        });
     }
 
-    // Update user (requer implementação na API)
+    /** Confirmar email via token enviado no link do signup/reenvio. */
+    async confirmEmail(token: string) {
+        return this.request(API_CONTRACT.auth.confirmEmail(), {
+            method: 'POST',
+            body: JSON.stringify({ token }),
+        });
+    }
+
+    /** Reenviar e-mail de confirmação para conta ainda não confirmada. */
+    async resendEmailConfirmation(email: string) {
+        return this.request(API_CONTRACT.auth.resendConfirmation(), {
+            method: 'POST',
+            body: JSON.stringify({ email }),
+        });
+    }
+
+    /** Alias usado pela UI legada; ignora redirectTo (o link aponta para FRONTEND_URL no servidor). */
+    async resetPasswordForEmail(email: string, _options?: { redirectTo?: string }) {
+        return this.requestPasswordReset(email);
+    }
+
+    /** Redefinir senha com token JWT recebido no link do email. */
+    async completePasswordReset(token: string, password: string) {
+        return this.request(API_CONTRACT.auth.resetPassword(), {
+            method: 'POST',
+            body: JSON.stringify({ token, password }),
+        });
+    }
+
+    /** Alterar senha com usuário autenticado (senha atual + nova). */
+    async changePassword(currentPassword: string, newPassword: string) {
+        return this.request('/auth/change-password', {
+            method: 'POST',
+            body: JSON.stringify({ currentPassword, newPassword }),
+        });
+    }
+
+    // Update user (outros campos — ainda não exposto na API)
     async updateUser(updates: { password?: string }) {
-        // TODO: Implementar endpoint na API
+        if (updates?.password) {
+            throw new Error('Para nova senha com link de recuperação, use completePasswordReset.');
+        }
         throw new Error('Update user ainda não implementado na API');
     }
 
@@ -425,6 +721,27 @@ class ApiClient {
 
                 const result = await response.json();
                 return { url: result.url, path: result.path };
+            }
+
+            if (bucket === 'progress-photos') {
+                const formData = new FormData();
+                formData.append('file', file);
+                const response = await fetch(API_CONTRACT.uploads.progressPhoto(), {
+                    method: 'POST',
+                    headers: {
+                        Authorization: `Bearer ${this.token}`,
+                    },
+                    body: formData,
+                });
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({ error: 'Erro no upload' }));
+                    const uploadError = new Error(error.error || 'Erro no upload da foto de progresso');
+                    (uploadError as any).errorType = ErrorType.BACKEND;
+                    (uploadError as any).status = response.status;
+                    throw uploadError;
+                }
+                const result = await response.json();
+                return { url: result.url as string, path: (result.path as string) || path };
             }
             
             // Para outros buckets, manter compatibilidade temporária
@@ -467,6 +784,10 @@ class ApiClient {
         if (bucket === 'avatars') {
             return path.startsWith('http') ? path : `${API_URL}${path}`;
         }
+        if (bucket === 'progress-photos') {
+            const base = API_URL.replace(/\/$/, '');
+            return `${base}/api/uploads/storage/progress-photos/${path}`;
+        }
         
         // Para outros buckets, manter compatibilidade
         return `${API_URL}/storage/v1/object/public/${bucket}/${path}`;
@@ -503,9 +824,8 @@ class ApiClient {
             return [];
         }
         // DESIGN-FRONTEND-DATA-CONTEXT-LOCK-015: Verificar role antes de permitir
-        if (identity.role !== 'coach') {
-            // DESIGN-023: Não lançar exceção - logar warning e retornar array vazio
-            console.warn('[DESIGN-023] getAlunosByCoach() requer role "coach", mas role atual é:', identity.role);
+        if (identity.role !== 'coach' && identity.role !== 'admin') {
+            console.warn('[DESIGN-023] getAlunosByCoach() requer role coach/admin, role atual:', identity.role);
             return [];
         }
         return this.request(API_CONTRACT.alunos.byCoach());
@@ -517,8 +837,8 @@ class ApiClient {
         if (!identity) {
             return apiSuccess([]);
         }
-        if (identity.role !== 'coach') {
-            console.warn('[REACT-API-RESILIENCE-FIX-008] getAlunosByCoachSafe() requer role "coach"');
+        if (identity.role !== 'coach' && identity.role !== 'admin') {
+            console.warn('[REACT-API-RESILIENCE-FIX-008] getAlunosByCoachSafe() requer role coach/admin');
             return apiSuccess([]);
         }
         return this.safeRequest<any[]>(API_CONTRACT.alunos.byCoach());

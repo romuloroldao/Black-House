@@ -1,14 +1,20 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '@/lib/api-client';
-import { Food, getAllFoodsSafe, getMacroGroup } from '@/lib/foodService';
+import {
+  Food,
+  getAllFoodsSafe,
+  listarSubstituicoesIsocaloricas,
+  macroScaleFactor,
+  quantityUnitLabel,
+} from '@/lib/foodService';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { Calendar, Eye, Calculator, ChefHat, Pencil, Trash2 } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 
@@ -26,17 +32,9 @@ interface Dieta {
 interface ItemDieta {
   id: string;
   quantidade: number;
+  unidade_quantidade?: string;
   refeicao: string;
-  alimento: {
-    id: number;
-    name: string;
-    portion: number;
-    calories: number;
-    carbs: number;
-    protein: number;
-    fat: number;
-    group: string;
-  };
+  alimento: Food;
 }
 
 interface DietaCompleta extends Dieta {
@@ -111,16 +109,18 @@ const DietViewer = () => {
           return {
             ...item,
             quantidade: quantidade,
-            alimento: alimento ? {
-              id: Number(alimento.id),
-              name: alimento.name,
-              portion: alimento.portion,
-              calories: alimento.calories,
-              carbs: alimento.carbs,
-              protein: alimento.protein,
-              fat: alimento.fat,
-              group: getMacroGroup(alimento)
-            } : { id: 0, name: 'Alimento não encontrado', portion: 0, calories: 0, carbs: 0, protein: 0, fat: 0, group: 'mixed' }
+            alimento: alimento ?? {
+              id: '',
+              name: 'Alimento não encontrado',
+              portion: 0,
+              calories: 0,
+              carbs: 0,
+              protein: 0,
+              fat: 0,
+              tipo_id: null,
+              tipo_nome: null,
+              origem_ptn: null,
+            },
           };
         })
       );
@@ -139,40 +139,26 @@ const DietViewer = () => {
     }
   };
 
-  const calcularSubstituicoes = (item: ItemDieta, alimentos: Food[]) => {
-    const alimento = item.alimento;
-    let nutrienteDominante: keyof Pick<typeof alimento, 'protein' | 'carbs' | 'fat'> = 'protein';
-    
-    if (alimento.group === 'carb') nutrienteDominante = 'carbs';
-    if (alimento.group === 'fat') nutrienteDominante = 'fat';
-
-    const valorOriginal = alimento[nutrienteDominante];
-    if (valorOriginal === 0) return [];
-
-    return alimentos
-      .filter(a => 
-        getMacroGroup(a) === alimento.group && 
-        a.id !== String(alimento.id) &&
-        (nutrienteDominante === 'protein' ? a.protein : nutrienteDominante === 'carbs' ? a.carbs : a.fat) > 0
-      )
-      .map(sub => {
-        const valorSub = nutrienteDominante === 'protein' ? sub.protein : nutrienteDominante === 'carbs' ? sub.carbs : sub.fat;
-        const qtdEquivalente = (item.quantidade * valorOriginal) / valorSub;
-        return {
-          nome: sub.name,
-          quantidade: Math.round(qtdEquivalente * 10) / 10,
-          nutriente: nutrienteDominante === 'protein' ? 'Proteínas' : 
-                    nutrienteDominante === 'carbs' ? 'Carboidratos' : 'Lipídios'
-        };
-      })
-      .slice(0, 3);
+  const calcularSubstituicoes = (item: ItemDieta, alimentosLista: Food[]) => {
+    const alimento = item.alimento as Food;
+    return listarSubstituicoesIsocaloricas(
+      alimento,
+      item.quantidade,
+      item.unidade_quantidade || 'g',
+      alimentosLista,
+      { limit: 3 },
+    ).map((s) => ({
+      nome: s.alimento.name,
+      quantidade: s.quantidadeEquivalente,
+      nutriente: `${s.kcalEquivalente.toFixed(0)} kcal`,
+    }));
   };
 
   const calcularTotaisRefeicao = (itens: ItemDieta[], refeicao: string) => {
     return itens
       .filter(item => item.refeicao === refeicao)
       .reduce((total, item) => {
-        const fator = item.quantidade / item.alimento.portion;
+        const fator = macroScaleFactor(item.quantidade, item.unidade_quantidade, item.alimento.portion);
         return {
           kcal: total.kcal + (item.alimento.calories * fator),
           proteinas: total.proteinas + (item.alimento.protein * fator),
@@ -184,7 +170,7 @@ const DietViewer = () => {
 
   const calcularTotaisDieta = (itens: ItemDieta[]) => {
     return itens.reduce((total, item) => {
-      const fator = item.quantidade / item.alimento.portion;
+      const fator = macroScaleFactor(item.quantidade, item.unidade_quantidade, item.alimento.portion);
       return {
         kcal: total.kcal + (item.alimento.calories * fator),
         proteinas: total.proteinas + (item.alimento.protein * fator),
@@ -224,7 +210,7 @@ const DietViewer = () => {
   if (loading) {
     return (
       <div className="p-6">
-        <div className="animate-pulse space-y-4">
+        <div className="motion-safe:animate-pulse space-y-4">
           <div className="h-8 bg-muted rounded w-1/3"></div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[1, 2, 3].map(i => (
@@ -323,11 +309,14 @@ const DietViewer = () => {
                     <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
                       <DialogHeader>
                         <DialogTitle>{dietaSelecionada?.nome}</DialogTitle>
+                        <DialogDescription>
+                          Detalhes da dieta do aluno, resumo nutricional e refeições com itens e substituições.
+                        </DialogDescription>
                       </DialogHeader>
                       
                       {loadingDetalhes ? (
                         <div className="space-y-4">
-                          <div className="animate-pulse">
+                          <div className="motion-safe:animate-pulse">
                             <div className="h-4 bg-muted rounded w-1/2 mb-2"></div>
                             <div className="h-4 bg-muted rounded w-3/4"></div>
                           </div>
@@ -407,7 +396,17 @@ const DietViewer = () => {
                                         <div className="flex items-center justify-between">
                                           <span className="font-medium">{item.alimento.name}</span>
                                           <span className="text-sm text-muted-foreground">
-                                            {item.quantidade}g - {Math.round((item.alimento.calories * item.quantidade) / item.alimento.portion)} kcal
+                                            {item.quantidade}
+                                            {quantityUnitLabel(item.unidade_quantidade)} —{' '}
+                                            {Math.round(
+                                              item.alimento.calories *
+                                                macroScaleFactor(
+                                                  item.quantidade,
+                                                  item.unidade_quantidade,
+                                                  item.alimento.portion,
+                                                ),
+                                            )}{' '}
+                                            kcal
                                           </span>
                                         </div>
 

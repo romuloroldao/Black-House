@@ -30,6 +30,12 @@ function sanitizeAiOutput(aiOutput, requestId = 'unknown') {
             orientacoes: sanitizeString(aiOutput.orientacoes, 5000, true)
         };
 
+        // O schema canônico trata dieta como opcional. Quando o PDF não contém
+        // refeições válidas, omitimos o campo em vez de enviar null.
+        if (sanitized.dieta === null) {
+            delete sanitized.dieta;
+        }
+
         // Remover campos extras que não estão no schema
         const allowedKeys = ['aluno', 'dieta', 'suplementos', 'farmacos', 'orientacoes'];
         Object.keys(sanitized).forEach(key => {
@@ -73,13 +79,20 @@ function sanitizeAluno(aluno) {
         };
     }
 
-    return {
+    const out = {
         nome: sanitizeString(aluno.nome, 255, false) || '',
-        peso: sanitizeNumber(aluno.peso, 0, 500, true),
-        altura: sanitizeNumber(aluno.altura, 0, 300, true),
-        idade: sanitizeInteger(aluno.idade, 0, 150, true),
+        peso: sanitizePositiveNumber(aluno.peso, 500),
+        altura: sanitizePositiveNumber(aluno.altura, 300),
+        idade: sanitizePositiveInteger(aluno.idade, 150),
         objetivo: sanitizeString(aluno.objetivo, 1000, true)
     };
+    const email = sanitizeString(aluno.email, 255, true);
+    if (email) out.email = email;
+    const telefone = sanitizeString(aluno.telefone, 40, true);
+    if (telefone) out.telefone = telefone;
+    const cpf = sanitizeString(aluno.cpf_cnpj, 20, true);
+    if (cpf) out.cpf_cnpj = cpf;
+    return out;
 }
 
 /**
@@ -106,7 +119,7 @@ function sanitizeDieta(dieta) {
 }
 
 /**
- * Sanitiza uma refeição
+ * Sanitiza uma refeição (com campos opcionais para fichas complexas)
  */
 function sanitizeRefeicao(refeicao) {
     if (!refeicao || typeof refeicao !== 'object') {
@@ -119,7 +132,7 @@ function sanitizeRefeicao(refeicao) {
     }
 
     const alimentos = sanitizeArray(refeicao.alimentos, sanitizeAlimento);
-    
+
     // Filtrar alimentos inválidos
     const alimentosValidos = alimentos.filter(a => a && a.nome && a.quantidade);
 
@@ -128,14 +141,65 @@ function sanitizeRefeicao(refeicao) {
         return null;
     }
 
-    return {
+    const result = {
         nome,
         alimentos: alimentosValidos
     };
+
+    // Campos opcionais — incluídos apenas quando presentes para preservar
+    // compatibilidade com fichas simples.
+    const horario = sanitizeString(refeicao.horario, 50, true);
+    if (horario) result.horario = horario;
+
+    const observacao = sanitizeString(refeicao.observacao, 1000, true);
+    if (observacao) result.observacao = observacao;
+
+    const diaSemana = sanitizeDiaSemana(refeicao.dia_semana);
+    if (diaSemana) result.dia_semana = diaSemana;
+
+    const plano = sanitizeString(refeicao.plano, 100, true);
+    if (plano) result.plano = plano;
+
+    const macros = sanitizeMacros(refeicao.macros);
+    if (macros) result.macros = macros;
+
+    return result;
 }
 
 /**
- * Sanitiza um alimento
+ * Sanitiza dia da semana (normaliza variações comuns).
+ */
+function sanitizeDiaSemana(value) {
+    const raw = sanitizeString(value, 50, true);
+    if (!raw) return null;
+
+    const normalized = raw.toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/\bfeira\b/g, '')
+        .replace(/[^a-z0-9 ]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const map = {
+        'segunda': 'Segunda',
+        'terca': 'Terça',
+        'quarta': 'Quarta',
+        'quinta': 'Quinta',
+        'sexta': 'Sexta',
+        'sabado': 'Sábado',
+        'domingo': 'Domingo',
+        'todos': 'Todos os dias',
+        'todos os dias': 'Todos os dias',
+        'todos dias': 'Todos os dias',
+        'dia 1': 'Dia 1', 'dia 2': 'Dia 2', 'dia 3': 'Dia 3',
+        'dia 4': 'Dia 4', 'dia 5': 'Dia 5', 'dia 6': 'Dia 6', 'dia 7': 'Dia 7'
+    };
+
+    return map[normalized] || raw.substring(0, 50);
+}
+
+/**
+ * Sanitiza um alimento (com alternativas opcionais)
  */
 function sanitizeAlimento(alimento) {
     if (!alimento || typeof alimento !== 'object') {
@@ -149,10 +213,48 @@ function sanitizeAlimento(alimento) {
         return null; // Ambos são obrigatórios
     }
 
-    return {
-        nome,
-        quantidade
-    };
+    if (isForbiddenFoodName(nome)) {
+        return null;
+    }
+
+    const result = { nome, quantidade };
+
+    // Alternativas (substitutos da mesma linha)
+    if (Array.isArray(alimento.alternativas)) {
+        const alternativas = alimento.alternativas
+            .map(alt => {
+                if (!alt || typeof alt !== 'object') return null;
+                const altNome = sanitizeString(alt.nome, 255, false);
+                const altQtd = sanitizeString(alt.quantidade, 100, true) || quantidade;
+                if (!altNome || isForbiddenFoodName(altNome)) return null;
+                if (altNome.toLowerCase() === nome.toLowerCase()) return null;
+                return { nome: altNome, quantidade: altQtd };
+            })
+            .filter(Boolean);
+        if (alternativas.length > 0) {
+            result.alternativas = alternativas;
+        }
+    }
+
+    return result;
+}
+
+function isForbiddenFoodName(nome) {
+    const normalized = String(nome || '')
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+
+    if (!normalized) return true;
+
+    return /^(ptn|cho|lip|kcal|glip|g lip|gptn|g ptn|proteina|carboidrato|gordura)$/.test(normalized) ||
+        /^personalizado\s*-/.test(normalized) ||
+        /^lista de substit/i.test(normalized) ||
+        /^grupo dos?\b/.test(normalized) ||
+        /^grupo das?\b/.test(normalized) ||
+        /^(carnes e proteinas|paes e variedades|feijao e leguminosas|vegetais [ab]|leite e derivados|frutas?|cereais|bebidas|gorduras|oleaginosas|oleos e gorduras|fibras [ab])$/.test(normalized);
 }
 
 /**
@@ -172,7 +274,7 @@ function sanitizeMacros(macros) {
 }
 
 /**
- * Sanitiza suplemento
+ * Sanitiza suplemento (com horário opcional)
  */
 function sanitizeSuplemento(suplemento) {
     if (!suplemento || typeof suplemento !== 'object') {
@@ -186,15 +288,20 @@ function sanitizeSuplemento(suplemento) {
         return null;
     }
 
-    return {
+    const result = {
         nome,
         dosagem,
         observacao: sanitizeString(suplemento.observacao, 1000, true)
     };
+
+    const horario = sanitizeString(suplemento.horario, 100, true);
+    if (horario) result.horario = horario;
+
+    return result;
 }
 
 /**
- * Sanitiza fármaco
+ * Sanitiza fármaco (com horário opcional)
  */
 function sanitizeFarmaco(farmaco) {
     if (!farmaco || typeof farmaco !== 'object') {
@@ -208,11 +315,16 @@ function sanitizeFarmaco(farmaco) {
         return null;
     }
 
-    return {
+    const result = {
         nome,
         dosagem,
         observacao: sanitizeString(farmaco.observacao, 1000, true)
     };
+
+    const horario = sanitizeString(farmaco.horario, 100, true);
+    if (horario) result.horario = horario;
+
+    return result;
 }
 
 /**
@@ -294,6 +406,16 @@ function sanitizeInteger(value, min, max, nullable) {
     const num = sanitizeNumber(value, min, max, nullable);
     if (num === null) return null;
     return Math.floor(num);
+}
+
+function sanitizePositiveNumber(value, max) {
+    const num = sanitizeNumber(value, 0, max, true);
+    return num && num > 0 ? num : null;
+}
+
+function sanitizePositiveInteger(value, max) {
+    const num = sanitizeInteger(value, 0, max, true);
+    return num && num > 0 ? num : null;
 }
 
 /**

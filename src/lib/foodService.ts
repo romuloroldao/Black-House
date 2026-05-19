@@ -8,8 +8,55 @@ export type Food = {
   protein: number;
   carbs: number;
   fat: number;
+  /** Gramas de álcool etílico por `portion` (mesma base que macros); 7 kcal/g na energia. */
+  alcohol?: number;
   portion: number;
+  tipo_id?: string | null;
+  tipo_nome?: string | null;
+  macro_predominante?: string | null;
+  equiv_livre?: boolean;
+  origem_ptn?: string | null;
 };
+
+export type QuantityUnit = 'g' | 'ml' | 'un';
+
+/** kcal a partir de macros + álcool (4/4/9/7). */
+export function kcalFromMacrosFood(
+  protein: number,
+  carbs: number,
+  fat: number,
+  alcohol = 0,
+): number {
+  const p = Number(protein) || 0;
+  const c = Number(carbs) || 0;
+  const l = Number(fat) || 0;
+  const a = Number(alcohol) || 0;
+  return p * 4 + c * 4 + l * 9 + a * 7;
+}
+
+/**
+ * Factor para aplicar nutrientes por referência ao item da dieta.
+ * - g/ml: quantidade na mesma base que `food.portion` (ex.: g por 100g; ml por 100ml).
+ * - un: número de unidades; macros no cadastro devem ser por UMA unidade (`portion` = massa/volume dessa unidade).
+ */
+export function macroScaleFactor(
+  quantidade: number,
+  unidade: string | undefined,
+  portion: number,
+): number {
+  const q = Number(quantidade) || 0;
+  const p = Number(portion) > 0 ? Number(portion) : 100;
+  const u = (unidade || 'g').toLowerCase();
+  if (u === 'un') return q;
+  return q / p;
+}
+
+export function quantityUnitLabel(u: string | undefined): string {
+  const x = (u || 'g').toLowerCase();
+  if (x === 'ml') return 'ml';
+  if (x === 'un') return 'un.';
+  return 'g';
+}
 
 const toNumber = (value: unknown, fallback = 0) => {
   const parsed = Number(value);
@@ -19,14 +66,42 @@ const toNumber = (value: unknown, fallback = 0) => {
 export const normalizeFood = (row: any): Food => {
   return {
     id: String(row?.id ?? ''),
-    name: row?.name ?? row?.nome ?? '',
+    name: String(row?.name ?? row?.nome ?? ''),
     calories: toNumber(row?.calories ?? row?.kcal_por_referencia),
     protein: toNumber(row?.protein ?? row?.ptn_por_referencia),
     carbs: toNumber(row?.carbs ?? row?.cho_por_referencia),
     fat: toNumber(row?.fat ?? row?.lip_por_referencia),
-    portion: toNumber(row?.portion ?? row?.quantidade_referencia_g, 100)
+    alcohol: toNumber(row?.alcohol ?? row?.alcool_por_referencia, 0),
+    portion: toNumber(row?.portion ?? row?.quantidade_referencia_g, 100),
+    tipo_id: row?.tipo_id != null ? String(row.tipo_id) : null,
+    tipo_nome: row?.tipo_nome != null ? String(row.tipo_nome) : null,
+    macro_predominante: row?.macro_predominante != null ? String(row.macro_predominante) : null,
+    equiv_livre: row?.equiv_livre === true,
+    origem_ptn: row?.origem_ptn != null ? String(row.origem_ptn) : null,
   };
 };
+
+// Reexporta motor isocalórico (logicaTabela)
+export {
+  sameEquivalenceGroup,
+  canSubstitute,
+  listarSubstituicoesIsocaloricas,
+  kcalPorPorcao,
+  calcularQuantidadeEquivalente,
+} from '@/lib/foodEquivalence';
+export type { SubstituicaoIsocalorica } from '@/lib/foodEquivalence';
+
+export const getSubstitutionCategory = (food: Food) => {
+  if (food.tipo_id && String(food.tipo_id).trim() !== '') {
+    return `tipo:${String(food.tipo_id)}`;
+  }
+  return 'sem-grupo';
+};
+
+export const getSubstitutionCategoryLabel = (
+  _categoryKey: string,
+  food?: Food | null,
+) => food?.tipo_nome?.trim() || 'Sem grupo';
 
 export const getMacroGroup = (food: Food) => {
   const max = Math.max(food.protein, food.carbs, food.fat);
@@ -35,6 +110,19 @@ export const getMacroGroup = (food: Food) => {
   if (max === food.carbs) return 'carb';
   return 'fat';
 };
+
+export const getMacroGroupLabel = (macro: string) => {
+  if (macro === 'protein') return 'PROTEÍNAS';
+  if (macro === 'carb') return 'CARBOIDRATOS';
+  if (macro === 'fat') return 'GORDURAS';
+  if (macro === 'mixed') return 'ALIMENTOS MISTOS';
+  return 'OUTROS';
+};
+
+/** @deprecated Usar equivalência isocalórica; mantido para compatibilidade. */
+export const getCategoryEquivalenceKey = () => 'calories' as const;
+export const getEquivalenceLabel = () => 'Calorias (isocalórica)';
+export const getEquivalenceUnit = () => 'kcal';
 
 export const getAllFoodsSafe = async (): Promise<ApiResult<Food[]>> => {
   const result = await apiClient.requestSafe<any[]>(API_CONTRACT.alimentos.list());

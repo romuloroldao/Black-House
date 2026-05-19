@@ -16,8 +16,10 @@ module.exports = {
         const allowedOrigins = [
             'https://blackhouse.app.br',
             'https://www.blackhouse.app.br',
+            'https://app.blackhouse.app.br',
             'http://localhost:8080', // Dev
-            'http://localhost:5173'  // Dev alternativo
+            'http://localhost:5173', // Dev alternativo
+            'http://127.0.0.1:5173'
         ];
         
         if (allowedOrigins.indexOf(origin) !== -1) {

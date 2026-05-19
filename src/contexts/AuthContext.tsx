@@ -6,7 +6,7 @@ export interface User {
   id: string;
   email: string;
   created_at?: string;
-  role?: 'coach' | 'aluno';
+  role?: 'coach' | 'aluno' | 'admin';
   payment_status?: 'CURRENT' | 'OVERDUE' | 'PENDING_AFTER_DUE_DATE';
   // Campos adicionais que podem ser usados
   [key: string]: any;
@@ -24,7 +24,7 @@ interface AuthContextType {
   authInitialized: boolean; // REACT-AUTH-BOOTSTRAP-DEADLOCK-FIX-009: Sinaliza conclusão do bootstrap
   login: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
-  role?: 'coach' | 'aluno';
+  role?: 'coach' | 'aluno' | 'admin';
   payment_status?: 'CURRENT' | 'OVERDUE' | 'PENDING_AFTER_DUE_DATE';
 }
 

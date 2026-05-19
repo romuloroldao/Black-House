@@ -11,7 +11,7 @@ interface DataContextGuard {
   canFetchData: boolean;
   identity: {
     user_id: string;
-    role: 'coach' | 'aluno';
+    role: 'coach' | 'aluno' | 'admin';
     tenant_id?: string;
   } | null;
 }

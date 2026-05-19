@@ -37,6 +37,10 @@ CREATE TABLE IF NOT EXISTS public.agenda_eventos (
 CREATE TABLE IF NOT EXISTS public.tipos_alimentos (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   nome_tipo text NOT NULL UNIQUE,
+  macro_predominante text,
+  equiv_isocalorica boolean NOT NULL DEFAULT true,
+  equiv_livre boolean NOT NULL DEFAULT false,
+  ordem_exibicao integer NOT NULL DEFAULT 0,
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT tipos_alimentos_pkey PRIMARY KEY (id)
 );
@@ -49,6 +53,7 @@ CREATE TABLE IF NOT EXISTS public.alimentos (
   cho_por_referencia numeric NOT NULL,
   ptn_por_referencia numeric NOT NULL,
   lip_por_referencia numeric NOT NULL,
+  alcool_por_referencia numeric NOT NULL DEFAULT 0,
   origem_ptn text NOT NULL CHECK (origem_ptn = ANY (ARRAY['Vegetal'::text, 'Animal'::text, 'Mista'::text, 'N/A'::text])),
   tipo_id uuid,
   info_adicional text,
@@ -112,6 +117,7 @@ CREATE TABLE IF NOT EXISTS public.asaas_config (
   coach_id uuid NOT NULL UNIQUE,
   is_sandbox boolean NOT NULL DEFAULT true,
   webhook_url text,
+  asaas_api_key text,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT asaas_config_pkey PRIMARY KEY (id),
@@ -257,12 +263,14 @@ CREATE TABLE IF NOT EXISTS public.itens_dieta (
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   dieta_id uuid NOT NULL,
   quantidade double precision NOT NULL,
+  unidade_quantidade text NOT NULL DEFAULT 'g'::text,
   refeicao text NOT NULL,
   dia_semana text,
   alimento_id uuid,
   CONSTRAINT itens_dieta_pkey PRIMARY KEY (id),
   CONSTRAINT itens_dieta_dieta_id_fkey FOREIGN KEY (dieta_id) REFERENCES public.dietas(id),
-  CONSTRAINT itens_dieta_alimento_id_fkey FOREIGN KEY (alimento_id) REFERENCES public.alimentos(id)
+  CONSTRAINT itens_dieta_alimento_id_fkey FOREIGN KEY (alimento_id) REFERENCES public.alimentos(id),
+  CONSTRAINT itens_dieta_unidade_quantidade_check CHECK ((unidade_quantidade = ANY (ARRAY['g'::text, 'ml'::text, 'un'::text])))
 );
 
 CREATE TABLE IF NOT EXISTS public.eventos (
@@ -349,11 +357,13 @@ CREATE TABLE IF NOT EXISTS public.financial_exceptions (
 CREATE TABLE IF NOT EXISTS public.fotos_alunos (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   aluno_id uuid NOT NULL,
+  coach_id uuid,
   url text NOT NULL,
   descricao text,
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT fotos_alunos_pkey PRIMARY KEY (id),
-  CONSTRAINT fotos_alunos_aluno_id_fkey FOREIGN KEY (aluno_id) REFERENCES public.alunos(id)
+  CONSTRAINT fotos_alunos_aluno_id_fkey FOREIGN KEY (aluno_id) REFERENCES public.alunos(id),
+  CONSTRAINT fotos_alunos_coach_id_fkey FOREIGN KEY (coach_id) REFERENCES app_auth.users(id)
 );
 
 CREATE TABLE IF NOT EXISTS public.lembretes_eventos (
@@ -451,6 +461,8 @@ CREATE TABLE IF NOT EXISTS public.planos_pagamento (
 CREATE TABLE IF NOT EXISTS public.profiles (
   id uuid NOT NULL,
   avatar_url text,
+  display_name text,
+  phone text,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT profiles_pkey PRIMARY KEY (id),
@@ -510,7 +522,20 @@ CREATE TABLE IF NOT EXISTS public.relatorio_templates (
   CONSTRAINT relatorio_templates_coach_id_fkey FOREIGN KEY (coach_id) REFERENCES app_auth.users(id)
 );
 
-ALTER TABLE public.relatorios ADD CONSTRAINT IF NOT EXISTS relatorios_template_id_fkey FOREIGN KEY (template_id) REFERENCES public.relatorio_templates(id);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'relatorios_template_id_fkey'
+  ) THEN
+    ALTER TABLE public.relatorios
+      ADD CONSTRAINT relatorios_template_id_fkey
+      FOREIGN KEY (template_id) REFERENCES public.relatorio_templates(id);
+  END IF;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS public.relatorio_feedbacks (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -680,6 +705,97 @@ BEGIN
         ', tbl.table_name, tbl.table_name);
     END LOOP;
 END $$;
+
+-- ============================================================================
+-- Patch idempotente: fotos_alunos.coach_id (denormaliza o coach do aluno)
+-- ============================================================================
+
+ALTER TABLE public.fotos_alunos
+  ADD COLUMN IF NOT EXISTS coach_id uuid;
+
+UPDATE public.fotos_alunos f
+SET coach_id = a.coach_id
+FROM public.alunos a
+WHERE f.aluno_id = a.id
+  AND f.coach_id IS NULL
+  AND a.coach_id IS NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fotos_alunos_coach_id_fkey'
+  ) THEN
+    ALTER TABLE public.fotos_alunos
+      ADD CONSTRAINT fotos_alunos_coach_id_fkey
+      FOREIGN KEY (coach_id) REFERENCES app_auth.users(id);
+  END IF;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_fotos_alunos_coach_id ON public.fotos_alunos(coach_id);
+
+-- ============================================================================
+-- Patch: campos opcionais em profiles (PATCH /api/profiles/me)
+-- ============================================================================
+
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS display_name text;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS phone text;
+
+-- ============================================================================
+-- Sincronização coach_id em fotos_alunos
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.sync_fotos_alunos_coach_id_from_aluno()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  SELECT a.coach_id
+    INTO NEW.coach_id
+  FROM public.alunos a
+  WHERE a.id = NEW.aluno_id;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_sync_fotos_alunos_coach_id ON public.fotos_alunos;
+CREATE TRIGGER trg_sync_fotos_alunos_coach_id
+BEFORE INSERT OR UPDATE OF aluno_id ON public.fotos_alunos
+FOR EACH ROW
+EXECUTE FUNCTION public.sync_fotos_alunos_coach_id_from_aluno();
+
+CREATE OR REPLACE FUNCTION public.propagate_aluno_coach_to_fotos()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.coach_id IS DISTINCT FROM OLD.coach_id THEN
+    UPDATE public.fotos_alunos
+       SET coach_id = NEW.coach_id
+     WHERE aluno_id = NEW.id;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_propagate_aluno_coach_to_fotos ON public.alunos;
+CREATE TRIGGER trg_propagate_aluno_coach_to_fotos
+AFTER UPDATE OF coach_id ON public.alunos
+FOR EACH ROW
+EXECUTE FUNCTION public.propagate_aluno_coach_to_fotos();
+
+-- Coluna opcional em bases já criadas (CREATE TABLE IF NOT EXISTS não acrescenta colunas novas)
+ALTER TABLE public.asaas_config ADD COLUMN IF NOT EXISTS asaas_api_key text;
+
+-- Precisão nutricional: álcool (7 kcal/g) + unidade da quantidade no item da dieta
+ALTER TABLE public.alimentos ADD COLUMN IF NOT EXISTS alcool_por_referencia numeric NOT NULL DEFAULT 0;
+
+ALTER TABLE public.itens_dieta ADD COLUMN IF NOT EXISTS unidade_quantidade text NOT NULL DEFAULT 'g';
+ALTER TABLE public.itens_dieta DROP CONSTRAINT IF EXISTS itens_dieta_unidade_quantidade_check;
+ALTER TABLE public.itens_dieta ADD CONSTRAINT itens_dieta_unidade_quantidade_check CHECK (
+  unidade_quantidade = ANY (ARRAY['g'::text, 'ml'::text, 'un'::text])
+);
 
 -- ============================================================================
 -- COMENTÁRIOS

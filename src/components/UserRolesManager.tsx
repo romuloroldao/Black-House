@@ -299,7 +299,7 @@ const UserRolesManager = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <Loader2 className="h-8 w-8 motion-safe:animate-spin text-primary" />
       </div>
     );
   }
@@ -452,7 +452,7 @@ const UserRolesManager = () => {
                         >
                           <SelectTrigger className="w-32">
                             {updating === u.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <Loader2 className="h-4 w-4 motion-safe:animate-spin" />
                             ) : (
                               <SelectValue />
                             )}
@@ -485,7 +485,7 @@ const UserRolesManager = () => {
                           onClick={() => setUserToDelete(u)}
                         >
                           {deleting === u.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <Loader2 className="h-4 w-4 motion-safe:animate-spin" />
                           ) : (
                             <Trash2 className="h-4 w-4" />
                           )}

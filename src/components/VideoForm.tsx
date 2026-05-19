@@ -273,7 +273,7 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
           <Button onClick={handleSave} className="shadow-glow" disabled={saving}>
             {saving ? (
               <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full motion-safe:animate-spin mr-2" />
                 Salvando...
               </>
             ) : (
@@ -320,7 +320,7 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
                 
                 {isValidating && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full motion-safe:animate-spin" />
                     Validando vídeo do YouTube...
                   </div>
                 )}

@@ -7,12 +7,13 @@ import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { DateInputBR } from "@/components/ui/date-input-br";
 import { 
   DollarSign,
   Plus,
@@ -179,7 +180,7 @@ const PaymentManager = () => {
       }
     }
 
-    const result = await apiClient.requestSafe('/functions/create-asaas-payment', {
+    const result = await apiClient.requestSafe('/api/payments/create-asaas', {
       method: 'POST',
       body: JSON.stringify({
         alunoId: formData.aluno_id,
@@ -273,7 +274,7 @@ const PaymentManager = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
-        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full motion-safe:animate-spin" />
       </div>
     );
   }
@@ -399,6 +400,9 @@ const PaymentManager = () => {
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Nova Cobrança</DialogTitle>
+            <DialogDescription>
+              Selecione o aluno, valor ou plano, forma de pagamento, vencimento e descrição.
+            </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -498,11 +502,10 @@ const PaymentManager = () => {
 
               <div className="col-span-2 space-y-2">
                 <Label htmlFor="due_date">Data de Vencimento *</Label>
-                <Input
+                <DateInputBR
                   id="due_date"
-                  type="date"
                   value={formData.due_date}
-                  onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
+                  onChange={(value) => setFormData({ ...formData, due_date: value })}
                   required
                 />
               </div>

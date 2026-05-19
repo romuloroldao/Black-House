@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare, Trash2, User, Utensils, TrendingUp, Activity, Wallet } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import StudentProgressDashboard from "./student/StudentProgressDashboard";
 import StudentFinancialManagement from "./student/StudentFinancialManagement";
@@ -98,13 +98,27 @@ export default function StudentDetails() {
   const carregarDadosAluno = async () => {
     try {
       setLoading(true);
+      // Evita mostrar dados do aluno anterior enquanto carrega o novo ID da rota.
+      setStudent(null);
+      setFeedback("");
+      setFeedbackId(null);
+      setTreinos([]);
+      setDieta(null);
+      setFotos([]);
+      setSelectedFoto(null);
 
       // Carregar dados do aluno
       const alunoResult = await apiClient.requestSafe<any>(`/api/alunos/${id}`);
       const aluno = alunoResult.success ? alunoResult.data : null;
-      if (aluno) {
-        setStudent(aluno);
+      if (!aluno) {
+        toast({
+          title: "Aluno não encontrado",
+          description: "Não foi possível carregar os dados deste aluno.",
+          variant: "destructive",
+        });
+        return;
       }
+      setStudent(aluno);
 
       // Carregar feedback
       const feedbackResult = await apiClient.requestSafe<any[]>(`/api/feedbacks-alunos?aluno_id=${id}`);
@@ -413,7 +427,7 @@ export default function StudentDetails() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <Loader2 className="h-8 w-8 motion-safe:animate-spin text-primary" />
       </div>
     );
   }
@@ -423,7 +437,7 @@ export default function StudentDetails() {
       <div className="container mx-auto p-6">
         <div className="text-center">
           <h2 className="text-2xl font-bold mb-4">Aluno não encontrado</h2>
-          <Button onClick={() => navigate("/")}>
+          <Button onClick={() => navigate("/?tab=students")}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Voltar
           </Button>
@@ -436,7 +450,7 @@ export default function StudentDetails() {
     <div className="container mx-auto p-6 max-w-6xl">
       {/* Header */}
       <div className="mb-6">
-        <Button variant="ghost" onClick={() => navigate("/")} className="mb-4">
+        <Button variant="ghost" onClick={() => navigate("/?tab=students")} className="mb-4">
           <ArrowLeft className="mr-2 h-4 w-4" />
           Voltar para lista de alunos
         </Button>
@@ -521,7 +535,7 @@ export default function StudentDetails() {
                 <Button onClick={handleSaveFeedback} disabled={saving} className="w-full">
                   {saving ? (
                     <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
                       Salvando...
                     </>
                   ) : (
@@ -591,6 +605,9 @@ export default function StudentDetails() {
                 <DialogContent>
                   <DialogHeader>
                     <DialogTitle>Atribuir Treino</DialogTitle>
+                    <DialogDescription>
+                      Escolha o treino e opcionalmente validade e lembrete de expiração.
+                    </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4 py-4">
                     <div className="space-y-2">
@@ -643,7 +660,7 @@ export default function StudentDetails() {
                       <Button onClick={handleAtribuirTreino} disabled={saving}>
                         {saving ? (
                           <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
                             Atribuindo...
                           </>
                         ) : (
@@ -697,7 +714,7 @@ export default function StudentDetails() {
                       >
                         {saving ? (
                           <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
                             Removendo...
                           </>
                         ) : (
@@ -754,6 +771,9 @@ export default function StudentDetails() {
                     <DialogContent>
                       <DialogHeader>
                         <DialogTitle>Criar Nova Dieta</DialogTitle>
+                        <DialogDescription>
+                          Defina nome e objetivo para criar uma nova dieta para este aluno.
+                        </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-4 py-4">
                         <div className="space-y-2">
@@ -788,7 +808,7 @@ export default function StudentDetails() {
                           <Button onClick={handleCriarDieta} disabled={saving}>
                             {saving ? (
                               <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
                                 Criando...
                               </>
                             ) : (
@@ -814,6 +834,9 @@ export default function StudentDetails() {
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Criar Nova Dieta</DialogTitle>
+                      <DialogDescription>
+                        Defina nome e objetivo para criar uma nova dieta para este aluno.
+                      </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
                       <div className="space-y-2">
@@ -848,7 +871,7 @@ export default function StudentDetails() {
                         <Button onClick={handleCriarDieta} disabled={saving}>
                           {saving ? (
                             <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
                               Criando...
                             </>
                           ) : (
@@ -929,6 +952,10 @@ export default function StudentDetails() {
       {/* Dialog para ampliar foto */}
       <Dialog open={!!selectedFoto} onOpenChange={() => setSelectedFoto(null)}>
         <DialogContent className="max-w-4xl">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Foto ampliada</DialogTitle>
+            <DialogDescription>Visualização em tamanho maior da foto do aluno.</DialogDescription>
+          </DialogHeader>
           {selectedFoto && (
             <img
               src={selectedFoto}

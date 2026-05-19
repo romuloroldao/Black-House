@@ -12,14 +12,22 @@ import { apiClient } from "@/lib/api-client";
 import logoWhite from "@/assets/logo-white.svg";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
 import MessagesPopover from "./MessagesPopover";
 
 interface StudentSidebarProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
+  mobileOpen?: boolean;
+  onMobileOpenChange?: (open: boolean) => void;
 }
 
-const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
+const StudentSidebar = ({
+  activeTab,
+  onTabChange,
+  mobileOpen = false,
+  onMobileOpenChange,
+}: StudentSidebarProps) => {
   const { signOut, user } = useAuth();
   const { isReady, identity } = useDataContext();
   const navigate = useNavigate();
@@ -34,8 +42,44 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
   const [isOnline, setIsOnline] = useState(true);
   const isMarkingAsReadRef = useRef(false);
 
+  const getFirstName = (value?: string | null): string => {
+    if (!value) return "Usuário";
+    const normalized = value.trim();
+    if (!normalized) return "Usuário";
+    return normalized.split(/\s+/)[0] || "Usuário";
+  };
+
+  const getFirstNameFromEmail = (email?: string | null): string => {
+    const rawEmail = (email || "").trim().toLowerCase();
+    if (!rawEmail.includes("@")) return "Usuário";
+
+    const localPart = rawEmail.split("@")[0] || "";
+    const normalized = localPart.replace(/[._-]+/g, " ").trim();
+    const firstChunk = normalized.split(" ").filter(Boolean)[0];
+    if (!firstChunk) return "Usuário";
+    return firstChunk.charAt(0).toUpperCase() + firstChunk.slice(1);
+  };
+
+  const normalizeAvatarUrl = (raw: unknown): string | null => {
+    if (typeof raw !== "string") return null;
+    const value = raw.trim();
+    if (!value) return null;
+    if (value.startsWith("/api/")) {
+      const base = (import.meta.env.VITE_API_URL || "https://api.blackhouse.app.br").replace(/\/$/, "");
+      return `${base}${value}`;
+    }
+    if (/^http:\/\/localhost:3001/i.test(value)) {
+      return value.replace(/^http:\/\/localhost:3001/i, "https://api.blackhouse.app.br");
+    }
+    return value;
+  };
+
   // DESIGN-023: Guards defensivos para dados do aluno
-  const safeStudentName = studentName || user?.email || 'Usuário';
+  const safeStudentName = studentName
+    ? getFirstName(studentName)
+    : identity?.nome
+      ? getFirstName(identity.nome)
+      : getFirstNameFromEmail(user?.email);
   const safeStudentAvatar = studentAvatar || null;
   const safeInitial = safeStudentName.charAt(0)?.toUpperCase() || '?';
 
@@ -43,9 +87,10 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
     // Initialize audio for notifications
     audioRef.current = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZURE');
     
-    // DESIGN-FRONTEND-HERMETIC-BOOTSTRAP-AND-ASSET-FIX-021: Removido loadStudentProfile() - dados vêm do DataContext
-    // Avatar e nome devem ser passados via props ou obtidos de getMe() quando necessário
     if (user) {
+      loadStudentProfile().catch((error) => {
+        console.warn('[STUDENT-SIDEBAR] Erro ao carregar perfil do aluno (não crítico):', error);
+      });
       // Carregar dados do aluno via getMe() apenas quando necessário (não em mount)
       loadUnreadCount();
       loadUnreadMessages();
@@ -76,11 +121,32 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
         }
       };
     }
-  }, [user, toast]);
+  }, [user, toast, identity]);
 
-  // DESIGN-FRONTEND-HERMETIC-BOOTSTRAP-AND-ASSET-FIX-021: loadStudentProfile() removido
-  // Dados devem vir do DataContext ou ser carregados sob demanda (não em mount)
-  // Avatar e nome podem ser obtidos via getMe() quando necessário, não automaticamente
+  const loadStudentProfile = async () => {
+    if (!user?.id) {
+      setStudentAvatar(null);
+      return;
+    }
+
+    // Nome base (DataContext/email) para não piscar vazio
+    const baseName = identity?.nome
+      ? getFirstName(identity.nome)
+      : getFirstNameFromEmail(user.email);
+    setStudentName(baseName);
+
+    const profileResult = await apiClient.requestSafe<any>('/api/profiles/me');
+    if (profileResult.success && profileResult.data) {
+      const displayName = String(profileResult.data.display_name || '').trim();
+      if (displayName) {
+        setStudentName(getFirstName(displayName));
+      }
+      setStudentAvatar(normalizeAvatarUrl(profileResult.data.avatar_url));
+      return;
+    }
+
+    setStudentAvatar(null);
+  };
 
   const loadUnreadCount = async () => {
     if (!user) return;
@@ -199,7 +265,8 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
 
   const handleTabChange = (tab: string) => {
     onTabChange(tab);
-    
+    onMobileOpenChange?.(false);
+
     // Mark messages as read when user opens the respective tab
     if (tab === "chat" && unreadMessages > 0) {
       markChatMessagesAsRead();
@@ -209,6 +276,7 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
   };
 
   const handleLogout = async () => {
+    onMobileOpenChange?.(false);
     await signOut();
     navigate("/auth");
   };
@@ -227,24 +295,46 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
     { id: "profile", label: "Meu Perfil", icon: User },
   ];
 
-  // DESIGN-023-RUNTIME-CRASH-RESOLUTION-001: Guard defensivo - componente NÃO renderiza fora de READY
-  // DESIGN-FRONTEND-HERMETIC-BOOTSTRAP-AND-ASSET-FIX-021: Componente só monta quando DataContext === READY
-  if (!isReady) {
-    return null;
-  }
+  // DESIGN-023-RUNTIME-CRASH-RESOLUTION-001: durante bootstrap mostra esqueleto (evita sumir o menu no mobile)
+  const showSkeleton = !isReady;
 
   return (
-    <aside className="w-64 bg-card border-r border-border flex flex-col transition-all duration-300 ease-in-out">
+    <>
+      {mobileOpen && (
+        <button
+          type="button"
+          aria-label="Fechar menu"
+          className="fixed inset-0 z-[110] bg-black/60 md:hidden"
+          onClick={() => onMobileOpenChange?.(false)}
+        />
+      )}
+      <aside
+        className={cn(
+          "flex shrink-0 flex-col overflow-hidden border-r border-border bg-card",
+          /* Desktop: sempre no fluxo, coluna fixa */
+          "md:z-auto md:h-screen md:w-64 md:shadow-none md:sticky md:top-0",
+          /* Mobile fechado: fora do layout — evita barra lateral a empilhar em cima do dashboard */
+          !mobileOpen && "max-md:hidden",
+          /* Mobile aberto: painel por cima do conteúdo */
+          mobileOpen &&
+            "max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-[120] max-md:flex max-md:h-full max-md:w-[min(288px,88vw)] max-md:shadow-xl"
+        )}
+      >
       <div className="p-6 border-b border-border flex items-center justify-between">
         <img src={logoWhite} alt="Black House" className="h-12 w-auto" />
         <MessagesPopover unreadCount={unreadMessages} onCountChange={setUnreadMessages} />
       </div>
 
       <ScrollArea className="flex-1">
-        <nav className="p-4 space-y-2">
+        <nav className="space-y-2 p-4">
           <TooltipProvider delayDuration={0}>
-            {/* DESIGN-023: Guard defensivo - verificar array antes de .map */}
-            {Array.isArray(menuItems) && menuItems.length > 0 ? (
+            {showSkeleton ? (
+              <div className="space-y-2">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <Skeleton key={i} className="h-10 w-full" />
+                ))}
+              </div>
+            ) : Array.isArray(menuItems) && menuItems.length > 0 ? (
               menuItems.map((item) => {
                 // DESIGN-023: Optional chaining para acessos profundos
                 const Icon = item?.icon;
@@ -263,7 +353,7 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
                     <TooltipTrigger asChild>
                       <Button
                         variant={isActive ? "default" : "ghost"}
-                        className="w-full justify-start relative transition-all duration-200 ease-in-out"
+                        className="w-full justify-start relative transition-all duration-200 ease-in-out motion-reduce:transition-none"
                         onClick={() => handleTabChange(itemId)}
                       >
                         <Icon className="mr-3 h-4 w-4" />
@@ -271,7 +361,7 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
                         {itemBadge !== undefined && itemBadge > 0 && (
                           <Badge 
                             variant="destructive" 
-                            className={`ml-auto ${animateBadge && itemId === 'chat' ? 'animate-bounce' : ''}`}
+                            className={`ml-auto ${animateBadge && itemId === 'chat' ? 'motion-safe:animate-bounce' : ''}`}
                           >
                             {itemBadge}
                           </Badge>
@@ -290,7 +380,7 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
       </ScrollArea>
 
       <div className="p-4 border-t border-border">
-        <div className="flex items-center gap-3 mb-4 p-2 rounded-lg hover:bg-muted/50 transition-colors">
+        <div className="flex items-center gap-3 mb-4 p-2 rounded-lg hover:bg-muted/50 transition-colors motion-reduce:transition-none">
           <div className="relative">
             <Avatar className="h-10 w-10">
               {/* DESIGN-023: Optional chaining para acessos profundos */}
@@ -307,7 +397,7 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
               title={isOnline ? "Online" : "Offline"}
             />
           </div>
-          <span className="text-sm font-medium text-foreground">{safeStudentName}</span>
+          <span className="text-sm font-medium text-foreground truncate">{safeStudentName}</span>
         </div>
 
         <Button
@@ -320,6 +410,7 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
         </Button>
       </div>
     </aside>
+    </>
   );
 };
 

@@ -6,12 +6,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { DateInputBR } from "@/components/ui/date-input-br";
 import { 
   Calendar as CalendarIcon, 
   Plus, 
@@ -27,6 +28,7 @@ import {
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
+import { formatDateBR } from "@/lib/date-format";
 
 interface Evento {
   id: string;
@@ -356,7 +358,7 @@ const AgendaManager = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
-        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full motion-safe:animate-spin" />
       </div>
     );
   }
@@ -439,7 +441,7 @@ const AgendaManager = () => {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle>
-                Eventos {date && `- ${format(date, "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}`}
+                Eventos {date && `- ${formatDateBR(date)}`}
               </CardTitle>
               <Badge variant="secondary">
                 {eventosFiltrados.length} {eventosFiltrados.length === 1 ? 'evento' : 'eventos'}
@@ -542,6 +544,9 @@ const AgendaManager = () => {
             <DialogTitle>
               {eventoSelecionado ? "Editar Evento" : "Novo Evento"}
             </DialogTitle>
+            <DialogDescription>
+              Dados do compromisso: título, descrição, tipo, aluno opcional, data, hora, prioridade e status.
+            </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -603,11 +608,10 @@ const AgendaManager = () => {
 
               <div className="space-y-2">
                 <Label htmlFor="data_evento">Data *</Label>
-                <Input
+                <DateInputBR
                   id="data_evento"
-                  type="date"
                   value={formData.data_evento}
-                  onChange={(e) => setFormData({ ...formData, data_evento: e.target.value })}
+                  onChange={(value) => setFormData({ ...formData, data_evento: value })}
                   required
                 />
               </div>
