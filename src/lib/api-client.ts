@@ -1,11 +1,13 @@
 import { assertDataContextReady, assertNoSupabaseDirectAccess } from './data-context-guard';
 import { API_CONTRACT, isContractEndpoint, normalizeEndpoint } from '@/contracts/api-contract';
+import type { AlunoHojeResponse } from '@/types/aluno-hoje';
 import { getAvailabilityKeyForEndpoint, isDataAvailable } from '@/lib/dataAvailability';
 
 // FIX-012 — prefixos de rotas semânticas na VPS (PostgreSQL; ver src/contracts/api-contract.ts)
 export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/alunos/by-coach',
     '/api/alunos/me',
+    '/api/alunos/me/hoje',
     '/api/alunos/me/notification-preferences',
     '/api/alunos/link-user',
     '/api/alunos/unlinked-registrations',
@@ -910,6 +912,15 @@ class ApiClient {
             return apiSuccess(null);
         }
         return this.safeRequest<any>('/api/alunos/me');
+    }
+
+    /** GET /api/alunos/me/hoje — resumo agregado do portal do aluno */
+    async getHojeSafe(): Promise<ApiResult<AlunoHojeResponse | null>> {
+        const identity = assertDataContextReady('getHojeSafe()');
+        if (!identity) {
+            return apiSuccess(null);
+        }
+        return this.safeRequest<AlunoHojeResponse>(API_CONTRACT.alunos.hoje());
     }
 
     // REACT-API-RESILIENCE-FIX-008: Versão resiliente de getProfile

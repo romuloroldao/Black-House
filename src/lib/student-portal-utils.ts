@@ -1,3 +1,5 @@
+import type { AlunoHojePendencia, AlunoHojeRetorno } from "@/types/aluno-hoje";
+
 /** Utilitários partilhados pelo portal do aluno (dashboard, futuro ecrã Hoje). */
 
 export type PendingTask = {
@@ -166,4 +168,28 @@ export function buildPendingTasks(input: {
   }
 
   return tasks;
+}
+
+export function mapRetornoFromApi(retorno: AlunoHojeRetorno | null | undefined): ReturnCountdownInfo | null {
+  if (!retorno) return null;
+  return {
+    date: retorno.date,
+    days: retorno.days,
+    label: retorno.label,
+    source: retorno.source,
+    planName: retorno.plan_name ?? null,
+    overdue: retorno.overdue,
+  };
+}
+
+export function mapPendenciasFromApi(items: AlunoHojePendencia[] | undefined): PendingTask[] {
+  if (!items?.length) return [];
+  return items.map((item) => ({
+    id: item.id,
+    title: item.title,
+    description: item.description,
+    tab: item.tab,
+    priority: item.priority,
+    searchParams: item.search_params,
+  }));
 }

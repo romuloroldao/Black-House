@@ -19,6 +19,7 @@ export const API_CONTRACT = {
   alunos: {
     byCoach: () => `${API_BASE}/api/alunos/by-coach`,
     me: () => `${API_BASE}/api/alunos/me`,
+    hoje: () => `${API_BASE}/api/alunos/me/hoje`,
     notificationPreferences: () => `${API_BASE}/api/alunos/me/notification-preferences`,
     list: () => `${API_BASE}/api/alunos`,
     linkUser: () => `${API_BASE}/api/alunos/link-user`,
@@ -169,6 +170,7 @@ const CONTRACT_PATTERNS = [
   '/auth/logout',
   '/api/alunos/by-coach',
   '/api/alunos/me',
+  '/api/alunos/me/hoje',
   '/api/alunos/me/notification-preferences',
   '/api/alunos/link-user',
   '/api/alunos',

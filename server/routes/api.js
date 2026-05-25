@@ -120,6 +120,31 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
     }
   });
 
+  // GET /api/alunos/me/hoje — resumo agregado (treino, dieta, pendências, retorno)
+  const { getAlunoHoje } = require('../services/aluno-hoje.service');
+  router.get(
+    '/alunos/me/hoje',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['aluno']),
+    resolveAlunoOrFail,
+    async (req, res) => {
+      try {
+        const payload = await getAlunoHoje(pool, {
+          aluno: req.aluno,
+          userId: req.user.id,
+        });
+        return res.json(payload);
+      } catch (error) {
+        console.error('Erro em GET /api/alunos/me/hoje:', error);
+        return res.status(500).json({
+          error: error.message || 'Erro ao carregar resumo do dia',
+          error_code: 'ALUNO_HOJE_ERROR',
+        });
+      }
+    },
+  );
+
   // POST /api/alunos/link-user - Vincula usuário existente a aluno importado
   // DESIGN-GUARD-RAILS-ROLE-ACCESS-003: Rota apenas para coaches
   // DESIGN-LINK-ALUNO-USER-001: Rota semântica para vínculo aluno ↔ user

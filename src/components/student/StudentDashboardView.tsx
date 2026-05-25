@@ -7,9 +7,8 @@ import { Calendar, Dumbbell, Utensils, TrendingUp } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import { getPlanoAlunoLegivel } from "@/lib/aluno-display";
 import {
-  buildPendingTasks,
-  hasCheckinThisWeek,
-  pickReturnCountdown,
+  mapPendenciasFromApi,
+  mapRetornoFromApi,
   type PendingTask,
   type ReturnCountdownInfo,
 } from "@/lib/student-portal-utils";
@@ -66,10 +65,9 @@ const StudentDashboardView = () => {
 
   const loadDashboardData = async () => {
     setLoading(true);
-    const alunoResult = await apiClient.getMeSafe();
-    const aluno = alunoResult.success ? alunoResult.data : null;
+    const hojeResult = await apiClient.getHojeSafe();
 
-    if (!aluno) {
+    if (!hojeResult.success || !hojeResult.data) {
       setAlunoData(null);
       setTreinoAtual(null);
       setDietaAtual(null);
@@ -80,86 +78,13 @@ const StudentDashboardView = () => {
       return;
     }
 
-    setAlunoData(aluno);
-
-    const alunosTreinosResult = await apiClient.requestSafe<any[]>('/api/alunos-treinos');
-    const alunosTreinos = alunosTreinosResult.success && Array.isArray(alunosTreinosResult.data) ? alunosTreinosResult.data : [];
-    const alunoTreinoRow =
-      alunosTreinos.find((at) => at.aluno_id === aluno.id && at.ativo === true) || null;
-    let treinoData: any = null;
-    if (alunoTreinoRow?.treino_id) {
-      const treinoResult = await apiClient.requestSafe<any>(`/api/treinos/${alunoTreinoRow.treino_id}`);
-      treinoData = treinoResult.success ? treinoResult.data : null;
-    }
-    setTreinoAtual(treinoData);
-
-    const dietasResult = await apiClient.requestSafe<any[]>('/api/dietas');
-    const dietas = dietasResult.success && Array.isArray(dietasResult.data) ? dietasResult.data : [];
-    const dietasAluno = dietas.filter((d) => d.aluno_id === aluno.id);
-    const dieta =
-      dietasAluno.find((d) => d.ativa === true) ||
-      dietasAluno.sort(
-        (a, b) =>
-          new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime(),
-      )[0] ||
-      null;
-    setDietaAtual(dieta);
-
-    setReturnCountdown(
-      pickReturnCountdown(dieta, alunoTreinoRow, treinoData?.nome ?? null),
-    );
-
-    const checkinsResult = await apiClient.requestSafe<any[]>('/api/weekly-checkins');
-    const checkinsRaw =
-      checkinsResult.success && Array.isArray(checkinsResult.data) ? checkinsResult.data : [];
-    const checkinsAluno = checkinsRaw.filter((c) => c.aluno_id === aluno.id);
-    const checkinDue = !hasCheckinThisWeek(checkinsAluno);
-
-    let unreadChat = 0;
-    if (user?.id) {
-      const mensagensResult = await apiClient.requestSafe<any[]>('/api/mensagens');
-      const mensagens =
-        mensagensResult.success && Array.isArray(mensagensResult.data)
-          ? mensagensResult.data
-          : [];
-      unreadChat = mensagens.filter(
-        (m) => m.destinatario_id === user.id && !m.lida,
-      ).length;
-    }
-
-    let unreadAnnouncements = 0;
-    const turmasResult = await apiClient.requestSafe<any[]>('/api/turmas-alunos');
-    const turmasAluno =
-      turmasResult.success && Array.isArray(turmasResult.data) ? turmasResult.data : [];
-    const turmaIds = turmasAluno.filter((t) => t.aluno_id === aluno.id).map((t) => t.turma_id);
-    const avisosResult = await apiClient.requestSafe<any[]>('/api/avisos-destinatarios');
-    const avisos =
-      avisosResult.success && Array.isArray(avisosResult.data) ? avisosResult.data : [];
-    const individualCount = avisos.filter(
-      (a) => a.aluno_id === aluno.id && a.lido === false,
-    ).length;
-    const classCount =
-      turmaIds.length > 0
-        ? avisos.filter((a) => a.lido === false && turmaIds.includes(a.turma_id)).length
-        : 0;
-    unreadAnnouncements = individualCount + classCount;
-
-    setPendingTasks(
-      buildPendingTasks({
-        checkinDue,
-        unreadChat,
-        unreadAnnouncements,
-      }),
-    );
-
-    const eventosResult = await apiClient.requestSafe<any[]>('/api/agenda-eventos');
-    const eventos = eventosResult.success && Array.isArray(eventosResult.data) ? eventosResult.data : [];
-    const hoje = new Date().toISOString().split("T")[0];
-    const proximos = eventos
-      .filter(e => e.aluno_id === aluno.id && e.data_evento >= hoje)
-      .sort((a, b) => new Date(a.data_evento || 0).getTime() - new Date(b.data_evento || 0).getTime())
-      .slice(0, 3);
-    setProximosEventos(proximos);
+    const hoje = hojeResult.data;
+    setAlunoData(hoje.aluno);
+    setTreinoAtual(hoje.treino?.detalhe ?? null);
+    setDietaAtual(hoje.dieta);
+    setReturnCountdown(mapRetornoFromApi(hoje.retorno));
+    setPendingTasks(mapPendenciasFromApi(hoje.pendencias));
+    setProximosEventos(hoje.proximos_eventos?.slice(0, 3) ?? []);
     setLoading(false);
   };
 
