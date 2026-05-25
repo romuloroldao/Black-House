@@ -133,6 +133,12 @@
 | 2.5 | Tela fim de sessão (resumo + CTA voltar) | Sessão | Feedback positivo (copy + ícone) |
 | 2.6 | Manter modo lista + export PDF | `StudentWorkoutsView` | Coaches/alunos avançados |
 
+### Entregáveis Fase 2 (MVP)
+
+- [x] Treino de hoje + Iniciar sessão em `StudentWorkoutsView`
+- [x] `StudentWorkoutSessionView` fullscreen com timer e progresso local
+- [ ] CTA Iniciar também no ecrã Hoje (link direto para workouts + sessão)
+
 ### Entregáveis Fase 2
 
 - [ ] PR `feat(aluno): modo sessão treino MVP`

@@ -1,36 +1,46 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Dumbbell, Clock, Target, ChevronDown, Play, Weight, FileDown } from "lucide-react";
 import { exportWorkoutToPdf } from "@/utils/workoutPdfExport";
+import StudentWorkoutSessionView from "@/components/student/StudentWorkoutSessionView";
+import { readSessionProgress } from "@/lib/workout-session-utils";
 
 const StudentWorkoutsView = () => {
   const { user } = useAuth();
   const { toast } = useToast();
   const [treinos, setTreinos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sessionTreino, setSessionTreino] = useState<any | null>(null);
   const [expandedWorkouts, setExpandedWorkouts] = useState<Set<string>>(new Set());
   const [studentName, setStudentName] = useState<string>("");
 
+  const treinoPrincipal = treinos[0] ?? null;
+  const sessionProgress = treinoPrincipal ? readSessionProgress(treinoPrincipal.id) : null;
+
   const handleExportPdf = async (treino: any) => {
     try {
-      await exportWorkoutToPdf({
-        id: treino.id,
-        nome: treino.nome,
-        descricao: treino.descricao,
-        categoria: treino.categoria,
-        dificuldade: treino.dificuldade,
-        duracao: treino.duracao,
-        exercicios: treino.exercicios,
-        tags: treino.tags,
-        dataExpiracao: treino.dataExpiracao,
-      }, studentName);
+      await exportWorkoutToPdf(
+        {
+          id: treino.id,
+          nome: treino.nome,
+          descricao: treino.descricao,
+          categoria: treino.categoria,
+          dificuldade: treino.dificuldade,
+          duracao: treino.duracao,
+          exercicios: treino.exercicios,
+          tags: treino.tags,
+          dataExpiracao: treino.dataExpiracao,
+        },
+        studentName,
+      );
       toast({
         title: "PDF exportado!",
         description: "Seu treino foi exportado com sucesso.",
@@ -47,7 +57,7 @@ const StudentWorkoutsView = () => {
 
   useEffect(() => {
     if (user) {
-      loadWorkoutData();
+      void loadWorkoutData();
     }
   }, [user]);
 
@@ -59,14 +69,18 @@ const StudentWorkoutsView = () => {
     if (aluno) {
       setStudentName(aluno.nome || user?.email || "");
 
-      const alunosTreinosResult = await apiClient.requestSafe<any[]>('/api/alunos-treinos');
-      const alunosTreinos = alunosTreinosResult.success && Array.isArray(alunosTreinosResult.data)
-        ? alunosTreinosResult.data
-        : [];
+      const alunosTreinosResult = await apiClient.requestSafe<any[]>("/api/alunos-treinos");
+      const alunosTreinos =
+        alunosTreinosResult.success && Array.isArray(alunosTreinosResult.data)
+          ? alunosTreinosResult.data
+          : [];
 
       const alunosTreinosFiltrados = alunosTreinos
         .filter((at: any) => at.aluno_id === aluno.id && at.ativo === true)
-        .sort((a: any, b: any) => new Date(b.data_inicio || 0).getTime() - new Date(a.data_inicio || 0).getTime());
+        .sort(
+          (a: any, b: any) =>
+            new Date(b.data_inicio || 0).getTime() - new Date(a.data_inicio || 0).getTime(),
+        );
 
       if (alunosTreinosFiltrados.length > 0) {
         const treinosComExpiracao = await Promise.all(
@@ -76,11 +90,12 @@ const StudentWorkoutsView = () => {
             return {
               ...treino,
               dataExpiracao: at.data_expiracao,
-              diasAntecedenciaNotificacao: at.dias_antecedencia_notificacao
+              data_retorno: at.data_retorno,
+              diasAntecedenciaNotificacao: at.dias_antecedencia_notificacao,
             };
-          })
+          }),
         );
-        setTreinos(treinosComExpiracao.filter(t => t?.id));
+        setTreinos(treinosComExpiracao.filter((t) => t?.id));
       } else {
         setTreinos([]);
       }
@@ -90,23 +105,39 @@ const StudentWorkoutsView = () => {
     setLoading(false);
   };
 
+  const exercicioCount = useMemo(() => {
+    const ex = treinoPrincipal?.exercicios;
+    return Array.isArray(ex) ? ex.length : 0;
+  }, [treinoPrincipal]);
+
+  if (sessionTreino) {
+    return (
+      <StudentWorkoutSessionView
+        treino={sessionTreino}
+        onExit={() => {
+          setSessionTreino(null);
+          void loadWorkoutData();
+        }}
+      />
+    );
+  }
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full motion-safe:animate-spin mx-auto mb-4" />
-          <p className="text-muted-foreground">Carregando treinos...</p>
-        </div>
+      <div className="min-w-0 space-y-4">
+        <Skeleton className="h-10 w-48" />
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-48 w-full" />
       </div>
     );
   }
 
   if (!treinos || treinos.length === 0) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
+      <div className="flex min-h-[400px] items-center justify-center">
         <div className="text-center">
-          <Dumbbell className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-          <h3 className="text-lg font-semibold mb-2">Nenhum treino atribuído</h3>
+          <Dumbbell className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
+          <h3 className="mb-2 text-lg font-semibold">Nenhum treino atribuído</h3>
           <p className="text-muted-foreground">
             Entre em contato com seu coach para receber seu treino personalizado
           </p>
@@ -116,13 +147,10 @@ const StudentWorkoutsView = () => {
   }
 
   const toggleWorkout = (treinoId: string) => {
-    setExpandedWorkouts(prev => {
+    setExpandedWorkouts((prev) => {
       const newSet = new Set(prev);
-      if (newSet.has(treinoId)) {
-        newSet.delete(treinoId);
-      } else {
-        newSet.add(treinoId);
-      }
+      if (newSet.has(treinoId)) newSet.delete(treinoId);
+      else newSet.add(treinoId);
       return newSet;
     });
   };
@@ -130,198 +158,168 @@ const StudentWorkoutsView = () => {
   return (
     <div className="min-w-0 space-y-6">
       <div>
-        <h1 className="text-3xl font-bold mb-2">Meus Treinos</h1>
+        <h1 className="mb-1 text-2xl font-bold sm:text-3xl">Meus treinos</h1>
         <p className="text-muted-foreground">
-          {treinos.length === 1 ? "Seu plano de treino personalizado" : `Você tem ${treinos.length} treinos ativos`}
+          {treinos.length === 1
+            ? "Seu plano de treino personalizado"
+            : `${treinos.length} treinos ativos`}
         </p>
       </div>
+
+      {treinoPrincipal && (
+        <Card className="border-primary/30 bg-gradient-to-br from-primary/10 to-transparent shadow-card">
+          <CardHeader className="pb-2">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-primary">
+                  Treino de hoje
+                </p>
+                <CardTitle className="text-xl">{treinoPrincipal.nome}</CardTitle>
+              </div>
+              <Badge variant="premium">Ativo</Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground line-clamp-2">
+              {treinoPrincipal.descricao || "Pronto para treinar?"}
+            </p>
+            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+              {exercicioCount > 0 && (
+                <span>{exercicioCount} exercício{exercicioCount !== 1 ? "s" : ""}</span>
+              )}
+              {treinoPrincipal.duracao != null && (
+                <span>· ~{treinoPrincipal.duracao} min</span>
+              )}
+              {sessionProgress && sessionProgress.completedIndexes.length > 0 && (
+                <span className="text-primary">
+                  · {sessionProgress.completedIndexes.length} feitos hoje
+                </span>
+              )}
+            </div>
+            <Button
+              type="button"
+              className="h-12 w-full text-base font-semibold"
+              disabled={exercicioCount === 0}
+              onClick={() => setSessionTreino(treinoPrincipal)}
+            >
+              <Play className="mr-2 h-5 w-5 fill-current" />
+              Iniciar sessão
+            </Button>
+            {exercicioCount === 0 && (
+              <p className="text-center text-xs text-muted-foreground">
+                Aguarde o coach cadastrar os exercícios deste treino.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-6">
         {treinos.map((treino, idx) => {
           const isExpanded = expandedWorkouts.has(treino.id);
           const exercicios = treino.exercicios || [];
-          
-          // Calcular dias restantes até expiração
           const hoje = new Date();
           const dataExpiracao = treino.dataExpiracao ? new Date(treino.dataExpiracao) : null;
-          const diasRestantes = dataExpiracao 
+          const diasRestantes = dataExpiracao
             ? Math.ceil((dataExpiracao.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24))
             : null;
-          
+
           return (
             <Card key={idx} className="shadow-card border-primary/20">
               <CardHeader>
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <CardTitle className="text-2xl">{treino.nome}</CardTitle>
-                    <p className="text-muted-foreground mt-2">{treino.descricao}</p>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <CardTitle className="text-xl">{treino.nome}</CardTitle>
+                    <p className="mt-1 text-sm text-muted-foreground">{treino.descricao}</p>
                   </div>
-                  <div className="flex gap-2 ml-4 items-start">
-                    <Badge variant="premium">Ativo</Badge>
+                  <div className="flex shrink-0 flex-col items-end gap-2">
+                    {idx === 0 && <Badge variant="outline">Principal</Badge>}
                     {diasRestantes !== null && (
-                      <Badge 
+                      <Badge
                         variant={diasRestantes <= 7 ? "destructive" : "secondary"}
-                        className={diasRestantes <= 7 ? "bg-destructive/10 text-destructive border-destructive/20" : ""}
                       >
-                        {diasRestantes > 0 
-                          ? `${diasRestantes} ${diasRestantes === 1 ? 'dia' : 'dias'} restante${diasRestantes === 1 ? '' : 's'}`
-                          : 'Expirado'
-                        }
+                        {diasRestantes > 0
+                          ? `${diasRestantes}d restantes`
+                          : "Expirado"}
                       </Badge>
                     )}
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => handleExportPdf(treino)}
-                      className="shrink-0"
-                    >
-                      <FileDown className="h-4 w-4 mr-1" />
-                      PDF
-                    </Button>
                   </div>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="flex items-center gap-3 p-4 rounded-lg bg-muted/50">
-                    <Target className="h-8 w-8 text-primary" />
-                    <div>
-                      <div className="text-sm text-muted-foreground">Categoria</div>
-                      <div className="font-semibold">{treino.categoria}</div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3 p-4 rounded-lg bg-muted/50">
-                    <Dumbbell className="h-8 w-8 text-primary" />
-                    <div>
-                      <div className="text-sm text-muted-foreground">Dificuldade</div>
-                      <div className="font-semibold">{treino.dificuldade}</div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3 p-4 rounded-lg bg-muted/50">
-                    <Clock className="h-8 w-8 text-primary" />
-                    <div>
-                      <div className="text-sm text-muted-foreground">Duração</div>
-                      <div className="font-semibold">{treino.duracao} min</div>
-                    </div>
-                  </div>
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="sm"
+                    disabled={!exercicios.length}
+                    onClick={() => setSessionTreino(treino)}
+                  >
+                    <Play className="mr-1 h-4 w-4" />
+                    Iniciar
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleExportPdf(treino)}
+                  >
+                    <FileDown className="mr-1 h-4 w-4" />
+                    PDF
+                  </Button>
                 </div>
 
-                {treino.tags && treino.tags.length > 0 && (
-                  <div>
-                    <h3 className="font-semibold mb-3">Tags</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {treino.tags.map((tag: string, index: number) => (
-                        <Badge key={index} variant="outline">
-                          {tag}
-                        </Badge>
-                      ))}
-                    </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="flex items-center gap-2 rounded-lg bg-muted/50 p-3 text-sm">
+                    <Target className="h-5 w-5 text-primary shrink-0" />
+                    <span>{treino.categoria || "—"}</span>
                   </div>
-                )}
+                  <div className="flex items-center gap-2 rounded-lg bg-muted/50 p-3 text-sm">
+                    <Dumbbell className="h-5 w-5 text-primary shrink-0" />
+                    <span>{treino.dificuldade || "—"}</span>
+                  </div>
+                  <div className="flex items-center gap-2 rounded-lg bg-muted/50 p-3 text-sm">
+                    <Clock className="h-5 w-5 text-primary shrink-0" />
+                    <span>{treino.duracao != null ? `${treino.duracao} min` : "—"}</span>
+                  </div>
+                </div>
 
                 <Separator />
 
-                {/* Exercícios */}
-                <div>
-                  <Collapsible open={isExpanded} onOpenChange={() => toggleWorkout(treino.id)}>
-                    <CollapsibleTrigger asChild>
-                      <Button variant="outline" className="w-full justify-between">
-                        <div className="flex items-center gap-2">
-                          <Dumbbell className="h-4 w-4" />
-                          <span>
-                            Ver Exercícios {exercicios.length > 0 && `(${exercicios.length})`}
-                          </span>
+                <Collapsible open={isExpanded} onOpenChange={() => toggleWorkout(treino.id)}>
+                  <CollapsibleTrigger asChild>
+                    <Button variant="outline" className="w-full justify-between">
+                      <span>
+                        Ver exercícios {exercicios.length > 0 && `(${exercicios.length})`}
+                      </span>
+                      <ChevronDown
+                        className={`h-4 w-4 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                      />
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-4 space-y-3">
+                    {exercicios.length === 0 ? (
+                      <p className="py-6 text-center text-sm text-muted-foreground">
+                        Nenhum exercício cadastrado
+                      </p>
+                    ) : (
+                      exercicios.map((exercicio: any, exIdx: number) => (
+                        <div
+                          key={exIdx}
+                          className="rounded-lg border border-border/60 p-3"
+                        >
+                          <p className="font-medium">
+                            #{exIdx + 1} {exercicio.nome}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {exercicio.series}×{exercicio.repeticoes}
+                            {exercicio.peso ? ` · ${exercicio.peso}` : ""}
+                          </p>
                         </div>
-                        <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                      </Button>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="mt-4 space-y-4">
-                      {exercicios.length === 0 ? (
-                        <p className="text-center text-muted-foreground py-8">
-                          Nenhum exercício cadastrado neste treino
-                        </p>
-                      ) : (
-                        exercicios.map((exercicio: any, exIdx: number) => (
-                          <Card key={exIdx} className="border-primary/10">
-                            <CardContent className="p-4">
-                              <div className="flex items-start justify-between mb-3">
-                                <div>
-                                  <h4 className="font-semibold text-lg flex items-center gap-2">
-                                    <span className="text-primary">#{exIdx + 1}</span>
-                                    {exercicio.nome}
-                                  </h4>
-                                  {exercicio.observacoes && (
-                                    <p className="text-sm text-muted-foreground mt-1">
-                                      {exercicio.observacoes}
-                                    </p>
-                                  )}
-                                </div>
-                                {exercicio.video_url && (
-                                  <Button 
-                                    variant="ghost" 
-                                    size="icon"
-                                    onClick={() => window.open(exercicio.video_url, '_blank')}
-                                  >
-                                    <Play className="h-4 w-4" />
-                                  </Button>
-                                )}
-                              </div>
-                              
-                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
-                                  <Target className="h-4 w-4 text-primary" />
-                                  <div>
-                                    <div className="text-xs text-muted-foreground">Séries</div>
-                                    <div className="font-semibold">{exercicio.series}</div>
-                                  </div>
-                                </div>
-                                
-                                <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
-                                  <Dumbbell className="h-4 w-4 text-primary" />
-                                  <div>
-                                    <div className="text-xs text-muted-foreground">Repetições</div>
-                                    <div className="font-semibold">{exercicio.repeticoes}</div>
-                                  </div>
-                                </div>
-                                
-                                {exercicio.peso && (
-                                  <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
-                                    <Weight className="h-4 w-4 text-primary" />
-                                    <div>
-                                      <div className="text-xs text-muted-foreground">T.E.P</div>
-                                      <div className="font-semibold">{exercicio.peso}</div>
-                                    </div>
-                                  </div>
-                                )}
-                                
-                                <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
-                                  <Clock className="h-4 w-4 text-primary" />
-                                  <div>
-                                    <div className="text-xs text-muted-foreground">Descanso</div>
-                                    <div className="font-semibold">{exercicio.descanso}</div>
-                                  </div>
-                                </div>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        ))
-                      )}
-                    </CollapsibleContent>
-                  </Collapsible>
-                </div>
-
-                <div className="p-4 rounded-lg bg-gradient-premium border border-primary/30">
-                  <h3 className="font-semibold mb-2 flex items-center gap-2">
-                    <Target className="h-5 w-5 text-primary" />
-                    Instruções
-                  </h3>
-                  <p className="text-sm text-muted-foreground">
-                    Siga este treino conforme orientado pelo seu coach. Mantenha a consistência e foco nos exercícios.
-                    Em caso de dúvidas, entre em contato através do chat.
-                  </p>
-                </div>
+                      ))
+                    )}
+                  </CollapsibleContent>
+                </Collapsible>
               </CardContent>
             </Card>
           );
