@@ -37,11 +37,19 @@ export type AlunoHojeTreino = {
   };
 };
 
+export type AlunoHojeCheckinStreak = {
+  semanas_consecutivas: number;
+  fez_esta_semana: boolean;
+  total_checkins: number;
+  badge: string | null;
+};
+
 export type AlunoHojeResponse = {
   aluno: Record<string, unknown>;
   treino: AlunoHojeTreino | null;
   dieta: Record<string, unknown> | null;
   retorno: AlunoHojeRetorno | null;
+  checkin_streak: AlunoHojeCheckinStreak | null;
   pendencias: AlunoHojePendencia[];
   proximos_eventos: Array<{
     id: string;

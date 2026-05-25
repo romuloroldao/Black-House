@@ -70,6 +70,39 @@ function pickReturnCountdown(dieta, alunoTreino, treinoNome) {
   };
 }
 
+function weekKeyFromDate(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString().slice(0, 10);
+}
+
+function computeCheckinStreak(checkins) {
+  const weeks = new Set();
+  for (const c of checkins) {
+    if (c.created_at) weeks.add(weekKeyFromDate(c.created_at));
+  }
+  const estaSemana = weekKeyFromDate(new Date());
+  let streak = 0;
+  let cursor = new Date(`${estaSemana}T12:00:00`);
+  while (weeks.has(cursor.toISOString().slice(0, 10))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 7);
+  }
+  let badge = null;
+  if (streak >= 8) badge = '8+ semanas firme';
+  else if (streak >= 4) badge = '4 check-ins seguidos';
+  else if (streak >= 2) badge = 'Em sequência';
+  return {
+    semanas_consecutivas: streak,
+    fez_esta_semana: weeks.has(estaSemana),
+    total_checkins: checkins.length,
+    badge,
+  };
+}
+
 function startOfCalendarWeek(date = new Date()) {
   const d = new Date(date);
   const day = d.getDay();
@@ -159,6 +192,7 @@ async function getAlunoHoje(pool, { aluno, userId }) {
     alunoTreinoRes,
     dietaRes,
     checkinsRes,
+    checkinsStreakRes,
     unreadChatRes,
     turmasRes,
     avisosRes,
@@ -188,6 +222,13 @@ async function getAlunoHoje(pool, { aluno, userId }) {
        WHERE aluno_id = $1 AND created_at >= $2::timestamptz
        ORDER BY created_at DESC LIMIT 20`,
       [alunoId, startOfCalendarWeek().toISOString()],
+    ),
+    pool.query(
+      `SELECT id, created_at FROM public.weekly_checkins
+       WHERE aluno_id = $1
+       ORDER BY created_at DESC NULLS LAST
+       LIMIT 120`,
+      [alunoId],
     ),
     pool.query(
       `SELECT COUNT(*)::int AS total
@@ -247,6 +288,7 @@ async function getAlunoHoje(pool, { aluno, userId }) {
 
   const unreadChat = unreadChatRes.rows[0]?.total ?? 0;
   const checkinDue = !hasCheckinThisWeek(checkinsRes.rows);
+  const checkin_streak = computeCheckinStreak(checkinsStreakRes.rows);
   const retorno = pickReturnCountdown(
     dieta,
     alunoTreinoRow,
@@ -262,6 +304,7 @@ async function getAlunoHoje(pool, { aluno, userId }) {
     retorno,
     pendencias: buildPendencias({ checkinDue, unreadChat, unreadAvisos }),
     proximos_eventos: eventosRes.rows,
+    checkin_streak,
     contadores: {
       unread_chat: unreadChat,
       unread_avisos: unreadAvisos,

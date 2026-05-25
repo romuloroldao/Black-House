@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -8,163 +9,81 @@ import { Slider } from "@/components/ui/slider";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import escalaBristol from "@/assets/escala-bristol.jpg";
+import CheckinStepHeader from "@/components/student/checkin/CheckinStepHeader";
+import {
+  CHECKIN_SECTIONS,
+  countCompletedSections,
+  getSectionMissingLabels,
+  type CheckinSectionId,
+} from "@/lib/checkin-sections";
+import { CHECKIN_FIELD_LABELS, INITIAL_CHECKIN_FORM, type CheckinFormData } from "@/lib/checkin-types";
+import { buildCheckinPayload } from "@/lib/checkin-payload";
 
-type CheckinFormData = {
-  beliscou_fora_plano: string;
-  seguiu_plano_nota: number;
-  apetite: string;
-  treinou_todas_sessoes: string;
-  desafiou_treinos: string;
-  fez_cardio: string;
-  seguiu_suplementacao: string;
-  recursos_hormonais: string;
-  ingeriu_agua_minima: string;
-  exposicao_sol: string;
-  pressao_arterial: string;
-  glicemia: string;
-  media_horas_sono: string;
-  dificuldade_adormecer: string;
-  acordou_noite: string;
-  estresse_semana: string;
-  lida_desafios: string;
-  convivio_familiar: string;
-  convivio_trabalho: string;
-  postura_problemas: string;
-  higiene_sono: string;
-  autoestima: number;
-  media_evacuacoes: string;
-  formato_fezes: string;
-  nao_cumpriu_porque: string;
-};
-
-/** Campos obrigatórios alinhados a POST /api/checkins (server/routes/api.js). */
-const CHECKIN_REQUIRED: { key: keyof CheckinFormData; label: string; kind: "choice" | "sim_nao" }[] = [
-  { key: "beliscou_fora_plano", label: "Beliscou fora do plano?", kind: "choice" },
-  { key: "apetite", label: "Apetite", kind: "choice" },
-  { key: "treinou_todas_sessoes", label: "Treinou todas as sessões?", kind: "sim_nao" },
-  { key: "desafiou_treinos", label: "Desafiou-se nos treinos?", kind: "sim_nao" },
-  { key: "fez_cardio", label: "Fez todo o cardio?", kind: "sim_nao" },
-  { key: "seguiu_suplementacao", label: "Seguiu suplementação?", kind: "sim_nao" },
-  { key: "recursos_hormonais", label: "Recursos hormonais", kind: "choice" },
-  { key: "ingeriu_agua_minima", label: "Ingeriu água mínima?", kind: "sim_nao" },
-  { key: "exposicao_sol", label: "Exposição ao sol?", kind: "sim_nao" },
-  { key: "media_horas_sono", label: "Média de horas de sono", kind: "choice" },
-  { key: "dificuldade_adormecer", label: "Dificuldade para adormecer?", kind: "sim_nao" },
-  { key: "estresse_semana", label: "Estresse da semana", kind: "sim_nao" },
-  { key: "lida_desafios", label: "Lida com desafios", kind: "choice" },
-  { key: "convivio_familiar", label: "Convívio familiar", kind: "choice" },
-  { key: "convivio_trabalho", label: "Convívio no trabalho", kind: "choice" },
-  { key: "postura_problemas", label: "Postura frente a problemas", kind: "choice" },
-  { key: "higiene_sono", label: "Higiene do sono", kind: "sim_nao" },
-  { key: "media_evacuacoes", label: "Média de evacuações", kind: "choice" },
-  { key: "formato_fezes", label: "Formato das fezes (Bristol)", kind: "choice" },
-];
-
-/** Não entram em REQUIRED_CHECKIN no backend — podem ficar em branco. */
-const CHECKIN_OPTIONAL_KEYS: (keyof CheckinFormData)[] = [
-  "pressao_arterial",
-  "glicemia",
-  "acordou_noite",
-  "nao_cumpriu_porque",
-];
-
-const CHECKIN_FIELD_LABELS: Record<string, string> = Object.fromEntries(
-  CHECKIN_REQUIRED.map((f) => [f.key, f.label]),
-);
-
-function getMissingCheckinFields(data: CheckinFormData): string[] {
-  const missing: string[] = [];
-  for (const field of CHECKIN_REQUIRED) {
-    const value = data[field.key];
-    if (field.kind === "sim_nao") {
-      if (value !== "sim" && value !== "nao") {
-        missing.push(field.label);
-      }
-    } else if (value === "" || value === null || value === undefined) {
-      missing.push(field.label);
-    }
-  }
-  return missing;
-}
-
-function optionalCheckinText(value: string): string | null {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : null;
-}
-
-function buildCheckinPayload(data: CheckinFormData) {
-  const payload: Record<string, unknown> = {
-    beliscou_fora_plano: data.beliscou_fora_plano,
-    seguiu_plano_nota: data.seguiu_plano_nota,
-    apetite: data.apetite,
-    treinou_todas_sessoes: data.treinou_todas_sessoes === "sim",
-    desafiou_treinos: data.desafiou_treinos === "sim",
-    fez_cardio: data.fez_cardio === "sim",
-    seguiu_suplementacao: data.seguiu_suplementacao === "sim",
-    recursos_hormonais: data.recursos_hormonais,
-    ingeriu_agua_minima: data.ingeriu_agua_minima === "sim",
-    exposicao_sol: data.exposicao_sol === "sim",
-    media_horas_sono: data.media_horas_sono,
-    dificuldade_adormecer: data.dificuldade_adormecer === "sim",
-    estresse_semana: data.estresse_semana === "sim",
-    lida_desafios: data.lida_desafios,
-    convivio_familiar: data.convivio_familiar,
-    convivio_trabalho: data.convivio_trabalho,
-    postura_problemas: data.postura_problemas,
-    higiene_sono: data.higiene_sono === "sim",
-    autoestima: data.autoestima,
-    media_evacuacoes: data.media_evacuacoes,
-    formato_fezes: data.formato_fezes,
-  };
-
-  for (const key of CHECKIN_OPTIONAL_KEYS) {
-    payload[key] = optionalCheckinText(data[key] as string);
-  }
-
-  return payload;
-}
+const SECTION_IDS: CheckinSectionId[] = CHECKIN_SECTIONS.map((s) => s.id);
 
 export default function StudentWeeklyCheckin() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    beliscou_fora_plano: "",
-    seguiu_plano_nota: 3,
-    apetite: "",
-    treinou_todas_sessoes: "",
-    desafiou_treinos: "",
-    fez_cardio: "",
-    seguiu_suplementacao: "",
-    recursos_hormonais: "",
-    ingeriu_agua_minima: "",
-    exposicao_sol: "",
-    pressao_arterial: "",
-    glicemia: "",
-    media_horas_sono: "",
-    dificuldade_adormecer: "",
-    acordou_noite: "",
-    estresse_semana: "",
-    lida_desafios: "",
-    convivio_familiar: "",
-    convivio_trabalho: "",
-    postura_problemas: "",
-    higiene_sono: "",
-    autoestima: 3,
-    media_evacuacoes: "",
-    formato_fezes: "",
-    nao_cumpriu_porque: "",
+  const [step, setStep] = useState(() => {
+    const raw = Number(searchParams.get("checkin_step"));
+    return raw >= 0 && raw < CHECKIN_SECTIONS.length ? raw : 0;
   });
+  const [formData, setFormData] = useState<CheckinFormData>(INITIAL_CHECKIN_FORM);
+
+  const completedSections = countCompletedSections(formData, CHECKIN_FIELD_LABELS);
+  const currentSectionId = SECTION_IDS[step];
+
+  const syncStepToUrl = (next: number) => {
+    setStep(next);
+    const params = new URLSearchParams(searchParams);
+    params.set("tab", "checkin");
+    if (next > 0) params.set("checkin_step", String(next));
+    else params.delete("checkin_step");
+    setSearchParams(params, { replace: true });
+  };
+
+  const goNext = () => {
+    const missing = getSectionMissingLabels(formData, currentSectionId, CHECKIN_FIELD_LABELS);
+    if (missing.length > 0) {
+      const preview = missing.slice(0, 3).join(", ");
+      const extra = missing.length > 3 ? ` e mais ${missing.length - 3}` : "";
+      toast.error(`Complete este bloco: ${preview}${extra}.`);
+      return;
+    }
+    if (step < CHECKIN_SECTIONS.length - 1) syncStepToUrl(step + 1);
+  };
+
+  const goPrev = () => {
+    if (step > 0) syncStepToUrl(step - 1);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const missingLabels = getMissingCheckinFields(formData);
-    if (missingLabels.length > 0) {
-      const preview = missingLabels.slice(0, 4).join(", ");
-      const extra = missingLabels.length > 4 ? ` e mais ${missingLabels.length - 4}` : "";
+    if (step < CHECKIN_SECTIONS.length - 1) {
+      goNext();
+      return;
+    }
+
+    const missingLabels = getSectionMissingLabels(formData, "bem_estar", CHECKIN_FIELD_LABELS);
+    const allMissing = SECTION_IDS.flatMap((id) =>
+      getSectionMissingLabels(formData, id, CHECKIN_FIELD_LABELS),
+    );
+    if (allMissing.length > 0) {
+      const preview = allMissing.slice(0, 4).join(", ");
+      const extra = allMissing.length > 4 ? ` e mais ${allMissing.length - 4}` : "";
       toast.error(`Preencha todas as perguntas obrigatórias antes de enviar: ${preview}${extra}.`);
+      const firstIncomplete = SECTION_IDS.findIndex(
+        (id) => getSectionMissingLabels(formData, id, CHECKIN_FIELD_LABELS).length > 0,
+      );
+      if (firstIncomplete >= 0) syncStepToUrl(firstIncomplete);
+      return;
+    }
+    if (missingLabels.length > 0) {
+      syncStepToUrl(3);
       return;
     }
 
@@ -194,34 +113,8 @@ export default function StudentWeeklyCheckin() {
         return;
       }
       
-      // Reset form
-      setFormData({
-        beliscou_fora_plano: "",
-        seguiu_plano_nota: 3,
-        apetite: "",
-        treinou_todas_sessoes: "",
-        desafiou_treinos: "",
-        fez_cardio: "",
-        seguiu_suplementacao: "",
-        recursos_hormonais: "",
-        ingeriu_agua_minima: "",
-        exposicao_sol: "",
-        pressao_arterial: "",
-        glicemia: "",
-        media_horas_sono: "",
-        dificuldade_adormecer: "",
-        acordou_noite: "",
-        estresse_semana: "",
-        lida_desafios: "",
-        convivio_familiar: "",
-        convivio_trabalho: "",
-        postura_problemas: "",
-        higiene_sono: "",
-        autoestima: 3,
-        media_evacuacoes: "",
-        formato_fezes: "",
-        nao_cumpriu_porque: "",
-      });
+      setFormData(INITIAL_CHECKIN_FORM);
+      syncStepToUrl(0);
     } catch (error: any) {
       console.error("Erro ao enviar check-in:", error);
 
@@ -256,11 +149,15 @@ export default function StudentWeeklyCheckin() {
       <div>
         <h2 className="text-3xl font-bold tracking-tight">Check-in Semanal</h2>
         <p className="text-muted-foreground mt-2">
-          Preencha seu check-in semanal para acompanhar seu progresso
+          Quatro blocos curtos — salve o envio só no final
         </p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
+        <CheckinStepHeader step={step} completedSections={completedSections} />
+
+        {step === 0 && (
+        <>
         {/* Nutrição e Dieta */}
         <Card>
           <CardHeader>
@@ -330,8 +227,10 @@ export default function StudentWeeklyCheckin() {
             </div>
           </CardContent>
         </Card>
+        </>
+        )}
 
-        {/* Treino */}
+        {step === 1 && (
         <Card>
           <CardHeader>
             <CardTitle>Treino e Exercícios</CardTitle>
@@ -392,7 +291,10 @@ export default function StudentWeeklyCheckin() {
             </div>
           </CardContent>
         </Card>
+        )}
 
+        {step === 0 && (
+        <>
         {/* Suplementação */}
         <Card>
           <CardHeader>
@@ -517,8 +419,10 @@ export default function StudentWeeklyCheckin() {
             </div>
           </CardContent>
         </Card>
+        </>
+        )}
 
-        {/* Sono */}
+        {step === 2 && (
         <Card>
           <CardHeader>
             <CardTitle>Qualidade do Sono</CardTitle>
@@ -594,7 +498,10 @@ export default function StudentWeeklyCheckin() {
             </div>
           </CardContent>
         </Card>
+        )}
 
+        {step === 3 && (
+        <>
         {/* Mental e Emocional */}
         <Card>
           <CardHeader>
@@ -815,17 +722,36 @@ export default function StudentWeeklyCheckin() {
             </div>
           </CardContent>
         </Card>
+        </>
+        )}
 
-        <Button type="submit" size="lg" className="w-full" disabled={loading}>
-          {loading ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
-              Enviando...
-            </>
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+          {step > 0 ? (
+            <Button type="button" variant="outline" onClick={goPrev} disabled={loading}>
+              <ChevronLeft className="mr-2 h-4 w-4" />
+              Anterior
+            </Button>
           ) : (
-            "Enviar Check-in Semanal"
+            <span />
           )}
-        </Button>
+          {step < CHECKIN_SECTIONS.length - 1 ? (
+            <Button type="button" className="sm:ml-auto" onClick={goNext}>
+              Próximo
+              <ChevronRight className="ml-2 h-4 w-4" />
+            </Button>
+          ) : (
+            <Button type="submit" size="lg" className="w-full sm:ml-auto sm:w-auto" disabled={loading}>
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
+                  Enviando...
+                </>
+              ) : (
+                "Enviar check-in"
+              )}
+            </Button>
+          )}
+        </div>
       </form>
     </div>
   );

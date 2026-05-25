@@ -11,9 +11,14 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Camera, Upload, Loader2, Trash2, Activity, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import StudentProgressDashboard from "./StudentProgressDashboard";
+import CheckinStreakCard from "@/components/student/today/CheckinStreakCard";
+import { useAlunoHoje } from "@/hooks/useAlunoHoje";
+import { useSearchParams } from "react-router-dom";
 
 const StudentProgressView = () => {
   const { user } = useAuth();
+  const [, setSearchParams] = useSearchParams();
+  const { data: hoje, loading: hojeLoading } = useAlunoHoje(Boolean(user));
   const [fotos, setFotos] = useState<any[]>([]);
   const [alunoId, setAlunoId] = useState<string | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -127,6 +132,13 @@ const StudentProgressView = () => {
           Acompanhe sua evolução através de métricas semanais e fotos
         </p>
       </div>
+
+      <CheckinStreakCard
+        loading={hojeLoading}
+        streak={hoje?.checkin_streak ?? null}
+        checkinDue={hoje?.contadores?.checkin_due}
+        onOpenCheckin={() => setSearchParams({ tab: "checkin" })}
+      />
 
       <Tabs defaultValue="metrics" className="min-w-0 w-full">
         <TabsList className="grid h-auto w-full min-w-0 max-w-full grid-cols-2 gap-1 sm:max-w-md">

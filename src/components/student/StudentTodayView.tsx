@@ -14,6 +14,7 @@ import ReturnCountdownBanner from "@/components/student/ReturnCountdownBanner";
 import PendingTasksList from "@/components/student/PendingTasksList";
 import TodayHeroCard from "@/components/student/today/TodayHeroCard";
 import TodayPlanCards from "@/components/student/today/TodayPlanCards";
+import CheckinStreakCard from "@/components/student/today/CheckinStreakCard";
 
 type StudentTodayViewProps = {
   /** Evita segunda chamada quando o portal já carregou /api/alunos/me/hoje */
@@ -61,6 +62,13 @@ const StudentTodayView = ({ hojeState }: StudentTodayViewProps) => {
       />
 
       <ReturnCountdownBanner loading={loading} countdown={returnCountdown} />
+
+      <CheckinStreakCard
+        loading={loading}
+        streak={data?.checkin_streak ?? null}
+        checkinDue={data?.contadores?.checkin_due}
+        onOpenCheckin={() => openTab("checkin")}
+      />
 
       <PendingTasksList
         loading={loading}
