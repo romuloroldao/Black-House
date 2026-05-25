@@ -44,10 +44,20 @@ export type AlunoHojeCheckinStreak = {
   badge: string | null;
 };
 
+export type AlunoHojeDietaRotacao = {
+  plano: "A" | "B";
+  cycle_summary: string;
+  today_label: string;
+  day_in_block: number;
+  block_length: number;
+  cycle_length: number;
+};
+
 export type AlunoHojeResponse = {
   aluno: Record<string, unknown>;
   treino: AlunoHojeTreino | null;
   dieta: Record<string, unknown> | null;
+  dieta_rotacao: AlunoHojeDietaRotacao | null;
   retorno: AlunoHojeRetorno | null;
   checkin_streak: AlunoHojeCheckinStreak | null;
   pendencias: AlunoHojePendencia[];

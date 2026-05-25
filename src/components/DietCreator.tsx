@@ -23,6 +23,12 @@ import { listarSubstituicoesIsocaloricas } from '@/lib/foodEquivalence';
 import { getAlunoDisplayName } from '@/lib/aluno-display';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DietReturnDateFields } from '@/components/DietReturnDateFields';
+import {
+  DietRotationFields,
+  dietRotationFromRow,
+  dietRotationToPayload,
+  type DietRotationFormState,
+} from '@/components/DietRotationFields';
 
 type Alimento = Food;
 
@@ -81,6 +87,13 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
   const [farmacos, setFarmacos] = useState<Farmaco[]>([]);
   const [dataRetorno, setDataRetorno] = useState('');
   const [diasValidade, setDiasValidade] = useState('');
+  const [rotacao, setRotacao] = useState<DietRotationFormState>({
+    rotacao_ativa: false,
+    rotacao_dias_plano_a: '3',
+    rotacao_dias_plano_b: '1',
+    rotacao_plano_inicial: 'A',
+    rotacao_data_inicio: '',
+  });
   const [editingDietaId, setEditingDietaId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
@@ -194,6 +207,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
         retornoRaw ? String(retornoRaw).slice(0, 10) : '',
       );
       setDiasValidade('');
+      setRotacao(dietRotationFromRow(dieta));
 
       // Reorganizar itens por refeição - usar nomes únicos do banco
       const nomesRefeicoesBanco = [...new Set(itensComAlimentos.map(item => item.refeicao))];
@@ -407,6 +421,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
             objetivo: objetivo,
             aluno_id: selectedAluno,
             data_retorno: dataRetorno || null,
+            ...dietRotationToPayload(rotacao),
           }),
         });
         dietaIdAtual = createResult.success ? createResult.data?.id : null;
@@ -419,6 +434,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
             nome: dietName,
             objetivo: objetivo,
             data_retorno: dataRetorno || null,
+            ...dietRotationToPayload(rotacao),
           }),
         });
         if (!updateResult.success) {
@@ -594,6 +610,8 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
             onDataRetornoChange={setDataRetorno}
             onDiasValidadeChange={setDiasValidade}
           />
+
+          <DietRotationFields value={rotacao} onChange={setRotacao} />
         </CardContent>
       </Card>
 

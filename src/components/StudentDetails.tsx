@@ -16,6 +16,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import StudentProgressDashboard from "./student/StudentProgressDashboard";
 import StudentFinancialManagement from "./student/StudentFinancialManagement";
 import { DietReturnDateFields } from "@/components/DietReturnDateFields";
+import {
+  DietRotationFields,
+  dietRotationToPayload,
+  type DietRotationFormState,
+} from "@/components/DietRotationFields";
 import { formatDateBR } from "@/lib/date-format";
 
 interface Student {
@@ -95,9 +100,24 @@ export default function StudentDetails() {
     data_retorno: "",
     dias_validade: "",
   });
+  const [rotacaoDieta, setRotacaoDieta] = useState<DietRotationFormState>({
+    rotacao_ativa: false,
+    rotacao_dias_plano_a: "3",
+    rotacao_dias_plano_b: "1",
+    rotacao_plano_inicial: "A",
+    rotacao_data_inicio: "",
+  });
 
-  const resetNovaDieta = () =>
+  const resetNovaDieta = () => {
     setNovaDieta({ nome: "", objetivo: "", data_retorno: "", dias_validade: "" });
+    setRotacaoDieta({
+      rotacao_ativa: false,
+      rotacao_dias_plano_a: "3",
+      rotacao_dias_plano_b: "1",
+      rotacao_plano_inicial: "A",
+      rotacao_data_inicio: "",
+    });
+  };
 
   useEffect(() => {
     if (id) {
@@ -360,6 +380,7 @@ export default function StudentDetails() {
           objetivo: novaDieta.objetivo || null,
           aluno_id: id,
           data_retorno: novaDieta.data_retorno || null,
+          ...dietRotationToPayload(rotacaoDieta),
         }),
       });
       const dieta = createResult.success ? createResult.data : null;
@@ -372,8 +393,7 @@ export default function StudentDetails() {
       setIsCriarDietaOpen(false);
       resetNovaDieta();
       carregarDadosAluno();
-      
-      // Redirecionar para a página de edição da dieta
+
       if (dieta) {
         navigate(`/dieta/${dieta.id}`);
       }
@@ -849,6 +869,7 @@ export default function StudentDetails() {
                             setNovaDieta({ ...novaDieta, dias_validade: dias })
                           }
                         />
+                        <DietRotationFields value={rotacaoDieta} onChange={setRotacaoDieta} />
                         <div className="flex gap-2 justify-end">
                           <Button variant="outline" onClick={() => setIsCriarDietaOpen(false)}>
                             Cancelar
@@ -922,6 +943,7 @@ export default function StudentDetails() {
                           setNovaDieta({ ...novaDieta, dias_validade: dias })
                         }
                       />
+                      <DietRotationFields value={rotacaoDieta} onChange={setRotacaoDieta} />
                       <div className="flex gap-2 justify-end">
                         <Button variant="outline" onClick={() => setIsCriarDietaOpen(false)}>
                           Cancelar

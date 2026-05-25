@@ -86,6 +86,7 @@ const StudentTodayView = ({ hojeState }: StudentTodayViewProps) => {
             data_retorno?: string | null;
           } | null
         }
+        dietaRotacao={data?.dieta_rotacao ?? null}
         onOpenTreino={() => openTab("workouts", { session: "1" })}
         onOpenDieta={() => openTab("diet")}
       />

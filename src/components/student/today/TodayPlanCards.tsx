@@ -2,12 +2,14 @@ import { ChevronRight, Dumbbell, Utensils } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { AlunoHojeTreino } from "@/types/aluno-hoje";
+import { Badge } from "@/components/ui/badge";
+import type { AlunoHojeDietaRotacao, AlunoHojeTreino } from "@/types/aluno-hoje";
 
 type TodayPlanCardsProps = {
   loading?: boolean;
   treino?: AlunoHojeTreino | null;
   dieta?: { nome?: string | null; objetivo?: string | null; data_retorno?: string | null } | null;
+  dietaRotacao?: AlunoHojeDietaRotacao | null;
   onOpenTreino: () => void;
   onOpenDieta: () => void;
 };
@@ -16,6 +18,7 @@ const TodayPlanCards = ({
   loading,
   treino,
   dieta,
+  dietaRotacao,
   onOpenTreino,
   onOpenDieta,
 }: TodayPlanCardsProps) => {
@@ -73,6 +76,11 @@ const TodayPlanCards = ({
           {dieta?.nome ? (
             <>
               <p className="font-semibold leading-snug line-clamp-2">{dieta.nome}</p>
+              {dietaRotacao && (
+                <Badge variant="premium" className="text-xs font-normal">
+                  {dietaRotacao.today_label}
+                </Badge>
+              )}
               {dieta.data_retorno && (
                 <p className="text-xs text-muted-foreground">
                   Retorno{" "}

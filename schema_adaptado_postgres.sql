@@ -832,7 +832,12 @@ ALTER TABLE public.alunos
 ALTER TABLE public.dietas
   ADD COLUMN IF NOT EXISTS data_retorno date,
   ADD COLUMN IF NOT EXISTS ativa boolean NOT NULL DEFAULT true,
-  ADD COLUMN IF NOT EXISTS schedule_cycle_id uuid;
+  ADD COLUMN IF NOT EXISTS schedule_cycle_id uuid,
+  ADD COLUMN IF NOT EXISTS rotacao_ativa boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS rotacao_dias_plano_a smallint,
+  ADD COLUMN IF NOT EXISTS rotacao_dias_plano_b smallint,
+  ADD COLUMN IF NOT EXISTS rotacao_plano_inicial text NOT NULL DEFAULT 'A',
+  ADD COLUMN IF NOT EXISTS rotacao_data_inicio date;
 
 ALTER TABLE public.alunos_treinos
   ADD COLUMN IF NOT EXISTS data_retorno date,

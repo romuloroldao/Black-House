@@ -103,6 +103,8 @@ function computeCheckinStreak(checkins) {
   };
 }
 
+const { getRotationForDate } = require('../utils/diet-rotation');
+
 function startOfCalendarWeek(date = new Date()) {
   const d = new Date(date);
   const day = d.getDay();
@@ -210,7 +212,9 @@ async function getAlunoHoje(pool, { aluno, userId }) {
       [alunoId],
     ),
     pool.query(
-      `SELECT id, aluno_id, nome, objetivo, data_retorno, ativa, created_at
+      `SELECT id, aluno_id, nome, objetivo, data_retorno, ativa, created_at,
+              rotacao_ativa, rotacao_dias_plano_a, rotacao_dias_plano_b,
+              rotacao_plano_inicial, rotacao_data_inicio
        FROM public.dietas
        WHERE aluno_id = $1
        ORDER BY (CASE WHEN COALESCE(ativa, true) THEN 0 ELSE 1 END), created_at DESC NULLS LAST
@@ -297,10 +301,13 @@ async function getAlunoHoje(pool, { aluno, userId }) {
 
   const alunoEnriched = await enrichPlanoNome(pool, aluno);
 
+  const dieta_rotacao = dieta ? getRotationForDate(dieta) : null;
+
   return {
     aluno: alunoEnriched,
     treino,
     dieta,
+    dieta_rotacao,
     retorno,
     pendencias: buildPendencias({ checkinDue, unreadChat, unreadAvisos }),
     proximos_eventos: eventosRes.rows,

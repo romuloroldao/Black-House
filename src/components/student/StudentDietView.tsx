@@ -26,6 +26,12 @@ import { MacroRingsRow } from "@/components/student/diet/MacroRing";
 import MealTimelineItem from "@/components/student/diet/MealTimelineItem";
 import MealDetailSheet from "@/components/student/diet/MealDetailSheet";
 import PremiumEmptyState from "@/components/student/PremiumEmptyState";
+import DietRotationBanner from "@/components/student/diet/DietRotationBanner";
+import {
+  getRotationForDate,
+  isRotationEnabled,
+  type DietRotationConfig,
+} from "@/lib/diet-rotation";
 
 const StudentDietView = () => {
   const { user } = useAuth();
@@ -110,7 +116,34 @@ const StudentDietView = () => {
   }, [user, loadDietData]);
 
   const mealGroups = useMemo(() => buildMealGroups(itensDieta), [itensDieta]);
-  const showPlanoTabs = useMemo(() => dietHasPlanoAB(mealGroups), [mealGroups]);
+  const rotationConfig = useMemo((): DietRotationConfig | null => {
+    if (!dieta) return null;
+    return {
+      rotacao_ativa: dieta.rotacao_ativa,
+      rotacao_dias_plano_a: dieta.rotacao_dias_plano_a,
+      rotacao_dias_plano_b: dieta.rotacao_dias_plano_b,
+      rotacao_plano_inicial: dieta.rotacao_plano_inicial,
+      rotacao_data_inicio: dieta.rotacao_data_inicio,
+      created_at: dieta.created_at,
+    };
+  }, [dieta]);
+
+  const rotationToday = useMemo(
+    () => (rotationConfig ? getRotationForDate(rotationConfig) : null),
+    [rotationConfig],
+  );
+
+  const rotationActive = Boolean(rotationConfig && isRotationEnabled(rotationConfig));
+  const showPlanoTabs = useMemo(
+    () => !rotationActive && dietHasPlanoAB(mealGroups),
+    [mealGroups, rotationActive],
+  );
+
+  useEffect(() => {
+    if (rotationToday?.plano) {
+      setPlanoAtivo(rotationToday.plano);
+    }
+  }, [rotationToday?.plano]);
 
   const visibleGroups = useMemo(
     () => mealGroups.filter((g) => getItemsForPlano(g, planoAtivo).length > 0),
@@ -203,6 +236,8 @@ const StudentDietView = () => {
           </p>
         )}
       </div>
+
+      {rotationToday && <DietRotationBanner info={rotationToday} />}
 
       {showPlanoTabs && (
         <Tabs
