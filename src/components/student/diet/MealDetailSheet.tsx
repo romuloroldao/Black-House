@@ -30,14 +30,17 @@ const MealDetailSheet = ({
 }: MealDetailSheetProps) => {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="max-h-[85vh] rounded-t-2xl">
-        <SheetHeader className="text-left">
+      <SheetContent
+        side="bottom"
+        className="flex max-h-[min(88dvh,920px)] flex-col gap-0 overflow-hidden rounded-t-2xl p-0 pb-[env(safe-area-inset-bottom,0px)]"
+      >
+        <SheetHeader className="shrink-0 border-b border-border/60 px-6 pb-4 pr-14 pt-6 text-left">
           <SheetTitle>{mealName}</SheetTitle>
           <SheetDescription>
             Plano {plano} · {items.length} alimento{items.length !== 1 ? "s" : ""}
           </SheetDescription>
         </SheetHeader>
-        <ul className="mt-4 space-y-3 overflow-y-auto pb-6">
+        <ul className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-y-contain px-6 py-4 [-webkit-overflow-scrolling:touch]">
           {items.map((item) => {
             if (!item.alimentos) return null;
             const fator = macroScaleFactor(
