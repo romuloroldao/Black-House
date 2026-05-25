@@ -5,7 +5,8 @@ const PaymentRemindersJob = require('./payment-reminders.job');
 const CheckinRemindersJob = require('./checkin-reminders.job');
 const EventRemindersJob = require('./event-reminders.job');
 const RecurringChargesJob = require('./recurring-charges.job');
-const WorkoutExpirationsJob = require('./workout-expirations.job');
+const ReturnRemindersJob = require('./return-reminders.job');
+const AgendaCoachRemindersJob = require('./agenda-coach-reminders.job');
 
 class JobsRunner {
     constructor(pool, notificationService, asaasService) {
@@ -45,10 +46,14 @@ class JobsRunner {
             console.warn('[JobsRunner] AsaasService não disponível, pulando RecurringChargesJob');
         }
 
-        // Workout Expirations
-        const workoutExpirations = new WorkoutExpirationsJob(this.pool, this.notificationService);
-        workoutExpirations.start();
-        this.jobs.push(workoutExpirations);
+        // Retorno dieta + treino (substitui lembrete único de vencimento)
+        const returnReminders = new ReturnRemindersJob(this.pool, this.notificationService);
+        returnReminders.start();
+        this.jobs.push(returnReminders);
+
+        const agendaCoachReminders = new AgendaCoachRemindersJob(this.pool, this.notificationService);
+        agendaCoachReminders.start();
+        this.jobs.push(agendaCoachReminders);
 
         console.log(`[JobsRunner] ${this.jobs.length} jobs iniciados com sucesso`);
     }

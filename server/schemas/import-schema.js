@@ -35,15 +35,24 @@ const MacroBlockSchema = z.object({
     calorias: z.number().nonnegative().nullable().optional()
 }).strict();
 
+/** Campos opcionais enviados pelo importador ao vincular alimentos ao catálogo. */
+const CatalogLinkFields = {
+    alimento_id: z.string().uuid().nullable().optional(),
+    tipo_id: z.string().uuid().nullable().optional(),
+    tipo_nome: z.string().max(255).nullable().optional(),
+};
+
 const AlternativaSchema = z.object({
     nome: z.string().min(1).max(255),
-    quantidade: z.string().min(1).max(100)
+    quantidade: z.string().min(1).max(100),
+    ...CatalogLinkFields,
 }).strict();
 
 const AlimentoSchema = z.object({
     nome: z.string().min(1, 'Nome do alimento é obrigatório').max(255),
     quantidade: z.string().min(1, 'Quantidade é obrigatória').max(100),
-    alternativas: z.array(AlternativaSchema).optional().default([])
+    alternativas: z.array(AlternativaSchema).optional().default([]),
+    ...CatalogLinkFields,
 }).strict();
 
 const RefeicaoSchema = z.object({
@@ -72,6 +81,7 @@ const ImportSchema = z.object({
     dieta: z.object({
         nome: z.string().min(1).max(255).default('Plano Alimentar Importado'),
         objetivo: z.string().max(1000).nullable().optional(),
+        data_retorno: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
         refeicoes: z.array(RefeicaoSchema).min(0).refine(
             (refeicoes) => refeicoes.every(ref => ref.alimentos && ref.alimentos.length > 0),
             { message: 'Todas as refeições devem ter pelo menos um alimento' }

@@ -78,15 +78,39 @@ class ImportController {
             if (!file) {
                 return res.status(400).json({
                     success: false,
-                    error: 'PDF é obrigatório'
+                    error: 'Arquivo é obrigatório (PDF, CSV ou XLSX)'
                 });
             }
 
-            // Validar tipo de arquivo
-            if (file.mimetype !== 'application/pdf') {
+            const isCsv = /\.csv$/i.test(file.originalname || '') ||
+                ['text/csv', 'application/csv', 'text/comma-separated-values'].includes(file.mimetype);
+            const isXlsx = /\.xlsx$/i.test(file.originalname || '') ||
+                [
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'application/vnd.ms-excel',
+                ].includes(file.mimetype);
+            const isSpreadsheet = isCsv || isXlsx;
+
+            if (!isSpreadsheet && file.mimetype !== 'application/pdf') {
                 return res.status(400).json({
                     success: false,
-                    error: 'Apenas arquivos PDF são aceitos'
+                    error: 'Apenas arquivos PDF, CSV ou XLSX são aceitos'
+                });
+            }
+
+            if (isSpreadsheet) {
+                if (!pdfParserService.isValidSize(file.buffer, 50)) {
+                    return res.status(413).json({
+                        success: false,
+                        error: 'Arquivo muito grande. Tamanho máximo: 50MB'
+                    });
+                }
+            } else {
+            // Validar se é PDF válido
+            if (!pdfParserService.isValidPDF(file.buffer)) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Arquivo não é um PDF válido'
                 });
             }
 
@@ -97,13 +121,6 @@ class ImportController {
                     error: 'Arquivo muito grande. Tamanho máximo: 50MB'
                 });
             }
-
-            // Validar se é PDF válido
-            if (!pdfParserService.isValidPDF(file.buffer)) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Arquivo não é um PDF válido'
-                });
             }
 
             const requestId = req.id || `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -111,17 +128,19 @@ class ImportController {
             logger.info('IMPORT-PDF: import-engine', {
                 requestId,
                 fileName: file.originalname,
-                sizeMb: (file.buffer.length / 1024 / 1024).toFixed(2)
+                sizeMb: (file.buffer.length / 1024 / 1024).toFixed(2),
+                format: isXlsx ? 'xlsx' : isCsv ? 'csv' : 'pdf',
             });
 
             let engineResult;
             try {
                 engineResult = await importEngine.process(file.buffer, {
                     fileName: file.originalname,
-                    requestId
+                    requestId,
+                    mimeType: file.mimetype,
                 });
             } catch (engineError) {
-                if (engineError.code === 'OCR_EMPTY') {
+                if (engineError.code === 'OCR_EMPTY' || engineError.code === 'CSV_PARSE_FAILED' || engineError.code === 'XLSX_PARSE_FAILED' || engineError.code === 'XLSX_READ_FAILED') {
                     return res.status(400).json({
                         success: false,
                         error: engineError.message
@@ -141,7 +160,7 @@ class ImportController {
                 });
                 return res.status(500).json({
                     success: false,
-                    error: engineError.message || 'Erro ao processar PDF'
+                    error: engineError.message || 'Erro ao processar ficha'
                 });
             }
 
@@ -160,10 +179,10 @@ class ImportController {
             });
 
         } catch (error) {
-            console.error('Erro ao processar PDF:', error);
+            console.error('Erro ao processar ficha:', error);
             res.status(500).json({
                 success: false,
-                error: error.message || 'Erro ao processar PDF'
+                error: error.message || 'Erro ao processar ficha'
             });
         }
     }

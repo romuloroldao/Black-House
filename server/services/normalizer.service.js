@@ -43,12 +43,17 @@ class NormalizerService {
      * Normaliza dados da dieta
      */
     _normalizeDieta(dieta) {
-        return {
+        const out = {
             nome: this._normalizeString(dieta.nome) || 'Plano Alimentar Importado',
             objetivo: this._normalizeString(dieta.objetivo),
             refeicoes: this._normalizeRefeicoes(dieta.refeicoes || []),
             macros: this._normalizeMacros(dieta.macros || {})
         };
+        const dr = this._normalizeString(dieta.data_retorno);
+        if (dr && /^\d{4}-\d{2}-\d{2}$/.test(dr)) {
+            out.data_retorno = dr;
+        }
+        return out;
     }
 
     /**

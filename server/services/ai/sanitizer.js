@@ -110,6 +110,11 @@ function sanitizeDieta(dieta) {
         macros: sanitizeMacros(dieta.macros)
     };
 
+    const dr = sanitizeString(dieta.data_retorno, 10, true);
+    if (dr && /^\d{4}-\d{2}-\d{2}$/.test(dr)) {
+        sanitized.data_retorno = dr;
+    }
+
     // Se não há refeições válidas, retornar null
     if (!sanitized.refeicoes || sanitized.refeicoes.length === 0) {
         return null;

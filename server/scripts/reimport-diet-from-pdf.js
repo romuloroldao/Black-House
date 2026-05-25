@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const { Client } = require('pg');
 const { parseStudentPDF } = require('../parse-pdf-local');
+const importEngine = require('../services/import-engine');
 const { safeValidateDietOnly } = require('../schemas/import-schema');
 const AlimentoRepository = require('../repositories/alimento.repository');
 const TipoAlimentoRepository = require('../repositories/tipo-alimento.repository');
@@ -53,6 +54,20 @@ async function reimportOne(client, alunoRow, pdfPath, coachUserId) {
     const parsed = await parseStudentPDF(buf);
     if (!parsed?.dieta?.refeicoes?.length) {
         throw new Error(`PDF sem refeições reconhecidas: ${pdfPath}`);
+    }
+
+    // Secção COMPLEMENTO (suplementos/fármacos) nem sempre vem no parseStudentPDF — import-engine cobre.
+    if (!(parsed.suplementos?.length || parsed.farmacos?.length)) {
+        try {
+            const engine = await importEngine.process(buf, {
+                fileName: path.basename(pdfPath),
+                requestId: `reimport-${Date.now()}`,
+            });
+            parsed.suplementos = engine?.data?.suplementos || [];
+            parsed.farmacos = engine?.data?.farmacos || [];
+        } catch (engineErr) {
+            console.warn(`⚠ Protocolo não extraído de ${pdfPath}: ${engineErr.message}`);
+        }
     }
 
     const payload = {

@@ -35,11 +35,22 @@ class DietService {
      * @private
      */
     async _createDietaCompletaInternal(dietaData, alunoId, userId) {
+        const { parseReturnDate, afterTableMutation } = require('./return-reminder.service');
+        const dataRetorno = parseReturnDate(
+            dietaData.data_retorno || dietaData.data_expiracao || null,
+        );
+
         const dieta = await this.dietRepository.createDieta({
             nome: dietaData.nome || 'Plano Alimentar Importado',
             objetivo: dietaData.objetivo || null,
-            aluno_id: alunoId
+            aluno_id: alunoId,
+            data_retorno: dataRetorno,
         });
+
+        if (dataRetorno) {
+            const db = { query: this.dietRepository.query.bind(this.dietRepository) };
+            await afterTableMutation(db, 'dietas', { ...dieta, aluno_id: alunoId, data_retorno: dataRetorno });
+        }
 
         const stats = {
             dieta_id: dieta.id,

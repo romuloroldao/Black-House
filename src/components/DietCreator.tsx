@@ -22,6 +22,7 @@ import {
 import { listarSubstituicoesIsocaloricas } from '@/lib/foodEquivalence';
 import { getAlunoDisplayName } from '@/lib/aluno-display';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DietReturnDateFields } from '@/components/DietReturnDateFields';
 
 type Alimento = Food;
 
@@ -78,6 +79,8 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
     { nome: 'Jantar', itens: [] }
   ]);
   const [farmacos, setFarmacos] = useState<Farmaco[]>([]);
+  const [dataRetorno, setDataRetorno] = useState('');
+  const [diasValidade, setDiasValidade] = useState('');
   const [editingDietaId, setEditingDietaId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
@@ -186,6 +189,11 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
       setDietName(dieta.nome);
       setObjetivo(dieta.objetivo || '');
       setSelectedAluno(dieta.aluno_id);
+      const retornoRaw = dieta.data_retorno;
+      setDataRetorno(
+        retornoRaw ? String(retornoRaw).slice(0, 10) : '',
+      );
+      setDiasValidade('');
 
       // Reorganizar itens por refeição - usar nomes únicos do banco
       const nomesRefeicoesBanco = [...new Set(itensComAlimentos.map(item => item.refeicao))];
@@ -397,7 +405,8 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
           body: JSON.stringify({
             nome: dietName,
             objetivo: objetivo,
-            aluno_id: selectedAluno
+            aluno_id: selectedAluno,
+            data_retorno: dataRetorno || null,
           }),
         });
         dietaIdAtual = createResult.success ? createResult.data?.id : null;
@@ -408,7 +417,8 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
           method: 'PATCH',
           body: JSON.stringify({
             nome: dietName,
-            objetivo: objetivo
+            objetivo: objetivo,
+            data_retorno: dataRetorno || null,
           }),
         });
         if (!updateResult.success) {
@@ -577,6 +587,13 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
               placeholder="Ex: Ganho de massa muscular"
             />
           </div>
+
+          <DietReturnDateFields
+            dataRetorno={dataRetorno}
+            diasValidade={diasValidade}
+            onDataRetornoChange={setDataRetorno}
+            onDiasValidadeChange={setDiasValidade}
+          />
         </CardContent>
       </Card>
 

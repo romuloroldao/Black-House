@@ -483,6 +483,70 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
     }
   });
 
+  // GET /api/alunos/me/notification-preferences — canal in-app / email+in-app
+  router.get(
+    '/alunos/me/notification-preferences',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['aluno']),
+    resolveAlunoOrFail,
+    async (req, res) => {
+      try {
+        const {
+          getNotificationPreferences,
+        } = require('../services/return-reminder.service');
+        const prefs = await getNotificationPreferences(pool, req.aluno.id);
+        if (!prefs) {
+          return res.status(404).json({ error: 'Aluno não encontrado' });
+        }
+        res.json({
+          notification_channel: prefs.notification_channel,
+          timezone: prefs.timezone,
+          labels: {
+            in_app_only: 'Apenas no aplicativo (sininho)',
+            in_app_and_email: 'Aplicativo e e-mail',
+          },
+        });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
+  // PATCH /api/alunos/me/notification-preferences
+  router.patch(
+    '/alunos/me/notification-preferences',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['aluno']),
+    resolveAlunoOrFail,
+    async (req, res) => {
+      try {
+        const {
+          updateNotificationPreferences,
+          CHANNEL_IN_APP_ONLY,
+          CHANNEL_IN_APP_AND_EMAIL,
+        } = require('../services/return-reminder.service');
+        const { notification_channel, timezone } = req.body || {};
+        const prefs = await updateNotificationPreferences(pool, req.aluno.id, {
+          notification_channel,
+          timezone,
+        });
+        res.json({
+          notification_channel: prefs?.notification_channel || CHANNEL_IN_APP_AND_EMAIL,
+          timezone: prefs?.timezone,
+          labels: {
+            in_app_only: 'Apenas no aplicativo (sininho)',
+            in_app_and_email: 'Aplicativo e e-mail',
+          },
+        });
+      } catch (error) {
+        const status = error.message?.includes('inválido') ? 400 : 500;
+        res.status(status).json({ error: error.message });
+      }
+    },
+  );
+
   // PATCH /api/alunos/me - Atualiza dados do aluno canônico
   // DESIGN-GUARD-RAILS-ROLE-ACCESS-003: Rota apenas para alunos
   // DESIGN-LINK-ALUNO-USER-001: NÃO permite alterar user_id (vínculo deve ser via /api/alunos/link-user)
@@ -1764,28 +1828,189 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
   // ROTAS: AGENDA EVENTOS (public.agenda_eventos)
   // ============================================================================
 
-  const AGENDA_TIPO = new Set(['retorno', 'ajuste_dieta', 'alteracao_treino', 'avaliacao', 'outro']);
+  const {
+    onAgendaEventSaved,
+    newCycleId: newAgendaReminderCycleId,
+    getAgendaSummary,
+    getAgendaAttention,
+    getCoachNotificationPreferences,
+    updateCoachNotificationPreferences,
+  } = require('../services/agenda-coach-reminder.service');
+
+  const { resolveCoachScope, listTeamMembers, addTeamMember, removeTeamMember } = require('../services/coach-team.service');
+  const {
+    getAgendaSuggestions,
+    snoozeAgendaEvent,
+  } = require('../services/agenda-crm.service');
+
+  async function attachCoachScope(req, res, next) {
+    try {
+      req.coachScope = await resolveCoachScope(pool, req.user.id, req.user.role);
+      next();
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
+  function effectiveCoachIds(scope) {
+    if (scope.isAdmin && scope.coachIds === null) return null;
+    return scope.coachIds;
+  }
+
+  const AGENDA_TIPO = new Set([
+    'retorno', 'ajuste_dieta', 'alteracao_treino', 'avaliacao', 'outro',
+    'consulta', 'acompanhamento',
+  ]);
   const AGENDA_STATUS = new Set(['pendente', 'concluido', 'cancelado']);
   const AGENDA_PRIORIDADE = new Set(['baixa', 'normal', 'alta']);
+
+  router.get(
+    '/agenda-eventos/suggestions',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'assistant']),
+    attachCoachScope,
+    async (req, res) => {
+      try {
+        const ids = effectiveCoachIds(req.coachScope);
+        if (!ids) {
+          return res.json([]);
+        }
+        const rows = await getAgendaSuggestions(pool, ids);
+        return res.json(rows);
+      } catch (error) {
+        return res.status(500).json({ error: error.message || 'Erro nas sugestões' });
+      }
+    },
+  );
+
+  router.get(
+    '/agenda-eventos/summary',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'assistant']),
+    attachCoachScope,
+    async (req, res) => {
+      try {
+        let coachIds = effectiveCoachIds(req.coachScope);
+        if (req.user.role === 'admin' && req.query.coach_id) {
+          coachIds = [req.query.coach_id];
+        }
+        if (!coachIds) {
+          return res.json({
+            pendentes_hoje: 0,
+            pendentes_amanha: 0,
+            atrasados: 0,
+            proximos_7_dias: 0,
+            por_tipo: {},
+          });
+        }
+        const summary = await getAgendaSummary(pool, coachIds);
+        return res.json(summary);
+      } catch (error) {
+        return res.status(500).json({ error: error.message || 'Erro ao resumir agenda' });
+      }
+    },
+  );
+
+  router.get(
+    '/agenda-eventos/attention',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'assistant']),
+    attachCoachScope,
+    async (req, res) => {
+      try {
+        let coachIds = effectiveCoachIds(req.coachScope);
+        if (req.user.role === 'admin' && req.query.coach_id) {
+          coachIds = [req.query.coach_id];
+        }
+        if (!coachIds) {
+          return res.json([]);
+        }
+        const limit = Math.min(parseInt(req.query.limit, 10) || 15, 50);
+        const rows = await getAgendaAttention(pool, coachIds, limit);
+        return res.json(rows);
+      } catch (error) {
+        return res.status(500).json({ error: error.message || 'Erro ao listar atenção' });
+      }
+    },
+  );
+
+  router.get(
+    '/coach/me/notification-preferences',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      try {
+        const prefs = await getCoachNotificationPreferences(pool, req.user.id);
+        return res.json({
+          ...prefs,
+          labels: {
+            in_app_only: 'Apenas no aplicativo (sininho)',
+            in_app_and_email: 'Aplicativo e e-mail',
+          },
+        });
+      } catch (error) {
+        return res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
+  router.patch(
+    '/coach/me/notification-preferences',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      try {
+        const { notification_channel, timezone } = req.body || {};
+        const prefs = await updateCoachNotificationPreferences(pool, req.user.id, {
+          notification_channel,
+          timezone,
+        });
+        return res.json({
+          ...prefs,
+          labels: {
+            in_app_only: 'Apenas no aplicativo (sininho)',
+            in_app_and_email: 'Aplicativo e e-mail',
+          },
+        });
+      } catch (error) {
+        const status = error.message?.includes('inválido') ? 400 : 500;
+        return res.status(status).json({ error: error.message });
+      }
+    },
+  );
 
   router.get(
     '/agenda-eventos',
     authenticate,
     domainSchemaGuard,
-    validateRole(['coach', 'admin', 'aluno']),
+    validateRole(['coach', 'admin', 'assistant', 'aluno']),
     requireAlunoWhenStudent(),
+    attachCoachScope,
     async (req, res) => {
       try {
-        if (req.user.role === 'admin') {
+        if (req.user.role === 'admin' && !req.coachScope?.coachIds) {
           const r = await pool.query(
-            `SELECT * FROM public.agenda_eventos ORDER BY data_evento ASC, hora_evento ASC NULLS LAST, created_at DESC LIMIT 500`,
+            `SELECT ae.*, a.ultimo_contato_em, a.ultimo_contato_resumo
+             FROM public.agenda_eventos ae
+             LEFT JOIN public.alunos a ON a.id = ae.aluno_id
+             ORDER BY ae.data_evento ASC, ae.hora_evento ASC NULLS LAST, ae.created_at DESC LIMIT 500`,
           );
           return res.json(r.rows);
         }
-        if (req.user.role === 'coach') {
+        if (req.user.role === 'coach' || req.user.role === 'assistant') {
+          const ids = effectiveCoachIds(req.coachScope) || [req.user.id];
           const r = await pool.query(
-            `SELECT * FROM public.agenda_eventos WHERE coach_id = $1 ORDER BY data_evento ASC, hora_evento ASC NULLS LAST, created_at DESC`,
-            [req.user.id],
+            `SELECT ae.*, a.ultimo_contato_em, a.ultimo_contato_resumo
+             FROM public.agenda_eventos ae
+             LEFT JOIN public.alunos a ON a.id = ae.aluno_id
+             WHERE ae.coach_id = ANY($1::uuid[])
+             ORDER BY ae.data_evento ASC, ae.hora_evento ASC NULLS LAST, ae.created_at DESC`,
+            [ids],
           );
           return res.json(r.rows);
         }
@@ -1801,10 +2026,35 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
   );
 
   router.post(
+    '/agenda-eventos/:id/snooze',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'assistant']),
+    validateUUIDParam('id'),
+    attachCoachScope,
+    async (req, res) => {
+      try {
+        if (!req.coachScope.canWrite) {
+          return res.status(403).json({ error: 'Sem permissão para adiar lembretes', error_code: 'FORBIDDEN' });
+        }
+        const days = req.body?.days ?? 1;
+        const row = await snoozeAgendaEvent(pool, req.params.id, req.coachScope, days);
+        if (!row) {
+          return res.status(404).json({ error: 'Evento não encontrado', error_code: 'NOT_FOUND' });
+        }
+        return res.json(row);
+      } catch (error) {
+        return res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
+  router.post(
     '/agenda-eventos',
     authenticate,
     domainSchemaGuard,
-    validateRole(['coach', 'admin']),
+    validateRole(['coach', 'admin', 'assistant']),
+    attachCoachScope,
     async (req, res) => {
       try {
         const {
@@ -1838,7 +2088,11 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
           return res.status(400).json({ error: 'prioridade inválida', error_code: 'INVALID_PRIORIDADE' });
         }
 
-        let coachId = req.user.id;
+        if (!req.coachScope.canWrite) {
+          return res.status(403).json({ error: 'Sem permissão de escrita na Agenda', error_code: 'FORBIDDEN' });
+        }
+
+        let coachId = req.coachScope.ownerCoachId || req.user.id;
         if (req.user.role === 'admin') {
           if (!req.body.coach_id) {
             return res.status(400).json({ error: 'coach_id é obrigatório para admin', error_code: 'MISSING_COACH_ID' });
@@ -1859,11 +2113,12 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
           }
         }
 
+        const cycleId = newAgendaReminderCycleId();
         const ins = await pool.query(
           `INSERT INTO public.agenda_eventos (
             coach_id, aluno_id, titulo, descricao, data_evento, hora_evento,
-            tipo, status, prioridade, notificacao_enviada
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            tipo, status, prioridade, notificacao_enviada, reminder_cycle_id
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
           RETURNING *`,
           [
             coachId,
@@ -1876,9 +2131,16 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
             st,
             pr,
             Boolean(notificacao_enviada),
+            cycleId,
           ],
         );
-        return res.status(201).json(ins.rows[0]);
+        let row = ins.rows[0];
+        try {
+          row = await onAgendaEventSaved(pool, row, { previous: null });
+        } catch (hookErr) {
+          console.warn('agenda.on_create_hook_failed', hookErr.message);
+        }
+        return res.status(201).json(row);
       } catch (error) {
         console.error('Erro ao criar agenda_evento:', error);
         return res.status(500).json({ error: error.message || 'Erro ao criar evento' });
@@ -1890,20 +2152,27 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
     '/agenda-eventos/:id',
     authenticate,
     domainSchemaGuard,
-    validateRole(['coach', 'admin']),
+    validateRole(['coach', 'admin', 'assistant']),
     validateUUIDParam('id'),
+    attachCoachScope,
     async (req, res) => {
       try {
         const { id } = req.params;
-        const cur = await pool.query('SELECT coach_id FROM public.agenda_eventos WHERE id = $1', [id]);
+        const cur = await pool.query('SELECT * FROM public.agenda_eventos WHERE id = $1', [id]);
         if (cur.rows.length === 0) {
           return res.status(404).json({ error: 'Evento não encontrado', error_code: 'NOT_FOUND' });
         }
-        if (req.user.role === 'coach' && String(cur.rows[0].coach_id) !== String(req.user.id)) {
+        const previous = cur.rows[0];
+        const ids = effectiveCoachIds(req.coachScope);
+        if (ids && !ids.includes(String(previous.coach_id))) {
           return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+        if (!req.coachScope.canWrite) {
+          return res.status(403).json({ error: 'Sem permissão de escrita', error_code: 'FORBIDDEN' });
         }
 
         const allowed = new Set([
+          'snoozed_until',
           'titulo',
           'descricao',
           'data_evento',
@@ -1938,7 +2207,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
             val = Boolean(val);
           }
           if (key === 'aluno_id' && val != null) {
-            const cid = cur.rows[0].coach_id;
+            const cid = previous.coach_id;
             const own = await pool.query(`SELECT id FROM public.alunos WHERE id = $1 AND coach_id = $2`, [val, cid]);
             if (own.rows.length === 0) {
               return res.status(400).json({
@@ -1967,10 +2236,80 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
         queryParams.push(id);
         const q = `UPDATE public.agenda_eventos SET ${updateFields.join(', ')}, updated_at = now() WHERE id = $${paramIndex} RETURNING *`;
         const result = await pool.query(q, queryParams);
-        return res.json(result.rows[0]);
+        let row = result.rows[0];
+        try {
+          row = await onAgendaEventSaved(pool, row, { previous });
+        } catch (hookErr) {
+          console.warn('agenda.on_patch_hook_failed', hookErr.message);
+        }
+        return res.json(row);
       } catch (error) {
         console.error('Erro ao atualizar agenda_evento:', error);
         return res.status(500).json({ error: error.message || 'Erro ao atualizar evento' });
+      }
+    },
+  );
+
+  router.get(
+    '/coach/team/members',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    attachCoachScope,
+    async (req, res) => {
+      try {
+        const ownerId = req.coachScope.isAssistant
+          ? req.coachScope.ownerCoachId
+          : req.user.id;
+        const rows = await listTeamMembers(pool, ownerId);
+        return res.json(rows);
+      } catch (error) {
+        return res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
+  router.post(
+    '/coach/team/members',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    attachCoachScope,
+    async (req, res) => {
+      try {
+        if (req.coachScope.isAssistant) {
+          return res.status(403).json({ error: 'Apenas o coach titular gere a equipa', error_code: 'FORBIDDEN' });
+        }
+        const row = await addTeamMember(pool, req.user.id, {
+          member_email: req.body?.member_email,
+          team_role: req.body?.team_role || 'assistant',
+        });
+        return res.status(201).json(row);
+      } catch (error) {
+        return res.status(400).json({ error: error.message });
+      }
+    },
+  );
+
+  router.delete(
+    '/coach/team/members/:id',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    validateUUIDParam('id'),
+    attachCoachScope,
+    async (req, res) => {
+      try {
+        if (req.coachScope.isAssistant) {
+          return res.status(403).json({ error: 'Apenas o coach titular gere a equipa', error_code: 'FORBIDDEN' });
+        }
+        const row = await removeTeamMember(pool, req.user.id, req.params.id);
+        if (!row) {
+          return res.status(404).json({ error: 'Membro não encontrado' });
+        }
+        return res.json({ ok: true });
+      } catch (error) {
+        return res.status(500).json({ error: error.message });
       }
     },
   );
@@ -1979,8 +2318,9 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
     '/agenda-eventos/:id',
     authenticate,
     domainSchemaGuard,
-    validateRole(['coach', 'admin']),
+    validateRole(['coach', 'admin', 'assistant']),
     validateUUIDParam('id'),
+    attachCoachScope,
     async (req, res) => {
       try {
         const { id } = req.params;
@@ -1988,8 +2328,12 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
         if (cur.rows.length === 0) {
           return res.status(404).json({ error: 'Evento não encontrado', error_code: 'NOT_FOUND' });
         }
-        if (req.user.role === 'coach' && String(cur.rows[0].coach_id) !== String(req.user.id)) {
+        const ids = effectiveCoachIds(req.coachScope);
+        if (ids && !ids.includes(String(cur.rows[0].coach_id))) {
           return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+        if (!req.coachScope.canWrite) {
+          return res.status(403).json({ error: 'Sem permissão de escrita', error_code: 'FORBIDDEN' });
         }
         await pool.query('DELETE FROM public.agenda_eventos WHERE id = $1', [id]);
         return res.json({ ok: true });
@@ -3902,28 +4246,19 @@ module.exports = function (pool, authenticate, domainSchemaGuard) {
 
         conversa = conversaResult.rows[0];
       } else {
-        const conversaResult = await pool.query('SELECT * FROM public.get_or_create_conversa($1, $2)', [
-          aluno.id,
-          aluno.coach_id,
-        ]);
+        const existingConversa = await pool.query(
+          'SELECT * FROM public.conversas WHERE aluno_id = $1 AND coach_id = $2 LIMIT 1',
+          [aluno.id, aluno.coach_id],
+        );
 
-        if (conversaResult.rows.length === 0) {
-          let existingConversa = await pool.query(
-            'SELECT * FROM public.conversas WHERE aluno_id = $1 AND coach_id = $2',
-            [aluno.id, aluno.coach_id]
+        if (existingConversa.rows.length === 0) {
+          const novaConversa = await pool.query(
+            'INSERT INTO public.conversas (aluno_id, coach_id) VALUES ($1, $2) RETURNING *',
+            [aluno.id, aluno.coach_id],
           );
-
-          if (existingConversa.rows.length === 0) {
-            const novaConversa = await pool.query(
-              'INSERT INTO public.conversas (aluno_id, coach_id) VALUES ($1, $2) RETURNING *',
-              [aluno.id, aluno.coach_id]
-            );
-            conversa = novaConversa.rows[0];
-          } else {
-            conversa = existingConversa.rows[0];
-          }
+          conversa = novaConversa.rows[0];
         } else {
-          conversa = { id: conversaResult.rows[0].get_or_create_conversa };
+          conversa = existingConversa.rows[0];
         }
       }
 

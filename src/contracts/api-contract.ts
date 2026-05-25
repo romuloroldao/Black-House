@@ -19,6 +19,7 @@ export const API_CONTRACT = {
   alunos: {
     byCoach: () => `${API_BASE}/api/alunos/by-coach`,
     me: () => `${API_BASE}/api/alunos/me`,
+    notificationPreferences: () => `${API_BASE}/api/alunos/me/notification-preferences`,
     list: () => `${API_BASE}/api/alunos`,
     linkUser: () => `${API_BASE}/api/alunos/link-user`,
     unlinkedRegistrations: () => `${API_BASE}/api/alunos/unlinked-registrations`,
@@ -123,7 +124,16 @@ export const API_CONTRACT = {
   },
   agendaEventos: {
     list: () => `${API_BASE}/api/agenda-eventos`,
+    summary: () => `${API_BASE}/api/agenda-eventos/summary`,
+    attention: () => `${API_BASE}/api/agenda-eventos/attention`,
+    suggestions: () => `${API_BASE}/api/agenda-eventos/suggestions`,
+    snooze: (id: string) => `${API_BASE}/api/agenda-eventos/${id}/snooze`,
     byId: (id: string) => `${API_BASE}/api/agenda-eventos/${id}`,
+  },
+  coach: {
+    notificationPreferences: () => `${API_BASE}/api/coach/me/notification-preferences`,
+    teamMembers: () => `${API_BASE}/api/coach/team/members`,
+    teamMemberById: (id: string) => `${API_BASE}/api/coach/team/members/${id}`,
   },
   /** Calendário de turmas (public.eventos + eventos_participantes) — ver EventsCalendar */
   eventosTurma: {
@@ -159,6 +169,7 @@ const CONTRACT_PATTERNS = [
   '/auth/logout',
   '/api/alunos/by-coach',
   '/api/alunos/me',
+  '/api/alunos/me/notification-preferences',
   '/api/alunos/link-user',
   '/api/alunos',
   '/api/alunos/:id',
@@ -218,7 +229,14 @@ const CONTRACT_PATTERNS = [
   '/api/expenses',
   '/api/expenses/:id',
   '/api/agenda-eventos',
+  '/api/agenda-eventos/summary',
+  '/api/agenda-eventos/attention',
+  '/api/agenda-eventos/suggestions',
+  '/api/agenda-eventos/:id/snooze',
   '/api/agenda-eventos/:id',
+  '/api/coach/me/notification-preferences',
+  '/api/coach/team/members',
+  '/api/coach/team/members/:id',
   '/api/eventos',
   '/api/eventos/:id',
   '/api/eventos-participantes',

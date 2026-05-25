@@ -11,6 +11,121 @@ import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import escalaBristol from "@/assets/escala-bristol.jpg";
 
+type CheckinFormData = {
+  beliscou_fora_plano: string;
+  seguiu_plano_nota: number;
+  apetite: string;
+  treinou_todas_sessoes: string;
+  desafiou_treinos: string;
+  fez_cardio: string;
+  seguiu_suplementacao: string;
+  recursos_hormonais: string;
+  ingeriu_agua_minima: string;
+  exposicao_sol: string;
+  pressao_arterial: string;
+  glicemia: string;
+  media_horas_sono: string;
+  dificuldade_adormecer: string;
+  acordou_noite: string;
+  estresse_semana: string;
+  lida_desafios: string;
+  convivio_familiar: string;
+  convivio_trabalho: string;
+  postura_problemas: string;
+  higiene_sono: string;
+  autoestima: number;
+  media_evacuacoes: string;
+  formato_fezes: string;
+  nao_cumpriu_porque: string;
+};
+
+/** Campos obrigatórios alinhados a POST /api/checkins (server/routes/api.js). */
+const CHECKIN_REQUIRED: { key: keyof CheckinFormData; label: string; kind: "choice" | "sim_nao" }[] = [
+  { key: "beliscou_fora_plano", label: "Beliscou fora do plano?", kind: "choice" },
+  { key: "apetite", label: "Apetite", kind: "choice" },
+  { key: "treinou_todas_sessoes", label: "Treinou todas as sessões?", kind: "sim_nao" },
+  { key: "desafiou_treinos", label: "Desafiou-se nos treinos?", kind: "sim_nao" },
+  { key: "fez_cardio", label: "Fez todo o cardio?", kind: "sim_nao" },
+  { key: "seguiu_suplementacao", label: "Seguiu suplementação?", kind: "sim_nao" },
+  { key: "recursos_hormonais", label: "Recursos hormonais", kind: "choice" },
+  { key: "ingeriu_agua_minima", label: "Ingeriu água mínima?", kind: "sim_nao" },
+  { key: "exposicao_sol", label: "Exposição ao sol?", kind: "sim_nao" },
+  { key: "media_horas_sono", label: "Média de horas de sono", kind: "choice" },
+  { key: "dificuldade_adormecer", label: "Dificuldade para adormecer?", kind: "sim_nao" },
+  { key: "estresse_semana", label: "Estresse da semana", kind: "sim_nao" },
+  { key: "lida_desafios", label: "Lida com desafios", kind: "choice" },
+  { key: "convivio_familiar", label: "Convívio familiar", kind: "choice" },
+  { key: "convivio_trabalho", label: "Convívio no trabalho", kind: "choice" },
+  { key: "postura_problemas", label: "Postura frente a problemas", kind: "choice" },
+  { key: "higiene_sono", label: "Higiene do sono", kind: "sim_nao" },
+  { key: "media_evacuacoes", label: "Média de evacuações", kind: "choice" },
+  { key: "formato_fezes", label: "Formato das fezes (Bristol)", kind: "choice" },
+];
+
+/** Não entram em REQUIRED_CHECKIN no backend — podem ficar em branco. */
+const CHECKIN_OPTIONAL_KEYS: (keyof CheckinFormData)[] = [
+  "pressao_arterial",
+  "glicemia",
+  "acordou_noite",
+  "nao_cumpriu_porque",
+];
+
+const CHECKIN_FIELD_LABELS: Record<string, string> = Object.fromEntries(
+  CHECKIN_REQUIRED.map((f) => [f.key, f.label]),
+);
+
+function getMissingCheckinFields(data: CheckinFormData): string[] {
+  const missing: string[] = [];
+  for (const field of CHECKIN_REQUIRED) {
+    const value = data[field.key];
+    if (field.kind === "sim_nao") {
+      if (value !== "sim" && value !== "nao") {
+        missing.push(field.label);
+      }
+    } else if (value === "" || value === null || value === undefined) {
+      missing.push(field.label);
+    }
+  }
+  return missing;
+}
+
+function optionalCheckinText(value: string): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function buildCheckinPayload(data: CheckinFormData) {
+  const payload: Record<string, unknown> = {
+    beliscou_fora_plano: data.beliscou_fora_plano,
+    seguiu_plano_nota: data.seguiu_plano_nota,
+    apetite: data.apetite,
+    treinou_todas_sessoes: data.treinou_todas_sessoes === "sim",
+    desafiou_treinos: data.desafiou_treinos === "sim",
+    fez_cardio: data.fez_cardio === "sim",
+    seguiu_suplementacao: data.seguiu_suplementacao === "sim",
+    recursos_hormonais: data.recursos_hormonais,
+    ingeriu_agua_minima: data.ingeriu_agua_minima === "sim",
+    exposicao_sol: data.exposicao_sol === "sim",
+    media_horas_sono: data.media_horas_sono,
+    dificuldade_adormecer: data.dificuldade_adormecer === "sim",
+    estresse_semana: data.estresse_semana === "sim",
+    lida_desafios: data.lida_desafios,
+    convivio_familiar: data.convivio_familiar,
+    convivio_trabalho: data.convivio_trabalho,
+    postura_problemas: data.postura_problemas,
+    higiene_sono: data.higiene_sono === "sim",
+    autoestima: data.autoestima,
+    media_evacuacoes: data.media_evacuacoes,
+    formato_fezes: data.formato_fezes,
+  };
+
+  for (const key of CHECKIN_OPTIONAL_KEYS) {
+    payload[key] = optionalCheckinText(data[key] as string);
+  }
+
+  return payload;
+}
+
 export default function StudentWeeklyCheckin() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
@@ -44,6 +159,15 @@ export default function StudentWeeklyCheckin() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const missingLabels = getMissingCheckinFields(formData);
+    if (missingLabels.length > 0) {
+      const preview = missingLabels.slice(0, 4).join(", ");
+      const extra = missingLabels.length > 4 ? ` e mais ${missingLabels.length - 4}` : "";
+      toast.error(`Preencha todas as perguntas obrigatórias antes de enviar: ${preview}${extra}.`);
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -58,33 +182,7 @@ export default function StudentWeeklyCheckin() {
       // DESIGN-VPS-ONLY-CANONICAL-DATA-AND-STORAGE-002
       const response = await apiClient.request('/api/checkins', {
         method: 'POST',
-        body: JSON.stringify({
-        beliscou_fora_plano: formData.beliscou_fora_plano,
-        seguiu_plano_nota: formData.seguiu_plano_nota,
-        apetite: formData.apetite,
-        treinou_todas_sessoes: formData.treinou_todas_sessoes === "sim",
-        desafiou_treinos: formData.desafiou_treinos === "sim",
-        fez_cardio: formData.fez_cardio === "sim",
-        seguiu_suplementacao: formData.seguiu_suplementacao === "sim",
-        recursos_hormonais: formData.recursos_hormonais,
-        ingeriu_agua_minima: formData.ingeriu_agua_minima === "sim",
-        exposicao_sol: formData.exposicao_sol === "sim",
-        pressao_arterial: formData.pressao_arterial || null,
-        glicemia: formData.glicemia || null,
-        media_horas_sono: formData.media_horas_sono,
-        dificuldade_adormecer: formData.dificuldade_adormecer === "sim",
-        acordou_noite: formData.acordou_noite || null,
-        estresse_semana: formData.estresse_semana === "sim",
-        lida_desafios: formData.lida_desafios,
-        convivio_familiar: formData.convivio_familiar,
-        convivio_trabalho: formData.convivio_trabalho,
-        postura_problemas: formData.postura_problemas,
-        higiene_sono: formData.higiene_sono === "sim",
-        autoestima: formData.autoestima,
-        media_evacuacoes: formData.media_evacuacoes,
-        formato_fezes: formData.formato_fezes,
-        nao_cumpriu_porque: formData.nao_cumpriu_porque || null,
-        }),
+        body: JSON.stringify(buildCheckinPayload(formData)),
       });
 
       if (response.success) {
@@ -126,18 +224,27 @@ export default function StudentWeeklyCheckin() {
       });
     } catch (error: any) {
       console.error("Erro ao enviar check-in:", error);
-      
-      // Mensagens amigáveis para erros comuns
+
       let mensagemErro = "Não foi possível enviar o check-in. Por favor, tente novamente.";
-      
-      if (error.message?.includes("apetite") || error.code === "23514") {
-        mensagemErro = "Por favor, preencha todos os campos obrigatórios antes de enviar.";
+
+      const apiMissing = Array.isArray(error?.missing_fields) ? error.missing_fields as string[] : [];
+      if (apiMissing.length > 0) {
+        const labels = apiMissing.map((k) => CHECKIN_FIELD_LABELS[k] || k);
+        const preview = labels.slice(0, 4).join(", ");
+        const extra = labels.length > 4 ? ` e mais ${labels.length - 4}` : "";
+        mensagemErro = `Preencha as perguntas em falta: ${preview}${extra}.`;
+      } else if (
+        error.message?.includes("CHECKIN_MISSING_FIELDS") ||
+        error.message?.includes("apetite") ||
+        error.code === "23514"
+      ) {
+        mensagemErro = "Por favor, preencha todas as perguntas obrigatórias (opções Sim/Não e listas) antes de enviar.";
       } else if (error.message?.includes("Usuário não autenticado")) {
         mensagemErro = "Sua sessão expirou. Por favor, faça login novamente.";
-      } else if (error.message?.includes("Aluno não encontrado")) {
+      } else if (error.message?.includes("Aluno não encontrado") || error.message?.includes("ALUNO_NOT_LINKED")) {
         mensagemErro = "Perfil não encontrado. Entre em contato com seu coach.";
       }
-      
+
       toast.error(mensagemErro);
     } finally {
       setLoading(false);
@@ -380,10 +487,11 @@ export default function StudentWeeklyCheckin() {
           </CardContent>
         </Card>
 
-        {/* Saúde Física */}
+        {/* Saúde Física — campos de texto livre, todos opcionais */}
         <Card>
           <CardHeader>
             <CardTitle>Saúde Física</CardTitle>
+            <CardDescription>Preencha apenas se quiser registrar pressão ou glicemia esta semana.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-2">
@@ -457,7 +565,7 @@ export default function StudentWeeklyCheckin() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="acordou">15. Acordou à noite? Quantas vezes?</Label>
+              <Label htmlFor="acordou">15. Acordou à noite? Quantas vezes? (opcional)</Label>
               <Textarea
                 id="acordou"
                 value={formData.acordou_noite}
@@ -688,19 +796,20 @@ export default function StudentWeeklyCheckin() {
           </CardContent>
         </Card>
 
-        {/* Observações */}
+        {/* Observações — opcional */}
         <Card>
           <CardHeader>
             <CardTitle>Observações Finais</CardTitle>
+            <CardDescription>Campo opcional. Use só se quiser comentar algo à parte do check-in.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              <Label htmlFor="observacoes">25. O que não cumpriu? Por quê?</Label>
+              <Label htmlFor="observacoes">25. O que não cumpriu? Por quê? (opcional)</Label>
               <Textarea
                 id="observacoes"
                 value={formData.nao_cumpriu_porque}
                 onChange={(e) => setFormData({ ...formData, nao_cumpriu_porque: e.target.value })}
-                placeholder="Descreva os desafios enfrentados durante a semana..."
+                placeholder="Opcional — descreva desafios ou pendências da semana, se desejar"
                 rows={4}
               />
             </div>

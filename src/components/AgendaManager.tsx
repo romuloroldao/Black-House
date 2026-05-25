@@ -41,6 +41,51 @@ interface Evento {
   prioridade: string;
   aluno_id: string | null;
   aluno_nome?: string;
+  snoozed_until?: string | null;
+  ultimo_contato_em?: string | null;
+  ultimo_contato_resumo?: string | null;
+}
+
+interface AgendaSummary {
+  pendentes_hoje: number;
+  pendentes_amanha: number;
+  atrasados: number;
+  proximos_7_dias: number;
+  por_tipo?: Record<string, number>;
+}
+
+type JanelaOperacional = "atrasado" | "hoje" | "amanha" | "futuro" | "outro";
+
+function normalizeDateKey(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return String(value).split("T")[0] || null;
+}
+
+function computeJanela(dataEvento: string, status: string): JanelaOperacional {
+  if (status !== "pendente") return "outro";
+  const hoje = format(new Date(), "yyyy-MM-dd");
+  const amanha = format(new Date(Date.now() + 86400000), "yyyy-MM-dd");
+  const d = normalizeDateKey(dataEvento);
+  if (!d) return "outro";
+  if (d < hoje) return "atrasado";
+  if (d === hoje) return "hoje";
+  if (d === amanha) return "amanha";
+  return "futuro";
+}
+
+function janelaBadge(janela: JanelaOperacional) {
+  switch (janela) {
+    case "atrasado":
+      return { label: "Atrasado", variant: "destructive" as const };
+    case "hoje":
+      return { label: "Hoje", variant: "default" as const };
+    case "amanha":
+      return { label: "Amanhã", variant: "secondary" as const };
+    case "futuro":
+      return { label: "Em breve", variant: "outline" as const };
+    default:
+      return null;
+  }
 }
 
 const AgendaManager = () => {
@@ -54,7 +99,18 @@ const AgendaManager = () => {
   const [eventoSelecionado, setEventoSelecionado] = useState<Evento | null>(null);
   const [filtroTipo, setFiltroTipo] = useState<string>("todos");
   const [filtroStatus, setFiltroStatus] = useState<string>("todos");
-  
+  const [filtroJanela, setFiltroJanela] = useState<string>("todos");
+  const [summary, setSummary] = useState<AgendaSummary | null>(null);
+  const [suggestions, setSuggestions] = useState<
+    Array<{
+      aluno_id: string;
+      aluno_nome: string;
+      mensagem: string;
+      tipo_sugerido: string;
+      dias_sem_checkin: number;
+    }>
+  >([]);
+
   const [formData, setFormData] = useState({
     titulo: "",
     descricao: "",
@@ -85,7 +141,7 @@ const AgendaManager = () => {
       setAlunos(alunosFiltrados);
 
       // Carregar eventos
-      await carregarEventos();
+      await Promise.all([carregarEventos(), carregarResumo()]);
     } catch (error) {
       console.error("Erro ao carregar dados:", error);
       toast({
@@ -95,6 +151,63 @@ const AgendaManager = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const carregarResumo = async () => {
+    const [sumRes, sugRes] = await Promise.all([
+      apiClient.requestSafe<AgendaSummary>("/api/agenda-eventos/summary"),
+      apiClient.requestSafe<
+        Array<{
+          aluno_id: string;
+          aluno_nome: string;
+          mensagem: string;
+          tipo_sugerido: string;
+          dias_sem_checkin: number;
+        }>
+      >("/api/agenda-eventos/suggestions"),
+    ]);
+    if (sumRes.success && sumRes.data) {
+      setSummary(sumRes.data);
+    }
+    if (sugRes.success && Array.isArray(sugRes.data)) {
+      setSuggestions(sugRes.data);
+    }
+  };
+
+  const handleSnooze = async (eventoId: string) => {
+    const res = await apiClient.requestSafe(`/api/agenda-eventos/${eventoId}/snooze`, {
+      method: "POST",
+      body: JSON.stringify({ days: 1 }),
+    });
+    if (res.success) {
+      toast({ title: "Lembrete adiado", description: "Lembretes adiados por 1 dia (data do evento mantida)." });
+      void Promise.all([carregarEventos(), carregarResumo()]);
+    } else {
+      toast({ title: "Erro", description: res.error || "Não foi possível adiar", variant: "destructive" });
+    }
+  };
+
+  const handleCriarFromSuggestion = async (s: (typeof suggestions)[0]) => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    const data = format(d, "yyyy-MM-dd");
+    const res = await apiClient.requestSafe("/api/agenda-eventos", {
+      method: "POST",
+      body: JSON.stringify({
+        titulo: `Acompanhamento — ${s.aluno_nome}`,
+        tipo: s.tipo_sugerido || "acompanhamento",
+        data_evento: data,
+        aluno_id: s.aluno_id,
+        status: "pendente",
+        prioridade: s.dias_sem_checkin >= 21 ? "alta" : "normal",
+      }),
+    });
+    if (res.success) {
+      toast({ title: "Retorno agendado", description: `Evento criado para ${formatDateBR(d)}.` });
+      void Promise.all([carregarEventos(), carregarResumo()]);
+    } else {
+      toast({ title: "Erro", description: res.error, variant: "destructive" });
     }
   };
 
@@ -219,7 +332,7 @@ const AgendaManager = () => {
       
       // Aguardar um pouco antes de recarregar para garantir que o banco foi atualizado
       setTimeout(() => {
-        carregarEventos();
+        void Promise.all([carregarEventos(), carregarResumo()]);
       }, 300);
     } catch (error) {
       console.error("Erro ao salvar evento:", error);
@@ -246,7 +359,7 @@ const AgendaManager = () => {
         description: "O evento foi removido da agenda.",
       });
 
-      carregarEventos();
+      void Promise.all([carregarEventos(), carregarResumo()]);
     } catch (error) {
       console.error("Erro ao deletar evento:", error);
       toast({
@@ -307,7 +420,7 @@ const AgendaManager = () => {
         title: novoStatus === "concluido" ? "Evento concluído!" : "Evento reaberto",
       });
 
-      carregarEventos();
+      void Promise.all([carregarEventos(), carregarResumo()]);
     } catch (error) {
       console.error("Erro ao atualizar status:", error);
     }
@@ -317,7 +430,9 @@ const AgendaManager = () => {
     { value: "retorno", label: "Retorno", color: "bg-primary" },
     { value: "ajuste_dieta", label: "Ajuste de Dieta", color: "bg-primary" },
     { value: "alteracao_treino", label: "Alteração de Treino", color: "bg-warning" },
-    { value: "avaliacao", label: "Avaliação", color: "bg-accent" },
+    { value: "consulta", label: "Consulta", color: "bg-accent" },
+    { value: "acompanhamento", label: "Acompanhamento", color: "bg-accent" },
+    { value: "avaliacao", label: "Avaliação (legado)", color: "bg-accent" },
     { value: "outro", label: "Outro", color: "bg-muted" },
   ];
 
@@ -330,17 +445,27 @@ const AgendaManager = () => {
   const eventosFiltrados = eventos.filter((evento) => {
     const matchTipo = filtroTipo === "todos" || evento.tipo === filtroTipo;
     const matchStatus = filtroStatus === "todos" || evento.status === filtroStatus;
-    
-    // Comparar datas normalizando o formato (pode vir com hora/timezone do banco)
+    const janela = computeJanela(evento.data_evento, evento.status);
+    const matchJanela =
+      filtroJanela === "todos" ||
+      (filtroJanela === "atrasados" && janela === "atrasado") ||
+      (filtroJanela === "hoje" && janela === "hoje") ||
+      (filtroJanela === "amanha" && janela === "amanha") ||
+      (filtroJanela === "proximos7" &&
+        janela !== "atrasado" &&
+        evento.status === "pendente" &&
+        normalizeDateKey(evento.data_evento) != null &&
+        normalizeDateKey(evento.data_evento)! <=
+          format(new Date(Date.now() + 7 * 86400000), "yyyy-MM-dd"));
+
     let matchData = true;
     if (date) {
       const dataSelecionada = format(date, "yyyy-MM-dd");
-      // Normalizar data_evento (pode vir como "2026-01-13" ou "2026-01-13T00:00:00.000Z")
-      const dataEvento = evento.data_evento ? evento.data_evento.split('T')[0] : null;
+      const dataEvento = normalizeDateKey(evento.data_evento);
       matchData = dataEvento === dataSelecionada;
     }
-    
-    return matchTipo && matchStatus && matchData;
+
+    return matchTipo && matchStatus && matchJanela && matchData;
   });
 
   const getStatusIcon = (status: string) => {
@@ -381,6 +506,84 @@ const AgendaManager = () => {
         </Button>
       </div>
 
+      {suggestions.length > 0 && (
+        <Card className="border-primary/30 bg-primary/5">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-primary" />
+              Sugestões inteligentes
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {suggestions.slice(0, 5).map((s) => (
+              <div
+                key={s.aluno_id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 bg-background/80 p-3"
+              >
+                <p className="text-sm">{s.mensagem}</p>
+                <Button size="sm" variant="secondary" onClick={() => handleCriarFromSuggestion(s)}>
+                  Agendar retorno
+                </Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {summary && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Card
+            className="cursor-pointer border-destructive/40 hover:border-destructive/70 transition-colors"
+            onClick={() => {
+              setFiltroJanela("atrasados");
+              setFiltroStatus("pendente");
+            }}
+          >
+            <CardContent className="p-4">
+              <p className="text-xs text-muted-foreground">Atrasados</p>
+              <p className="text-2xl font-bold text-destructive">{summary.atrasados}</p>
+            </CardContent>
+          </Card>
+          <Card
+            className="cursor-pointer hover:border-primary/50 transition-colors"
+            onClick={() => {
+              setFiltroJanela("hoje");
+              setFiltroStatus("pendente");
+              setDate(new Date());
+            }}
+          >
+            <CardContent className="p-4">
+              <p className="text-xs text-muted-foreground">Hoje</p>
+              <p className="text-2xl font-bold">{summary.pendentes_hoje}</p>
+            </CardContent>
+          </Card>
+          <Card
+            className="cursor-pointer hover:border-primary/50 transition-colors"
+            onClick={() => {
+              setFiltroJanela("amanha");
+              setFiltroStatus("pendente");
+            }}
+          >
+            <CardContent className="p-4">
+              <p className="text-xs text-muted-foreground">Amanhã</p>
+              <p className="text-2xl font-bold">{summary.pendentes_amanha}</p>
+            </CardContent>
+          </Card>
+          <Card
+            className="cursor-pointer hover:border-primary/50 transition-colors"
+            onClick={() => {
+              setFiltroJanela("proximos7");
+              setFiltroStatus("pendente");
+            }}
+          >
+            <CardContent className="p-4">
+              <p className="text-xs text-muted-foreground">Próximos 7 dias</p>
+              <p className="text-2xl font-bold">{summary.proximos_7_dias}</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Calendário */}
         <Card className="lg:col-span-1">
@@ -414,6 +617,22 @@ const AgendaManager = () => {
                         {tipo.label}
                       </SelectItem>
                     ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Janela</Label>
+                <Select value={filtroJanela} onValueChange={setFiltroJanela}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Todas</SelectItem>
+                    <SelectItem value="atrasados">Atrasados</SelectItem>
+                    <SelectItem value="hoje">Hoje</SelectItem>
+                    <SelectItem value="amanha">Amanhã</SelectItem>
+                    <SelectItem value="proximos7">Próximos 7 dias</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -475,6 +694,15 @@ const AgendaManager = () => {
                               <p className="text-sm text-muted-foreground">{evento.descricao}</p>
                             )}
 
+                            {evento.ultimo_contato_resumo && (
+                              <p className="text-xs text-muted-foreground">
+                                Último contacto: {evento.ultimo_contato_resumo}
+                                {evento.ultimo_contato_em
+                                  ? ` (${formatDateBR(evento.ultimo_contato_em)})`
+                                  : ""}
+                              </p>
+                            )}
+
                             <div className="flex flex-wrap gap-2 text-sm">
                               {evento.hora_evento && (
                                 <Badge variant="outline" className="gap-1">
@@ -500,10 +728,27 @@ const AgendaManager = () => {
                               >
                                 {prioridades.find(p => p.value === evento.prioridade)?.label}
                               </Badge>
+
+                              {(() => {
+                                const jb = janelaBadge(computeJanela(evento.data_evento, evento.status));
+                                return jb ? (
+                                  <Badge variant={jb.variant}>{jb.label}</Badge>
+                                ) : null;
+                              })()}
                             </div>
                           </div>
 
                           <div className="flex gap-1">
+                            {evento.status === "pendente" && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                title="Adiar lembrete 1 dia"
+                                onClick={() => handleSnooze(evento.id)}
+                              >
+                                <Clock className="w-4 h-4" />
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="icon"

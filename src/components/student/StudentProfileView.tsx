@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDataContext } from "@/contexts/DataContext";
-import { User, Save, Camera, Loader2, Upload } from "lucide-react";
+import { User, Save, Camera, Loader2, Upload, Bell } from "lucide-react";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { DateInputBR } from "@/components/ui/date-input-br";
@@ -27,6 +28,10 @@ const StudentProfileView = () => {
     peso: "",
     objetivo: "",
   });
+  const [notificationChannel, setNotificationChannel] = useState<
+    "in_app_only" | "in_app_and_email"
+  >("in_app_and_email");
+  const [savingNotifications, setSavingNotifications] = useState(false);
 
   useEffect(() => {
     if (!isReady || !user) return;
@@ -34,9 +39,12 @@ const StudentProfileView = () => {
     let isMounted = true;
 
     const loadProfileData = async () => {
-      const [alunoResult, profileResult] = await Promise.all([
+      const [alunoResult, profileResult, prefsResult] = await Promise.all([
         apiClient.getMeSafe(),
         apiClient.getProfileSafe(),
+        apiClient.requestSafe<{
+          notification_channel: "in_app_only" | "in_app_and_email";
+        }>("/api/alunos/me/notification-preferences"),
       ]);
 
       const aluno = alunoResult.success ? alunoResult.data : null;
@@ -54,6 +62,10 @@ const StudentProfileView = () => {
       });
 
       setAvatarUrl(profile?.avatar_url || null);
+
+      if (prefsResult.success && prefsResult.data?.notification_channel) {
+        setNotificationChannel(prefsResult.data.notification_channel);
+      }
     };
 
     loadProfileData();
@@ -353,6 +365,76 @@ const StudentProfileView = () => {
             >
               <Save className="h-4 w-4 mr-2" />
               {loading ? "Salvando..." : "Salvar Alterações"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="shadow-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Bell className="h-5 w-5 text-primary" />
+            Notificações de retorno
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Lembretes de retorno de dieta e treino (2 dias antes, véspera e no dia) aparecem sempre no
+            sininho do portal. Escolha se também deseja receber por e-mail.
+          </p>
+          <RadioGroup
+            value={notificationChannel}
+            onValueChange={(v) =>
+              setNotificationChannel(v as "in_app_only" | "in_app_and_email")
+            }
+            className="space-y-3"
+          >
+            <div className="flex items-start gap-3 rounded-lg border border-border p-3">
+              <RadioGroupItem value="in_app_and_email" id="notif-email" />
+              <Label htmlFor="notif-email" className="cursor-pointer font-normal leading-snug">
+                <span className="font-medium text-foreground">Aplicativo e e-mail</span>
+                <span className="mt-1 block text-sm text-muted-foreground">
+                  Sininho na plataforma + e-mails com a identidade Black House.
+                </span>
+              </Label>
+            </div>
+            <div className="flex items-start gap-3 rounded-lg border border-border p-3">
+              <RadioGroupItem value="in_app_only" id="notif-inapp" />
+              <Label htmlFor="notif-inapp" className="cursor-pointer font-normal leading-snug">
+                <span className="font-medium text-foreground">Apenas no aplicativo</span>
+                <span className="mt-1 block text-sm text-muted-foreground">
+                  Somente notificações internas (sem e-mails automáticos de retorno).
+                </span>
+              </Label>
+            </div>
+          </RadioGroup>
+          <div className="flex justify-end">
+            <Button
+              variant="outline"
+              disabled={savingNotifications}
+              onClick={async () => {
+                setSavingNotifications(true);
+                try {
+                  const result = await apiClient.requestSafe(
+                    "/api/alunos/me/notification-preferences",
+                    {
+                      method: "PATCH",
+                      body: JSON.stringify({ notification_channel: notificationChannel }),
+                    },
+                  );
+                  if (!result.success) {
+                    throw new Error(result.error || "Erro ao salvar");
+                  }
+                  toast.success("Preferência de notificação salva");
+                } catch (e: unknown) {
+                  const msg = e instanceof Error ? e.message : "Erro ao salvar";
+                  toast.error(msg);
+                } finally {
+                  setSavingNotifications(false);
+                }
+              }}
+            >
+              {savingNotifications ? "Salvando..." : "Salvar preferência"}
             </Button>
           </div>
         </CardContent>

@@ -55,6 +55,10 @@ const SettingsManager = () => {
     newMessages: true,
     eventReminders: true,
   });
+  const [agendaCoachEmail, setAgendaCoachEmail] = useState(true);
+  const [teamEmail, setTeamEmail] = useState("");
+  const [teamRole, setTeamRole] = useState<"assistant" | "viewer">("assistant");
+  const [teamMembers, setTeamMembers] = useState<any[]>([]);
 
   // Password change dialog state
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
@@ -71,7 +75,25 @@ const SettingsManager = () => {
     loadAsaasConfig();
     loadTwilioConfig();
     loadProfile();
+    loadCoachAgendaNotificationPrefs();
+    loadTeamMembers();
   }, [user]);
+
+  const loadTeamMembers = async () => {
+    const res = await apiClient.requestSafe<any[]>(API_CONTRACT.coach.teamMembers());
+    if (res.success && Array.isArray(res.data)) {
+      setTeamMembers(res.data.filter((m) => m.ativo !== false));
+    }
+  };
+
+  const loadCoachAgendaNotificationPrefs = async () => {
+    const res = await apiClient.requestSafe<{ notification_channel: string }>(
+      API_CONTRACT.coach.notificationPreferences(),
+    );
+    if (res.success && res.data?.notification_channel) {
+      setAgendaCoachEmail(res.data.notification_channel === "in_app_and_email");
+    }
+  };
 
   useEffect(() => {
     if (asaasConfig && typeof asaasConfig.is_sandbox === "boolean") {
@@ -192,7 +214,14 @@ const SettingsManager = () => {
   const handleSaveNotifications = async () => {
     setLoading(true);
     try {
-      // Save notification preferences (could be stored in a separate table)
+      const channel = agendaCoachEmail ? "in_app_and_email" : "in_app_only";
+      const result = await apiClient.requestSafe(API_CONTRACT.coach.notificationPreferences(), {
+        method: "PATCH",
+        body: JSON.stringify({ notification_channel: channel }),
+      });
+      if (!result.success) {
+        throw new Error(result.error || "Erro ao salvar preferências da Agenda");
+      }
       toast.success("Preferências de notificação atualizadas!");
     } catch (error: any) {
       toast.error("Erro ao salvar preferências: " + error.message);
@@ -675,9 +704,109 @@ const SettingsManager = () => {
 
               <Separator />
 
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label htmlFor="agenda-coach-email">Lembretes da Agenda por e-mail</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Retornos de alunos (2 dias antes, véspera e no dia). O sininho na plataforma é sempre enviado.
+                  </p>
+                </div>
+                <Switch
+                  id="agenda-coach-email"
+                  checked={agendaCoachEmail}
+                  onCheckedChange={setAgendaCoachEmail}
+                />
+              </div>
+
+              <Separator />
+
               <Button onClick={handleSaveNotifications} disabled={loading}>
                 {loading ? "Salvando..." : "Salvar Preferências"}
               </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Equipa (assistentes)</CardTitle>
+              <CardDescription>
+                Assistentes com acesso à sua Agenda e alunos. Visualizadores só consultam.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="team-email">Email do assistente</Label>
+                  <Input
+                    id="team-email"
+                    type="email"
+                    placeholder="assistente@email.com"
+                    value={teamEmail}
+                    onChange={(e) => setTeamEmail(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Permissão</Label>
+                  <select
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={teamRole}
+                    onChange={(e) => setTeamRole(e.target.value as "assistant" | "viewer")}
+                  >
+                    <option value="assistant">Assistente (editar Agenda)</option>
+                    <option value="viewer">Visualizador (só leitura)</option>
+                  </select>
+                </div>
+              </div>
+              <Button
+                variant="secondary"
+                disabled={loading || !teamEmail.trim()}
+                onClick={async () => {
+                  setLoading(true);
+                  try {
+                    const res = await apiClient.requestSafe(API_CONTRACT.coach.teamMembers(), {
+                      method: "POST",
+                      body: JSON.stringify({ member_email: teamEmail.trim(), team_role: teamRole }),
+                    });
+                    if (!res.success) throw new Error(res.error);
+                    setTeamEmail("");
+                    await loadTeamMembers();
+                    toast.success("Membro adicionado à equipa");
+                  } catch (e: any) {
+                    toast.error(e.message || "Erro ao adicionar");
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+              >
+                Adicionar à equipa
+              </Button>
+              {teamMembers.length > 0 && (
+                <ul className="space-y-2 text-sm border-t pt-4">
+                  {teamMembers.map((m) => (
+                    <li key={m.id} className="flex justify-between items-center gap-2">
+                      <span>
+                        {m.member_nome || m.member_email} — {m.team_role === "assistant" ? "Assistente" : "Visualizador"}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={async () => {
+                          const res = await apiClient.requestSafe(
+                            API_CONTRACT.coach.teamMemberById(m.id),
+                            { method: "DELETE" },
+                          );
+                          if (res.success) {
+                            await loadTeamMembers();
+                            toast.success("Removido da equipa");
+                          }
+                        }}
+                      >
+                        Remover
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

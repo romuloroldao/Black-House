@@ -32,6 +32,7 @@ const { sendEmailConfirmation } = require('./utils/send-email-confirmation');
 const { errorHandler, notFoundHandler } = require('./middleware/error-handler');
 const requestLogger = require('./middleware/request-logger');
 const logger = require('./utils/logger');
+const { afterTableMutation } = require('./services/return-reminder.service');
 const SecretsValidator = require('./utils/secrets-validator');
 const GracefulShutdown = require('./utils/graceful-shutdown');
 const { assertDatabaseSchema, assertGlobalSchema } = require('./utils/schema-validator');
@@ -275,16 +276,27 @@ app.set('schemaError', () => globalSchemaError);
 const JWT_SECRET = process.env.JWT_SECRET;
 
 // Configurar multer para upload de PDFs (memória, sem salvar em disco)
+const IMPORT_FILE_MIMES = new Set([
+    'application/pdf',
+    'text/csv',
+    'application/csv',
+    'text/comma-separated-values',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel',
+]);
+
 const upload = multer({
     storage: multer.memoryStorage(),
     limits: {
         fileSize: 50 * 1024 * 1024 // 50MB
     },
     fileFilter: (req, file, cb) => {
-        if (file.mimetype === 'application/pdf') {
+        const name = String(file.originalname || '').toLowerCase();
+        const isSpreadsheet = name.endsWith('.csv') || name.endsWith('.xlsx');
+        if (file.mimetype === 'application/pdf' || isSpreadsheet || IMPORT_FILE_MIMES.has(file.mimetype)) {
             cb(null, true);
         } else {
-            cb(new Error('Apenas arquivos PDF são aceitos'), false);
+            cb(new Error('Apenas arquivos PDF, CSV ou XLSX são aceitos'), false);
         }
     }
 });
@@ -1679,6 +1691,20 @@ app.post('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) =>
         insertedRows.push(result.rows[0]);
         }
 
+        if (table === 'alunos_treinos' || table === 'dietas') {
+            for (const row of insertedRows) {
+                try {
+                    await afterTableMutation(pool, table, row);
+                } catch (hookErr) {
+                    logger.warn('return_reminder.after_insert_failed', {
+                        table,
+                        id: row?.id,
+                        error: hookErr.message,
+                    });
+                }
+            }
+        }
+
         res.json(insertedRows.length === 1 ? insertedRows[0] : insertedRows);
     } catch (error) {
         logger.error('Erro ao inserir registro', {
@@ -1916,6 +1942,18 @@ app.patch('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) =
             actor_user_id: actorUserId,
             row_count: result.rows.length
         });
+
+        if (table === 'alunos_treinos' || table === 'dietas') {
+            try {
+                await afterTableMutation(pool, table, result.rows[0]);
+            } catch (hookErr) {
+                logger.warn('return_reminder.after_patch_failed', {
+                    table,
+                    id,
+                    error: hookErr.message,
+                });
+            }
+        }
         
         res.json(result.rows[0]);
     } catch (error) {

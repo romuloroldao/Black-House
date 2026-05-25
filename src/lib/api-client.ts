@@ -6,6 +6,7 @@ import { getAvailabilityKeyForEndpoint, isDataAvailable } from '@/lib/dataAvaila
 export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/alunos/by-coach',
     '/api/alunos/me',
+    '/api/alunos/me/notification-preferences',
     '/api/alunos/link-user',
     '/api/alunos/unlinked-registrations',
     '/api/alunos/adopt-registration',
@@ -34,7 +35,13 @@ export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/notificacoes',
     '/api/notificacoes/',
     '/api/agenda-eventos',
+    '/api/agenda-eventos/summary',
+    '/api/agenda-eventos/attention',
+    '/api/agenda-eventos/suggestions',
     '/api/agenda-eventos/',
+    '/api/coach/team/members',
+    '/api/coach/team/members/',
+    '/api/coach/me/notification-preferences',
     '/api/eventos',
     '/api/eventos/',
     '/api/eventos-participantes',
@@ -550,6 +557,9 @@ class ApiClient {
                 (backendError as any).status = response.status;
                 if (Array.isArray(errObj.fields)) {
                     (backendError as any).fields = errObj.fields;
+                }
+                if (Array.isArray(errObj.missing_fields)) {
+                    (backendError as any).missing_fields = errObj.missing_fields;
                 }
                 let errorType = ErrorType.BACKEND;
                 if (response.status === 401 || response.status === 403) {

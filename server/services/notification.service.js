@@ -4,6 +4,16 @@
 const logger = require('../utils/logger');
 const { getAlunoRecordForAuthUser } = require('../utils/aluno-auth-user');
 const { getAuthUserIdForAluno } = require('../utils/aluno-auth-user');
+const { getCopy } = require('./return-reminder-copy');
+const { buildCoachAgendaCopy } = require('./agenda-coach-reminder-copy');
+const {
+  shouldSendEmail,
+  CHANNEL_IN_APP_ONLY,
+} = require('./return-reminder.service');
+const {
+  shouldSendCoachEmail,
+  CHANNEL_IN_APP_ONLY: COACH_CHANNEL_IN_APP_ONLY,
+} = require('./agenda-coach-reminder.service');
 
 class NotificationService {
     constructor(websocketService, pool) {
@@ -371,7 +381,175 @@ class NotificationService {
     }
 
     /**
+     * Lembrete de retorno de dieta ou treino (marco D-2, D-1, D0).
+     * Respeita preferência do aluno: in_app_only | in_app_and_email.
+     */
+    async notifyReturnReminder({
+        domain,
+        milestone,
+        entityId,
+        alunoId,
+        coachId,
+        alunoNome,
+        coachNome,
+        planoNome,
+        returnDate,
+        notificationChannel,
+    }) {
+        const copy = getCopy(domain, milestone);
+        if (!copy) {
+            return { emailStatus: 'skipped', emailProvider: null, emailError: null };
+        }
+
+        const type = domain === 'diet' ? 'diet_return_reminder' : 'workout_return_reminder';
+        const link = domain === 'diet' ? 'diet' : 'workouts';
+
+        const studentUserId = await getAuthUserIdForAluno(this.pool, alunoId);
+        if (!studentUserId) {
+            return { emailStatus: 'skipped_no_user', emailProvider: null, emailError: null };
+        }
+
+        await this.notifyUser(studentUserId, type, copy.title, copy.message, {
+            entityId,
+            alunoId,
+            milestone,
+            returnDate,
+            planoNome,
+            link,
+        });
+
+        const channel = notificationChannel || (await this._resolveChannel(alunoId));
+        if (channel === CHANNEL_IN_APP_ONLY) {
+            return { emailStatus: 'skipped_preference', emailProvider: null, emailError: null };
+        }
+
+        const wantsEmail = await shouldSendEmail(this.pool, alunoId);
+        if (!wantsEmail) {
+            return { emailStatus: 'skipped_preference', emailProvider: null, emailError: null };
+        }
+
+        try {
+            const result = await this.sendStudentEmail(studentUserId, copy.emailType, {
+                alunoNome,
+                coachNome,
+                planoNome,
+                dataRetorno: returnDate,
+            });
+            const provider = result?.provider || 'none';
+            if (provider === 'none' || result?.skipped) {
+                return { emailStatus: 'skipped', emailProvider: provider, emailError: null };
+            }
+            return { emailStatus: 'sent', emailProvider: provider, emailError: null };
+        } catch (error) {
+            return {
+                emailStatus: 'failed',
+                emailProvider: null,
+                emailError: error.message,
+            };
+        }
+    }
+
+    async _resolveChannel(alunoId) {
+        const r = await this.pool.query(
+            `SELECT notification_channel::text AS ch FROM public.alunos WHERE id = $1`,
+            [alunoId],
+        );
+        return r.rows[0]?.ch || 'in_app_and_email';
+    }
+
+    /**
+     * Lembrete de Agenda para o coach (D-2, D-1, D0, atrasado).
+     */
+    async notifyAgendaCoachReminder({
+        agendaEventoId,
+        coachUserId,
+        alunoId,
+        alunoNome,
+        tipo,
+        milestone,
+        eventDate,
+        titulo,
+        prioridade,
+        notificationChannel,
+        forceInAppOnly = false,
+    }) {
+        const copy = buildCoachAgendaCopy(tipo, milestone, alunoNome, titulo);
+        if (!copy) {
+            return { emailStatus: 'skipped', emailProvider: null, emailError: null };
+        }
+
+        const notifType =
+            milestone === 'OVERDUE_DAILY' ? 'agenda_coach_overdue' : 'agenda_coach_reminder';
+
+        await this.notifyUser(coachUserId, notifType, copy.title, copy.message, {
+            agendaEventoId,
+            alunoId,
+            milestone,
+            eventDate,
+            tipo,
+            titulo,
+            prioridade,
+            link: 'calendar',
+        });
+
+        if (forceInAppOnly) {
+            return { emailStatus: 'skipped_preference', emailProvider: null, emailError: null };
+        }
+
+        if (notificationChannel === COACH_CHANNEL_IN_APP_ONLY) {
+            return { emailStatus: 'skipped_preference', emailProvider: null, emailError: null };
+        }
+
+        const wantsEmail = await shouldSendCoachEmail(this.pool, coachUserId);
+        if (!wantsEmail) {
+            return { emailStatus: 'skipped_preference', emailProvider: null, emailError: null };
+        }
+
+        try {
+            const userR = await this.pool.query(
+                `SELECT email FROM app_auth.users WHERE id = $1 LIMIT 1`,
+                [coachUserId],
+            );
+            const to = userR.rows[0]?.email;
+            if (!to) {
+                return { emailStatus: 'skipped', emailProvider: null, emailError: null };
+            }
+
+            const profileR = await this.pool.query(
+                `SELECT nome_completo FROM public.coach_profiles WHERE user_id = $1 LIMIT 1`,
+                [coachUserId],
+            );
+            const coachNome = profileR.rows[0]?.nome_completo || '';
+
+            const { sendCoachNotificationEmail } = require('../utils/send-coach-notification-email');
+            const result = await sendCoachNotificationEmail({
+                to,
+                type: copy.emailType,
+                context: {
+                    coachNome,
+                    alunoNome,
+                    eventTitle: titulo,
+                    eventDate,
+                    message: copy.message,
+                },
+            });
+            const provider = result?.provider || 'none';
+            if (provider === 'none' || result?.skipped) {
+                return { emailStatus: 'skipped', emailProvider: provider, emailError: null };
+            }
+            return { emailStatus: 'sent', emailProvider: provider, emailError: null };
+        } catch (error) {
+            return {
+                emailStatus: 'failed',
+                emailProvider: null,
+                emailError: error.message,
+            };
+        }
+    }
+
+    /**
      * Vencimento de treino — coach e aluno
+     * @deprecated Use notifyReturnReminder + ReturnRemindersJob
      */
     async notifyWorkoutExpirationReminder(workout, daysUntilExpiration) {
         const daysLabel =

@@ -50,6 +50,7 @@ import {
   ImportExtractionSummary,
   ProtocolItemRow,
 } from '@/components/import/ImportDialogParts';
+import { DietReturnDateFields } from '@/components/DietReturnDateFields';
 
 interface Alternativa {
   nome: string;
@@ -97,6 +98,7 @@ interface ParsedStudentData {
   dieta?: {
     nome: string;
     objetivo?: string;
+    data_retorno?: string | null;
     refeicoes: Refeicao[];
     macros?: {
       proteina?: number;
@@ -267,6 +269,7 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
   const [isImporting, setIsImporting] = useState(false);
   const [currentStep, setCurrentStep] = useState<'upload' | 'review' | 'complete'>('upload');
   const [reviewTab, setReviewTab] = useState<'aluno' | 'dieta' | 'protocolo'>('aluno');
+  const [diasValidadeDieta, setDiasValidadeDieta] = useState('');
   const [catalogFoods, setCatalogFoods] = useState<Food[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const catalogLinkedRef = useRef(false);
@@ -297,11 +300,27 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
     setEditableData((prev) => (prev ? linkAlimentosToCatalog(prev, catalogFoods) : prev));
   }, [catalogFoods, editableData?.dieta]);
 
+  const isAcceptedImportFile = (f: File) => {
+    const name = f.name.toLowerCase();
+  const mime = (f.type || '').toLowerCase();
+    return (
+      name.endsWith('.pdf') ||
+      name.endsWith('.csv') ||
+      name.endsWith('.xlsx') ||
+      mime === 'application/pdf' ||
+      mime === 'text/csv' ||
+      mime === 'application/csv' ||
+      mime === 'text/comma-separated-values' ||
+      mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+      mime === 'application/vnd.ms-excel'
+    );
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
-      if (selectedFile.type !== 'application/pdf') {
-        toast.error('Por favor, selecione um arquivo PDF');
+      if (!isAcceptedImportFile(selectedFile)) {
+        toast.error('Selecione um arquivo PDF, CSV ou XLSX');
         return;
       }
       setFile(selectedFile);
@@ -339,7 +358,7 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
       });
 
       if (!response.ok) {
-        let errorMessage = 'Erro ao processar PDF';
+        let errorMessage = 'Erro ao processar ficha';
         try {
           const errorData = await response.json();
           errorMessage = errorData.error || errorData.message || errorMessage;
@@ -366,11 +385,14 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
       setImportWarnings(Array.isArray(data.warnings) ? data.warnings : []);
 
       const conf = meta.confidence?.overall ?? null;
-      if (meta.source === 'local_structured') {
-        toast.info(
-          'Plano Black House reconhecido — extração estruturada (rápida, sem IA). Revise os dados antes de salvar.',
-          { duration: 5000 },
-        );
+      if (meta.source === 'local_structured' || meta.source === 'csv_blackhouse' || meta.source === 'xlsx_blackhouse') {
+        const spreadsheetMsg =
+          meta.source === 'xlsx_blackhouse'
+            ? 'Plano Excel (XLSX) Black House reconhecido — extração estruturada. Revise os dados antes de salvar.'
+            : meta.source === 'csv_blackhouse'
+              ? 'Plano CSV Black House reconhecido — extração estruturada. Revise os dados antes de salvar.'
+              : 'Plano Black House reconhecido — extração estruturada (rápida, sem IA). Revise os dados antes de salvar.';
+        toast.info(spreadsheetMsg, { duration: 5000 });
       } else if (meta.aiUsed) {
         if (conf !== null && conf < 70) {
           toast.warning(`PDF processado com IA, mas a confiança está em ${conf}%. Revise atentamente.`);
@@ -387,14 +409,15 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
       }
 
       catalogLinkedRef.current = false;
+      setDiasValidadeDieta('');
       const normalizedData = normalizeParsedStudentData(data.data);
       setParsedData(normalizedData);
       setEditableData(JSON.parse(JSON.stringify(normalizedData)));
       setReviewTab('aluno');
       setCurrentStep('review');
     } catch (error: any) {
-      console.error('Erro ao processar PDF:', error);
-      toast.error(error.message || 'Erro ao processar PDF');
+      console.error('Erro ao processar ficha:', error);
+      toast.error(error.message || 'Erro ao processar ficha');
     } finally {
       setIsProcessing(false);
     }
@@ -409,11 +432,11 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
     });
   };
 
-  const updateDieta = (field: 'nome' | 'objetivo', value: string) => {
+  const updateDieta = (field: 'nome' | 'objetivo' | 'data_retorno', value: string) => {
     if (!editableData?.dieta) return;
     setEditableData({
       ...editableData,
-      dieta: { ...editableData.dieta, [field]: value },
+      dieta: { ...editableData.dieta, [field]: value || null },
     });
   };
 
@@ -779,7 +802,18 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
         let errorMessage = 'Erro ao importar aluno';
         try {
           const errorData = await response.json();
+          const detailList = Array.isArray(errorData.errors)
+            ? errorData.errors
+                .slice(0, 5)
+                .map((e: { path?: string; message?: string }) =>
+                  e.path ? `${e.path}: ${e.message}` : e.message,
+                )
+                .filter(Boolean)
+            : [];
           errorMessage = errorData.error || errorData.message || errorMessage;
+          if (detailList.length > 0) {
+            errorMessage = `${errorMessage} — ${detailList.join('; ')}`;
+          }
         } catch {
           const text = await response.text();
           errorMessage = text.substring(0, 200) || errorMessage;
@@ -838,6 +872,7 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
     setImportWarnings([]);
     setCurrentStep('upload');
     setReviewTab('aluno');
+    setDiasValidadeDieta('');
   };
 
   const handleCpfCnpjChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -856,7 +891,11 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
       : 'bg-red-500/10 text-red-600 border-red-500/30 dark:text-red-400';
 
   const extractionLabel =
-    importMeta?.source === 'local_structured'
+    importMeta?.source === 'xlsx_blackhouse'
+      ? 'Excel Black House'
+      : importMeta?.source === 'csv_blackhouse'
+      ? 'CSV Black House'
+      : importMeta?.source === 'local_structured'
       ? 'Parser estruturado'
       : importMeta?.aiUsed
         ? `IA (${importMeta.provider?.provider || 'configurada'})`
@@ -877,17 +916,17 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Upload className="w-5 h-5" />
-              Upload do PDF
+              Upload da ficha
             </CardTitle>
             <CardDescription>
-              Faça upload da ficha do aluno em PDF. O sistema extrai automaticamente os dados, preservando refeições, substitutos, dias da semana e fases.
+              Envie a ficha em PDF, CSV ou Excel (XLSX). O modelo Black House é lido directamente — aba A ou B.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-8 text-center hover:border-primary/50 transition-colors">
               <input
                 type="file"
-                accept=".pdf"
+                accept=".pdf,.csv,.xlsx"
                 onChange={handleFileChange}
                 className="hidden"
                 id="pdf-upload"
@@ -897,14 +936,16 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                 {isProcessing ? (
                   <div className="flex flex-col items-center gap-4">
                     <Loader2 className="w-12 h-12 text-primary motion-safe:animate-spin" />
-                    <p className="text-muted-foreground">Processando PDF...</p>
+                    <p className="text-muted-foreground">Processando ficha...</p>
                   </div>
                 ) : (
                   <div className="flex flex-col items-center gap-4">
                     <FileText className="w-12 h-12 text-muted-foreground" />
                     <div>
-                      <p className="font-medium">Clique para selecionar ou arraste o PDF</p>
-                      <p className="text-sm text-muted-foreground">Apenas arquivos PDF são aceitos · até 50MB</p>
+                      <p className="font-medium">Clique para selecionar ou arraste o ficheiro</p>
+                      <p className="text-sm text-muted-foreground">
+                        PDF, CSV ou XLSX (modelo Black House) · até 50MB
+                      </p>
                     </div>
                   </div>
                 )}
@@ -918,7 +959,7 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                   <span className="text-sm font-medium">{file.name}</span>
                 </div>
                 <Button onClick={processFile} size="sm">
-                  Processar PDF
+                  Processar ficha
                 </Button>
               </div>
             )}
@@ -1119,6 +1160,13 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                           placeholder="Nome do plano alimentar"
                         />
                       </div>
+
+                      <DietReturnDateFields
+                        dataRetorno={editableData.dieta.data_retorno || ''}
+                        diasValidade={diasValidadeDieta}
+                        onDataRetornoChange={(iso) => updateDieta('data_retorno', iso)}
+                        onDiasValidadeChange={setDiasValidadeDieta}
+                      />
 
                       {editableData.dieta.macros && (
                         <div className="flex gap-2 flex-wrap">
@@ -1354,7 +1402,7 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                     <div className="p-6 bg-muted/30 rounded-lg text-center space-y-3">
                       <Utensils className="h-8 w-8 text-muted-foreground mx-auto" />
                       <p className="text-sm text-muted-foreground">
-                        Nenhuma refeição detectada no PDF. Clique em "Adicionar Refeição" para criar manualmente.
+                        Nenhuma refeição detectada na ficha. Clique em "Adicionar Refeição" para criar manualmente.
                       </p>
                     </div>
                   )}

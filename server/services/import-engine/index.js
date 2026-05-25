@@ -1,15 +1,7 @@
 /**
  * Import Engine — orquestrador multi-camadas para fichas de alunos.
  *
- * Pipeline:
- *   1. OCR Layer        → texto limpo + detecção de PDF escaneado
- *   2. Document Understanding → segmentação semântica por seção
- *   3. Semantic Layer   → extração IA / parser local
- *   4. Entity Normalizer → sinónimos e reclassificação protocolo
- *   5. Sanitizer + Zod  → schema canónico
- *   6. Normalizer       → formato interno
- *   7. Validation Layer → coerência contextual + correções
- *   8. Confidence Layer → scores por campo
+ * Suporta PDF, CSV e XLSX (modelo Excel Black House).
  */
 
 const ocrLayer = require('./ocr-layer');
@@ -23,17 +15,101 @@ const { safeValidate } = require('../../schemas/import-schema');
 const normalizerService = require('../normalizer.service');
 const validatorService = require('../validator.service');
 const logger = require('../../utils/logger');
+const { parseBlackHouseCSV } = require('../parse-csv-local');
+const { parseBlackHouseXLSX } = require('../parse-xlsx-local');
+
+const CSV_MIMES = new Set(['text/csv', 'application/csv', 'text/comma-separated-values']);
+const XLSX_MIMES = new Set([
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel',
+]);
+
+function isCsvImport(fileName, mimeType) {
+    if (/\.csv$/i.test(String(fileName || ''))) return true;
+    if (!mimeType) return false;
+    return CSV_MIMES.has(String(mimeType).toLowerCase());
+}
+
+function isXlsxImport(fileName, mimeType) {
+    if (/\.xlsx$/i.test(String(fileName || ''))) return true;
+    if (!mimeType) return false;
+    return XLSX_MIMES.has(String(mimeType).toLowerCase());
+}
 
 class ImportEngine {
     /**
-     * Processa PDF completo e devolve dados prontos para revisão.
-     * @param {Buffer} pdfBuffer
-     * @param {Object} options - { fileName, requestId }
+     * Processa ficheiro (PDF, CSV ou XLSX) e devolve dados prontos para revisão.
+     * @param {Buffer} fileBuffer
+     * @param {Object} options - { fileName, requestId, mimeType }
      */
-    async process(pdfBuffer, options = {}) {
-        const { fileName = 'ficha.pdf', requestId = `req-${Date.now()}` } = options;
+    async process(fileBuffer, options = {}) {
+        const { fileName = 'ficha.pdf', requestId = `req-${Date.now()}`, mimeType } = options;
 
-        // 1. OCR
+        if (isXlsxImport(fileName, mimeType)) {
+            return this._processSpreadsheet(fileBuffer, {
+                fileName,
+                requestId,
+                parse: () => parseBlackHouseXLSX(fileBuffer, fileName),
+                source: 'xlsx_blackhouse',
+                format: 'XLSX',
+                hints: { fromXlsx: true },
+            });
+        }
+
+        if (isCsvImport(fileName, mimeType)) {
+            return this._processSpreadsheet(fileBuffer, {
+                fileName,
+                requestId,
+                parse: () => parseBlackHouseCSV(fileBuffer, fileName),
+                source: 'csv_blackhouse',
+                format: 'CSV',
+                hints: { fromCsv: true },
+            });
+        }
+
+        return this._processPdf(fileBuffer, { fileName, requestId });
+    }
+
+    async _processSpreadsheet(_buffer, { fileName, requestId, parse, source, format, hints }) {
+        let raw;
+        try {
+            raw = parse();
+        } catch (err) {
+            err.code = err.code || `${format}_PARSE_FAILED`;
+            throw err;
+        }
+
+        logger.info(`IMPORT-ENGINE: ${format} Black House parseado`, {
+            requestId,
+            fileName,
+            refeicoes: raw?.dieta?.refeicoes?.length || 0,
+            dataRetorno: raw?.dieta?.data_retorno || null,
+        });
+
+        const ocrResult = {
+            text: '',
+            numPages: 1,
+            extractionQuality: 'high',
+            likelyScanned: false,
+            avgCharsPerPage: 0,
+            perPageText: [],
+        };
+        const docAnalysis = {
+            hints: { hasPlanoAlimentar: true, ...hints },
+            sections: [],
+        };
+
+        return this._finalizePipeline(raw, {
+            requestId,
+            fileName,
+            aiUsed: false,
+            source,
+            ocrResult,
+            docAnalysis,
+        });
+    }
+
+    async _processPdf(pdfBuffer, { fileName, requestId }) {
         const ocrResult = await ocrLayer.process(pdfBuffer);
         if (!ocrResult.text?.trim()) {
             const err = new Error(
@@ -43,15 +119,13 @@ class ImportEngine {
             throw err;
         }
 
-        // 2. Document understanding
         const docAnalysis = documentUnderstanding.analyze(ocrResult.text);
 
-        // 3. Semantic extraction
         const { raw, aiUsed, source } = await semanticLayer.extract({
             ocrResult,
             docAnalysis,
             pdfBuffer,
-            fileName
+            fileName,
         });
 
         logger.info('IMPORT-ENGINE: extração bruta concluída', {
@@ -60,13 +134,24 @@ class ImportEngine {
             source,
             aiUsed,
             hasAluno: !!raw?.aluno,
-            refeicoes: raw?.dieta?.refeicoes?.length || 0
+            refeicoes: raw?.dieta?.refeicoes?.length || 0,
         });
 
-        // 4. Entity normalization (antes do sanitizer)
+        return this._finalizePipeline(raw, {
+            requestId,
+            fileName,
+            aiUsed,
+            source,
+            ocrResult,
+            docAnalysis,
+        });
+    }
+
+    async _finalizePipeline(raw, ctx) {
+        const { requestId, aiUsed, source, ocrResult, docAnalysis } = ctx;
+
         const entityNormalized = entityNormalizer.normalizeExtractedData(raw);
 
-        // 5. Sanitize + Zod
         const sanitized = sanitizeAiOutput(entityNormalized, requestId);
 
         if (sanitized.dieta?.refeicoes) {
@@ -83,38 +168,34 @@ class ImportEngine {
             const errors = (schemaValidation.errors || [])
                 .map((e) => `${e.path}: ${e.message}`)
                 .slice(0, 15);
-            const err = new Error('Dados extraídos fora do schema canónico');
+            const err = new Error('Dados extraídos fora do schema canônico');
             err.code = 'SCHEMA_INVALID';
             err.details = errors;
             err.rawOutput = raw;
             throw err;
         }
 
-        // 6. Business normalizer
         const normalizedData = normalizerService.normalize(schemaValidation.data);
 
-        // 7. Contextual validation + fixes
         const validationResult = validationLayer.validateAndFix(normalizedData, {
             fullText: ocrResult.text,
             sections: docAnalysis.sections,
-            docAnalysis
+            docAnalysis,
         });
 
-        // 8. Business validator (legado)
         const businessValidation = validatorService.validateImportData(validationResult.data);
 
-        // 9. Confidence
         const confidence = confidenceLayer.evaluate(validationResult.data, {
             ocrResult,
             docAnalysis,
             validationResult,
-            aiUsed
+            aiUsed,
         });
 
         const warnings = [
             ...businessValidation.errors,
             ...validationResult.issues,
-            ...confidence.warnings
+            ...confidence.warnings,
         ].filter(Boolean);
 
         const extractedTreino = validationResult.data._extracted_treino || null;
@@ -134,15 +215,15 @@ class ImportEngine {
                 ocr: {
                     quality: ocrResult.extractionQuality,
                     likelyScanned: ocrResult.likelyScanned,
-                    avgCharsPerPage: ocrResult.avgCharsPerPage
+                    avgCharsPerPage: ocrResult.avgCharsPerPage,
                 },
                 document: docAnalysis.hints,
                 validation: {
                     fixes: validationResult.fixes,
-                    valid: validationResult.valid && businessValidation.valid
+                    valid: validationResult.valid && businessValidation.valid,
                 },
-                extractedTreino
-            }
+                extractedTreino,
+            },
         };
     }
 }

@@ -806,3 +806,117 @@ COMMENT ON TABLE public.treinos IS 'Treinos cadastrados pelos coaches';
 COMMENT ON TABLE public.dietas IS 'Dietas prescritas para alunos';
 COMMENT ON TABLE public.conversas IS 'Conversas entre coach e aluno';
 COMMENT ON TABLE public.weekly_checkins IS 'Check-ins semanais dos alunos';
+
+-- ============================================================================
+-- Retorno dieta/treino + preferências de notificação do aluno
+-- (detalhe em server/migrations/20260520_return_reminders.sql)
+-- ============================================================================
+
+DO $$ BEGIN
+  CREATE TYPE public.automation_domain AS ENUM ('diet', 'workout');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE public.return_milestone AS ENUM ('D_MINUS_2', 'D_MINUS_1', 'D_DAY');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE public.student_notification_channel AS ENUM ('in_app_only', 'in_app_and_email');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+ALTER TABLE public.alunos
+  ADD COLUMN IF NOT EXISTS timezone text NOT NULL DEFAULT 'America/Sao_Paulo',
+  ADD COLUMN IF NOT EXISTS notification_channel public.student_notification_channel
+    NOT NULL DEFAULT 'in_app_and_email';
+
+ALTER TABLE public.dietas
+  ADD COLUMN IF NOT EXISTS data_retorno date,
+  ADD COLUMN IF NOT EXISTS ativa boolean NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS schedule_cycle_id uuid;
+
+ALTER TABLE public.alunos_treinos
+  ADD COLUMN IF NOT EXISTS data_retorno date,
+  ADD COLUMN IF NOT EXISTS schedule_cycle_id uuid;
+
+CREATE TABLE IF NOT EXISTS public.return_reminder_dispatches (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  domain public.automation_domain NOT NULL,
+  entity_id uuid NOT NULL,
+  aluno_id uuid NOT NULL REFERENCES public.alunos(id) ON DELETE CASCADE,
+  coach_id uuid NOT NULL REFERENCES app_auth.users(id) ON DELETE CASCADE,
+  schedule_cycle_id uuid NOT NULL,
+  milestone public.return_milestone NOT NULL,
+  return_date date NOT NULL,
+  notification_channel public.student_notification_channel,
+  email_status text NOT NULL DEFAULT 'pending',
+  email_provider text,
+  email_error text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT return_reminder_dispatches_unique
+    UNIQUE (domain, entity_id, schedule_cycle_id, milestone)
+);
+
+-- Lembretes de Agenda para coach (server/migrations/20260521_agenda_coach_reminders.sql)
+DO $$ BEGIN
+  CREATE TYPE public.agenda_coach_milestone AS ENUM ('D_MINUS_2', 'D_MINUS_1', 'D_DAY', 'OVERDUE_DAILY');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE public.coach_notification_channel AS ENUM ('in_app_only', 'in_app_and_email');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+ALTER TABLE public.coach_profiles
+  ADD COLUMN IF NOT EXISTS timezone text NOT NULL DEFAULT 'America/Sao_Paulo',
+  ADD COLUMN IF NOT EXISTS notification_channel public.coach_notification_channel
+    NOT NULL DEFAULT 'in_app_and_email';
+
+ALTER TABLE public.agenda_eventos
+  ADD COLUMN IF NOT EXISTS reminder_cycle_id uuid,
+  ADD COLUMN IF NOT EXISTS source_type text,
+  ADD COLUMN IF NOT EXISTS source_id uuid;
+
+CREATE TABLE IF NOT EXISTS public.agenda_coach_reminder_dispatches (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  agenda_evento_id uuid NOT NULL REFERENCES public.agenda_eventos(id) ON DELETE CASCADE,
+  coach_id uuid NOT NULL REFERENCES app_auth.users(id) ON DELETE CASCADE,
+  aluno_id uuid REFERENCES public.alunos(id) ON DELETE SET NULL,
+  reminder_cycle_id uuid NOT NULL,
+  milestone public.agenda_coach_milestone NOT NULL,
+  event_date date NOT NULL,
+  event_tipo text NOT NULL,
+  dispatch_on date NOT NULL DEFAULT CURRENT_DATE,
+  notification_channel public.coach_notification_channel,
+  email_status text NOT NULL DEFAULT 'pending',
+  email_provider text,
+  email_error text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT agenda_coach_reminder_dispatches_cycle_unique
+    UNIQUE (agenda_evento_id, reminder_cycle_id, milestone),
+  CONSTRAINT agenda_coach_reminder_dispatches_overdue_daily_unique
+    UNIQUE (agenda_evento_id, milestone, dispatch_on)
+);
+
+-- CRM, equipa, snooze, tipos consulta/acompanhamento (server/migrations/20260522_agenda_crm_team.sql)
+DO $$ BEGIN ALTER TYPE public.user_role ADD VALUE 'assistant'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+ALTER TABLE public.agenda_eventos DROP CONSTRAINT IF EXISTS agenda_eventos_tipo_check;
+ALTER TABLE public.agenda_eventos ADD CONSTRAINT agenda_eventos_tipo_check CHECK (
+  tipo = ANY (ARRAY['retorno','ajuste_dieta','alteracao_treino','avaliacao','outro','consulta','acompanhamento']::text[])
+);
+
+ALTER TABLE public.agenda_eventos ADD COLUMN IF NOT EXISTS snoozed_until date;
+ALTER TABLE public.alunos
+  ADD COLUMN IF NOT EXISTS ultimo_contato_em timestamptz,
+  ADD COLUMN IF NOT EXISTS ultimo_contato_tipo text,
+  ADD COLUMN IF NOT EXISTS ultimo_contato_resumo text,
+  ADD COLUMN IF NOT EXISTS ultimo_contato_agenda_evento_id uuid;
+
+CREATE TABLE IF NOT EXISTS public.coach_team_members (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_coach_id uuid NOT NULL REFERENCES app_auth.users(id) ON DELETE CASCADE,
+  member_user_id uuid NOT NULL REFERENCES app_auth.users(id) ON DELETE CASCADE,
+  team_role text NOT NULL DEFAULT 'assistant' CHECK (team_role IN ('assistant','viewer')),
+  ativo boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT coach_team_members_unique UNIQUE (owner_coach_id, member_user_id)
+);

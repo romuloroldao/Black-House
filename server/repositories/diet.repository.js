@@ -69,18 +69,29 @@ class DietRepository {
             throw error;
         }
         
-        const query = `
+        const hasReturn = dietaData.data_retorno != null;
+        const query = hasReturn
+            ? `
+            INSERT INTO public.dietas (
+                nome, objetivo, aluno_id, data_retorno, ativa
+            ) VALUES ($1, $2, $3, $4::date, true)
+            RETURNING id, nome, objetivo, aluno_id, data_retorno, ativa, schedule_cycle_id, created_at
+        `
+            : `
             INSERT INTO public.dietas (
                 nome, objetivo, aluno_id
             ) VALUES ($1, $2, $3)
-            RETURNING id, nome, objetivo, aluno_id, created_at
+            RETURNING id, nome, objetivo, aluno_id, data_retorno, ativa, schedule_cycle_id, created_at
         `;
-        
-        const values = [
-            dietaData.nome,
-            dietaData.objetivo || null,
-            dietaData.aluno_id
-        ];
+
+        const values = hasReturn
+            ? [
+                  dietaData.nome,
+                  dietaData.objetivo || null,
+                  dietaData.aluno_id,
+                  dietaData.data_retorno,
+              ]
+            : [dietaData.nome, dietaData.objetivo || null, dietaData.aluno_id];
         
         const result = await this.query(query, values);
         return result.rows[0];

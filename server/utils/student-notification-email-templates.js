@@ -156,6 +156,103 @@ function buildStudentNotificationEmail(type, ctx = {}) {
       return null;
     }
 
+    case 'diet_return_d_minus_2':
+    case 'diet_return_d_minus_1':
+    case 'diet_return_d_day': {
+      const coachLine = ctx.coachNome
+        ? ` Seu coach ${String(ctx.coachNome).trim()} aguarda seu retorno.`
+        : '';
+      const retorno = formatDateBR(ctx.dataRetorno);
+      const messages = {
+        diet_return_d_minus_2: {
+          preheader: 'Faltam 2 dias para o seu retorno da dieta.',
+          headline: 'Retorno da dieta',
+          intro: 'Faltam 2 dias para o seu retorno da dieta.',
+          subjectSuffix: 'Faltam 2 dias para seu retorno de dieta',
+        },
+        diet_return_d_minus_1: {
+          preheader: 'Amanhã é o dia do seu retorno da dieta.',
+          headline: 'Retorno da dieta',
+          intro: 'Amanhã é o dia do seu retorno da dieta.',
+          subjectSuffix: 'Retorno de dieta amanhã',
+        },
+        diet_return_d_day: {
+          preheader: 'Hoje é o dia do seu retorno da dieta.',
+          headline: 'Retorno da dieta',
+          intro: 'Hoje é o dia do seu retorno da dieta.',
+          subjectSuffix: 'Hoje é seu retorno de dieta',
+        },
+      };
+      const m = messages[type];
+      return {
+        subject: `${appName} — ${m.subjectSuffix}`,
+        text:
+          `${appName}\n\n${greeting}\n\n${m.intro}${coachLine}\n` +
+          (retorno !== 'em breve' ? `Data prevista: ${retorno}.\n\n` : '\n') +
+          `${studentPortalUrl('diet')}\n\n${baseFoot}`,
+        htmlPayload: {
+          preheader: m.preheader,
+          appName,
+          headline: m.headline,
+          intro: m.intro,
+          introSecond: `${coachLine}${retorno !== 'em breve' ? ` Retorno previsto: ${retorno}.` : ''}`.trim(),
+          ctaUrl: studentPortalUrl('diet'),
+          ctaLabel: 'Acessar minha dieta',
+          expiryLine: 'Você também recebe este aviso no sininho do portal.',
+          footnote: baseFoot,
+        },
+      };
+    }
+
+    case 'workout_return_d_minus_2':
+    case 'workout_return_d_minus_1':
+    case 'workout_return_d_day': {
+      const treino = ctx.planoNome ? String(ctx.planoNome) : 'seu treino';
+      const coachLine = ctx.coachNome
+        ? ` Seu coach ${String(ctx.coachNome).trim()} está acompanhando seu ciclo.`
+        : '';
+      const retorno = formatDateBR(ctx.dataRetorno);
+      const messages = {
+        workout_return_d_minus_2: {
+          preheader: 'Faltam 2 dias para o seu retorno do treino.',
+          headline: 'Retorno do treino',
+          intro: 'Faltam 2 dias para o seu retorno do treino.',
+          subjectSuffix: 'Faltam 2 dias para seu retorno de treino',
+        },
+        workout_return_d_minus_1: {
+          preheader: 'Amanhã é o dia do seu retorno do treino.',
+          headline: 'Retorno do treino',
+          intro: 'Amanhã é o dia do seu retorno do treino.',
+          subjectSuffix: 'Retorno de treino amanhã',
+        },
+        workout_return_d_day: {
+          preheader: 'Hoje é o dia do seu retorno do treino.',
+          headline: 'Retorno do treino',
+          intro: 'Hoje é o dia do seu retorno do treino.',
+          subjectSuffix: 'Hoje é seu retorno de treino',
+        },
+      };
+      const m = messages[type];
+      return {
+        subject: `${appName} — ${m.subjectSuffix}`,
+        text:
+          `${appName}\n\n${greeting}\n\n${m.intro} (${treino}).${coachLine}\n` +
+          (retorno !== 'em breve' ? `Data prevista: ${retorno}.\n\n` : '\n') +
+          `${studentPortalUrl('workouts')}\n\n${baseFoot}`,
+        htmlPayload: {
+          preheader: m.preheader,
+          appName,
+          headline: m.headline,
+          intro: `${m.intro} Plano: "${treino}".`,
+          introSecond: `${coachLine}${retorno !== 'em breve' ? ` Retorno previsto: ${retorno}.` : ''}`.trim(),
+          ctaUrl: studentPortalUrl('workouts'),
+          ctaLabel: 'Abrir treinos',
+          expiryLine: 'Você também recebe este aviso no sininho do portal.',
+          footnote: baseFoot,
+        },
+      };
+    }
+
     case 'workout_expiration_reminder': {
       const treino = ctx.treinoNome ? String(ctx.treinoNome) : 'seu treino';
       const days = ctx.daysUntilExpiration != null ? Number(ctx.daysUntilExpiration) : 0;

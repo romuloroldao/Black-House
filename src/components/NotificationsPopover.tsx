@@ -131,6 +131,8 @@ const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
       case 'aviso':
         return MessageSquare;
       case 'agenda':
+      case 'agenda_coach_reminder':
+      case 'agenda_coach_overdue':
       case 'event_reminder':
       case 'novo_evento':
       case 'evento_cancelado':

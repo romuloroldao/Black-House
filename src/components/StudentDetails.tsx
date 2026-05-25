@@ -15,6 +15,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import StudentProgressDashboard from "./student/StudentProgressDashboard";
 import StudentFinancialManagement from "./student/StudentFinancialManagement";
+import { DietReturnDateFields } from "@/components/DietReturnDateFields";
+import { formatDateBR } from "@/lib/date-format";
 
 interface Student {
   id: string;
@@ -24,6 +26,9 @@ interface Student {
   peso: number | null;
   objetivo: string | null;
   created_at: string;
+  ultimo_contato_em?: string | null;
+  ultimo_contato_resumo?: string | null;
+  ultimo_contato_tipo?: string | null;
 }
 
 interface Feedback {
@@ -49,6 +54,7 @@ interface Dieta {
   nome: string;
   objetivo: string | null;
   data_criacao: string;
+  data_retorno?: string | null;
 }
 
 interface Foto {
@@ -86,7 +92,12 @@ export default function StudentDetails() {
   const [novaDieta, setNovaDieta] = useState({
     nome: "",
     objetivo: "",
+    data_retorno: "",
+    dias_validade: "",
   });
+
+  const resetNovaDieta = () =>
+    setNovaDieta({ nome: "", objetivo: "", data_retorno: "", dias_validade: "" });
 
   useEffect(() => {
     if (id) {
@@ -269,6 +280,7 @@ export default function StudentDetails() {
           treino_id: treinoSelecionado,
           ativo: true,
           data_expiracao: dataExpiracao?.toISOString().split('T')[0],
+          data_retorno: dataExpiracao?.toISOString().split('T')[0],
           dias_antecedencia_notificacao: diasAntecedenciaNotif ? parseInt(diasAntecedenciaNotif) : 7,
           notificacao_expiracao_enviada: false,
         }),
@@ -347,6 +359,7 @@ export default function StudentDetails() {
           nome: novaDieta.nome,
           objetivo: novaDieta.objetivo || null,
           aluno_id: id,
+          data_retorno: novaDieta.data_retorno || null,
         }),
       });
       const dieta = createResult.success ? createResult.data : null;
@@ -357,7 +370,7 @@ export default function StudentDetails() {
       });
 
       setIsCriarDietaOpen(false);
-      setNovaDieta({ nome: "", objetivo: "" });
+      resetNovaDieta();
       carregarDadosAluno();
       
       // Redirecionar para a página de edição da dieta
@@ -457,6 +470,14 @@ export default function StudentDetails() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">{student.nome}</h1>
+            {student.ultimo_contato_resumo && (
+              <p className="text-sm text-muted-foreground mt-1">
+                Último contacto: {student.ultimo_contato_resumo}
+                {student.ultimo_contato_em
+                  ? ` — ${new Date(student.ultimo_contato_em).toLocaleDateString("pt-BR")}`
+                  : ""}
+              </p>
+            )}
             <p className="text-muted-foreground">{student.email}</p>
           </div>
           <Button onClick={handleIniciarConversa} disabled={saving}>
@@ -612,18 +633,27 @@ export default function StudentDetails() {
                   <div className="space-y-4 py-4">
                     <div className="space-y-2">
                       <Label>Selecione um treino</Label>
-                      <Select value={treinoSelecionado} onValueChange={setTreinoSelecionado}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Escolha um treino..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {treinosDisponiveis.map((t) => (
-                            <SelectItem key={t.id} value={t.id}>
-                              {t.nome} - {t.categoria} ({t.dificuldade})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      {treinosDisponiveis.length === 0 ? (
+                        <div className="rounded-md border border-dashed border-amber-500/40 bg-amber-500/5 p-3 text-sm text-muted-foreground">
+                          <p className="font-medium text-foreground">Nenhum treino cadastrado</p>
+                          <p className="mt-1">
+                            Crie treinos no menu lateral em <strong>Treinos</strong> antes de atribuir a um aluno.
+                          </p>
+                        </div>
+                      ) : (
+                        <Select value={treinoSelecionado} onValueChange={setTreinoSelecionado}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Escolha um treino..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {treinosDisponiveis.map((t) => (
+                              <SelectItem key={t.id} value={t.id}>
+                                {t.nome} - {t.categoria} ({t.dificuldade})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="dias-validade">Validade (dias)</Label>
@@ -657,7 +687,10 @@ export default function StudentDetails() {
                       <Button variant="outline" onClick={() => setIsAtribuirTreinoOpen(false)}>
                         Cancelar
                       </Button>
-                      <Button onClick={handleAtribuirTreino} disabled={saving}>
+                      <Button
+                        onClick={handleAtribuirTreino}
+                        disabled={saving || treinosDisponiveis.length === 0}
+                      >
                         {saving ? (
                           <>
                             <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
@@ -755,6 +788,11 @@ export default function StudentDetails() {
                   <p className="text-xs text-muted-foreground mt-2">
                     Criada em: {new Date(dieta.data_criacao).toLocaleDateString('pt-BR')}
                   </p>
+                  {dieta.data_retorno && (
+                    <p className="text-xs text-muted-foreground">
+                      Retorno / vencimento: {formatDateBR(dieta.data_retorno)}
+                    </p>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <Button className="flex-1" variant="outline" onClick={() => navigate(`/dieta/${dieta.id}`)}>
@@ -772,7 +810,7 @@ export default function StudentDetails() {
                       <DialogHeader>
                         <DialogTitle>Criar Nova Dieta</DialogTitle>
                         <DialogDescription>
-                          Defina nome e objetivo para criar uma nova dieta para este aluno.
+                          Defina nome, objetivo e opcionalmente a data de retorno da dieta.
                         </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-4 py-4">
@@ -801,6 +839,16 @@ export default function StudentDetails() {
                             </SelectContent>
                           </Select>
                         </div>
+                        <DietReturnDateFields
+                          dataRetorno={novaDieta.data_retorno}
+                          diasValidade={novaDieta.dias_validade}
+                          onDataRetornoChange={(iso) =>
+                            setNovaDieta({ ...novaDieta, data_retorno: iso })
+                          }
+                          onDiasValidadeChange={(dias) =>
+                            setNovaDieta({ ...novaDieta, dias_validade: dias })
+                          }
+                        />
                         <div className="flex gap-2 justify-end">
                           <Button variant="outline" onClick={() => setIsCriarDietaOpen(false)}>
                             Cancelar
@@ -835,7 +883,7 @@ export default function StudentDetails() {
                     <DialogHeader>
                       <DialogTitle>Criar Nova Dieta</DialogTitle>
                       <DialogDescription>
-                        Defina nome e objetivo para criar uma nova dieta para este aluno.
+                        Defina nome, objetivo e opcionalmente a data de retorno da dieta.
                       </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
@@ -864,6 +912,16 @@ export default function StudentDetails() {
                           </SelectContent>
                         </Select>
                       </div>
+                      <DietReturnDateFields
+                        dataRetorno={novaDieta.data_retorno}
+                        diasValidade={novaDieta.dias_validade}
+                        onDataRetornoChange={(iso) =>
+                          setNovaDieta({ ...novaDieta, data_retorno: iso })
+                        }
+                        onDiasValidadeChange={(dias) =>
+                          setNovaDieta({ ...novaDieta, dias_validade: dias })
+                        }
+                      />
                       <div className="flex gap-2 justify-end">
                         <Button variant="outline" onClick={() => setIsCriarDietaOpen(false)}>
                           Cancelar
