@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import { readSessionProgress } from "@/lib/workout-session-utils";
 const StudentWorkoutsView = () => {
   const { user } = useAuth();
   const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [treinos, setTreinos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [sessionTreino, setSessionTreino] = useState<any | null>(null);
@@ -104,6 +106,17 @@ const StudentWorkoutsView = () => {
     }
     setLoading(false);
   };
+
+  useEffect(() => {
+    if (loading || searchParams.get("session") !== "1") return;
+    const principal = treinos[0];
+    if (principal?.exercicios?.length) {
+      setSessionTreino(principal);
+      const next = new URLSearchParams(searchParams);
+      next.delete("session");
+      setSearchParams(next, { replace: true });
+    }
+  }, [loading, treinos, searchParams, setSearchParams]);
 
   const exercicioCount = useMemo(() => {
     const ex = treinoPrincipal?.exercicios;

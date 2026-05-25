@@ -35,7 +35,8 @@ const StudentTodayView = ({ hojeState }: StudentTodayViewProps) => {
     setSearchParams({ tab: task.tab, ...task.searchParams });
   };
 
-  const openTab = (tab: string) => setSearchParams({ tab });
+  const openTab = (tab: string, extra?: Record<string, string>) =>
+    setSearchParams({ tab, ...extra });
 
   if (!isReady) {
     return (
@@ -77,7 +78,7 @@ const StudentTodayView = ({ hojeState }: StudentTodayViewProps) => {
             data_retorno?: string | null;
           } | null
         }
-        onOpenTreino={() => openTab("workouts")}
+        onOpenTreino={() => openTab("workouts", { session: "1" })}
         onOpenDieta={() => openTab("diet")}
       />
 
