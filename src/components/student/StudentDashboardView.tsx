@@ -46,7 +46,6 @@ const StudentDashboardView = () => {
   const [, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [alunoData, setAlunoData] = useState<any>(null);
-  const [alunoTreino, setAlunoTreino] = useState<any>(null);
   const [treinoAtual, setTreinoAtual] = useState<any>(null);
   const [dietaAtual, setDietaAtual] = useState<any>(null);
   const [proximosEventos, setProximosEventos] = useState<any[]>([]);
@@ -72,7 +71,6 @@ const StudentDashboardView = () => {
 
     if (!aluno) {
       setAlunoData(null);
-      setAlunoTreino(null);
       setTreinoAtual(null);
       setDietaAtual(null);
       setProximosEventos([]);
@@ -88,8 +86,6 @@ const StudentDashboardView = () => {
     const alunosTreinos = alunosTreinosResult.success && Array.isArray(alunosTreinosResult.data) ? alunosTreinosResult.data : [];
     const alunoTreinoRow =
       alunosTreinos.find((at) => at.aluno_id === aluno.id && at.ativo === true) || null;
-    setAlunoTreino(alunoTreinoRow);
-
     let treinoData: any = null;
     if (alunoTreinoRow?.treino_id) {
       const treinoResult = await apiClient.requestSafe<any>(`/api/treinos/${alunoTreinoRow.treino_id}`);
