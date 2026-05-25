@@ -52,8 +52,8 @@ const StudentDashboardView = () => {
   const [returnCountdown, setReturnCountdown] = useState<ReturnCountdownInfo | null>(null);
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
 
-  const navigateToTab = (tab: string) => {
-    setSearchParams({ tab });
+  const navigateToTab = (task: { tab: string; searchParams?: Record<string, string> }) => {
+    setSearchParams({ tab: task.tab, ...task.searchParams });
   };
 
   useEffect(() => {

@@ -1,4 +1,19 @@
-import { Home, Utensils, Dumbbell, Play, MessageSquare, TrendingUp, DollarSign, User, LogOut, FileText, Megaphone, ClipboardCheck } from "lucide-react";
+import {
+  Home,
+  Utensils,
+  Dumbbell,
+  Play,
+  MessageSquare,
+  TrendingUp,
+  DollarSign,
+  User,
+  LogOut,
+  FileText,
+  ClipboardCheck,
+  ChevronDown,
+  MoreHorizontal,
+  type LucideIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -13,11 +28,15 @@ import logoWhite from "@/assets/logo-white.svg";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
-import MessagesPopover from "./MessagesPopover";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 
 interface StudentSidebarProps {
   activeTab: string;
-  onTabChange: (tab: string) => void;
+  onTabChange: (tab: string, extra?: Record<string, string>) => void;
   mobileOpen?: boolean;
   onMobileOpenChange?: (open: boolean) => void;
 }
@@ -41,6 +60,10 @@ const StudentSidebar = ({
   const [studentAvatar, setStudentAvatar] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(true);
   const isMarkingAsReadRef = useRef(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  const MORE_TAB_IDS = ["progress", "videos", "reports", "financial", "profile"];
+  const coachUnreadTotal = unreadMessages + unreadCount;
 
   const getFirstName = (value?: string | null): string => {
     if (!value) return "Usuário";
@@ -123,6 +146,12 @@ const StudentSidebar = ({
     }
   }, [user, toast, identity]);
 
+  useEffect(() => {
+    if (MORE_TAB_IDS.includes(activeTab)) {
+      setMoreOpen(true);
+    }
+  }, [activeTab]);
+
   const loadStudentProfile = async () => {
     if (!user?.id) {
       setStudentAvatar(null);
@@ -195,84 +224,22 @@ const StudentSidebar = ({
     setUnreadMessages(newCount);
   };
 
-  const markChatMessagesAsRead = async () => {
-    // DESIGN-SUPABASE-PURGE-MESSAGING-001: Apenas alunos podem marcar mensagens como lidas
-    if (!user || user.role !== 'aluno') return;
-
-    // Clear badge immediately for better UX
-    setUnreadMessages(0);
-
-    const mensagensResult = await apiClient.requestSafe<any[]>('/api/mensagens');
-    const mensagens = mensagensResult.success && Array.isArray(mensagensResult.data) ? mensagensResult.data : [];
-    
-    const mensagensNaoLidas = mensagens.filter(
-      (m: any) => m.destinatario_id === user.id && !m.lida
-    );
-
-    for (const msg of mensagensNaoLidas) {
-      await apiClient.requestSafe(`/api/mensagens/${msg.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ lida: true }),
-      });
-    }
-  };
-
-  const markAnnouncementsAsRead = async () => {
-    if (!user) return;
-
-    // Set flag to prevent polling from reloading
-    isMarkingAsReadRef.current = true;
-    
-    // Clear badge immediately for better UX
-    setUnreadCount(0);
-
-    const alunoResult = await apiClient.getMeSafe();
-    const aluno = alunoResult.success ? alunoResult.data : null;
-    if (!aluno) {
-      isMarkingAsReadRef.current = false;
-      return;
-    }
-
-    const turmasResult = await apiClient.requestSafe<any[]>('/api/turmas-alunos');
-    const turmasAluno = turmasResult.success && Array.isArray(turmasResult.data) ? turmasResult.data : [];
-    const turmaIds = turmasAluno.filter(t => t.aluno_id === aluno.id).map(t => t.turma_id);
-
-    const avisosResult = await apiClient.requestSafe<any[]>('/api/avisos-destinatarios');
-    const avisos = avisosResult.success && Array.isArray(avisosResult.data) ? avisosResult.data : [];
-
-    const individualAvisos = avisos.filter(a => a.aluno_id === aluno.id && a.lido === false);
-    for (const aviso of individualAvisos) {
-      await apiClient.requestSafe(`/api/avisos-destinatarios/${aviso.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ lido: true, lido_em: new Date().toISOString() })
-      });
-    }
-
-    if (turmaIds.length > 0) {
-      const classAvisos = avisos.filter(a => a.lido === false && turmaIds.includes(a.turma_id));
-      for (const aviso of classAvisos) {
-        await apiClient.requestSafe(`/api/avisos-destinatarios/${aviso.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ lido: true, lido_em: new Date().toISOString() })
-        });
-      }
-    }
-
-    setTimeout(() => {
-      isMarkingAsReadRef.current = false;
-    }, 500);
-  };
-
   const handleTabChange = (tab: string) => {
-    onTabChange(tab);
-    onMobileOpenChange?.(false);
-
-    // Mark messages as read when user opens the respective tab
-    if (tab === "chat" && unreadMessages > 0) {
-      markChatMessagesAsRead();
-    } else if (tab === "messages" && unreadCount > 0) {
-      markAnnouncementsAsRead();
+    if (tab === "coach") {
+      const coachView =
+        unreadMessages > 0 ? "chat" : unreadCount > 0 ? "avisos" : "chat";
+      onTabChange("coach", { coachView });
+    } else {
+      onTabChange(tab);
     }
+    onMobileOpenChange?.(false);
+  };
+
+  const isTabActive = (tabId: string): boolean => {
+    if (tabId === "coach") {
+      return activeTab === "coach" || activeTab === "chat" || activeTab === "messages";
+    }
+    return activeTab === tabId;
   };
 
   const handleLogout = async () => {
@@ -281,19 +248,63 @@ const StudentSidebar = ({
     navigate("/auth");
   };
 
-  const menuItems = [
-    { id: "dashboard", label: "Dashboard", icon: Home },
-    { id: "diet", label: "Minha Dieta", icon: Utensils },
-    { id: "workouts", label: "Meus Treinos", icon: Dumbbell },
-    { id: "videos", label: "Galeria de Vídeos", icon: Play },
-    { id: "chat", label: "Chat", icon: MessageSquare, badge: unreadMessages },
-    { id: "messages", label: "Mensagens do Coach", icon: Megaphone, badge: unreadCount },
-    { id: "reports", label: "Meus Relatórios", icon: FileText },
-    { id: "checkin", label: "Check-in Semanal", icon: ClipboardCheck },
-    { id: "progress", label: "Meu Progresso", icon: TrendingUp },
-    { id: "financial", label: "Financeiro", icon: DollarSign },
-    { id: "profile", label: "Meu Perfil", icon: User },
+  type MenuItem = {
+    id: string;
+    label: string;
+    icon: LucideIcon;
+    badge?: number;
+  };
+
+  const primaryMenuItems: MenuItem[] = [
+    { id: "dashboard", label: "Início", icon: Home },
+    { id: "diet", label: "Dieta", icon: Utensils },
+    { id: "workouts", label: "Treinos", icon: Dumbbell },
+    { id: "coach", label: "Coach", icon: MessageSquare, badge: coachUnreadTotal },
+    { id: "checkin", label: "Check-in", icon: ClipboardCheck },
   ];
+
+  const moreMenuItems: MenuItem[] = [
+    { id: "progress", label: "Progresso", icon: TrendingUp },
+    { id: "videos", label: "Vídeos", icon: Play },
+    { id: "reports", label: "Relatórios", icon: FileText },
+    { id: "financial", label: "Financeiro", icon: DollarSign },
+    { id: "profile", label: "Perfil", icon: User },
+  ];
+
+  const renderMenuButton = (item: MenuItem) => {
+    const Icon = item.icon;
+    const isActive = isTabActive(item.id);
+    const itemBadge = typeof item.badge === "number" ? item.badge : undefined;
+
+    return (
+      <Tooltip key={item.id}>
+        <TooltipTrigger asChild>
+          <Button
+            variant={isActive ? "default" : "ghost"}
+            className="w-full justify-start relative transition-all duration-200 ease-in-out motion-reduce:transition-none"
+            onClick={() => handleTabChange(item.id)}
+          >
+            <Icon className="mr-3 h-4 w-4 shrink-0" />
+            {item.label}
+            {itemBadge !== undefined && itemBadge > 0 && (
+              <Badge
+                variant="destructive"
+                className={cn(
+                  "ml-auto",
+                  animateBadge && item.id === "coach" && "motion-safe:animate-bounce",
+                )}
+              >
+                {itemBadge > 9 ? "9+" : itemBadge}
+              </Badge>
+            )}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="right" className="md:hidden">
+          <p>{item.label}</p>
+        </TooltipContent>
+      </Tooltip>
+    );
+  };
 
   // DESIGN-023-RUNTIME-CRASH-RESOLUTION-001: durante bootstrap mostra esqueleto (evita sumir o menu no mobile)
   const showSkeleton = !isReady;
@@ -320,9 +331,8 @@ const StudentSidebar = ({
             "max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-[120] max-md:flex max-md:h-full max-md:w-[min(288px,88vw)] max-md:shadow-xl"
         )}
       >
-      <div className="p-6 border-b border-border flex items-center justify-between">
+      <div className="border-b border-border p-6">
         <img src={logoWhite} alt="Black House" className="h-12 w-auto" />
-        <MessagesPopover unreadCount={unreadMessages} onCountChange={setUnreadMessages} />
       </div>
 
       <ScrollArea className="flex-1">
@@ -334,47 +344,45 @@ const StudentSidebar = ({
                   <Skeleton key={i} className="h-10 w-full" />
                 ))}
               </div>
-            ) : Array.isArray(menuItems) && menuItems.length > 0 ? (
-              menuItems.map((item) => {
-                // DESIGN-023: Optional chaining para acessos profundos
-                const Icon = item?.icon;
-                const itemId = item?.id || '';
-                const itemLabel = item?.label || '';
-                const itemBadge = typeof item?.badge === 'number' ? item.badge : undefined;
-                const isActive = activeTab === itemId;
-                
-                if (!Icon) {
-                  console.warn('[DESIGN-023] Item de menu sem ícone:', item);
-                  return null;
-                }
+            ) : (
+              <>
+                {primaryMenuItems.map(renderMenuButton)}
 
-                return (
-                  <Tooltip key={itemId}>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant={isActive ? "default" : "ghost"}
-                        className="w-full justify-start relative transition-all duration-200 ease-in-out motion-reduce:transition-none"
-                        onClick={() => handleTabChange(itemId)}
-                      >
-                        <Icon className="mr-3 h-4 w-4" />
-                        {itemLabel}
-                        {itemBadge !== undefined && itemBadge > 0 && (
-                          <Badge 
-                            variant="destructive" 
-                            className={`ml-auto ${animateBadge && itemId === 'chat' ? 'motion-safe:animate-bounce' : ''}`}
-                          >
-                            {itemBadge}
-                          </Badge>
+                <Collapsible
+                  open={moreOpen}
+                  onOpenChange={setMoreOpen}
+                  className="pt-2 md:hidden"
+                >
+                  <CollapsibleTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      className="w-full justify-between text-muted-foreground hover:text-foreground"
+                    >
+                      <span className="flex items-center gap-3">
+                        <MoreHorizontal className="h-4 w-4" />
+                        Mais
+                      </span>
+                      <ChevronDown
+                        className={cn(
+                          "h-4 w-4 transition-transform motion-reduce:transition-none",
+                          moreOpen && "rotate-180",
                         )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right" className="md:hidden">
-                      <p>{itemLabel}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                );
-              })
-            ) : null}
+                      />
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-1 pt-1">
+                    {moreMenuItems.map(renderMenuButton)}
+                  </CollapsibleContent>
+                </Collapsible>
+
+                <div className="hidden space-y-1 border-t border-border/60 pt-3 md:block">
+                  <p className="px-3 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Mais
+                  </p>
+                  {moreMenuItems.map(renderMenuButton)}
+                </div>
+              </>
+            )}
           </TooltipProvider>
         </nav>
       </ScrollArea>

@@ -6,12 +6,11 @@ import StudentDashboardView from "@/components/student/StudentDashboardView";
 import StudentDietView from "@/components/student/StudentDietView";
 import StudentWorkoutsView from "@/components/student/StudentWorkoutsView";
 import StudentVideosView from "@/components/student/StudentVideosView";
-import StudentChatView from "@/components/student/StudentChatView";
+import StudentCoachHubView from "@/components/student/StudentCoachHubView";
 import StudentProgressView from "@/components/student/StudentProgressView";
 import StudentFinancialView from "@/components/student/StudentFinancialView";
 import StudentProfileView from "@/components/student/StudentProfileView";
 import StudentReportsView from "@/components/student/StudentReportsView";
-import StudentMessagesView from "@/components/student/StudentMessagesView";
 import StudentWeeklyCheckin from "@/components/student/StudentWeeklyCheckin";
 import NotificationsPopover from "@/components/NotificationsPopover";
 import { Button } from "@/components/ui/button";
@@ -27,12 +26,20 @@ const StudentPortal = () => {
 
   useEffect(() => {
     const tab = searchParams.get("tab") || "dashboard";
+    if (tab === "chat" || tab === "messages") {
+      setSearchParams(
+        { tab: "coach", coachView: tab === "chat" ? "chat" : "avisos" },
+        { replace: true },
+      );
+      setActiveTab("coach");
+      return;
+    }
     setActiveTab(tab);
-  }, [searchParams]);
+  }, [searchParams, setSearchParams]);
 
-  const handleTabChange = (tab: string) => {
+  const handleTabChange = (tab: string, extra?: Record<string, string>) => {
     setActiveTab(tab);
-    setSearchParams({ tab });
+    setSearchParams({ tab, ...extra });
     setMobileNavOpen(false);
   };
 
@@ -48,10 +55,10 @@ const StudentPortal = () => {
           return <StudentWorkoutsView />;
         case "videos":
           return <StudentVideosView />;
+        case "coach":
         case "chat":
-          return <StudentChatView />;
         case "messages":
-          return <StudentMessagesView />;
+          return <StudentCoachHubView />;
         case "reports":
           return <StudentReportsView />;
         case "progress":

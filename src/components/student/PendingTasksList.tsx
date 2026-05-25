@@ -13,7 +13,7 @@ import type { PendingTask } from "@/lib/student-portal-utils";
 type PendingTasksListProps = {
   loading?: boolean;
   tasks: PendingTask[];
-  onNavigate: (tab: string) => void;
+  onNavigate: (task: PendingTask) => void;
 };
 
 const iconById: Record<string, typeof ClipboardCheck> = {
@@ -69,7 +69,7 @@ const PendingTasksList = ({ loading, tasks, onNavigate }: PendingTasksListProps)
                         ? "h-auto w-full justify-between gap-3 rounded-lg border border-primary/25 bg-primary/5 px-3 py-3 text-left hover:bg-primary/10"
                         : "h-auto w-full justify-between gap-3 rounded-lg border border-border/60 px-3 py-3 text-left hover:bg-muted/50"
                     }
-                    onClick={() => onNavigate(task.tab)}
+                    onClick={() => onNavigate(task)}
                   >
                     <span className="flex min-w-0 flex-1 items-start gap-3">
                       <Icon className="mt-0.5 h-5 w-5 shrink-0 text-primary" />

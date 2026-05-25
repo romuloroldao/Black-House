@@ -6,6 +6,8 @@ export type PendingTask = {
   description: string;
   tab: string;
   priority: "high" | "normal";
+  /** Parâmetros extra na URL do portal (ex.: coachView=chat). */
+  searchParams?: Record<string, string>;
 };
 
 export type ReturnCountdownInfo = {
@@ -143,7 +145,8 @@ export function buildPendingTasks(input: {
           ? "1 mensagem nova no chat"
           : `${input.unreadChat} mensagens novas no chat`,
       description: "Seu coach enviou uma mensagem. Responda quando puder.",
-      tab: "chat",
+      tab: "coach",
+      searchParams: { coachView: "chat" },
       priority: "high",
     });
   }
@@ -155,8 +158,9 @@ export function buildPendingTasks(input: {
         input.unreadAnnouncements === 1
           ? "1 aviso do coach"
           : `${input.unreadAnnouncements} avisos do coach`,
-      description: "Leia os avisos na aba Mensagens do Coach.",
-      tab: "messages",
+      description: "Leia os avisos do coach na aba Coach.",
+      tab: "coach",
+      searchParams: { coachView: "avisos" },
       priority: "normal",
     });
   }
