@@ -63,6 +63,12 @@ All colors MUST be HSL.
     --student-surface: 0 0% 8%;
     --student-touch-min: 2.75rem;
 
+    /* Scrollbar discreto — alinhado ao tema escuro (não competir com o conteúdo) */
+    --scrollbar-size: 8px;
+    --scrollbar-thumb: 0 0% 32%;
+    --scrollbar-thumb-hover: 0 0% 42%;
+    --scrollbar-thumb-active: 0 0% 48%;
+
     --radius: 0.5rem;
 
     --sidebar-background: 0 0% 98%;
@@ -128,6 +134,81 @@ All colors MUST be HSL.
 
   body {
     @apply bg-background text-foreground;
+  }
+
+  /*
+   * Scrollbars nativos — Firefox + WebKit (Chrome, Edge, Safari).
+   * Track transparente; thumb fino e neutro; sem setas do sistema.
+   */
+  html {
+    scrollbar-gutter: stable;
+  }
+
+  html,
+  body,
+  :where(
+    .overflow-y-auto,
+    .overflow-x-auto,
+    .overflow-auto,
+    [data-radix-scroll-area-viewport]
+  ) {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--scrollbar-thumb) / 0.55) transparent;
+  }
+
+  html::-webkit-scrollbar,
+  body::-webkit-scrollbar,
+  :where(.overflow-y-auto, .overflow-x-auto, .overflow-auto)::-webkit-scrollbar,
+  [data-radix-scroll-area-viewport]::-webkit-scrollbar {
+    width: var(--scrollbar-size);
+    height: var(--scrollbar-size);
+  }
+
+  html::-webkit-scrollbar-track,
+  body::-webkit-scrollbar-track,
+  :where(.overflow-y-auto, .overflow-x-auto, .overflow-auto)::-webkit-scrollbar-track,
+  [data-radix-scroll-area-viewport]::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  html::-webkit-scrollbar-thumb,
+  body::-webkit-scrollbar-thumb,
+  :where(.overflow-y-auto, .overflow-x-auto, .overflow-auto)::-webkit-scrollbar-thumb,
+  [data-radix-scroll-area-viewport]::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--scrollbar-thumb) / 0.45);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  html::-webkit-scrollbar-thumb:hover,
+  body::-webkit-scrollbar-thumb:hover,
+  :where(.overflow-y-auto, .overflow-x-auto, .overflow-auto)::-webkit-scrollbar-thumb:hover,
+  [data-radix-scroll-area-viewport]::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--scrollbar-thumb-hover) / 0.65);
+  }
+
+  html::-webkit-scrollbar-thumb:active,
+  body::-webkit-scrollbar-thumb:active,
+  :where(.overflow-y-auto, .overflow-x-auto, .overflow-auto)::-webkit-scrollbar-thumb:active,
+  [data-radix-scroll-area-viewport]::-webkit-scrollbar-thumb:active {
+    background-color: hsl(var(--scrollbar-thumb-active) / 0.75);
+  }
+
+  html::-webkit-scrollbar-corner,
+  body::-webkit-scrollbar-corner,
+  :where(.overflow-y-auto, .overflow-x-auto, .overflow-auto)::-webkit-scrollbar-corner,
+  [data-radix-scroll-area-viewport]::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  html::-webkit-scrollbar-button,
+  body::-webkit-scrollbar-button,
+  :where(.overflow-y-auto, .overflow-x-auto, .overflow-auto)::-webkit-scrollbar-button,
+  [data-radix-scroll-area-viewport]::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
   }
 }
 
