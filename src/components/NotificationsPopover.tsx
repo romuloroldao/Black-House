@@ -18,6 +18,7 @@ import {
   getStudentNotificationCategory,
   STUDENT_NOTIFICATION_CATEGORY_LABELS,
 } from "@/lib/student-notification-utils";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
 interface Notification {
   id: string;
@@ -35,6 +36,7 @@ interface NotificationsPopoverProps {
 
 // DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001: NotificationsPopover deve renderizar mesmo com user null
 const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
+  const { confirm } = useConfirm();
   const { user } = useAuth();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
@@ -104,6 +106,8 @@ const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
   };
 
   const deleteNotification = async (notificationId: string) => {
+    if (!(await confirmDelete(confirm, "Esta notificação será removida."))) return;
+
     try {
       await apiClient.deleteNotification(notificationId);
 

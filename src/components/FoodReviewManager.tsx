@@ -14,6 +14,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Edit, Trash2, AlertCircle, Check, X, Merge, Search, RefreshCw, ArrowLeft } from "lucide-react";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import { Food, getAllFoodsSafe, getMacroGroup, kcalFromMacrosFood } from "@/lib/foodService";
 
 type Alimento = Food & { created_at?: string | null };
@@ -28,6 +29,7 @@ interface Props {
 }
 
 export default function FoodReviewManager({ onBack }: Props) {
+  const { confirm } = useConfirm();
   const [alimentos, setAlimentos] = useState<Alimento[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -195,7 +197,7 @@ export default function FoodReviewManager({ onBack }: Props) {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Tem certeza que deseja excluir este alimento?")) return;
+    if (!(await confirmDelete(confirm, "Este alimento será removido do catálogo."))) return;
     
     try {
       // DESIGN-SUPABASE-PURGE-GLOBAL-003: Usar rota semântica ao invés de from()
@@ -226,9 +228,19 @@ export default function FoodReviewManager({ onBack }: Props) {
 
   const handleMerge = async () => {
     if (!mergeTarget || selectedForMerge.length < 2) return;
-    
-    const toDelete = selectedForMerge.filter(id => id !== mergeTarget);
-    
+
+    const toDelete = selectedForMerge.filter((id) => id !== mergeTarget);
+    if (
+      !(await confirm({
+        title: "Confirmar mesclagem",
+        description: `${toDelete.length} alimento(s) duplicado(s) serão fundidos no alimento principal e removidos. Esta ação não pode ser desfeita.`,
+        confirmLabel: "Mesclar",
+        destructive: true,
+      }))
+    ) {
+      return;
+    }
+
     try {
       // Atualiza itens_dieta para apontar para o alimento alvo
       for (const id of toDelete) {

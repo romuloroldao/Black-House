@@ -51,6 +51,12 @@ import {
   ProtocolItemRow,
 } from '@/components/import/ImportDialogParts';
 import { DietReturnDateFields } from '@/components/DietReturnDateFields';
+import {
+  DietRotationFields,
+  dietRotationToPayload,
+  type DietRotationFormState,
+} from '@/components/DietRotationFields';
+import { inferRotationFromImport } from '@/lib/diet-rotation-infer';
 
 interface Alternativa {
   nome: string;
@@ -270,6 +276,13 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
   const [currentStep, setCurrentStep] = useState<'upload' | 'review' | 'complete'>('upload');
   const [reviewTab, setReviewTab] = useState<'aluno' | 'dieta' | 'protocolo'>('aluno');
   const [diasValidadeDieta, setDiasValidadeDieta] = useState('');
+  const [rotacaoDieta, setRotacaoDieta] = useState<DietRotationFormState>({
+    rotacao_ativa: false,
+    rotacao_dias_plano_a: '3',
+    rotacao_dias_plano_b: '1',
+    rotacao_plano_inicial: 'A',
+    rotacao_data_inicio: '',
+  });
   const [catalogFoods, setCatalogFoods] = useState<Food[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const catalogLinkedRef = useRef(false);
@@ -331,6 +344,13 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
       setCurrentStep('upload');
       catalogLinkedRef.current = false;
       setCatalogFoods([]);
+      setRotacaoDieta({
+        rotacao_ativa: false,
+        rotacao_dias_plano_a: '3',
+        rotacao_dias_plano_b: '1',
+        rotacao_plano_inicial: 'A',
+        rotacao_data_inicio: '',
+      });
     }
   };
 
@@ -413,6 +433,29 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
       const normalizedData = normalizeParsedStudentData(data.data);
       setParsedData(normalizedData);
       setEditableData(JSON.parse(JSON.stringify(normalizedData)));
+
+      const inferred = inferRotationFromImport({
+        refeicoes: normalizedData.dieta?.refeicoes,
+        textHints: [
+          normalizedData.orientacoes,
+          normalizedData.dieta?.nome,
+          normalizedData.dieta?.objetivo,
+        ],
+        dataRetorno: normalizedData.dieta?.data_retorno ?? null,
+      });
+      if (inferred) {
+        setRotacaoDieta(inferred.form);
+        toast.info(inferred.hint, { duration: 6000 });
+      } else {
+        setRotacaoDieta({
+          rotacao_ativa: false,
+          rotacao_dias_plano_a: '3',
+          rotacao_dias_plano_b: '1',
+          rotacao_plano_inicial: 'A',
+          rotacao_data_inicio: '',
+        });
+      }
+
       setReviewTab('aluno');
       setCurrentStep('review');
     } catch (error: any) {
@@ -787,6 +830,12 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           altura: toOptionalNum(editableData.aluno.altura),
           idade: toOptionalNum(editableData.aluno.idade),
         },
+        dieta: editableData.dieta
+          ? {
+              ...editableData.dieta,
+              ...dietRotationToPayload(rotacaoDieta),
+            }
+          : undefined,
       };
 
       const response = await fetch(`${API_URL}/api/import/confirm`, {
@@ -873,6 +922,13 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
     setCurrentStep('upload');
     setReviewTab('aluno');
     setDiasValidadeDieta('');
+    setRotacaoDieta({
+      rotacao_ativa: false,
+      rotacao_dias_plano_a: '3',
+      rotacao_dias_plano_b: '1',
+      rotacao_plano_inicial: 'A',
+      rotacao_data_inicio: '',
+    });
   };
 
   const handleCpfCnpjChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1167,6 +1223,8 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                         onDataRetornoChange={(iso) => updateDieta('data_retorno', iso)}
                         onDiasValidadeChange={setDiasValidadeDieta}
                       />
+
+                      <DietRotationFields value={rotacaoDieta} onChange={setRotacaoDieta} />
 
                       {editableData.dieta.macros && (
                         <div className="flex gap-2 flex-wrap">

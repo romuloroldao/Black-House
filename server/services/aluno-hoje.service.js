@@ -123,8 +123,19 @@ function hasCheckinThisWeek(rows) {
   });
 }
 
-function buildPendencias({ checkinDue, unreadChat, unreadAvisos }) {
+function buildPendencias({ checkinDue, unreadChat, unreadAvisos, fotoSemanalDue }) {
   const tasks = [];
+  if (fotoSemanalDue) {
+    tasks.push({
+      id: 'foto-semanal',
+      title: 'Foto desta semana',
+      description:
+        'Envie uma foto de evolução para o coach acompanhar o seu físico na ficha.',
+      tab: 'progress',
+      search_params: { section: 'photos', upload: '1' },
+      priority: 'normal',
+    });
+  }
   if (checkinDue) {
     tasks.push({
       id: 'checkin-weekly',
@@ -199,6 +210,7 @@ async function getAlunoHoje(pool, { aluno, userId }) {
     turmasRes,
     avisosRes,
     eventosRes,
+    fotosRes,
   ] = await Promise.all([
     pool.query(
       `SELECT at.*, t.nome AS treino_nome, t.descricao AS treino_descricao,
@@ -258,6 +270,15 @@ async function getAlunoHoje(pool, { aluno, userId }) {
        LIMIT 5`,
       [alunoId, hojeIso],
     ),
+    pool.query(
+      `SELECT f.id, f.url, f.created_at,
+              (SELECT COUNT(*)::int FROM public.fotos_alunos WHERE aluno_id = $1) AS total
+       FROM public.fotos_alunos f
+       WHERE f.aluno_id = $1
+       ORDER BY f.created_at DESC NULLS LAST
+       LIMIT 1`,
+      [alunoId],
+    ),
   ]);
 
   const alunoTreinoRow = alunoTreinoRes.rows[0] || null;
@@ -293,6 +314,20 @@ async function getAlunoHoje(pool, { aluno, userId }) {
   const unreadChat = unreadChatRes.rows[0]?.total ?? 0;
   const checkinDue = !hasCheckinThisWeek(checkinsRes.rows);
   const checkin_streak = computeCheckinStreak(checkinsStreakRes.rows);
+
+  const ultimaFoto = fotosRes.rows[0] || null;
+  const weekStart = startOfCalendarWeek();
+  const enviouEstaSemana = ultimaFoto?.created_at
+    ? new Date(ultimaFoto.created_at) >= weekStart
+    : false;
+  const fotosTotal = Number(ultimaFoto?.total ?? 0);
+  const fotos_evolucao = {
+    total: fotosTotal,
+    ultima_em: ultimaFoto?.created_at ?? null,
+    ultima_url: ultimaFoto?.url ?? null,
+    enviou_esta_semana: enviouEstaSemana,
+  };
+  const fotoSemanalDue = !enviouEstaSemana;
   const retorno = pickReturnCountdown(
     dieta,
     alunoTreinoRow,
@@ -309,14 +344,20 @@ async function getAlunoHoje(pool, { aluno, userId }) {
     dieta,
     dieta_rotacao,
     retorno,
-    pendencias: buildPendencias({ checkinDue, unreadChat, unreadAvisos }),
+    fotos_evolucao,
+    pendencias: buildPendencias({ checkinDue, unreadChat, unreadAvisos, fotoSemanalDue }),
     proximos_eventos: eventosRes.rows,
     checkin_streak,
     contadores: {
       unread_chat: unreadChat,
       unread_avisos: unreadAvisos,
       checkin_due: checkinDue,
-      pendencias_total: buildPendencias({ checkinDue, unreadChat, unreadAvisos }).length,
+      pendencias_total: buildPendencias({
+        checkinDue,
+        unreadChat,
+        unreadAvisos,
+        fotoSemanalDue,
+      }).length,
     },
     gerado_em: new Date().toISOString(),
   };

@@ -4,6 +4,7 @@ import { useApiSafeList } from "@/hooks/useApiSafe";
 import { safeArray } from "@/lib/data-safe-utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +33,7 @@ import VideoForm from "./VideoForm";
 import LiveManager from "./LiveManager";
 
 const VideoGallery = () => {
+  const { confirm } = useConfirm();
   const { user } = useAuth();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("videos");
@@ -126,7 +128,7 @@ const VideoGallery = () => {
   };
 
   const handleDeleteVideo = async (videoId: string) => {
-    if (!confirm("Tem certeza que deseja deletar este vídeo?")) {
+    if (!(await confirmDelete(confirm, "Este vídeo será removido da galeria."))) {
       return;
     }
 

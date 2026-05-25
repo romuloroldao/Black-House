@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
 import { DataContextProvider } from "./contexts/DataContext";
+import { ConfirmProvider } from "./contexts/ConfirmContext";
 import { BootstrapGuard } from "./components/BootstrapScreen";
 import { BootstrapAwareErrorBoundary } from "./components/ErrorBoundary";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -30,6 +31,7 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
       <DataContextProvider>
+        <ConfirmProvider>
         <BootstrapAwareErrorBoundary>
           <BrowserRouter>
             <BootstrapGuard>
@@ -105,10 +107,11 @@ const App = () => (
                 {/* 404 */}
                 <Route path="*" element={<NotFound />} />
               </Routes>
-            </TooltipProvider>
-          </BootstrapGuard>
+              </TooltipProvider>
+            </BootstrapGuard>
           </BrowserRouter>
         </BootstrapAwareErrorBoundary>
+        </ConfirmProvider>
       </DataContextProvider>
     </AuthProvider>
   </QueryClientProvider>

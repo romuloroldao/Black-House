@@ -17,6 +17,7 @@ import {
 import ReportForm from "./ReportForm";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
 interface Report {
   id: string;
@@ -36,6 +37,7 @@ interface Report {
 
 const ReportManager = () => {
   const { user } = useAuth();
+  const { confirm } = useConfirm();
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -108,7 +110,7 @@ const ReportManager = () => {
   };
 
   const handleDeleteReport = async (reportId: string) => {
-    if (!confirm("Tem certeza que deseja excluir este relatório?")) return;
+    if (!(await confirmDelete(confirm, "Este relatório será removido permanentemente."))) return;
 
     const result = await apiClient.requestSafe(`/api/relatorios/${reportId}`, { method: 'DELETE' });
     if (!result.success) {

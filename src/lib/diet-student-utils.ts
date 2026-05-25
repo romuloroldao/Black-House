@@ -153,8 +153,41 @@ export function calcularMacros(itens: DietItemWithFood[]): DietMacros {
   );
 }
 
-export function mealCheckStorageKey(dietaId: string, mealKey: string, plano: DietPlano): string {
-  return `bh-meal-done:${dietaId}:${mealKey}:${plano}`;
+/** Data local (YYYY-MM-DD) para checklist diário de refeições. */
+export function mealCheckDateKey(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+export function mealCheckStorageKey(
+  dietaId: string,
+  mealKey: string,
+  plano: DietPlano,
+  dateKey: string = mealCheckDateKey(),
+): string {
+  return `bh-meal-done:${dateKey}:${dietaId}:${mealKey}:${plano}`;
+}
+
+function pruneStaleMealDoneKeys(
+  dietaId: string,
+  mealKey: string,
+  plano: DietPlano,
+  todayKey: string,
+): void {
+  const prefix = "bh-meal-done:";
+  const suffix = `:${dietaId}:${mealKey}:${plano}`;
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (!k?.startsWith(prefix) || !k.endsWith(suffix)) continue;
+      const datePart = k.slice(prefix.length, k.length - suffix.length);
+      if (datePart && datePart !== todayKey) localStorage.removeItem(k);
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 export function readMealDone(dietaId: string, mealKey: string, plano: DietPlano): boolean {
@@ -167,7 +200,9 @@ export function readMealDone(dietaId: string, mealKey: string, plano: DietPlano)
 
 export function writeMealDone(dietaId: string, mealKey: string, plano: DietPlano, done: boolean): void {
   try {
-    const k = mealCheckStorageKey(dietaId, mealKey, plano);
+    const todayKey = mealCheckDateKey();
+    pruneStaleMealDoneKeys(dietaId, mealKey, plano, todayKey);
+    const k = mealCheckStorageKey(dietaId, mealKey, plano, todayKey);
     if (done) localStorage.setItem(k, "1");
     else localStorage.removeItem(k);
   } catch {

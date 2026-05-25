@@ -16,6 +16,7 @@ import { Calendar as CalendarIcon, Plus, Trash2, Users, Clock } from "lucide-rea
 import { Badge } from "./ui/badge";
 import { Alert, AlertDescription } from "./ui/alert";
 import { formatDateBR } from "@/lib/date-format";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
 interface Turma {
   id: string;
@@ -45,6 +46,7 @@ interface Evento {
 }
 
 export function EventsCalendar() {
+  const { confirm } = useConfirm();
   const { user } = useAuth();
   const [eventos, setEventos] = useState<Evento[]>([]);
   const [turmas, setTurmas] = useState<Turma[]>([]);
@@ -226,7 +228,15 @@ export function EventsCalendar() {
   };
 
   const handleCancelEvento = async (id: string) => {
-    if (!confirm("Tem certeza que deseja cancelar este evento?")) return;
+    if (
+      !(await confirmDelete(
+        confirm,
+        "Este evento será cancelado e os participantes deixarão de vê-lo.",
+        "Confirmar cancelamento",
+      ))
+    ) {
+      return;
+    }
 
     try {
       await apiClient.requestSafe(`/api/eventos/${id}`, {

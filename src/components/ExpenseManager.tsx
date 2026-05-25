@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DateInputBR } from "@/components/ui/date-input-br";
 import { toast } from "sonner";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import { Plus, Pencil, Trash2, TrendingDown, Clock, CheckCircle, XCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
@@ -29,6 +30,7 @@ interface Expense {
 }
 
 export default function ExpenseManager() {
+  const { confirm } = useConfirm();
   const { user } = useAuth();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
@@ -151,7 +153,7 @@ export default function ExpenseManager() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Tem certeza que deseja excluir esta despesa?")) return;
+    if (!(await confirmDelete(confirm, "Esta despesa será removida permanentemente."))) return;
 
     try {
       const result = await apiClient.requestSafe(`/api/expenses/${id}`, { method: 'DELETE' });

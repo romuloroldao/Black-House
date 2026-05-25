@@ -111,3 +111,13 @@ export function getRotationForDate(
 export function getPlanoForToday(config: DietRotationConfig): DietPlano | null {
   return getRotationForDate(config)?.plano ?? null;
 }
+
+/** Rótulo curto para badges no coach (ex.: "Ciclo 3A·1B activo"). */
+export function formatRotationBadgeLabel(
+  config: DietRotationConfig | null | undefined,
+): string | null {
+  if (!isRotationEnabled(config)) return null;
+  const a = Number(config?.rotacao_dias_plano_a) || 0;
+  const b = Number(config?.rotacao_dias_plano_b) || 0;
+  return `Ciclo ${a}A·${b}B activo`;
+}

@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { Plus, Pencil, Trash2, Calendar, DollarSign } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
 interface RecurringConfig {
   id: string;
@@ -40,6 +41,7 @@ interface PaymentPlan {
 
 export default function RecurringChargesConfig() {
   const { user } = useAuth();
+  const { confirm } = useConfirm();
   const [configs, setConfigs] = useState<RecurringConfig[]>([]);
   const [alunos, setAlunos] = useState<Aluno[]>([]);
   const [plans, setPlans] = useState<PaymentPlan[]>([]);
@@ -171,7 +173,7 @@ export default function RecurringChargesConfig() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Tem certeza que deseja excluir esta configuração?")) return;
+    if (!(await confirmDelete(confirm, "Esta configuração de cobrança será removida."))) return;
 
     try {
       const result = await apiClient.requestSafe(`/api/recurring-charges-config/${id}`, { method: 'DELETE' });

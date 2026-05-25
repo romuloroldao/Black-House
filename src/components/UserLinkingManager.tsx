@@ -30,6 +30,7 @@ import {
   Clock,
   Trash2
 } from "lucide-react";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
 interface Aluno {
   id: string;
@@ -57,6 +58,7 @@ interface UnlinkedRegistration {
 }
 
 export default function UserLinkingManager() {
+  const { confirm } = useConfirm();
   const { user } = useAuth();
   const [alunos, setAlunos] = useState<Aluno[]>([]);
   const [usuarios, setUsuarios] = useState<UserRole[]>([]);
@@ -280,9 +282,10 @@ export default function UserLinkingManager() {
 
   const handleDismissRegistration = async (reg: UnlinkedRegistration) => {
     if (
-      !confirm(
+      !(await confirmDelete(
+        confirm,
         `Remover o cadastro de ${reg.email} da plataforma? A pessoa precisará criar conta novamente para acessar.`,
-      )
+      ))
     ) {
       return;
     }

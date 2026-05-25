@@ -288,7 +288,10 @@ const DietViewer = () => {
                       </AlertDialogHeader>
                       <AlertDialogFooter>
                         <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => handleExcluirDieta(dieta.id)}>
+                        <AlertDialogAction
+                          onClick={() => handleExcluirDieta(dieta.id)}
+                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        >
                           Excluir
                         </AlertDialogAction>
                       </AlertDialogFooter>

@@ -70,28 +70,55 @@ class DietRepository {
         }
         
         const hasReturn = dietaData.data_retorno != null;
-        const query = hasReturn
-            ? `
-            INSERT INTO public.dietas (
-                nome, objetivo, aluno_id, data_retorno, ativa
-            ) VALUES ($1, $2, $3, $4::date, true)
-            RETURNING id, nome, objetivo, aluno_id, data_retorno, ativa, schedule_cycle_id, created_at
-        `
-            : `
-            INSERT INTO public.dietas (
-                nome, objetivo, aluno_id
-            ) VALUES ($1, $2, $3)
-            RETURNING id, nome, objetivo, aluno_id, data_retorno, ativa, schedule_cycle_id, created_at
+        const rotacaoAtiva = Boolean(dietaData.rotacao_ativa);
+        const rotacaoDiasA =
+            rotacaoAtiva && dietaData.rotacao_dias_plano_a != null
+                ? Number(dietaData.rotacao_dias_plano_a)
+                : null;
+        const rotacaoDiasB =
+            rotacaoAtiva && dietaData.rotacao_dias_plano_b != null
+                ? Number(dietaData.rotacao_dias_plano_b)
+                : null;
+        const rotacaoInicial =
+            String(dietaData.rotacao_plano_inicial || 'A').toUpperCase() === 'B' ? 'B' : 'A';
+        const rotacaoInicio =
+            rotacaoAtiva && dietaData.rotacao_data_inicio
+                ? String(dietaData.rotacao_data_inicio).slice(0, 10)
+                : null;
+
+        const baseCols = ['nome', 'objetivo', 'aluno_id'];
+        const baseVals = [dietaData.nome, dietaData.objetivo || null, dietaData.aluno_id];
+
+        if (hasReturn) {
+            baseCols.push('data_retorno', 'ativa');
+            baseVals.push(dietaData.data_retorno, true);
+        }
+
+        baseCols.push(
+            'rotacao_ativa',
+            'rotacao_dias_plano_a',
+            'rotacao_dias_plano_b',
+            'rotacao_plano_inicial',
+            'rotacao_data_inicio',
+        );
+        baseVals.push(rotacaoAtiva, rotacaoDiasA, rotacaoDiasB, rotacaoInicial, rotacaoInicio);
+
+        const placeholders = baseCols.map((col, i) => {
+            if (col === 'data_retorno' || col === 'rotacao_data_inicio') {
+                return `$${i + 1}::date`;
+            }
+            return `$${i + 1}`;
+        });
+
+        const query = `
+            INSERT INTO public.dietas (${baseCols.join(', ')})
+            VALUES (${placeholders.join(', ')})
+            RETURNING id, nome, objetivo, aluno_id, data_retorno, ativa, schedule_cycle_id, created_at,
+              rotacao_ativa, rotacao_dias_plano_a, rotacao_dias_plano_b,
+              rotacao_plano_inicial, rotacao_data_inicio
         `;
 
-        const values = hasReturn
-            ? [
-                  dietaData.nome,
-                  dietaData.objetivo || null,
-                  dietaData.aluno_id,
-                  dietaData.data_retorno,
-              ]
-            : [dietaData.nome, dietaData.objetivo || null, dietaData.aluno_id];
+        const values = baseVals;
         
         const result = await this.query(query, values);
         return result.rows[0];

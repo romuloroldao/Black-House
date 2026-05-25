@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DateInputBR } from "@/components/ui/date-input-br";
 import { toast } from "sonner";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import { Plus, Pencil, Trash2, AlertCircle, CheckCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
@@ -38,6 +39,7 @@ interface Aluno {
 }
 
 export default function FinancialExceptionsManager() {
+  const { confirm } = useConfirm();
   const { user } = useAuth();
   const [exceptions, setExceptions] = useState<FinancialException[]>([]);
   const [alunos, setAlunos] = useState<Aluno[]>([]);
@@ -166,7 +168,7 @@ export default function FinancialExceptionsManager() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Tem certeza que deseja excluir esta exceção?")) return;
+    if (!(await confirmDelete(confirm, "Esta exceção financeira será removida."))) return;
 
     try {
       const result = await apiClient.requestSafe(`/api/financial-exceptions/${id}`, { method: 'DELETE' });

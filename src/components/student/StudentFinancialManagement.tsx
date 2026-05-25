@@ -14,6 +14,7 @@ import { useDataContext } from "@/contexts/DataContext";
 import { DollarSign, CreditCard, Calendar, Plus, AlertCircle, Clock, CheckCircle, Download, Copy, Trash2, Edit } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
 interface Props {
   studentId: string;
@@ -21,6 +22,7 @@ interface Props {
 }
 
 const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
+  const { confirm } = useConfirm();
   const { user } = useAuth();
   const { isReady } = useDataContext();
   const { toast } = useToast();
@@ -218,6 +220,16 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
   const handleRemoveRecurring = async () => {
     if (!configCobranca) return;
 
+    if (
+      !(await confirmDelete(
+        confirm,
+        "A cobrança recorrente deste aluno será desactivada.",
+        "Confirmar remoção",
+      ))
+    ) {
+      return;
+    }
+
     const result = await apiClient.requestSafe(`/api/recurring-charges-config/${configCobranca.id}`, {
       method: 'PATCH',
       body: JSON.stringify({ ativo: false }),
@@ -241,6 +253,8 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
   };
 
   const handleDeleteException = async (id: string) => {
+    if (!(await confirmDelete(confirm, "Esta exceção financeira será removida."))) return;
+
     const result = await apiClient.requestSafe(`/api/financial-exceptions/${id}`, {
       method: 'PATCH',
       body: JSON.stringify({ ativo: false }),

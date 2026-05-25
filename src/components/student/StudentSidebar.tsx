@@ -4,7 +4,7 @@ import {
   Dumbbell,
   Play,
   MessageSquare,
-  TrendingUp,
+  Camera,
   DollarSign,
   User,
   LogOut,
@@ -267,7 +267,7 @@ const StudentSidebar = ({
   ];
 
   const moreMenuItems: MenuItem[] = [
-    { id: "progress", label: "Progresso", icon: TrendingUp },
+    { id: "progress", label: "Fotos e métricas", icon: Camera },
     { id: "videos", label: "Vídeos", icon: Play },
     { id: "reports", label: "Relatórios", icon: FileText },
     { id: "financial", label: "Financeiro", icon: DollarSign },

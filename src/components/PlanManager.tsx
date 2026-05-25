@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { Plus, Edit, Trash2, CreditCard, Users, UserPlus, X } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_CONTRACT } from "@/contracts/api-contract";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
 interface Plan {
   id: string;
@@ -54,6 +55,7 @@ const FREQUENCIAS = [
 
 export default function PlanManager() {
   const { user } = useAuth();
+  const { confirm } = useConfirm();
   const coachEndpoint = user?.id ? API_CONTRACT.alunos.byCoach() : undefined;
   
   // REACT-API-RESILIENCE-FIX-008: Usar hook resiliente para alunos
@@ -244,7 +246,15 @@ export default function PlanManager() {
   };
 
   const handleRemoveStudent = async (configId: string) => {
-    if (!confirm("Remover este aluno do plano?")) return;
+    if (
+      !(await confirmDelete(
+        confirm,
+        "Este aluno será removido do plano de cobrança.",
+        "Confirmar remoção",
+      ))
+    ) {
+      return;
+    }
 
     try {
       const result = await apiClient.requestSafe(`/api/recurring-charges-config/${configId}`, {
@@ -275,7 +285,7 @@ export default function PlanManager() {
   };
 
   const handleDelete = async (planId: string) => {
-    if (!confirm("Tem certeza que deseja excluir este plano?")) return;
+    if (!(await confirmDelete(confirm, "Este plano de pagamento será removido."))) return;
 
     try {
       const result = await apiClient.requestSafe(`/api/payment-plans/${planId}`, { method: 'DELETE' });

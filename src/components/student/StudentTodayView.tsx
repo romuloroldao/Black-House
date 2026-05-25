@@ -15,6 +15,7 @@ import PendingTasksList from "@/components/student/PendingTasksList";
 import TodayHeroCard from "@/components/student/today/TodayHeroCard";
 import TodayPlanCards from "@/components/student/today/TodayPlanCards";
 import CheckinStreakCard from "@/components/student/today/CheckinStreakCard";
+import TodayPhotoCard from "@/components/student/today/TodayPhotoCard";
 
 type StudentTodayViewProps = {
   /** Evita segunda chamada quando o portal já carregou /api/alunos/me/hoje */
@@ -68,6 +69,13 @@ const StudentTodayView = ({ hojeState }: StudentTodayViewProps) => {
         streak={data?.checkin_streak ?? null}
         checkinDue={data?.contadores?.checkin_due}
         onOpenCheckin={() => openTab("checkin")}
+      />
+
+      <TodayPhotoCard
+        loading={loading}
+        fotos={data?.fotos_evolucao}
+        onTirarFoto={() => openTab("progress", { section: "photos", upload: "1" })}
+        onVerGaleria={() => openTab("progress", { section: "photos" })}
       />
 
       <PendingTasksList

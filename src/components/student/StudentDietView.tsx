@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -16,6 +16,7 @@ import {
   dietHasPlanoAB,
   getItemsForPlano,
   pickActiveDieta,
+  mealCheckDateKey,
   readMealDone,
   writeMealDone,
   type DietItemWithFood,
@@ -42,7 +43,26 @@ const StudentDietView = () => {
   const [todosAlimentos, setTodosAlimentos] = useState<Food[]>([]);
   const [planoAtivo, setPlanoAtivo] = useState<DietPlano>("A");
   const [checkTick, setCheckTick] = useState(0);
+  const mealDayRef = useRef(mealCheckDateKey());
   const [detailMeal, setDetailMeal] = useState<MealGroup | null>(null);
+
+  /** Reinicia o checklist quando muda o dia (dieta diária). */
+  useEffect(() => {
+    const syncDay = () => {
+      const today = mealCheckDateKey();
+      if (mealDayRef.current !== today) {
+        mealDayRef.current = today;
+        setCheckTick((t) => t + 1);
+      }
+    };
+    syncDay();
+    document.addEventListener("visibilitychange", syncDay);
+    const interval = window.setInterval(syncDay, 60_000);
+    return () => {
+      document.removeEventListener("visibilitychange", syncDay);
+      window.clearInterval(interval);
+    };
+  }, []);
   const [substitutionDialog, setSubstitutionDialog] = useState<{
     open: boolean;
     alimentoAtual: any;

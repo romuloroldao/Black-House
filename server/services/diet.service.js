@@ -45,6 +45,11 @@ class DietService {
             objetivo: dietaData.objetivo || null,
             aluno_id: alunoId,
             data_retorno: dataRetorno,
+            rotacao_ativa: Boolean(dietaData.rotacao_ativa),
+            rotacao_dias_plano_a: dietaData.rotacao_dias_plano_a,
+            rotacao_dias_plano_b: dietaData.rotacao_dias_plano_b,
+            rotacao_plano_inicial: dietaData.rotacao_plano_inicial,
+            rotacao_data_inicio: dietaData.rotacao_data_inicio,
         });
 
         if (dataRetorno) {
@@ -182,7 +187,9 @@ class DietService {
         const base = this._mapRefeicaoName(refeicao.nome);
         const extras = [];
         if (refeicao.plano && String(refeicao.plano).trim()) {
-            extras.push(String(refeicao.plano).trim());
+            const raw = String(refeicao.plano).trim();
+            const letter = raw.toUpperCase();
+            extras.push(letter === 'A' || letter === 'B' ? `Plano ${letter}` : raw);
         }
         if (refeicao.horario && String(refeicao.horario).trim()) {
             extras.push(String(refeicao.horario).trim());

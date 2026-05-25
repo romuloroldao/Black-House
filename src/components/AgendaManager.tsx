@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -91,6 +92,7 @@ function janelaBadge(janela: JanelaOperacional) {
 const AgendaManager = () => {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { confirm } = useConfirm();
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [eventos, setEventos] = useState<Evento[]>([]);
   const [alunos, setAlunos] = useState<any[]>([]);
@@ -346,7 +348,11 @@ const AgendaManager = () => {
   };
 
   const handleDelete = async (eventoId: string) => {
-    if (!confirm("Tem certeza que deseja deletar este evento?")) return;
+    if (
+      !(await confirmDelete(confirm, "Este evento da agenda será removido permanentemente."))
+    ) {
+      return;
+    }
 
     try {
       const deleteResult = await apiClient.requestSafe(`/api/agenda-eventos/${eventoId}`, { method: 'DELETE' });

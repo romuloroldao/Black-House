@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/
 import { Badge } from "./ui/badge";
 import { Checkbox } from "./ui/checkbox";
 import { toast } from "sonner";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import { Users, Plus, Trash2, Edit, UserPlus } from "lucide-react";
 import { Alert, AlertDescription } from "./ui/alert";
 
@@ -34,6 +35,7 @@ interface TurmaAluno {
 }
 
 export function ClassGroupManager() {
+  const { confirm } = useConfirm();
   const { user } = useAuth();
   const [turmas, setTurmas] = useState<Turma[]>([]);
   const [alunos, setAlunos] = useState<Aluno[]>([]);
@@ -185,6 +187,16 @@ export function ClassGroupManager() {
   const handleRemoveMember = async (alunoId: string) => {
     if (!selectedTurma) return;
 
+    if (
+      !(await confirmDelete(
+        confirm,
+        "Este aluno será removido da turma.",
+        "Confirmar remoção",
+      ))
+    ) {
+      return;
+    }
+
     try {
       const membrosRes = await apiClient.requestSafe<any[]>(`/api/turmas-alunos?turma_id=${selectedTurma.id}&aluno_id=${alunoId}`);
       const membros = membrosRes.success && Array.isArray(membrosRes.data) ? membrosRes.data : [];
@@ -201,7 +213,9 @@ export function ClassGroupManager() {
   };
 
   const handleDeleteTurma = async (id: string) => {
-    if (!confirm("Tem certeza que deseja excluir esta turma?")) return;
+    if (!(await confirmDelete(confirm, "Esta turma será desactivada e deixará de aparecer na lista."))) {
+      return;
+    }
 
     try {
       const result = await apiClient.requestSafe(`/api/turmas/${id}`, {

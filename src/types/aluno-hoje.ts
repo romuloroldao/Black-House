@@ -37,6 +37,13 @@ export type AlunoHojeTreino = {
   };
 };
 
+export type AlunoHojeFotosEvolucao = {
+  total: number;
+  ultima_em: string | null;
+  ultima_url: string | null;
+  enviou_esta_semana: boolean;
+};
+
 export type AlunoHojeCheckinStreak = {
   semanas_consecutivas: number;
   fez_esta_semana: boolean;
@@ -60,6 +67,7 @@ export type AlunoHojeResponse = {
   dieta_rotacao: AlunoHojeDietaRotacao | null;
   retorno: AlunoHojeRetorno | null;
   checkin_streak: AlunoHojeCheckinStreak | null;
+  fotos_evolucao: AlunoHojeFotosEvolucao | null;
   pendencias: AlunoHojePendencia[];
   proximos_eventos: Array<{
     id: string;

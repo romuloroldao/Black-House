@@ -28,8 +28,10 @@ import {
 } from "@/components/ui/dialog";
 import UserRolesManager from "./UserRolesManager";
 import { API_CONTRACT } from "@/contracts/api-contract";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
 const SettingsManager = () => {
+  const { confirm } = useConfirm();
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -791,6 +793,15 @@ const SettingsManager = () => {
                         variant="ghost"
                         size="sm"
                         onClick={async () => {
+                          if (
+                            !(await confirmDelete(
+                              confirm,
+                              `Remover ${m.member_nome || m.member_email} da equipa?`,
+                              "Confirmar remoção",
+                            ))
+                          ) {
+                            return;
+                          }
                           const res = await apiClient.requestSafe(
                             API_CONTRACT.coach.teamMemberById(m.id),
                             { method: "DELETE" },

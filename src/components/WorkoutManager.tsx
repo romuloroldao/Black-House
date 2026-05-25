@@ -3,6 +3,7 @@ import { apiClient } from "@/lib/api-client";
 import { useApiSafeList } from "@/hooks/useApiSafe";
 import { safeArray } from "@/lib/data-safe-utils";
 import { useToast } from "@/hooks/use-toast";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +30,7 @@ import WorkoutTemplates from "./WorkoutTemplates";
 import { exportWorkoutToPdf, exportMultipleWorkoutsToPdf } from "@/utils/workoutPdfExport";
 
 const WorkoutManager = () => {
+  const { confirm } = useConfirm();
   const { toast } = useToast();
   const [activeView, setActiveView] = useState("list");
   const [searchTerm, setSearchTerm] = useState("");
@@ -101,7 +103,7 @@ const WorkoutManager = () => {
   };
 
   const handleDeleteWorkout = async (workoutId: string) => {
-    if (!confirm("Tem certeza que deseja deletar este treino?")) {
+    if (!(await confirmDelete(confirm, "Este treino será removido permanentemente."))) {
       return;
     }
 

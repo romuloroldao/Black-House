@@ -1,38 +1,84 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Camera, Upload, Loader2, Trash2, Activity, TrendingUp } from "lucide-react";
+import {
+  Camera,
+  Trash2,
+  Activity,
+  TrendingUp,
+  ChevronRight,
+  BarChart3,
+} from "lucide-react";
 import { toast } from "sonner";
+import { prepareImageForUpload } from "@/lib/prepare-image-upload";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import StudentProgressDashboard from "./StudentProgressDashboard";
 import CheckinStreakCard from "@/components/student/today/CheckinStreakCard";
+import ProgressPhotoUploadDialog from "@/components/student/progress/ProgressPhotoUploadDialog";
 import { useAlunoHoje } from "@/hooks/useAlunoHoje";
 import { useSearchParams } from "react-router-dom";
+import { formatPhotoAgeLabel } from "@/lib/photo-evolution-utils";
+
+type FotoAluno = {
+  id: string;
+  url: string;
+  descricao?: string | null;
+  created_at: string;
+};
 
 const StudentProgressView = () => {
   const { user } = useAuth();
-  const [, setSearchParams] = useSearchParams();
+  const { confirm } = useConfirm();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: hoje, loading: hojeLoading } = useAlunoHoje(Boolean(user));
-  const [fotos, setFotos] = useState<any[]>([]);
+  const [fotos, setFotos] = useState<FotoAluno[]>([]);
+  const [dataLoaded, setDataLoaded] = useState(false);
   const [alunoId, setAlunoId] = useState<string | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [preparingImage, setPreparingImage] = useState(false);
   const [descricao, setDescricao] = useState("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  const sectionParam = searchParams.get("section");
+  const focusFotos = searchParams.get("focus") === "fotos";
+  const uploadParam = searchParams.get("upload") === "1";
+
+  const defaultTab = useMemo(() => {
+    if (sectionParam === "metrics") return "metrics";
+    if (sectionParam === "photos" || focusFotos || uploadParam) return "photos";
+    if (!dataLoaded) return "photos";
+    return fotos.length === 0 ? "photos" : "metrics";
+  }, [sectionParam, focusFotos, uploadParam, dataLoaded, fotos.length]);
+
+  const [activeTab, setActiveTab] = useState<string>(defaultTab);
 
   useEffect(() => {
-    if (user) {
-      loadProgressData();
-    }
+    setActiveTab(defaultTab);
+  }, [defaultTab]);
+
+  useEffect(() => {
+    if (user) loadProgressData();
   }, [user]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  useEffect(() => {
+    if (!uploadParam) return;
+    setActiveTab("photos");
+    setIsUploadOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("upload");
+    setSearchParams(next, { replace: true });
+  }, [uploadParam, searchParams, setSearchParams]);
 
   const loadProgressData = async () => {
     const alunoResult = await apiClient.getMeSafe();
@@ -40,267 +86,227 @@ const StudentProgressView = () => {
 
     if (aluno) {
       setAlunoId(aluno.id);
-
-      const fotosResult = await apiClient.requestSafe<any[]>(`/api/fotos-alunos?aluno_id=${aluno.id}`);
-      const fotosData = fotosResult.success && Array.isArray(fotosResult.data) ? fotosResult.data : [];
-      const ordenadas = fotosData.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+      const fotosResult = await apiClient.requestSafe<FotoAluno[]>(
+        `/api/fotos-alunos?aluno_id=${aluno.id}`,
+      );
+      const fotosData =
+        fotosResult.success && Array.isArray(fotosResult.data) ? fotosResult.data : [];
+      const ordenadas = fotosData.sort(
+        (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime(),
+      );
       setFotos(ordenadas);
     }
+    setDataLoaded(true);
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const clearPreview = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+    setSelectedFile(null);
+  };
+
+  const resetUploadDialog = () => {
+    clearPreview();
+    setDescricao("");
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
-      if (!validTypes.includes(file.type)) {
-        toast.error("Tipo de arquivo inválido. Use JPG, PNG ou WEBP.");
-        return;
-      }
-
-      if (file.size > 5242880) {
-        toast.error("Arquivo muito grande. Tamanho máximo: 5MB");
-        return;
-      }
-
-      setSelectedFile(file);
-    }
     e.target.value = "";
+    if (!file) return;
+
+    setPreparingImage(true);
+    try {
+      const prepared = await prepareImageForUpload(file);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setSelectedFile(prepared);
+      setPreviewUrl(URL.createObjectURL(prepared));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Não foi possível usar esta foto");
+      clearPreview();
+    } finally {
+      setPreparingImage(false);
+    }
   };
 
   const handleUpload = async () => {
     if (!selectedFile || !alunoId) {
-      toast.error("Selecione uma foto antes de fazer upload");
+      toast.error("Selecione ou tire uma foto antes de enviar");
       return;
     }
 
     setUploading(true);
+    try {
+      const uploadResult = await apiClient.uploadFile(
+        "progress-photos",
+        `${alunoId}/${selectedFile.name}`,
+        selectedFile,
+      );
+      const publicUrl =
+        uploadResult?.url ||
+        apiClient.getPublicUrl("progress-photos", `${alunoId}/${selectedFile.name}`);
 
-    const fileExt = selectedFile.name.split(".").pop();
-    const fileName = `${Date.now()}.${fileExt}`;
-    const filePath = `${alunoId}/${fileName}`;
+      const createResult = await apiClient.requestSafe("/api/fotos-alunos", {
+        method: "POST",
+        body: JSON.stringify({
+          aluno_id: alunoId,
+          url: publicUrl,
+          descricao: descricao || null,
+        }),
+      });
 
-    const uploadResult = await apiClient.uploadFile("progress-photos", filePath, selectedFile);
-    const publicUrl = uploadResult?.url || apiClient.getPublicUrl("progress-photos", filePath);
+      if (!createResult.success) {
+        toast.error(createResult.error || "Erro ao registar a foto");
+        return;
+      }
 
-    const createResult = await apiClient.requestSafe('/api/fotos-alunos', {
-      method: 'POST',
-      body: JSON.stringify({
-        aluno_id: alunoId,
-        url: publicUrl,
-        descricao: descricao || null,
-      }),
-    });
-
-    if (!createResult.success) {
-      toast.error(createResult.error || "Erro ao fazer upload da foto");
+      toast.success("Foto enviada! O seu coach vê na sua ficha.");
+      setIsUploadOpen(false);
+      resetUploadDialog();
+      loadProgressData();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Erro ao enviar foto";
+      toast.error(
+        msg.includes("fetch") ? "Falha de conexão. Verifique a internet e tente de novo." : msg,
+      );
+    } finally {
       setUploading(false);
-      return;
     }
-
-    toast.success("Foto enviada com sucesso!");
-    setIsUploadOpen(false);
-    setSelectedFile(null);
-    setDescricao("");
-    loadProgressData();
-    setUploading(false);
   };
 
-  const handleDeletePhoto = async (foto: any) => {
-    if (!confirm("Tem certeza que deseja excluir esta foto?")) {
+  const handleDeletePhoto = async (foto: FotoAluno) => {
+    if (
+      !(await confirmDelete(confirm, "Esta foto de evolução será removida permanentemente."))
+    ) {
       return;
     }
 
-    const url = new URL(foto.url);
-    const pathParts = url.pathname.split("/");
-    const filePath = pathParts.slice(pathParts.indexOf("progress-photos") + 1).join("/");
-
-    const deleteResult = await apiClient.requestSafe(`/api/fotos-alunos/${foto.id}`, { method: 'DELETE' });
+    const deleteResult = await apiClient.requestSafe(`/api/fotos-alunos/${foto.id}`, {
+      method: "DELETE",
+    });
     if (!deleteResult.success) {
       toast.error(deleteResult.error || "Erro ao excluir foto");
       return;
     }
 
-    toast.success("Foto excluída com sucesso!");
+    toast.success("Foto excluída");
     loadProgressData();
   };
+
+  const ultimaFoto = fotos[0] ?? null;
+  const openMetrics = () => {
+    setActiveTab("metrics");
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", "progress");
+    next.set("section", "metrics");
+    setSearchParams(next);
+  };
+
+  const uploadTrigger = (
+    <Button className="w-full min-h-11 sm:w-auto" size="lg">
+      <Camera className="mr-2 h-4 w-4" />
+      {fotos.length === 0 ? "Tirar primeira foto" : "Tirar foto"}
+    </Button>
+  );
 
   return (
     <div className="min-w-0 space-y-6">
       <div className="min-w-0">
-        <h1 className="text-2xl font-bold sm:text-3xl">Meu Progresso</h1>
+        <h1 className="text-2xl font-bold sm:text-3xl">Fotos e evolução</h1>
         <p className="mt-1 text-muted-foreground">
-          Acompanhe sua evolução através de métricas semanais e fotos
+          Registe o seu físico para o coach e acompanhe métricas semanais
         </p>
       </div>
 
-      <CheckinStreakCard
-        loading={hojeLoading}
-        streak={hoje?.checkin_streak ?? null}
-        checkinDue={hoje?.contadores?.checkin_due}
-        onOpenCheckin={() => setSearchParams({ tab: "checkin" })}
-      />
-
-      <Tabs defaultValue="metrics" className="min-w-0 w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="min-w-0 w-full">
         <TabsList className="grid h-auto w-full min-w-0 max-w-full grid-cols-2 gap-1 sm:max-w-md">
-          <TabsTrigger value="metrics" className="flex items-center gap-2">
-            <Activity className="h-4 w-4" />
-            Métricas Semanais
-          </TabsTrigger>
-          <TabsTrigger value="photos" className="flex items-center gap-2">
+          <TabsTrigger value="photos" className="flex items-center gap-2 min-h-11">
             <Camera className="h-4 w-4" />
-            Evolução Fotográfica
+            Fotos
+          </TabsTrigger>
+          <TabsTrigger value="metrics" className="flex items-center gap-2 min-h-11">
+            <Activity className="h-4 w-4" />
+            Métricas
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="metrics" className="mt-6">
-          <StudentProgressDashboard />
-        </TabsContent>
-
         <TabsContent value="photos" className="mt-6 space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <TrendingUp className="h-5 w-5" />
-                Fotos de Progresso
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground mb-4">
-                Registre suas conquistas através de fotos ao longo do tempo
-              </p>
-
-              <Dialog open={isUploadOpen} onOpenChange={setIsUploadOpen}>
-                <DialogTrigger asChild>
-                  <Button className="w-full sm:w-auto">
-                    <Camera className="mr-2 h-4 w-4" />
-                    Adicionar Foto de Progresso
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Enviar Foto de Progresso</DialogTitle>
-                    <DialogDescription>
-                      Envie uma imagem (JPG, PNG ou WEBP até 5MB) e opcionalmente uma descrição.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="space-y-4 py-4">
-                    <div className="space-y-2">
-                      <Label>Foto</Label>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/jpeg,image/jpg,image/png,image/webp"
-                        onChange={handleFileSelect}
-                        className="hidden"
-                      />
-                      <input
-                        ref={cameraInputRef}
-                        type="file"
-                        accept="image/jpeg,image/jpg,image/png,image/webp"
-                        capture="environment"
-                        onChange={handleFileSelect}
-                        className="hidden"
-                      />
-                      <div className="flex flex-col gap-2 sm:flex-row">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="flex-1"
-                          onClick={() => fileInputRef.current?.click()}
-                        >
-                          <Upload className="h-4 w-4 mr-2" />
-                          {selectedFile ? selectedFile.name : "Escolher arquivo"}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          className="flex-1"
-                          onClick={() => cameraInputRef.current?.click()}
-                        >
-                          <Camera className="h-4 w-4 mr-2" />
-                          Tirar foto
-                        </Button>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        JPG, PNG ou WEBP - Máximo 5MB
-                      </p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="descricao">Descrição (opcional)</Label>
-                      <Textarea
-                        id="descricao"
-                        placeholder="Ex: Progresso após 2 meses de treino"
-                        value={descricao}
-                        onChange={(e) => setDescricao(e.target.value)}
-                        rows={3}
-                      />
-                    </div>
+          <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
+            <CardContent className="space-y-4 p-5">
+              <div className="flex gap-4">
+                {ultimaFoto ? (
+                  <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl border bg-muted">
+                    <img
+                      src={ultimaFoto.url}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
                   </div>
-                  <DialogFooter>
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setIsUploadOpen(false);
-                        setSelectedFile(null);
-                        setDescricao("");
-                      }}
-                    >
-                      Cancelar
-                    </Button>
-                    <Button
-                      onClick={handleUpload}
-                      disabled={!selectedFile || uploading}
-                    >
-                      {uploading ? (
-                        <>
-                          <Loader2 className="h-4 w-4 mr-2 motion-safe:animate-spin" />
-                          Enviando...
-                        </>
-                      ) : (
-                        <>
-                          <Upload className="h-4 w-4 mr-2" />
-                          Enviar Foto
-                        </>
-                      )}
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+                ) : (
+                  <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-xl border border-dashed border-primary/30 bg-primary/10">
+                    <Camera className="h-8 w-8 text-primary" aria-hidden />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold">Fotos de evolução</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {ultimaFoto
+                      ? `${formatPhotoAgeLabel(ultimaFoto.created_at)} · ${fotos.length} foto${fotos.length === 1 ? "" : "s"} no total`
+                      : "Uma foto por semana ajuda o coach a ajustar dieta e treino na sua ficha."}
+                  </p>
+                </div>
+              </div>
+
+              <ProgressPhotoUploadDialog
+                open={isUploadOpen}
+                onOpenChange={setIsUploadOpen}
+                trigger={uploadTrigger}
+                uploading={uploading}
+                preparingImage={preparingImage}
+                selectedFile={selectedFile}
+                previewUrl={previewUrl}
+                descricao={descricao}
+                onDescricaoChange={setDescricao}
+                onFileSelect={handleFileSelect}
+                onUpload={handleUpload}
+                onCancel={resetUploadDialog}
+              />
             </CardContent>
           </Card>
 
           {fotos.length > 0 ? (
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
+                <CardTitle className="flex items-center gap-2 text-base">
                   <TrendingUp className="h-5 w-5" />
-                  Galeria de Fotos
+                  Galeria
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid gap-4 md:grid-cols-3">
+                <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
                   {fotos.map((foto) => (
-                    <Card key={foto.id} className="overflow-hidden group relative">
-                      <div className="aspect-square bg-muted relative">
+                    <Card key={foto.id} className="group relative overflow-hidden">
+                      <div className="relative aspect-square bg-muted">
                         <img
                           src={foto.url}
-                          alt={foto.descricao || "Foto de progresso"}
-                          className="w-full h-full object-cover"
+                          alt={foto.descricao || "Foto de evolução"}
+                          className="h-full w-full object-cover"
                         />
-                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="absolute right-2 top-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                           <Button
                             size="icon"
                             variant="destructive"
+                            className="h-9 w-9"
+                            aria-label="Excluir foto"
                             onClick={() => handleDeletePhoto(foto)}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
                       </div>
-                      <CardContent className="p-4">
+                      <CardContent className="p-3">
                         {foto.descricao && (
-                          <p className="text-sm mb-2">{foto.descricao}</p>
+                          <p className="mb-1 text-sm line-clamp-2">{foto.descricao}</p>
                         )}
                         <p className="text-xs text-muted-foreground">
                           {new Date(foto.created_at).toLocaleDateString("pt-BR")}
@@ -313,16 +319,44 @@ const StudentProgressView = () => {
             </Card>
           ) : (
             <Card>
-              <CardContent className="flex flex-col items-center justify-center py-12">
-                <Camera className="h-12 w-12 text-muted-foreground mb-4" />
-                <p className="text-muted-foreground text-center">
-                  Nenhuma foto de progresso ainda.
-                  <br />
-                  Comece a registrar sua evolução!
-                </p>
+              <CardContent className="flex flex-col items-center justify-center gap-4 py-12 px-6 text-center">
+                <Camera className="h-14 w-14 text-muted-foreground/80" aria-hidden />
+                <div>
+                  <p className="font-medium">Ainda sem fotos</p>
+                  <p className="mt-2 text-sm text-muted-foreground max-w-sm">
+                    Tire uma foto agora — o seu coach vê na ficha do aluno e consegue acompanhar a
+                    evolução ao longo das semanas.
+                  </p>
+                </div>
+                <Button className="min-h-11" onClick={() => setIsUploadOpen(true)}>
+                  <Camera className="mr-2 h-4 w-4" />
+                  Tirar primeira foto
+                </Button>
               </CardContent>
             </Card>
           )}
+
+          <button
+            type="button"
+            onClick={openMetrics}
+            className="flex w-full items-center justify-between rounded-lg border border-border/60 bg-muted/20 px-4 py-3 text-left text-sm transition-colors hover:bg-muted/40"
+          >
+            <span className="flex items-center gap-2 font-medium">
+              <BarChart3 className="h-4 w-4 text-primary" />
+              Ver métricas semanais
+            </span>
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          </button>
+        </TabsContent>
+
+        <TabsContent value="metrics" className="mt-6 space-y-6">
+          <CheckinStreakCard
+            loading={hojeLoading}
+            streak={hoje?.checkin_streak ?? null}
+            checkinDue={hoje?.contadores?.checkin_due}
+            onOpenCheckin={() => setSearchParams({ tab: "checkin" })}
+          />
+          <StudentProgressDashboard />
         </TabsContent>
       </Tabs>
     </div>

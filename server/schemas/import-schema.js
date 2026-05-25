@@ -35,6 +35,20 @@ const MacroBlockSchema = z.object({
     calorias: z.number().nonnegative().nullable().optional()
 }).strict();
 
+const DietRotationImportFields = {
+    rotacao_ativa: z.boolean().optional(),
+    rotacao_dias_plano_a: optionalPositiveInt(30).nullable().optional(),
+    rotacao_dias_plano_b: optionalPositiveInt(30).nullable().optional(),
+    rotacao_plano_inicial: z.enum(['A', 'B']).optional(),
+    rotacao_data_inicio: z
+        .union([
+            z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+            z.literal(''),
+            z.null(),
+        ])
+        .optional(),
+};
+
 /** Campos opcionais enviados pelo importador ao vincular alimentos ao catálogo. */
 const CatalogLinkFields = {
     alimento_id: z.string().uuid().nullable().optional(),
@@ -86,7 +100,8 @@ const ImportSchema = z.object({
             (refeicoes) => refeicoes.every(ref => ref.alimentos && ref.alimentos.length > 0),
             { message: 'Todas as refeições devem ter pelo menos um alimento' }
         ),
-        macros: MacroBlockSchema.nullable().optional()
+        macros: MacroBlockSchema.nullable().optional(),
+        ...DietRotationImportFields,
     }).strict().optional(),
 
     suplementos: z.array(
@@ -118,6 +133,7 @@ const DietOnlyImportSchema = z.object({
         objetivo: z.string().max(1000).nullable().optional(),
         refeicoes: z.array(RefeicaoSchema).min(1, 'Informe ao menos uma refeição com alimentos'),
         macros: MacroBlockSchema.nullable().optional(),
+        ...DietRotationImportFields,
     }).strict(),
     suplementos: ImportSchema.shape.suplementos,
     farmacos: ImportSchema.shape.farmacos,

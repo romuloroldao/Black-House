@@ -8,9 +8,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Calendar, Utensils, Dumbbell, MessageCircle } from "lucide-react";
+import { Calendar, Utensils, Dumbbell, MessageCircle, Camera } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
-const STORAGE_KEY = "bh-student-onboarding-v1";
+const STORAGE_KEY = "bh-student-onboarding-v2";
 
 export function isStudentOnboardingDone(): boolean {
   try {
@@ -28,7 +29,7 @@ export function markStudentOnboardingDone(): void {
   }
 }
 
-const STEPS = [
+const STEPS: Array<{ title: string; description: string; icon: LucideIcon }> = [
   {
     title: "O seu dia num só lugar",
     description:
@@ -42,12 +43,18 @@ const STEPS = [
     icon: Utensils,
   },
   {
+    title: "Foto de evolução semanal",
+    description:
+      "No card «Foto desta semana» em Hoje ou em Fotos e métricas, tire uma foto — o coach vê na sua ficha.",
+    icon: Camera,
+  },
+  {
     title: "Coach e check-in semanal",
     description:
       "Chat e avisos ficam em Coach. O check-in em 4 blocos mantém a sua sequência de semanas.",
     icon: MessageCircle,
   },
-] as const;
+];
 
 type StudentOnboardingDialogProps = {
   open: boolean;
@@ -57,7 +64,7 @@ type StudentOnboardingDialogProps = {
 const StudentOnboardingDialog = ({ open, onOpenChange }: StudentOnboardingDialogProps) => {
   const [step, setStep] = useState(0);
   const current = STEPS[step];
-  const Icon = step === 1 ? Dumbbell : step === 0 ? Calendar : MessageCircle;
+  const Icon = current.icon;
 
   const finish = () => {
     markStudentOnboardingDone();

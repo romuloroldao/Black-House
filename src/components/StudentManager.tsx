@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import {
   Select,
   SelectContent,
@@ -74,6 +75,7 @@ const StudentManager = () => {
   const { user } = useAuth();
   const { isReady } = useDataContext();
   const { toast } = useToast();
+  const { confirm } = useConfirm();
   const navigate = useNavigate();
   
   const coachEndpoint = user?.id ? API_CONTRACT.alunos.byCoach() : undefined;
@@ -505,9 +507,10 @@ const StudentManager = () => {
 
   const handleDeleteStudent = async (studentId: string) => {
     if (
-      !confirm(
-        "Tem certeza que deseja excluir este aluno? A ficha e o cadastro de acesso na plataforma serão removidos.",
-      )
+      !(await confirmDelete(
+        confirm,
+        "A ficha e o cadastro de acesso deste aluno na plataforma serão removidos permanentemente.",
+      ))
     ) {
       return;
     }

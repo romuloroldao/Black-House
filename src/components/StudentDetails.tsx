@@ -18,10 +18,13 @@ import StudentFinancialManagement from "./student/StudentFinancialManagement";
 import { DietReturnDateFields } from "@/components/DietReturnDateFields";
 import {
   DietRotationFields,
+  dietRotationFromRow,
   dietRotationToPayload,
   type DietRotationFormState,
 } from "@/components/DietRotationFields";
+import { DietRotationBadge } from "@/components/DietRotationBadge";
 import { formatDateBR } from "@/lib/date-format";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
 interface Student {
   id: string;
@@ -60,6 +63,11 @@ interface Dieta {
   objetivo: string | null;
   data_criacao: string;
   data_retorno?: string | null;
+  rotacao_ativa?: boolean | null;
+  rotacao_dias_plano_a?: number | null;
+  rotacao_dias_plano_b?: number | null;
+  rotacao_plano_inicial?: string | null;
+  rotacao_data_inicio?: string | null;
 }
 
 interface Foto {
@@ -74,6 +82,7 @@ export default function StudentDetails() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user } = useAuth();
+  const { confirm } = useConfirm();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -189,6 +198,7 @@ export default function StudentDetails() {
       const dieta = dietas.sort((a, b) => new Date(b.data_criacao || 0).getTime() - new Date(a.data_criacao || 0).getTime())[0] || null;
       if (dieta) {
         setDieta(dieta);
+        setRotacaoDieta(dietRotationFromRow(dieta));
       }
 
       // Carregar fotos
@@ -331,7 +341,13 @@ export default function StudentDetails() {
   };
 
   const handleRemoverTreino = async (alunoTreinoId: string, treinoNome: string) => {
-    if (!confirm(`Tem certeza que deseja remover o treino "${treinoNome}"?`)) {
+    if (
+      !(await confirmDelete(
+        confirm,
+        `O treino "${treinoNome}" será desvinculado deste aluno.`,
+        "Confirmar remoção",
+      ))
+    ) {
       return;
     }
 
@@ -801,7 +817,10 @@ export default function StudentDetails() {
             {dieta ? (
               <div className="space-y-4">
                 <div>
-                  <h3 className="font-semibold text-lg">{dieta.nome}</h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-semibold text-lg">{dieta.nome}</h3>
+                    <DietRotationBadge config={dieta} />
+                  </div>
                   <p className="text-sm text-muted-foreground">
                     Objetivo: {dieta.objetivo || "Não especificado"}
                   </p>

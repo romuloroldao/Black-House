@@ -15,11 +15,13 @@ import { Plus, Search, Edit, Trash2, Apple, AlertCircle, Calculator, Upload, Dow
 import FoodReviewManager from "./FoodReviewManager";
 import * as XLSX from 'xlsx';
 import { Food, getAllFoodsSafe, getMacroGroup, kcalFromMacrosFood } from "@/lib/foodService";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
 type Alimento = Food;
 
 export default function FoodManager() {
   const { user } = useAuth();
+  const { confirm } = useConfirm();
   const [alimentos, setAlimentos] = useState<Alimento[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingFood, setEditingFood] = useState<Alimento | null>(null);
@@ -374,9 +376,11 @@ Batata doce,100,86,20,1.6,0.1`;
       // Verificar inconsistência e avisar
       const inconsistencia = verificarInconsistencia();
       if (inconsistencia) {
-        const confirmar = confirm(
-          `Atenção: As calorias informadas (${formData.calories} kcal) diferem das calculadas (${inconsistencia.kcalCalculada} kcal) em ${inconsistencia.percentual}%.\n\nDeseja continuar mesmo assim?`
-        );
+        const confirmar = await confirm({
+          title: "Calorias divergentes",
+          description: `As calorias informadas (${formData.calories} kcal) diferem das calculadas (${inconsistencia.kcalCalculada} kcal) em ${inconsistencia.percentual}%.\n\nDeseja continuar mesmo assim?`,
+          confirmLabel: "Continuar",
+        });
         if (!confirmar) return;
       }
 
@@ -438,7 +442,7 @@ Batata doce,100,86,20,1.6,0.1`;
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Tem certeza que deseja excluir este alimento?")) return;
+    if (!(await confirmDelete(confirm, "Este alimento será removido do catálogo."))) return;
 
     try {
       // DESIGN-SUPABASE-PURGE-GLOBAL-003: Usar rota semântica ao invés de from()

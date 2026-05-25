@@ -137,12 +137,28 @@ module.exports = function(pool, authenticate) {
         }
     });
 
+    function isAllowedProgressImage(file) {
+        const allowedTypes = [
+            'image/jpeg',
+            'image/jpg',
+            'image/png',
+            'image/webp',
+            'image/heic',
+            'image/heif',
+        ];
+        const mime = String(file.mimetype || '').toLowerCase();
+        if (allowedTypes.includes(mime) || mime.startsWith('image/')) {
+            return true;
+        }
+        const ext = path.extname(file.originalname || '').toLowerCase();
+        return ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'].includes(ext);
+    }
+
     const uploadProgress = multer({
         storage: multer.memoryStorage(),
-        limits: { fileSize: 5 * 1024 * 1024 },
+        limits: { fileSize: 8 * 1024 * 1024 },
         fileFilter: (req, file, cb) => {
-            const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-            if (allowedTypes.includes(file.mimetype)) {
+            if (isAllowedProgressImage(file)) {
                 cb(null, true);
             } else {
                 cb(new Error('Apenas imagens são permitidas (JPEG, PNG, WebP)'), false);

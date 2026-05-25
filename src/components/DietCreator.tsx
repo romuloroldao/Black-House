@@ -29,6 +29,7 @@ import {
   dietRotationToPayload,
   type DietRotationFormState,
 } from '@/components/DietRotationFields';
+import { DietRotationBadge } from '@/components/DietRotationBadge';
 
 type Alimento = Food;
 
@@ -563,7 +564,10 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
 
       <Card>
         <CardHeader>
-          <CardTitle>Informações da Dieta</CardTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            <CardTitle>Informações da Dieta</CardTitle>
+            {editingDietaId ? <DietRotationBadge config={rotacao} /> : null}
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
