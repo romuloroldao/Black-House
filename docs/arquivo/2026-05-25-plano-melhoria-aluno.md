@@ -16,8 +16,8 @@
 | 0 | Fundação e confiança | 1–2 semanas | Dados reais, menos erros, menu mais claro |
 | 1 | “Hoje” + Dieta v2 | 3–4 semanas | Sabe o que fazer hoje; dieta legível no telemóvel |
 | 2 | Treino em modo sessão | 3–4 semanas | Treinar na academia com fluxo dedicado |
-| 3 | Engajamento e check-in | 2–3 semanas | Streak, progresso, check-in por blocos |
-| 4 | Polish premium | 2 semanas | Motion, onboarding, a11y, testes com alunos |
+| 3 | Engajamento e check-in | 2–3 semanas | Streak, progresso, check-in por blocos — **concluída** |
+| 4 | Polish premium | 2 semanas | Motion, onboarding, a11y, testes com alunos — **em curso** |
 
 **Total estimado:** 11–15 semanas (pode sobrepor QA e deploy incremental por PR).
 
@@ -70,9 +70,9 @@
 
 ### Entregáveis Fase 0
 
-- [ ] PR `feat(aluno): dashboard dados reais e pendências`
-- [ ] PR `feat(aluno): navegação agrupada e hub coach`
-- [ ] PR `feat(aluno): countdown retorno e copy premium em empty states`
+- [x] PR `feat(aluno): dashboard dados reais e pendências`
+- [x] PR `feat(aluno): navegação agrupada e hub coach`
+- [x] PR `feat(aluno): countdown retorno e copy premium em empty states`
 
 ---
 
@@ -137,12 +137,12 @@
 
 - [x] Treino de hoje + Iniciar sessão em `StudentWorkoutsView`
 - [x] `StudentWorkoutSessionView` fullscreen com timer e progresso local
-- [ ] CTA Iniciar também no ecrã Hoje (link direto para workouts + sessão)
+- [x] CTA Iniciar também no ecrã Hoje (link direto para workouts + sessão)
 
 ### Entregáveis Fase 2
 
-- [ ] PR `feat(aluno): modo sessão treino MVP`
-- [ ] PR `feat(aluno): treino de hoje e melhorias lista`
+- [x] PR `feat(aluno): modo sessão treino MVP`
+- [x] PR `feat(aluno): treino de hoje e melhorias lista`
 
 ---
 
@@ -158,8 +158,9 @@
 
 ### Entregáveis Fase 3
 
-- [ ] PR `feat(aluno): check-in por secções`
-- [ ] PR `feat(aluno): streak e progresso visual`
+- [x] PR `feat(aluno): check-in por secções`
+- [x] PR `feat(aluno): streak e progresso visual`
+- [x] Notificações categorizadas (Coach / Sistema / Retorno) — Fase 4.4
 
 ---
 
@@ -176,9 +177,10 @@
 
 ### Entregáveis Fase 4
 
-- [ ] PR `chore(aluno): design tokens e motion`
-- [ ] PR `feat(aluno): onboarding e empty states`
-- [ ] Relatório teste: `docs/arquivo/2026-XX-XX-teste-melhoria-aluno.md`
+- [x] PR `chore(aluno): design tokens e motion` (CSS tokens + `student-tab-enter`)
+- [x] PR `feat(aluno): onboarding e empty states`
+- [x] Checklist teste: `docs/arquivo/2026-05-25-checklist-teste-aluno.md`
+- [ ] Auditoria a11y completa (4.5) com 5 alunos reais (4.6)
 
 ---
 
@@ -248,6 +250,6 @@ git checkout melhoria-aluno
 
 ## Próximo passo imediato
 
-Começar **Fase 0.1** (remover mocks em `StudentDashboardView`) — PR pequeno, alto impacto na confiança, sem dependência de novo endpoint.
-
-Quando quiseres, posso implementar o primeiro PR nesta branch.
+1. **QA manual** com `docs/arquivo/2026-05-25-checklist-teste-aluno.md` (5 alunos + coach).  
+2. **Merge** `melhoria-aluno` → `lancamento` quando checklist estiver verde.  
+3. Opcional pós-MVP: histórico de cargas na sessão de treino; macros “só plano activo” na dieta (evitar somar A+B).

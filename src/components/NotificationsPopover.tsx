@@ -14,6 +14,10 @@ import { Bell, Check, X, Users, Dumbbell, MessageSquare, Calendar, DollarSign, C
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
+import {
+  getStudentNotificationCategory,
+  STUDENT_NOTIFICATION_CATEGORY_LABELS,
+} from "@/lib/student-notification-utils";
 
 interface Notification {
   id: string;
@@ -194,6 +198,10 @@ const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
                   return null;
                 }
                 const Icon = getNotificationIcon(notification.tipo);
+                const category =
+                  user?.role === "aluno"
+                    ? getStudentNotificationCategory(notification.tipo)
+                    : null;
                 return (
                   <div
                     key={notification.id}
@@ -211,6 +219,11 @@ const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
                             onClick={() => handleNotificationClick(notification)}
                             className="text-left flex-1"
                           >
+                            {category && (
+                              <Badge variant="outline" className="mb-1.5 text-[10px] font-normal">
+                                {STUDENT_NOTIFICATION_CATEGORY_LABELS[category]}
+                              </Badge>
+                            )}
                             <p className="font-medium text-sm">
                               {notification.titulo}
                             </p>

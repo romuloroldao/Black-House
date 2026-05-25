@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Dumbbell, Clock, Target, ChevronDown, Play, Weight, FileDown } from "lucide-react";
 import { exportWorkoutToPdf } from "@/utils/workoutPdfExport";
 import StudentWorkoutSessionView from "@/components/student/StudentWorkoutSessionView";
+import PremiumEmptyState from "@/components/student/PremiumEmptyState";
 import { readSessionProgress } from "@/lib/workout-session-utils";
 
 const StudentWorkoutsView = () => {
@@ -147,15 +148,11 @@ const StudentWorkoutsView = () => {
 
   if (!treinos || treinos.length === 0) {
     return (
-      <div className="flex min-h-[400px] items-center justify-center">
-        <div className="text-center">
-          <Dumbbell className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
-          <h3 className="mb-2 text-lg font-semibold">Nenhum treino atribuído</h3>
-          <p className="text-muted-foreground">
-            Entre em contato com seu coach para receber seu treino personalizado
-          </p>
-        </div>
-      </div>
+      <PremiumEmptyState
+        icon={Dumbbell}
+        title="Nenhum treino atribuído"
+        description="O seu coach pode ativar um plano aqui. Depois use Iniciar sessão para treinar com timer e progresso."
+      />
     );
   }
 

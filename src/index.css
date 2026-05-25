@@ -56,6 +56,13 @@ All colors MUST be HSL.
     --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     --transition-bounce: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
 
+    /* BH Student — macros e superfície (Fase 4.1) */
+    --macro-protein: 199 89% 48%;
+    --macro-carb: 38 92% 50%;
+    --macro-fat: 350 89% 60%;
+    --student-surface: 0 0% 8%;
+    --student-touch-min: 2.75rem;
+
     --radius: 0.5rem;
 
     --sidebar-background: 0 0% 98%;
@@ -121,6 +128,23 @@ All colors MUST be HSL.
 
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .student-tab-enter {
+    animation: student-tab-enter 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  @keyframes student-tab-enter {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 }
 

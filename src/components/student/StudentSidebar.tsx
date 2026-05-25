@@ -326,7 +326,7 @@ const StudentSidebar = ({
         className={cn(
           "flex shrink-0 flex-col overflow-hidden border-r border-border bg-card",
           /* Desktop: sempre no fluxo, coluna fixa */
-          "md:z-auto md:h-screen md:w-64 md:shadow-none md:sticky md:top-0",
+          "md:z-auto md:w-64 md:shadow-none md:sticky md:top-0 md:self-start md:h-dvh md:max-h-dvh",
           /* Mobile: menu lateral só via hamburger; navegação principal = bottom nav */
           "max-md:hidden",
           mobileOpen && "max-md:!flex",

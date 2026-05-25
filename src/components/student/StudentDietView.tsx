@@ -25,6 +25,7 @@ import {
 import { MacroRingsRow } from "@/components/student/diet/MacroRing";
 import MealTimelineItem from "@/components/student/diet/MealTimelineItem";
 import MealDetailSheet from "@/components/student/diet/MealDetailSheet";
+import PremiumEmptyState from "@/components/student/PremiumEmptyState";
 
 const StudentDietView = () => {
   const { user } = useAuth();
@@ -182,15 +183,11 @@ const StudentDietView = () => {
 
   if (!dieta) {
     return (
-      <div className="flex min-h-[400px] items-center justify-center">
-        <div className="text-center">
-          <Utensils className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
-          <h3 className="mb-2 text-lg font-semibold">Nenhuma dieta atribuída</h3>
-          <p className="text-muted-foreground">
-            Entre em contato com seu coach para receber sua dieta personalizada
-          </p>
-        </div>
-      </div>
+      <PremiumEmptyState
+        icon={Utensils}
+        title="Nenhuma dieta atribuída"
+        description="Quando o seu coach publicar o plano, ele aparece aqui com refeições, macros e checklist do dia."
+      />
     );
   }
 

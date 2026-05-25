@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import StudentOnboardingDialog, {
+  isStudentOnboardingDone,
+} from "@/components/student/StudentOnboardingDialog";
 import { useSearchParams } from "react-router-dom";
 import { Menu } from "lucide-react";
 import StudentSidebar from "@/components/student/StudentSidebar";
@@ -29,6 +32,7 @@ const StudentPortal = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "hoje");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const hojeState = useAlunoHoje(Boolean(isReady && user));
   const { coachUnreadTotal } = hojeState;
 
@@ -49,6 +53,12 @@ const StudentPortal = () => {
     }
     setActiveTab(tab);
   }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (isReady && user?.role === "aluno" && !isStudentOnboardingDone()) {
+      setOnboardingOpen(true);
+    }
+  }, [isReady, user?.role]);
 
   const handleTabChange = (tab: string, extra?: Record<string, string>) => {
     setActiveTab(tab);
@@ -109,14 +119,14 @@ const StudentPortal = () => {
     }
 
     return (
-      <div className="relative flex min-h-screen w-full min-w-0 bg-background">
+      <div className="relative flex min-h-dvh w-full min-w-0 bg-background md:min-h-screen md:items-start">
         <StudentSidebar
           activeTab={activeTab}
           onTabChange={handleTabChange}
           mobileOpen={mobileNavOpen}
           onMobileOpenChange={setMobileNavOpen}
         />
-        <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col max-md:pt-[calc(3.5rem+env(safe-area-inset-top,0px))]">
+        <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col max-md:h-dvh max-md:max-h-dvh max-md:pt-[calc(3.5rem+env(safe-area-inset-top,0px))]">
           <header className="flex h-14 min-h-14 shrink-0 items-center gap-2 border-b border-border bg-background px-3 max-md:fixed max-md:inset-x-0 max-md:top-0 max-md:z-[100] max-md:min-h-[calc(3.5rem+env(safe-area-inset-top,0px))] max-md:pt-[env(safe-area-inset-top,0px)] max-md:shadow-md md:static md:top-auto md:z-30 md:min-h-14 md:pt-0 md:shadow-none bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/90 md:hidden">
             <Button
               type="button"
@@ -133,12 +143,15 @@ const StudentPortal = () => {
               <NotificationsPopover onNavigate={handleTabChange} />
             </div>
           </header>
-          <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden p-4 pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:p-6 md:pb-6 lg:p-8">
+          <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] p-4 pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:overflow-y-visible md:pb-6 md:p-6 lg:p-8">
             <div className="mb-4 hidden justify-end md:flex">
               <NotificationsPopover onNavigate={handleTabChange} />
             </div>
-            {content}
+            <div key={activeTab} className="student-tab-enter min-w-0">
+              {content}
+            </div>
           </main>
+          <StudentOnboardingDialog open={onboardingOpen} onOpenChange={setOnboardingOpen} />
           <StudentBottomNav
             activeTab={activeTab}
             onTabChange={handleTabChange}

@@ -12,7 +12,7 @@ const CheckinStepHeader = ({ step, completedSections }: CheckinStepHeaderProps) 
   const pct = Math.round(((step + 1) / CHECKIN_SECTIONS.length) * 100);
 
   return (
-    <div className="sticky top-0 z-10 -mx-1 mb-4 space-y-3 rounded-lg border border-border/60 bg-background/95 p-3 backdrop-blur">
+    <div className="sticky top-0 z-10 -mx-1 mb-4 space-y-3 rounded-lg border border-border/60 bg-background/95 p-3 backdrop-blur md:top-2">
       <div className="flex items-center justify-between gap-2 text-sm">
         <span className="font-medium">
           Bloco {step + 1} de {CHECKIN_SECTIONS.length}: {current.title}
