@@ -1,12 +1,22 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Calendar, Dumbbell, Utensils, TrendingUp } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import { getPlanoAlunoLegivel } from "@/lib/aluno-display";
+import {
+  buildPendingTasks,
+  hasCheckinThisWeek,
+  pickReturnCountdown,
+  type PendingTask,
+  type ReturnCountdownInfo,
+} from "@/lib/student-portal-utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDataContext } from "@/contexts/DataContext";
+import ReturnCountdownBanner from "@/components/student/ReturnCountdownBanner";
+import PendingTasksList from "@/components/student/PendingTasksList";
 
 function formatPeso(peso: unknown): string {
   if (peso == null || peso === "") return "—";
@@ -33,11 +43,19 @@ function formatStatusLabel(status: string | null | undefined): string {
 const StudentDashboardView = () => {
   const { user } = useAuth();
   const { isReady } = useDataContext();
+  const [, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [alunoData, setAlunoData] = useState<any>(null);
+  const [alunoTreino, setAlunoTreino] = useState<any>(null);
   const [treinoAtual, setTreinoAtual] = useState<any>(null);
   const [dietaAtual, setDietaAtual] = useState<any>(null);
   const [proximosEventos, setProximosEventos] = useState<any[]>([]);
+  const [returnCountdown, setReturnCountdown] = useState<ReturnCountdownInfo | null>(null);
+  const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
+
+  const navigateToTab = (tab: string) => {
+    setSearchParams({ tab });
+  };
 
   useEffect(() => {
     if (isReady && user) {
@@ -54,9 +72,12 @@ const StudentDashboardView = () => {
 
     if (!aluno) {
       setAlunoData(null);
+      setAlunoTreino(null);
       setTreinoAtual(null);
       setDietaAtual(null);
       setProximosEventos([]);
+      setReturnCountdown(null);
+      setPendingTasks([]);
       setLoading(false);
       return;
     }
@@ -65,14 +86,16 @@ const StudentDashboardView = () => {
 
     const alunosTreinosResult = await apiClient.requestSafe<any[]>('/api/alunos-treinos');
     const alunosTreinos = alunosTreinosResult.success && Array.isArray(alunosTreinosResult.data) ? alunosTreinosResult.data : [];
-    const alunoTreino = alunosTreinos.find(at => at.aluno_id === aluno.id && at.ativo === true) || null;
+    const alunoTreinoRow =
+      alunosTreinos.find((at) => at.aluno_id === aluno.id && at.ativo === true) || null;
+    setAlunoTreino(alunoTreinoRow);
 
-    if (alunoTreino?.treino_id) {
-      const treinoResult = await apiClient.requestSafe<any>(`/api/treinos/${alunoTreino.treino_id}`);
-      setTreinoAtual(treinoResult.success ? treinoResult.data : null);
-    } else {
-      setTreinoAtual(null);
+    let treinoData: any = null;
+    if (alunoTreinoRow?.treino_id) {
+      const treinoResult = await apiClient.requestSafe<any>(`/api/treinos/${alunoTreinoRow.treino_id}`);
+      treinoData = treinoResult.success ? treinoResult.data : null;
     }
+    setTreinoAtual(treinoData);
 
     const dietasResult = await apiClient.requestSafe<any[]>('/api/dietas');
     const dietas = dietasResult.success && Array.isArray(dietasResult.data) ? dietasResult.data : [];
@@ -85,6 +108,53 @@ const StudentDashboardView = () => {
       )[0] ||
       null;
     setDietaAtual(dieta);
+
+    setReturnCountdown(
+      pickReturnCountdown(dieta, alunoTreinoRow, treinoData?.nome ?? null),
+    );
+
+    const checkinsResult = await apiClient.requestSafe<any[]>('/api/weekly-checkins');
+    const checkinsRaw =
+      checkinsResult.success && Array.isArray(checkinsResult.data) ? checkinsResult.data : [];
+    const checkinsAluno = checkinsRaw.filter((c) => c.aluno_id === aluno.id);
+    const checkinDue = !hasCheckinThisWeek(checkinsAluno);
+
+    let unreadChat = 0;
+    if (user?.id) {
+      const mensagensResult = await apiClient.requestSafe<any[]>('/api/mensagens');
+      const mensagens =
+        mensagensResult.success && Array.isArray(mensagensResult.data)
+          ? mensagensResult.data
+          : [];
+      unreadChat = mensagens.filter(
+        (m) => m.destinatario_id === user.id && !m.lida,
+      ).length;
+    }
+
+    let unreadAnnouncements = 0;
+    const turmasResult = await apiClient.requestSafe<any[]>('/api/turmas-alunos');
+    const turmasAluno =
+      turmasResult.success && Array.isArray(turmasResult.data) ? turmasResult.data : [];
+    const turmaIds = turmasAluno.filter((t) => t.aluno_id === aluno.id).map((t) => t.turma_id);
+    const avisosResult = await apiClient.requestSafe<any[]>('/api/avisos-destinatarios');
+    const avisos =
+      avisosResult.success && Array.isArray(avisosResult.data) ? avisosResult.data : [];
+    const individualCount = avisos.filter(
+      (a) => a.aluno_id === aluno.id && a.lido === false,
+    ).length;
+    const classCount =
+      turmaIds.length > 0
+        ? avisos.filter((a) => a.lido === false && turmaIds.includes(a.turma_id)).length
+        : 0;
+    unreadAnnouncements = individualCount + classCount;
+
+    setPendingTasks(
+      buildPendingTasks({
+        checkinDue,
+        unreadChat,
+        unreadAnnouncements,
+      }),
+    );
 
     const eventosResult = await apiClient.requestSafe<any[]>('/api/agenda-eventos');
     const eventos = eventosResult.success && Array.isArray(eventosResult.data) ? eventosResult.data : [];
@@ -149,6 +219,47 @@ const StudentDashboardView = () => {
         <p className="text-muted-foreground">
           Continue sua jornada de transformação
         </p>
+      </div>
+
+      <ReturnCountdownBanner loading={loading} countdown={returnCountdown} />
+
+      <div className="grid min-w-0 gap-4 md:grid-cols-2">
+        <PendingTasksList
+          loading={loading}
+          tasks={pendingTasks}
+          onNavigate={navigateToTab}
+        />
+        <Card className="shadow-card md:row-span-1">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Resumo rápido</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm text-muted-foreground">
+            {loading ? (
+              <>
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-[80%]" />
+              </>
+            ) : (
+              <>
+                <p>
+                  {pendingTasks.length > 0
+                    ? `${pendingTasks.length} pendência${pendingTasks.length !== 1 ? "s" : ""} para resolver.`
+                    : "Nenhuma pendência urgente."}
+                </p>
+                {returnCountdown && (
+                  <p className="text-foreground/90">{returnCountdown.label}</p>
+                )}
+                {proximosEventos[0] && (
+                  <p>
+                    Próximo evento:{" "}
+                    <span className="text-foreground">{proximosEventos[0].titulo}</span> em{" "}
+                    {new Date(proximosEventos[0].data_evento).toLocaleDateString("pt-BR")}
+                  </p>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid min-w-0 gap-4 sm:gap-6 md:grid-cols-2 lg:grid-cols-4">
