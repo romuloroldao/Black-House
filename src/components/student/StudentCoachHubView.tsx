@@ -126,10 +126,10 @@ const StudentCoachHubView = () => {
   };
 
   return (
-    <div className="min-w-0 space-y-4">
-      <div>
+    <div className="min-w-0 space-y-5 md:space-y-6">
+      <div className="md:px-2 lg:px-4">
         <h1 className="text-2xl font-bold sm:text-3xl">Coach</h1>
-        <p className="text-muted-foreground text-sm sm:text-base">
+        <p className="text-sm text-muted-foreground sm:text-base">
           Chat direto e avisos do seu coach num só lugar
         </p>
       </div>
@@ -137,9 +137,9 @@ const StudentCoachHubView = () => {
       <Tabs
         value={activeView}
         onValueChange={(v) => setView(v as CoachHubView)}
-        className="min-w-0"
+        className="min-w-0 md:px-2 lg:px-4"
       >
-        <TabsList className="grid h-auto w-full max-w-md grid-cols-2">
+        <TabsList className="grid h-auto w-full max-w-md grid-cols-2 md:mx-0">
           <TabsTrigger value="chat" className="gap-2 py-2.5">
             <MessageSquare className="h-4 w-4" />
             Chat
@@ -163,8 +163,10 @@ const StudentCoachHubView = () => {
         <TabsContent value="chat" className="mt-4 min-w-0 focus-visible:outline-none">
           <StudentChatView />
         </TabsContent>
-        <TabsContent value="avisos" className="mt-4 min-w-0 focus-visible:outline-none">
-          <StudentMessagesView />
+        <TabsContent value="avisos" className="mt-4 min-w-0 focus-visible:outline-none md:mt-5">
+          <div className="mx-auto w-full max-w-3xl md:max-w-4xl">
+            <StudentMessagesView />
+          </div>
         </TabsContent>
       </Tabs>
     </div>

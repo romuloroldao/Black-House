@@ -6,33 +6,27 @@ import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Send, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 const StudentChatView = () => {
   const { user } = useAuth();
   const [conversaId, setConversaId] = useState<string | null>(null);
   const [mensagens, setMensagens] = useState<any[]>([]);
   const [novaMensagem, setNovaMensagem] = useState("");
-  const [coachNome, setCoachNome] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // DESIGN-ROLE-MESSAGING-ISOLATION-001: Apenas alunos podem acessar mensagens
-    if (user && user.role === 'aluno') {
+    if (user && user.role === "aluno") {
       loadChat();
     }
   }, [user]);
 
   useEffect(() => {
-    // DESIGN-ROLE-MESSAGING-ISOLATION-001: Polling só para alunos
-    if (conversaId && user?.role === 'aluno') {
-      // Polling para atualizações (substitui realtime)
+    if (conversaId && user?.role === "aluno") {
       const intervalId = setInterval(() => {
         loadChatMessages();
-      }, 5000); // Atualizar a cada 5 segundos
-
-      return () => {
-        clearInterval(intervalId);
-      };
+      }, 5000);
+      return () => clearInterval(intervalId);
     }
   }, [conversaId, user]);
 
@@ -41,8 +35,7 @@ const StudentChatView = () => {
   };
 
   const loadChat = async () => {
-    // DESIGN-ROLE-MESSAGING-ISOLATION-001: Apenas alunos podem acessar mensagens
-    if (!user?.id || user.role !== 'aluno') {
+    if (!user?.id || user.role !== "aluno") {
       toast.error("Acesso negado. Apenas alunos podem acessar mensagens.");
       return;
     }
@@ -58,21 +51,22 @@ const StudentChatView = () => {
       return;
     }
 
-    const mensagensResult = await apiClient.requestSafe<any[]>('/api/mensagens');
-    const mensagens = mensagensResult.success && Array.isArray(mensagensResult.data) ? mensagensResult.data : [];
+    const mensagensResult = await apiClient.requestSafe<any[]>("/api/mensagens");
+    const mensagensData =
+      mensagensResult.success && Array.isArray(mensagensResult.data) ? mensagensResult.data : [];
 
-    const conversaIdFromMessages = mensagens.length > 0 ? mensagens[0].conversa_id : null;
+    const conversaIdFromMessages = mensagensData.length > 0 ? mensagensData[0].conversa_id : null;
     if (!conversaIdFromMessages) {
-      const novaMensagem = await apiClient.requestSafe<any>('/api/mensagens', {
-        method: 'POST',
+      const novaMensagemRes = await apiClient.requestSafe<any>("/api/mensagens", {
+        method: "POST",
         body: JSON.stringify({
-          conteudo: 'Iniciando conversa'
-        })
+          conteudo: "Iniciando conversa",
+        }),
       });
 
-      if (novaMensagem.success && novaMensagem.data?.conversa_id) {
-        setConversaId(novaMensagem.data.conversa_id);
-        await loadChatMessages(novaMensagem.data.conversa_id);
+      if (novaMensagemRes.success && novaMensagemRes.data?.conversa_id) {
+        setConversaId(novaMensagemRes.data.conversa_id);
+        await loadChatMessages(novaMensagemRes.data.conversa_id);
       }
       return;
     }
@@ -84,23 +78,22 @@ const StudentChatView = () => {
   const loadChatMessages = async (conversaIdParam?: string) => {
     const id = conversaIdParam || conversaId;
     if (!id) return;
-
-    // DESIGN-ROLE-MESSAGING-ISOLATION-001: Apenas alunos podem carregar mensagens
-    if (!user || user.role !== 'aluno') return;
+    if (!user || user.role !== "aluno") return;
 
     const mensagensResult = await apiClient.requestSafe<any[]>(`/api/mensagens?conversaId=${id}`);
-    const mensagens = mensagensResult.success && Array.isArray(mensagensResult.data) ? mensagensResult.data : [];
+    const mensagensData =
+      mensagensResult.success && Array.isArray(mensagensResult.data) ? mensagensResult.data : [];
 
-    setMensagens(mensagens);
+    setMensagens(mensagensData);
     setTimeout(scrollToBottom, 100);
 
-    const mensagensNaoLidas = mensagens.filter(
-      (msg: any) => msg.destinatario_id === user.id && !msg.lida
+    const mensagensNaoLidas = mensagensData.filter(
+      (msg: any) => msg.destinatario_id === user.id && !msg.lida,
     );
 
     for (const msg of mensagensNaoLidas) {
       await apiClient.requestSafe(`/api/mensagens/${msg.id}`, {
-        method: 'PATCH',
+        method: "PATCH",
         body: JSON.stringify({ lida: true }),
       });
     }
@@ -109,14 +102,13 @@ const StudentChatView = () => {
   const handleEnviarMensagem = async () => {
     if (!novaMensagem.trim() || !conversaId) return;
 
-    // DESIGN-ROLE-MESSAGING-ISOLATION-001: Apenas alunos podem enviar mensagens
-    if (!user?.id || user.role !== 'aluno') {
+    if (!user?.id || user.role !== "aluno") {
       toast.error("Acesso negado. Apenas alunos podem enviar mensagens.");
       return;
     }
 
-    const result = await apiClient.requestSafe('/api/mensagens', {
-      method: 'POST',
+    const result = await apiClient.requestSafe("/api/mensagens", {
+      method: "POST",
       body: JSON.stringify({
         conversa_id: conversaId,
         conteudo: novaMensagem.trim(),
@@ -133,73 +125,77 @@ const StudentChatView = () => {
   };
 
   return (
-    <div className="space-y-6 h-[calc(100vh-12rem)]">
-      <div>
-        <h1 className="text-3xl font-bold mb-2">Chat com Coach</h1>
-        <p className="text-muted-foreground">
-          Tire suas dúvidas e receba orientações
-        </p>
-      </div>
-
-      <Card className="shadow-card flex flex-col h-full">
-        <CardHeader className="border-b border-border">
-          <CardTitle className="flex items-center gap-2">
-            <MessageSquare className="h-5 w-5 text-primary" />
-            Conversa com seu Coach
+    <div className="mx-auto w-full max-w-3xl md:max-w-4xl">
+      <Card className="flex max-h-[min(72dvh,720px)] min-h-[min(420px,55dvh)] flex-col overflow-hidden rounded-xl border-border/80 shadow-card md:min-h-[min(520px,62dvh)]">
+        <CardHeader className="shrink-0 border-b border-border/80 px-4 py-4 md:px-8 md:py-5">
+          <CardTitle className="flex items-center gap-2 text-base md:text-lg">
+            <MessageSquare className="h-5 w-5 text-primary" aria-hidden />
+            Conversa com seu coach
           </CardTitle>
         </CardHeader>
 
-        <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
+        <CardContent className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-4 py-5 md:px-8 md:py-6">
           {mensagens.length === 0 ? (
-            <div className="flex items-center justify-center h-full">
+            <div className="flex h-full min-h-[200px] items-center justify-center px-4">
               <div className="text-center text-muted-foreground">
-                <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                <MessageSquare className="mx-auto mb-3 h-12 w-12 opacity-50" aria-hidden />
                 <p>Inicie a conversa com seu coach</p>
               </div>
             </div>
           ) : (
-            mensagens.map((mensagem) => {
-              const isMe = mensagem.remetente_id === user?.id;
-              return (
-                <div
-                  key={mensagem.id}
-                  className={`flex ${isMe ? "justify-end" : "justify-start"}`}
-                >
+            <div className="space-y-4">
+              {mensagens.map((mensagem) => {
+                const isMe = mensagem.remetente_id === user?.id;
+                return (
                   <div
-                    className={`max-w-[70%] rounded-lg p-3 ${
-                      isMe
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted"
-                    }`}
+                    key={mensagem.id}
+                    className={cn("flex w-full", isMe ? "justify-end pl-6 md:pl-12" : "justify-start pr-6 md:pr-12")}
                   >
-                    <p className="text-sm">{mensagem.conteudo}</p>
-                    <p className="text-xs opacity-70 mt-1">
-                      {new Date(mensagem.created_at).toLocaleTimeString("pt-BR", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </p>
+                    <div
+                      className={cn(
+                        "max-w-[min(100%,18rem)] rounded-2xl px-4 py-2.5 md:max-w-[min(100%,22rem)] md:px-5 md:py-3",
+                        isMe
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted/80 text-foreground",
+                      )}
+                    >
+                      <p className="text-sm leading-relaxed">{mensagem.conteudo}</p>
+                      <p className="mt-1.5 text-xs opacity-70">
+                        {new Date(mensagem.created_at).toLocaleTimeString("pt-BR", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              );
-            })
+                );
+              })}
+              <div ref={messagesEndRef} className="h-1 shrink-0" aria-hidden />
+            </div>
           )}
-          <div ref={messagesEndRef} />
         </CardContent>
 
-        <div className="p-4 border-t border-border">
-          <div className="flex gap-2">
+        <div className="shrink-0 border-t border-border/80 px-4 py-4 md:px-8 md:py-5">
+          <div className="flex gap-3">
             <Input
               placeholder="Digite sua mensagem..."
               value={novaMensagem}
               onChange={(e) => setNovaMensagem(e.target.value)}
-              onKeyPress={(e) => {
+              onKeyDown={(e) => {
                 if (e.key === "Enter") {
+                  e.preventDefault();
                   handleEnviarMensagem();
                 }
               }}
+              className="min-h-11 flex-1"
             />
-            <Button onClick={handleEnviarMensagem}>
+            <Button
+              type="button"
+              size="icon"
+              className="h-11 w-11 shrink-0"
+              onClick={handleEnviarMensagem}
+              aria-label="Enviar mensagem"
+            >
               <Send className="h-4 w-4" />
             </Button>
           </div>
