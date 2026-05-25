@@ -1,19 +1,41 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Utensils, Replace, Pill } from "lucide-react";
+import { Utensils, Pill } from "lucide-react";
 import FoodSubstitutionDialog from "@/components/nutrition/FoodSubstitutionDialog";
-import { Food, getAllFoodsSafe, macroScaleFactor, quantityUnitLabel } from "@/lib/foodService";
+import { Food, getAllFoodsSafe } from "@/lib/foodService";
+import {
+  buildMealGroups,
+  calcularMacros,
+  countCompletedMeals,
+  dietHasPlanoAB,
+  getItemsForPlano,
+  pickActiveDieta,
+  readMealDone,
+  writeMealDone,
+  type DietItemWithFood,
+  type DietPlano,
+  type MealGroup,
+} from "@/lib/diet-student-utils";
+import { MacroRingsRow } from "@/components/student/diet/MacroRing";
+import MealTimelineItem from "@/components/student/diet/MealTimelineItem";
+import MealDetailSheet from "@/components/student/diet/MealDetailSheet";
 
 const StudentDietView = () => {
   const { user } = useAuth();
+  const [loading, setLoading] = useState(true);
   const [dieta, setDieta] = useState<any>(null);
-  const [itensDieta, setItensDieta] = useState<any[]>([]);
+  const [itensDieta, setItensDieta] = useState<DietItemWithFood[]>([]);
   const [farmacos, setFarmacos] = useState<any[]>([]);
   const [todosAlimentos, setTodosAlimentos] = useState<Food[]>([]);
+  const [planoAtivo, setPlanoAtivo] = useState<DietPlano>("A");
+  const [checkTick, setCheckTick] = useState(0);
+  const [detailMeal, setDetailMeal] = useState<MealGroup | null>(null);
   const [substitutionDialog, setSubstitutionDialog] = useState<{
     open: boolean;
     alimentoAtual: any;
@@ -24,19 +46,15 @@ const StudentDietView = () => {
     open: false,
     alimentoAtual: null,
     quantidadeAtual: 0,
-    unidadeQuantidade: 'g',
-    itemId: ''
+    unidadeQuantidade: "g",
+    itemId: "",
   });
 
-  useEffect(() => {
-    if (user) {
-      loadDietData();
-    }
-  }, [user]);
-
-  const loadDietData = async () => {
+  const loadDietData = useCallback(async () => {
+    setLoading(true);
     const alimentosResult = await getAllFoodsSafe();
-    const alimentosData = alimentosResult.success && Array.isArray(alimentosResult.data) ? alimentosResult.data : [];
+    const alimentosData =
+      alimentosResult.success && Array.isArray(alimentosResult.data) ? alimentosResult.data : [];
     const alimentosOrdenados = alimentosData.sort((a, b) => a.name.localeCompare(b.name));
     setTodosAlimentos(alimentosOrdenados);
 
@@ -47,19 +65,19 @@ const StudentDietView = () => {
       setDieta(null);
       setItensDieta([]);
       setFarmacos([]);
+      setLoading(false);
       return;
     }
 
-    const dietasResult = await apiClient.requestSafe<any[]>('/api/dietas');
+    const dietasResult = await apiClient.requestSafe<any[]>("/api/dietas");
     const dietas = dietasResult.success && Array.isArray(dietasResult.data) ? dietasResult.data : [];
-    const dietaData = dietas
-      .filter(d => d.aluno_id === aluno.id)
-      .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())[0] || null;
+    const dietaData = pickActiveDieta(dietas, aluno.id);
 
     if (!dietaData) {
       setDieta(null);
       setItensDieta([]);
       setFarmacos([]);
+      setLoading(false);
       return;
     }
 
@@ -67,7 +85,7 @@ const StudentDietView = () => {
 
     const [itensRes, farmacosRes] = await Promise.all([
       apiClient.requestSafe<any[]>(`/api/itens-dieta?dieta_id=${dietaData.id}`),
-      apiClient.requestSafe<any[]>(`/api/dieta-farmacos?dieta_id=${dietaData.id}`)
+      apiClient.requestSafe<any[]>(`/api/dieta-farmacos?dieta_id=${dietaData.id}`),
     ]);
 
     const itensArray = itensRes.success && Array.isArray(itensRes.data) ? itensRes.data : [];
@@ -76,63 +94,73 @@ const StudentDietView = () => {
     const alimentosMap = new Map(alimentosData.map((a: Food) => [a.id, a]));
     const itensComAlimentos = itensArray.map((item: any) => ({
       ...item,
-      alimentos: alimentosMap.get(item.alimento_id) || null
+      alimentos: alimentosMap.get(item.alimento_id) || null,
     }));
 
     setItensDieta(itensComAlimentos);
     setFarmacos(farmacosArray);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (user) {
+      void loadDietData();
+    }
+  }, [user, loadDietData]);
+
+  const mealGroups = useMemo(() => buildMealGroups(itensDieta), [itensDieta]);
+  const showPlanoTabs = useMemo(() => dietHasPlanoAB(mealGroups), [mealGroups]);
+
+  const visibleGroups = useMemo(
+    () => mealGroups.filter((g) => getItemsForPlano(g, planoAtivo).length > 0),
+    [mealGroups, planoAtivo],
+  );
+
+  const macrosPlano = useMemo(() => {
+    const itens = visibleGroups.flatMap((g) => getItemsForPlano(g, planoAtivo));
+    return calcularMacros(itens);
+  }, [visibleGroups, planoAtivo]);
+
+  const completedCount = useMemo(() => {
+    if (!dieta?.id) return 0;
+    void checkTick;
+    return countCompletedMeals(dieta.id, visibleGroups, planoAtivo);
+  }, [dieta?.id, visibleGroups, planoAtivo, checkTick]);
+
+  const progressPct =
+    visibleGroups.length > 0 ? Math.round((completedCount / visibleGroups.length) * 100) : 0;
+
+  const firstPendingIdx = useMemo(() => {
+    if (!dieta?.id) return 0;
+    return visibleGroups.findIndex((g) => !readMealDone(dieta.id, g.key, planoAtivo));
+  }, [dieta?.id, visibleGroups, planoAtivo, checkTick]);
+
+  const toggleMealDone = (group: MealGroup) => {
+    if (!dieta?.id) return;
+    const current = readMealDone(dieta.id, group.key, planoAtivo);
+    writeMealDone(dieta.id, group.key, planoAtivo, !current);
+    setCheckTick((t) => t + 1);
   };
 
-  const agruparPorRefeicao = (itens: any[]) => {
-    const refeicoes: { [key: string]: any[] } = {};
-    itens.forEach(item => {
-      if (!refeicoes[item.refeicao]) {
-        refeicoes[item.refeicao] = [];
-      }
-      refeicoes[item.refeicao].push(item);
-    });
-    return refeicoes;
-  };
-
-  const calcularMacros = (itens: any[]) => {
-    return itens.reduce((total, item) => {
-      if (!item.alimentos) return total;
-      
-      const fator = macroScaleFactor(
-        item.quantidade,
-        item.unidade_quantidade,
-        item.alimentos.portion
-      );
-      return {
-        totalCalorias: total.totalCalorias + (item.alimentos.calories * fator),
-        totalProteinas: total.totalProteinas + (item.alimentos.protein * fator),
-        totalCarboidratos: total.totalCarboidratos + (item.alimentos.carbs * fator),
-        totalLipidios: total.totalLipidios + (item.alimentos.fat * fator)
-      };
-    }, { totalCalorias: 0, totalProteinas: 0, totalCarboidratos: 0, totalLipidios: 0 });
-  };
-
-  const handleVerSubstitutos = (item: any) => {
+  const handleVerSubstitutos = (item: DietItemWithFood) => {
     setSubstitutionDialog({
       open: true,
       alimentoAtual: item.alimentos,
       quantidadeAtual: item.quantidade,
-      unidadeQuantidade: item.unidade_quantidade || 'g',
-      itemId: item.id
+      unidadeQuantidade: item.unidade_quantidade || "g",
+      itemId: item.id,
     });
   };
 
   const handleSubstituir = async (novoAlimentoId: string, novaQuantidade: number) => {
-    // Aqui você pode implementar a lógica de salvar a substituição no banco se quiser
-    // Por enquanto, vamos apenas atualizar localmente
-    const novosItens = itensDieta.map(item => {
+    const novosItens = itensDieta.map((item) => {
       if (item.id === substitutionDialog.itemId) {
-        const novoAlimento = todosAlimentos.find(a => a.id === novoAlimentoId);
+        const novoAlimento = todosAlimentos.find((a) => a.id === novoAlimentoId);
         return {
           ...item,
           alimento_id: novoAlimentoId,
           quantidade: novaQuantidade,
-          alimentos: novoAlimento
+          alimentos: novoAlimento ?? null,
         };
       }
       return item;
@@ -140,12 +168,24 @@ const StudentDietView = () => {
     setItensDieta(novosItens);
   };
 
+  if (loading) {
+    return (
+      <div className="min-w-0 space-y-4">
+        <Skeleton className="h-10 w-48" />
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-16 w-full" />
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-32 w-full" />
+      </div>
+    );
+  }
+
   if (!dieta) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
+      <div className="flex min-h-[400px] items-center justify-center">
         <div className="text-center">
-          <Utensils className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-          <h3 className="text-lg font-semibold mb-2">Nenhuma dieta atribuída</h3>
+          <Utensils className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
+          <h3 className="mb-2 text-lg font-semibold">Nenhuma dieta atribuída</h3>
           <p className="text-muted-foreground">
             Entre em contato com seu coach para receber sua dieta personalizada
           </p>
@@ -154,152 +194,107 @@ const StudentDietView = () => {
     );
   }
 
-  const refeicoes = agruparPorRefeicao(itensDieta);
-  const macros = calcularMacros(itensDieta);
-
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-5">
       <div>
-        <h1 className="text-3xl font-bold mb-2">Minha Dieta</h1>
+        <h1 className="mb-1 text-2xl font-bold sm:text-3xl">Minha dieta</h1>
         <p className="text-muted-foreground">{dieta.nome}</p>
+        {dieta.data_retorno && (
+          <p className="mt-1 text-sm text-primary/90">
+            Retorno{" "}
+            {new Date(String(dieta.data_retorno).slice(0, 10) + "T12:00:00").toLocaleDateString("pt-BR")}
+          </p>
+        )}
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Informações da Dieta</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <div>
-              <span className="font-medium">Objetivo:</span>{" "}
-              <span className="text-muted-foreground">{dieta.objetivo || "Não especificado"}</span>
-            </div>
-            <div>
-              <span className="font-medium">Criada em:</span>{" "}
-              <span className="text-muted-foreground">
-                {new Date(dieta.created_at).toLocaleDateString("pt-BR")}
-              </span>
-            </div>
+      {showPlanoTabs && (
+        <Tabs
+          value={planoAtivo}
+          onValueChange={(v) => setPlanoAtivo(v as DietPlano)}
+          className="w-full max-w-xs"
+        >
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="A">Plano A</TabsTrigger>
+            <TabsTrigger value="B">Plano B</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      )}
+
+      <Card className="shadow-card">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-base">Progresso do dia</CardTitle>
+            <Badge variant="premium">
+              {completedCount}/{visibleGroups.length} refeições
+            </Badge>
           </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Progress value={progressPct} className="h-2" />
+          <MacroRingsRow macros={macrosPlano} />
         </CardContent>
       </Card>
 
-      {/* Resumo Nutricional */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Resumo Nutricional Total</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-            <div>
-              <div className="text-2xl font-bold text-primary">
-                {Math.round(macros.totalCalorias)}
-              </div>
-              <div className="text-sm text-muted-foreground">Calorias</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-primary">
-                {Math.round(macros.totalProteinas)}g
-              </div>
-              <div className="text-sm text-muted-foreground">Proteínas</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-warning">
-                {Math.round(macros.totalCarboidratos)}g
-              </div>
-              <div className="text-sm text-muted-foreground">Carboidratos</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-destructive">
-                {Math.round(macros.totalLipidios)}g
-              </div>
-              <div className="text-sm text-muted-foreground">Gorduras</div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {dieta.objetivo && (
+        <p className="text-sm text-muted-foreground">
+          <span className="font-medium text-foreground">Objetivo:</span> {dieta.objetivo}
+        </p>
+      )}
 
-      {/* Fármacos */}
+      <div className="min-w-0">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Refeições de hoje
+        </h2>
+        {visibleGroups.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Nenhum item neste plano.</p>
+        ) : (
+          visibleGroups.map((group, idx) => (
+            <MealTimelineItem
+              key={`${group.key}-${planoAtivo}`}
+              group={group}
+              plano={planoAtivo}
+              done={readMealDone(dieta.id, group.key, planoAtivo)}
+              isLast={idx === visibleGroups.length - 1}
+              isCurrent={idx === firstPendingIdx}
+              onToggleDone={() => toggleMealDone(group)}
+              onOpenDetail={() => setDetailMeal(group)}
+            />
+          ))
+        )}
+      </div>
+
       {farmacos.length > 0 && (
-        <Card>
+        <Card className="shadow-card">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
+            <CardTitle className="flex items-center gap-2 text-base">
               <Pill className="h-5 w-5 text-primary" />
-              Fármacos e Suplementos
+              Fármacos e suplementos
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {farmacos.map((farmaco) => (
-                <div key={farmaco.id} className="border rounded-lg p-4 space-y-2">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="font-semibold text-lg">{farmaco.nome}</div>
-                      <div className="text-muted-foreground">{farmaco.dosagem}</div>
-                    </div>
-                  </div>
-                  {farmaco.observacao && (
-                    <div className="text-sm text-muted-foreground bg-muted/50 p-2 rounded">
-                      {farmaco.observacao}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+          <CardContent className="space-y-3">
+            {farmacos.map((farmaco) => (
+              <div key={farmaco.id} className="rounded-lg border border-border/60 p-3">
+                <p className="font-semibold">{farmaco.nome}</p>
+                <p className="text-sm text-muted-foreground">{farmaco.dosagem}</p>
+                {farmaco.observacao && (
+                  <p className="mt-2 text-xs text-muted-foreground bg-muted/40 rounded p-2">
+                    {farmaco.observacao}
+                  </p>
+                )}
+              </div>
+            ))}
           </CardContent>
         </Card>
       )}
 
-      {/* Refeições */}
-      <div className="space-y-4">
-        {Object.entries(refeicoes).map(([refeicao, itensRefeicao]) => (
-          <Card key={refeicao}>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Utensils className="h-5 w-5 text-primary" />
-                {refeicao}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {itensRefeicao.map((item: any) => {
-                  const fator = macroScaleFactor(
-                    item.quantidade,
-                    item.unidade_quantidade,
-                    item.alimentos.portion
-                  );
-                  const calorias = Math.round(item.alimentos.calories * fator);
-                  
-                  return (
-                    <div key={item.id} className="flex items-center justify-between p-4 rounded-lg border bg-card">
-                      <div className="flex-1">
-                        <div className="font-medium text-lg">{item.alimentos.name}</div>
-                        <div className="text-sm text-muted-foreground mt-1">
-                          {item.quantidade}
-                          {quantityUnitLabel(item.unidade_quantidade)}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <Badge variant="outline" className="text-sm">
-                          {calorias} kcal
-                        </Badge>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleVerSubstitutos(item)}
-                        >
-                          <Replace className="w-4 h-4 mr-2" />
-                          Ver Substitutos
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      <MealDetailSheet
+        open={detailMeal != null}
+        onOpenChange={(open) => !open && setDetailMeal(null)}
+        mealName={detailMeal?.displayName ?? ""}
+        plano={planoAtivo}
+        items={detailMeal ? getItemsForPlano(detailMeal, planoAtivo) : []}
+        onSubstituir={handleVerSubstitutos}
+      />
 
       <FoodSubstitutionDialog
         open={substitutionDialog.open}
