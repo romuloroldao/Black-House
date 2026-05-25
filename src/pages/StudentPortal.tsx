@@ -2,7 +2,11 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Menu } from "lucide-react";
 import StudentSidebar from "@/components/student/StudentSidebar";
-import StudentDashboardView from "@/components/student/StudentDashboardView";
+import StudentTodayView from "@/components/student/StudentTodayView";
+import StudentBottomNav from "@/components/student/StudentBottomNav";
+import { useAlunoHoje } from "@/hooks/useAlunoHoje";
+import { useAuth } from "@/contexts/AuthContext";
+import { useDataContext } from "@/contexts/DataContext";
 import StudentDietView from "@/components/student/StudentDietView";
 import StudentWorkoutsView from "@/components/student/StudentWorkoutsView";
 import StudentVideosView from "@/components/student/StudentVideosView";
@@ -20,12 +24,21 @@ import logoWhite from "@/assets/logo-white.svg";
 // A tela de bloqueio é rota separada (/portal-aluno/blocked)
 // O ProtectedRoute já redireciona alunos inadimplentes automaticamente
 const StudentPortal = () => {
+  const { user } = useAuth();
+  const { isReady } = useDataContext();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "dashboard");
+  const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "hoje");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const hojeState = useAlunoHoje(Boolean(isReady && user));
+  const { coachUnreadTotal } = hojeState;
 
   useEffect(() => {
-    const tab = searchParams.get("tab") || "dashboard";
+    let tab = searchParams.get("tab") || "hoje";
+    if (tab === "dashboard") {
+      setSearchParams({ tab: "hoje" }, { replace: true });
+      setActiveTab("hoje");
+      return;
+    }
     if (tab === "chat" || tab === "messages") {
       setSearchParams(
         { tab: "coach", coachView: tab === "chat" ? "chat" : "avisos" },
@@ -47,8 +60,9 @@ const StudentPortal = () => {
   const renderContent = () => {
     try {
       switch (activeTab) {
+        case "hoje":
         case "dashboard":
-          return <StudentDashboardView />;
+          return <StudentTodayView hojeState={hojeState} />;
         case "diet":
           return <StudentDietView />;
         case "workouts":
@@ -70,12 +84,12 @@ const StudentPortal = () => {
         case "checkin":
           return <StudentWeeklyCheckin />;
         default:
-          return <StudentDashboardView />;
+          return <StudentTodayView />;
       }
     } catch (error) {
       // DESIGN-ROOT-RENDER-UNBLOCK-001: Fallback seguro em caso de erro
       console.warn('[DESIGN-ROOT-RENDER-UNBLOCK-001] Erro ao renderizar conteúdo do StudentPortal. Usando fallback:', error);
-      return <StudentDashboardView />;
+      return <StudentTodayView />;
     }
   };
 
@@ -119,12 +133,17 @@ const StudentPortal = () => {
               <NotificationsPopover onNavigate={handleTabChange} />
             </div>
           </header>
-          <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden p-4 md:p-6 lg:p-8">
+          <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden p-4 pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:p-6 md:pb-6 lg:p-8">
             <div className="mb-4 hidden justify-end md:flex">
               <NotificationsPopover onNavigate={handleTabChange} />
             </div>
             {content}
           </main>
+          <StudentBottomNav
+            activeTab={activeTab}
+            onTabChange={handleTabChange}
+            coachBadge={coachUnreadTotal}
+          />
         </div>
       </div>
     );

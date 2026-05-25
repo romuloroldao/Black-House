@@ -114,8 +114,8 @@
 
 ### Entregáveis Fase 1
 
-- [ ] PR `feat(aluno): endpoint /api/alunos/me/hoje`
-- [ ] PR `feat(aluno): ecrã Hoje e bottom nav`
+- [x] PR `feat(aluno): endpoint /api/alunos/me/hoje`
+- [x] PR `feat(aluno): ecrã Hoje e bottom nav`
 - [ ] PR `feat(aluno): dieta timeline, planos A/B e checklist`
 
 ---

@@ -1,5 +1,5 @@
 import {
-  Home,
+  CalendarDays,
   Utensils,
   Dumbbell,
   Play,
@@ -62,7 +62,7 @@ const StudentSidebar = ({
   const isMarkingAsReadRef = useRef(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
-  const MORE_TAB_IDS = ["progress", "videos", "reports", "financial", "profile"];
+  const MORE_TAB_IDS = ["progress", "videos", "reports", "financial", "profile", "dashboard"];
   const coachUnreadTotal = unreadMessages + unreadCount;
 
   const getFirstName = (value?: string | null): string => {
@@ -239,6 +239,9 @@ const StudentSidebar = ({
     if (tabId === "coach") {
       return activeTab === "coach" || activeTab === "chat" || activeTab === "messages";
     }
+    if (tabId === "hoje") {
+      return activeTab === "hoje" || activeTab === "dashboard";
+    }
     return activeTab === tabId;
   };
 
@@ -256,7 +259,7 @@ const StudentSidebar = ({
   };
 
   const primaryMenuItems: MenuItem[] = [
-    { id: "dashboard", label: "Início", icon: Home },
+    { id: "hoje", label: "Hoje", icon: CalendarDays },
     { id: "diet", label: "Dieta", icon: Utensils },
     { id: "workouts", label: "Treinos", icon: Dumbbell },
     { id: "coach", label: "Coach", icon: MessageSquare, badge: coachUnreadTotal },
@@ -324,8 +327,9 @@ const StudentSidebar = ({
           "flex shrink-0 flex-col overflow-hidden border-r border-border bg-card",
           /* Desktop: sempre no fluxo, coluna fixa */
           "md:z-auto md:h-screen md:w-64 md:shadow-none md:sticky md:top-0",
-          /* Mobile fechado: fora do layout — evita barra lateral a empilhar em cima do dashboard */
-          !mobileOpen && "max-md:hidden",
+          /* Mobile: menu lateral só via hamburger; navegação principal = bottom nav */
+          "max-md:hidden",
+          mobileOpen && "max-md:!flex",
           /* Mobile aberto: painel por cima do conteúdo */
           mobileOpen &&
             "max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-[120] max-md:flex max-md:h-full max-md:w-[min(288px,88vw)] max-md:shadow-xl"

@@ -93,7 +93,7 @@ const ProtectedRoute = ({
   if (!allowedRoles.includes(userRole)) {
     // Redirecionar baseado no role
     if (userRole === 'aluno') {
-      return <Navigate to="/portal-aluno/dashboard" replace />;
+      return <Navigate to="/portal-aluno/dashboard?tab=hoje" replace />;
     } else {
       return <Navigate to="/" replace />;
     }
@@ -115,7 +115,7 @@ const ProtectedRoute = ({
 
   // Redirecionar aluno para portal-aluno se tentar acessar rotas do coach
   if (userRole === 'aluno' && location.pathname === '/') {
-    return <Navigate to="/portal-aluno/dashboard" replace />;
+    return <Navigate to="/portal-aluno/dashboard?tab=hoje" replace />;
   }
 
   // Coach/admin usam painel principal (não portal do aluno)
