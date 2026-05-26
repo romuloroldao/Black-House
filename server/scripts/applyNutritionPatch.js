@@ -12,6 +12,8 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const PATCH_FILES = [
     '20260216_nutrition_precision_patch.sql',
     '20260519_equivalencia_alimentar_grupos.sql',
+    '20260526_checkin_coach_respondido.sql',
+    '20260527_checkin_relato_search.sql',
 ];
 
 async function main() {
