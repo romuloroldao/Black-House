@@ -198,7 +198,7 @@ import: {
 - [x] `data_retorno` em `DietOnlyImportSchema` + envio no `confirm-diet`
 - [x] Opção **Substituir dieta activa** (`replace_active_diet`)
 - [x] Histórico de importações (2026-05-28)
-- [ ] Card estado portal no perfil
+- [x] Card estado portal no perfil (2026-05-28)
 - [ ] Importação em lote
 
 ---

@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare, Trash2, User, Utensils, TrendingUp, Activity, Wallet, Upload } from "lucide-react";
 import StudentImporter, { type ImportCompleteResult } from "./StudentImporter";
 import ImportHistoryPanel from "@/components/import/ImportHistoryPanel";
+import StudentPortalStatusCard from "@/components/student/StudentPortalStatusCard";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -107,6 +108,7 @@ export default function StudentDetails() {
   const [isCriarDietaOpen, setIsCriarDietaOpen] = useState(false);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [importHistoryRefresh, setImportHistoryRefresh] = useState(0);
+  const [portalStatusRefresh, setPortalStatusRefresh] = useState(0);
   const [novaDieta, setNovaDieta] = useState({
     nome: "",
     objetivo: "",
@@ -431,6 +433,7 @@ export default function StudentDetails() {
   const handleImportComplete = (result?: ImportCompleteResult) => {
     setIsImportDialogOpen(false);
     setImportHistoryRefresh((k) => k + 1);
+    setPortalStatusRefresh((k) => k + 1);
     carregarDadosAluno();
     if (result?.dietaId) {
       navigate(`/dieta/${result.dietaId}`);
@@ -592,6 +595,17 @@ export default function StudentDetails() {
 
         {/* TAB: Visão Geral */}
         <TabsContent value="overview" className="space-y-6 mt-6">
+          {id ? (
+            <StudentPortalStatusCard
+              alunoId={id}
+              refreshKey={portalStatusRefresh}
+              onLinked={() => {
+                setPortalStatusRefresh((k) => k + 1);
+                carregarDadosAluno();
+              }}
+            />
+          ) : null}
+
           <div className="grid gap-6 md:grid-cols-2">
             {/* Dados Básicos */}
             <Card>

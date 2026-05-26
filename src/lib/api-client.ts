@@ -2,6 +2,7 @@ import { assertDataContextReady, assertNoSupabaseDirectAccess } from './data-con
 import { API_CONTRACT, isContractEndpoint, normalizeEndpoint } from '@/contracts/api-contract';
 import type { AlunoHojeResponse } from '@/types/aluno-hoje';
 import type { ImportHistoryRecord } from '@/types/import-history';
+import type { AlunoPortalStatus } from '@/types/aluno-portal-status';
 import { getAvailabilityKeyForEndpoint, isDataAvailable } from '@/lib/dataAvailability';
 
 // FIX-012 — prefixos de rotas semânticas na VPS (PostgreSQL; ver src/contracts/api-contract.ts)
@@ -163,7 +164,12 @@ function mapLegacyApiToRestV1(endpoint: string): LegacyMapResult {
         unwrapFirstRow: true,
     });
 
-    let match = normalized.match(/^\/api\/alunos\/([^/]+)$/);
+    match = normalized.match(/^\/api\/alunos\/([^/]+)\/portal-status$/);
+    if (match) {
+        return { endpoint: `/api/alunos/${match[1]}/portal-status`, unwrapFirstRow: false };
+    }
+
+    match = normalized.match(/^\/api\/alunos\/([^/]+)$/);
     if (match && !['me', 'by-coach', 'link-user', 'unlinked-registrations', 'adopt-registration', 'dismiss-registration'].includes(match[1])) {
         return byIdToQuery('alunos', match[1]);
     }
@@ -983,6 +989,11 @@ class ApiClient {
                 limit: params?.limit,
             }),
         );
+    }
+
+    /** Estado do portal do aluno (vínculo, email confirmado, match por email). */
+    async getAlunoPortalStatusSafe(alunoId: string): Promise<ApiResult<AlunoPortalStatus>> {
+        return this.safeRequest(API_CONTRACT.alunos.portalStatus(alunoId));
     }
     
     // ============================================================================

@@ -12,7 +12,7 @@
 | Substituir dieta activa | ✅ | `replace_active_diet` + checkbox no import enrich |
 | Wizard «Novo Aluno» → import | ✅ | Após criar aluno, diálogo «Importar ficha agora?» |
 | Histórico de importações | ✅ | `GET /api/import/history` + painel no perfil do aluno |
-| Card estado portal no perfil | ⏳ | Backlog |
+| Card estado portal no perfil | ✅ | `GET /api/alunos/:id/portal-status` + `StudentPortalStatusCard` |
 | Importação em lote | ⏳ | Backlog |
 | Bug telefone no create | ⏳ | Pré-existente |
 
@@ -46,5 +46,5 @@
 
 1. ~~Deploy + smoke do Import P1~~ ✅
 2. ~~BH-CHECKIN-014 Export PDF~~ ✅ (`CoachCheckinDetailSheet` + `checkinPdfExport.ts`)
-3. **Próximo:** Card estado portal no perfil + importação em lote
+3. **Próximo:** Importação em lote · bug telefone no create
 4. IA check-in (011–012) quando API LLM estiver estável

@@ -13,6 +13,7 @@ const {
   validateAlunoBelongsToCoach,
 } = require('../utils/identity-resolver');
 const { queryAlunoRowsFullForUser } = require('../utils/aluno-resolve-by-user');
+const { getAlunoPortalStatus } = require('../utils/aluno-portal-status');
 const { validateUUIDParam, isValidUUID } = require('../utils/uuid-validator');
 const resolveAlunoOrFailMiddleware = require('../middleware/resolveAlunoOrFail');
 const resolveCoachOrFailMiddleware = require('../middleware/resolveCoachOrFail');
@@ -668,6 +669,39 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
       res.status(500).json({ error: error.message });
     }
   });
+
+  // GET /api/alunos/:alunoId/portal-status — card estado portal no perfil do coach
+  router.get(
+    '/alunos/:alunoId/portal-status',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      try {
+        const alunoId = String(req.params.alunoId || '').trim();
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(alunoId)) {
+          return res.status(400).json({ error: 'alunoId inválido' });
+        }
+
+        const result = await getAlunoPortalStatus(pool, alunoId, {
+          coachId: req.user.id,
+          isAdmin: req.user.role === 'admin',
+        });
+
+        if (result.error === 'NOT_FOUND') {
+          return res.status(404).json({ error: 'Aluno não encontrado' });
+        }
+        if (result.error === 'FORBIDDEN') {
+          return res.status(403).json({ error: 'Sem permissão para este aluno' });
+        }
+
+        return res.json(result);
+      } catch (error) {
+        return res.status(500).json({ error: error.message || 'Erro ao obter estado do portal' });
+      }
+    },
+  );
 
   // GET /api/alunos - Listar alunos
   router.get('/alunos', authenticate, domainSchemaGuard, async (req, res) => {
