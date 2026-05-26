@@ -23,12 +23,36 @@ async function resolveCoachScope(pool, userId, userRole) {
     };
   }
 
-  const teamRows = await pool.query(
-    `SELECT owner_coach_id, team_role
-     FROM public.coach_team_members
-     WHERE member_user_id = $1 AND ativo = true`,
-    [userId],
-  );
+  // Aluno não usa escopo de equipa; evita SELECT em coach_team_members (sem GRANT para app_user).
+  if (userRole === 'aluno') {
+    return {
+      ownerCoachId: null,
+      coachIds: [],
+      canWrite: false,
+      isAssistant: false,
+      isAdmin: false,
+    };
+  }
+
+  // app_user pode não ter GRANT em coach_team_members (migração antiga); fallback = só titular.
+  let teamRows = { rows: [] };
+  try {
+    teamRows = await pool.query(
+      `SELECT owner_coach_id, team_role
+       FROM public.coach_team_members
+       WHERE member_user_id = $1 AND ativo = true`,
+      [userId],
+    );
+  } catch (err) {
+    if (err.code === '42501') {
+      logger.warn('coach_team_members: sem permissão DB — escopo só do coach titular', {
+        userId,
+        code: err.code,
+      });
+    } else {
+      throw err;
+    }
+  }
 
   if (teamRows.rows.length > 0) {
     const ownerCoachId = teamRows.rows[0].owner_coach_id;
