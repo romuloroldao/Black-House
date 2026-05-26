@@ -99,6 +99,7 @@ export const API_CONTRACT = {
   import: {
     parsePdf: () => `${API_BASE}/api/import/parse-pdf`,
     confirm: () => `${API_BASE}/api/import/confirm`,
+    confirmDiet: () => `${API_BASE}/api/import/confirm-diet`,
   },
   payments: {
     createAsaas: () => `${API_BASE}/api/payments/create-asaas`,
@@ -219,6 +220,7 @@ const CONTRACT_PATTERNS = [
   '/api/lives/:id',
   '/api/import/parse-pdf',
   '/api/import/confirm',
+  '/api/import/confirm-diet',
   '/api/payments/create-asaas',
   '/api/asaas-payments',
   '/api/asaas-config',
