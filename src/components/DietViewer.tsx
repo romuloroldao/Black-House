@@ -1,4 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import {
+  dietHasPlanoABFromItens,
+  filterItensForPlanoView,
+  type DietPlano,
+} from '@/lib/diet-student-utils';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '@/lib/api-client';
 import {
@@ -47,6 +52,17 @@ const DietViewer = () => {
   const [dietaSelecionada, setDietaSelecionada] = useState<DietaCompleta | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingDetalhes, setLoadingDetalhes] = useState(false);
+  const [planoVisao, setPlanoVisao] = useState<DietPlano>('A');
+
+  const itensVisao = useMemo(() => {
+    if (!dietaSelecionada?.itens?.length) return [];
+    return filterItensForPlanoView(dietaSelecionada.itens, planoVisao);
+  }, [dietaSelecionada, planoVisao]);
+
+  const temPlanoAB = useMemo(
+    () => (dietaSelecionada?.itens ? dietHasPlanoABFromItens(dietaSelecionada.itens) : false),
+    [dietaSelecionada],
+  );
 
   useEffect(() => {
     carregarDietas();
@@ -132,6 +148,7 @@ const DietViewer = () => {
       };
 
       setDietaSelecionada(dietaCompleta);
+      setPlanoVisao('A');
     } catch (error) {
       console.error('Erro ao carregar detalhes da dieta:', error);
     } finally {
@@ -345,11 +362,36 @@ const DietViewer = () => {
                                 <CardTitle className="flex items-center gap-2 text-base">
                                   <Calculator className="w-4 h-4" />
                                   Resumo Nutricional Total
+                                  {temPlanoAB ? (
+                                    <span className="text-xs font-normal text-muted-foreground">
+                                      (Plano {planoVisao})
+                                    </span>
+                                  ) : null}
                                 </CardTitle>
+                                {temPlanoAB ? (
+                                  <div className="flex gap-2 pt-2">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant={planoVisao === 'A' ? 'default' : 'outline'}
+                                      onClick={() => setPlanoVisao('A')}
+                                    >
+                                      Plano A
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant={planoVisao === 'B' ? 'default' : 'outline'}
+                                      onClick={() => setPlanoVisao('B')}
+                                    >
+                                      Plano B
+                                    </Button>
+                                  </div>
+                                ) : null}
                               </CardHeader>
                               <CardContent>
                                 {(() => {
-                                  const totais = calcularTotaisDieta(dietaSelecionada.itens);
+                                  const totais = calcularTotaisDieta(itensVisao);
                                   return (
                                     <div className="grid grid-cols-4 gap-4 text-center">
                                       <div>
@@ -378,10 +420,10 @@ const DietViewer = () => {
                           {/* Refeições */}
                           <div className="space-y-4">
                             {refeicoesPadrao.map(nomeRefeicao => {
-                              const itensRefeicao = dietaSelecionada.itens.filter(item => item.refeicao === nomeRefeicao);
+                              const itensRefeicao = itensVisao.filter(item => item.refeicao === nomeRefeicao);
                               if (itensRefeicao.length === 0) return null;
 
-                              const totaisRefeicao = calcularTotaisRefeicao(dietaSelecionada.itens, nomeRefeicao);
+                              const totaisRefeicao = calcularTotaisRefeicao(itensVisao, nomeRefeicao);
 
                               return (
                                 <div key={nomeRefeicao} className="border rounded-lg p-4">

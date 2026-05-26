@@ -36,9 +36,9 @@
 
 | Item | Estado | Notas |
 |------|--------|--------|
-| Histórico de cargas na sessão de treino | ⏳ | MVP actual sem histórico |
-| Macros só plano activo (não somar A+B) | ✅ parcial | `StudentDietView` já filtra por `planoAtivo` |
-| Virtualização lista alimentos (>50) | ⏳ | Se performance reclamar |
+| Histórico de cargas na sessão de treino | ✅ | `localStorage` `bh-workout-load-history`, input + «última vez» |
+| Macros só plano activo (não somar A+B) | ✅ | `StudentDietView` + `StudentImporter` + `DietViewer` (toggle A/B) |
+| Virtualização lista alimentos (>50) | ✅ leve | Combobox cap 60/100; `content-visibility` em listas longas do import |
 
 ---
 

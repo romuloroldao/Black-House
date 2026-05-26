@@ -64,6 +64,12 @@ import {
   type DietRotationFormState,
 } from '@/components/DietRotationFields';
 import { inferRotationFromImport } from '@/lib/diet-rotation-infer';
+import { getPlanoForToday } from '@/lib/diet-rotation';
+import {
+  inferImportMacroPlano,
+  sumImportDeclaredMacros,
+  type DietPlano,
+} from '@/lib/diet-student-utils';
 
 interface Alternativa {
   nome: string;
@@ -870,22 +876,26 @@ const StudentImporter = ({
     });
   };
 
-  // Macros calculados vs declarados (estimativa simples — apenas para alerta)
+  // Macros declarados por refeição — soma só do plano activo (evita A+B em duplicado)
   const macroStats = useMemo(() => {
     if (!editableData?.dieta) return null;
     const refeicoes = editableData.dieta.refeicoes || [];
-    const totals = { proteina: 0, carboidrato: 0, gordura: 0, calorias: 0 };
-    for (const r of refeicoes) {
-      if (r.macros) {
-        totals.proteina += Number(r.macros.proteina || 0);
-        totals.carboidrato += Number(r.macros.carboidrato || 0);
-        totals.gordura += Number(r.macros.gordura || 0);
-        totals.calorias += Number(r.macros.calorias || 0);
-      }
+    const { hasPlanoAB } = inferImportMacroPlano(refeicoes);
+    let plano: DietPlano = "A";
+    if (hasPlanoAB && rotacaoDieta.rotacao_ativa) {
+      const config = {
+        rotacao_ativa: true,
+        rotacao_dias_plano_a: parseInt(rotacaoDieta.rotacao_dias_plano_a, 10) || 3,
+        rotacao_dias_plano_b: parseInt(rotacaoDieta.rotacao_dias_plano_b, 10) || 1,
+        rotacao_plano_inicial: rotacaoDieta.rotacao_plano_inicial,
+        rotacao_data_inicio: rotacaoDieta.rotacao_data_inicio || null,
+      };
+      plano = getPlanoForToday(config) ?? rotacaoDieta.rotacao_plano_inicial;
     }
+    const totals = sumImportDeclaredMacros(refeicoes, plano);
     const declared = editableData.dieta.macros || {};
-    return { totals, declared };
-  }, [editableData]);
+    return { totals, declared, hasPlanoAB, plano };
+  }, [editableData, rotacaoDieta]);
 
   const buildDietaPayload = () => {
     if (!editableData?.dieta) return null;
@@ -1528,7 +1538,9 @@ const StudentImporter = ({
                           ) : null}
                           {macroStats && macroStats.totals.calorias > 0 && macroStats.declared.calorias ? (
                             <Badge variant="outline" className="border-blue-500/40 text-blue-600 dark:text-blue-400">
-                              Soma refeições: {Math.round(macroStats.totals.calorias)} kcal
+                              Soma refeições
+                              {macroStats.hasPlanoAB ? ` (Plano ${macroStats.plano})` : ""}:{" "}
+                              {Math.round(macroStats.totals.calorias)} kcal
                             </Badge>
                           ) : null}
                         </div>
@@ -1648,7 +1660,13 @@ const StudentImporter = ({
 
                           <div className="space-y-2">
                             {refeicao.alimentos.map((alimento, aIdx) => (
-                              <div key={aIdx} className="space-y-1">
+                              <div
+                                key={aIdx}
+                                className={cn(
+                                  "space-y-1",
+                                  refeicao.alimentos.length > 40 && "bh-list-virtual-row",
+                                )}
+                              >
                                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center min-w-0">
                                   <FoodNameAutocomplete
                                     foods={catalogFoods}

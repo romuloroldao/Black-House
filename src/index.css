@@ -213,6 +213,11 @@ All colors MUST be HSL.
 }
 
 @layer utilities {
+  .bh-list-virtual-row {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 88px;
+  }
+
   .student-tab-enter {
     animation: student-tab-enter 0.28s cubic-bezier(0.4, 0, 0.2, 1);
   }

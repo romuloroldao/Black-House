@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Clock,
   Dumbbell,
+  History,
   Pause,
   Play,
   SkipForward,
@@ -13,7 +14,10 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { Collapsible, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import {
   formatTimer,
@@ -21,6 +25,9 @@ import {
   readSessionProgress,
   writeSessionProgress,
   clearSessionProgress,
+  readLoadHistory,
+  getLastLoadForExercise,
+  upsertTodayLoadHistory,
   type WorkoutExercise,
 } from "@/lib/workout-session-utils";
 
@@ -56,8 +63,23 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
   const [restSecondsLeft, setRestSecondsLeft] = useState<number | null>(null);
   const [restPaused, setRestPaused] = useState(false);
   const [restTotal, setRestTotal] = useState(0);
+  const [cargaInput, setCargaInput] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  const todayKey = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const loadHistory = useMemo(() => readLoadHistory(treino.id), [treino.id, finished]);
 
   const current = exercicios[currentIndex];
+  const ultimaCarga = useMemo(() => {
+    if (!current?.nome) return null;
+    return getLastLoadForExercise(treino.id, currentIndex, current.nome, todayKey);
+  }, [treino.id, currentIndex, current?.nome, todayKey]);
+
+  useEffect(() => {
+    const todaySession = loadHistory.find((s) => s.date === todayKey);
+    const savedLoad = todaySession?.exercises.find((e) => e.exerciseIndex === currentIndex);
+    setCargaInput(savedLoad?.pesoUsado ?? "");
+  }, [currentIndex, loadHistory, todayKey]);
   const progressPct = total > 0 ? Math.round((completed.size / total) * 100) : 0;
 
   const persist = useCallback(
@@ -93,6 +115,14 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
   const skipRest = () => setRestSecondsLeft(null);
 
   const markDoneAndAdvance = () => {
+    upsertTodayLoadHistory(
+      treino.id,
+      treino.nome,
+      currentIndex,
+      current?.nome ?? `Exercício ${currentIndex + 1}`,
+      cargaInput,
+    );
+
     const next = new Set(completed);
     next.add(currentIndex);
     setCompleted(next);
@@ -129,6 +159,9 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
   }
 
   if (finished) {
+    const todayLoads =
+      loadHistory.find((s) => s.date === todayKey)?.exercises.filter((e) => e.pesoUsado) ?? [];
+
     return (
       <div className="flex min-h-[70vh] flex-col items-center justify-center gap-6 p-6 text-center">
         <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary/15">
@@ -140,6 +173,19 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
             {completed.size} de {total} exercícios marcados em {treino.nome}
           </p>
         </div>
+        {todayLoads.length > 0 && (
+          <div className="w-full max-w-sm rounded-lg border border-border bg-card p-3 text-left text-sm">
+            <p className="mb-2 font-medium">Cargas registadas hoje</p>
+            <ul className="space-y-1 text-muted-foreground">
+              {todayLoads.map((e) => (
+                <li key={e.exerciseIndex} className="flex justify-between gap-2">
+                  <span className="truncate">{e.exerciseName}</span>
+                  <span className="shrink-0 font-medium text-foreground">{e.pesoUsado}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div className="flex w-full max-w-xs flex-col gap-2">
           <Button type="button" className="w-full" onClick={onExit}>
             Voltar aos treinos
@@ -174,8 +220,45 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
             Exercício {currentIndex + 1} de {total}
           </p>
         </div>
-        <Badge variant="premium">{progressPct}%</Badge>
+        <div className="flex items-center gap-1">
+          <Collapsible open={historyOpen} onOpenChange={setHistoryOpen}>
+            <CollapsibleTrigger asChild>
+              <Button type="button" variant="ghost" size="icon" aria-label="Histórico de cargas">
+                <History className="h-5 w-5" />
+              </Button>
+            </CollapsibleTrigger>
+          </Collapsible>
+          <Badge variant="premium">{progressPct}%</Badge>
+        </div>
       </header>
+
+      {historyOpen && loadHistory.length > 0 && (
+        <div className="max-h-40 shrink-0 overflow-y-auto border-b border-border px-4 py-2 text-sm">
+          <p className="mb-2 font-medium">Histórico de cargas</p>
+          <ul className="space-y-2">
+            {loadHistory.slice(0, 8).map((session) => (
+              <li key={session.date}>
+                <p className="text-xs text-muted-foreground">
+                  {new Date(session.date + "T12:00:00").toLocaleDateString("pt-BR")}
+                  {session.date === todayKey ? " (hoje)" : ""}
+                </p>
+                {session.exercises.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Sem cargas</p>
+                ) : (
+                  <ul className="mt-0.5 space-y-0.5">
+                    {session.exercises.map((e) => (
+                      <li key={e.exerciseIndex} className="flex justify-between gap-2 text-xs">
+                        <span className="truncate">{e.exerciseName}</span>
+                        <span className="shrink-0">{e.pesoUsado}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="px-4 pt-2">
         <Progress value={progressPct} className="h-1.5" />
@@ -249,6 +332,26 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
                 {formatTimer(parseRestSeconds(current?.descanso))}
               </p>
             </div>
+          </div>
+
+          <div className="mt-6 space-y-2">
+            <Label htmlFor="carga-usada" className="text-sm">
+              Carga usada hoje
+            </Label>
+            <Input
+              id="carga-usada"
+              value={cargaInput}
+              onChange={(e) => setCargaInput(e.target.value)}
+              placeholder="ex: 40 kg, 2x20 kg"
+              className="text-base"
+              inputMode="text"
+              autoComplete="off"
+            />
+            {ultimaCarga && (
+              <p className="text-xs text-muted-foreground">
+                Última vez: <span className="font-medium text-foreground">{ultimaCarga}</span>
+              </p>
+            )}
           </div>
 
           {current?.video_url && (

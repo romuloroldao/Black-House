@@ -51,19 +51,46 @@ export function parseRefeicaoLabel(refeicao: string): { base: string; plano: Die
   let base = String(refeicao || "").trim();
   let plano: DietPlano | null = null;
 
-  const patterns = [
-    /\s*[-–]\s*plano\s*([ab])\s*$/i,
-    /\s+plano\s*([ab])\s*$/i,
-    /\s*\(([ab])\)\s*$/i,
-    /\s*[-–]\s*([ab])\s*$/i,
-  ];
+  const setPlano = (letter: string) => {
+    const u = letter.toUpperCase();
+    if (u === "A" || u === "B") plano = u as DietPlano;
+  };
 
-  for (const re of patterns) {
-    const m = base.match(re);
-    if (m) {
-      plano = m[1].toUpperCase() as DietPlano;
-      base = base.replace(re, "").trim();
-      break;
+  // Alternativas do import: "… (Substituto)" — não é plano
+  base = base.replace(/\s*\(substituto\)\s*$/i, "").trim();
+
+  // Formato gravado no import: "Almoço (Plano A)" ou "Almoço (Plano A • 12:00)"
+  const parenSuffix = base.match(/\s*\(([^)]+)\)\s*$/);
+  if (parenSuffix) {
+    const inner = parenSuffix[1];
+    const planoInParen = inner.match(/\bplano\s*([ab])\b/i);
+    if (planoInParen) {
+      setPlano(planoInParen[1]);
+      base = base.slice(0, parenSuffix.index).trim();
+    } else {
+      const letterOnly = inner.match(/^([ab])\b(?:\s*[•·-]|$)/i);
+      if (letterOnly) {
+        setPlano(letterOnly[1]);
+        base = base.slice(0, parenSuffix.index).trim();
+      }
+    }
+  }
+
+  if (!plano) {
+    const patterns = [
+      /\s*[-–]\s*plano\s*([ab])\s*$/i,
+      /\s+plano\s*([ab])\s*$/i,
+      /\s*\(([ab])\)\s*$/i,
+      /\s*[-–]\s*([ab])\s*$/i,
+    ];
+
+    for (const re of patterns) {
+      const m = base.match(re);
+      if (m) {
+        setPlano(m[1]);
+        base = base.replace(re, "").trim();
+        break;
+      }
     }
   }
 
@@ -216,6 +243,93 @@ export function countCompletedMeals(
   plano: DietPlano,
 ): number {
   return groups.filter((g) => readMealDone(dietaId, g.key, plano)).length;
+}
+
+export type ImportRefeicaoMacros = {
+  nome: string;
+  plano?: string | null;
+  macros?: {
+    proteina?: number | null;
+    carboidrato?: number | null;
+    gordura?: number | null;
+    calorias?: number | null;
+  } | null;
+};
+
+/** Plano A/B explícito no campo `plano` ou no nome da refeição. */
+export function resolveImportRefeicaoPlano(refeicao: ImportRefeicaoMacros): DietPlano | null {
+  const fromField = String(refeicao.plano ?? "")
+    .trim()
+    .toUpperCase();
+  if (fromField === "A" || fromField === "B") return fromField;
+  return parseRefeicaoLabel(refeicao.nome).plano;
+}
+
+export function inferImportMacroPlano(refeicoes: ImportRefeicaoMacros[]): {
+  hasPlanoAB: boolean;
+} {
+  let anyA = false;
+  let anyB = false;
+  for (const r of refeicoes) {
+    const p = resolveImportRefeicaoPlano(r);
+    if (p === "A") anyA = true;
+    if (p === "B") anyB = true;
+  }
+  return { hasPlanoAB: anyA && anyB };
+}
+
+export function filterImportRefeicoesForMacroSum<T extends ImportRefeicaoMacros>(
+  refeicoes: T[],
+  plano: DietPlano,
+): T[] {
+  const { hasPlanoAB } = inferImportMacroPlano(refeicoes);
+  if (!hasPlanoAB) return refeicoes;
+  return refeicoes.filter((r) => {
+    const p = resolveImportRefeicaoPlano(r);
+    if (p === null) return true;
+    return p === plano;
+  });
+}
+
+export function sumImportDeclaredMacros(
+  refeicoes: ImportRefeicaoMacros[],
+  plano: DietPlano,
+): { proteina: number; carboidrato: number; gordura: number; calorias: number } {
+  const filtered = filterImportRefeicoesForMacroSum(refeicoes, plano);
+  return filtered.reduce(
+    (totals, r) => {
+      if (!r.macros) return totals;
+      return {
+        proteina: totals.proteina + Number(r.macros.proteina || 0),
+        carboidrato: totals.carboidrato + Number(r.macros.carboidrato || 0),
+        gordura: totals.gordura + Number(r.macros.gordura || 0),
+        calorias: totals.calorias + Number(r.macros.calorias || 0),
+      };
+    },
+    { proteina: 0, carboidrato: 0, gordura: 0, calorias: 0 },
+  );
+}
+
+export function dietHasPlanoABFromItens(itens: { refeicao: string }[]): boolean {
+  let anyA = false;
+  let anyB = false;
+  for (const item of itens) {
+    const { plano } = parseRefeicaoLabel(item.refeicao);
+    if (plano === "A") anyA = true;
+    if (plano === "B") anyB = true;
+  }
+  return anyA && anyB;
+}
+
+export function filterItensForPlanoView<T extends { refeicao: string }>(
+  itens: T[],
+  plano: DietPlano,
+): T[] {
+  if (!dietHasPlanoABFromItens(itens)) return itens;
+  return itens.filter((item) => {
+    const { plano: p } = parseRefeicaoLabel(item.refeicao);
+    return p === null || p === plano;
+  });
 }
 
 export function pickActiveDieta<T extends { aluno_id: string; ativa?: boolean; created_at?: string }>(
