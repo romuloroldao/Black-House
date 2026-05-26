@@ -167,7 +167,7 @@ export default function StudentDetails() {
       setStudent(aluno);
 
       // Carregar feedback
-      const feedbackResult = await apiClient.requestSafe<any[]>(`/api/feedbacks-alunos?aluno_id=${id}`);
+      const feedbackResult = await apiClient.listFeedbacksAlunosSafe(id);
       const feedbackData = feedbackResult.success && Array.isArray(feedbackResult.data) ? feedbackResult.data : [];
       const feedback = feedbackData.sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime())[0] || null;
       if (feedback) {
@@ -241,22 +241,16 @@ export default function StudentDetails() {
 
       if (feedbackId) {
         // Atualizar feedback existente
-        const updateResult = await apiClient.requestSafe(`/api/feedbacks-alunos/${feedbackId}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ feedback }),
-        });
+        const updateResult = await apiClient.updateFeedbackAlunoSafe(feedbackId, { feedback });
         if (!updateResult.success) {
           throw new Error(updateResult.error || 'Erro ao atualizar feedback');
         }
       } else {
         // Criar novo feedback
-        const createResult = await apiClient.requestSafe<any>('/api/feedbacks-alunos', {
-          method: 'POST',
-          body: JSON.stringify({
-            aluno_id: id,
-            coach_id: coachId,
-            feedback,
-          }),
+        const createResult = await apiClient.createFeedbackAlunoSafe({
+          aluno_id: id,
+          coach_id: coachId,
+          feedback,
         });
         const feedbackRecord = createResult.success ? createResult.data : null;
         if (feedbackRecord) setFeedbackId(feedbackRecord.id);

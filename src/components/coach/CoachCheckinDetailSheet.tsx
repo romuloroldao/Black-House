@@ -2,7 +2,17 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { ChevronLeft, ChevronRight, FileDown, Loader2, MessageSquare, Save } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Columns2,
+  FileDown,
+  Loader2,
+  MessageSquare,
+  Save,
+  Sparkles,
+} from "lucide-react";
+import { CheckinSideBySideCompare } from "@/components/coach/CheckinSideBySideCompare";
 import { exportCheckinToPdf } from "@/utils/checkinPdfExport";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -42,6 +52,7 @@ type CoachCheckinDetailSheetProps = {
   onOpenChange: (open: boolean) => void;
   checkin: WeeklyCheckinRecord | null;
   previousCheckin: WeeklyCheckinRecord | null;
+  allCheckins?: WeeklyCheckinRecord[];
   studentId: string;
   studentName: string;
   onNavigate: (direction: "prev" | "next") => void;
@@ -55,6 +66,7 @@ export default function CoachCheckinDetailSheet({
   onOpenChange,
   checkin,
   previousCheckin,
+  allCheckins = [],
   studentId,
   studentName,
   onNavigate,
@@ -71,6 +83,10 @@ export default function CoachCheckinDetailSheet({
   const [saving, setSaving] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [markedRespondido, setMarkedRespondido] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [aiTrends, setAiTrends] = useState<string | null>(null);
+  const [aiTrendsLoading, setAiTrendsLoading] = useState(false);
+  const [aiDraftLoading, setAiDraftLoading] = useState(false);
 
   useEffect(() => {
     setMarkedRespondido(false);
@@ -80,11 +96,7 @@ export default function CoachCheckinDetailSheet({
     if (!open || !studentId) return;
     setSection("nutricao");
 
-    apiClient
-      .requestSafe<Array<{ id?: string; aluno_id?: string; feedback?: string; updated_at?: string }>>(
-        `/api/feedbacks-alunos?aluno_id=${studentId}`,
-      )
-      .then((result) => {
+    apiClient.listFeedbacksAlunosSafe(studentId).then((result) => {
         if (!result.success || !Array.isArray(result.data)) return;
         const forStudent = result.data.filter((row) => row.aluno_id === studentId);
         const latest = [...forStudent].sort(
@@ -118,29 +130,22 @@ export default function CoachCheckinDetailSheet({
     setSaving(true);
     try {
       if (feedbackId) {
-        const update = await apiClient.requestSafe(`/api/feedbacks-alunos/${feedbackId}`, {
-          method: "PATCH",
-          body: JSON.stringify({ feedback: feedback.trim() }),
+        const update = await apiClient.updateFeedbackAlunoSafe(feedbackId, {
+          feedback: feedback.trim(),
         });
         if (!update.success) throw new Error(update.error || "Erro ao atualizar");
       } else {
-        const create = await apiClient.requestSafe<{ id: string }>("/api/feedbacks-alunos", {
-          method: "POST",
-          body: JSON.stringify({
-            aluno_id: studentId,
-            coach_id: user.id,
-            feedback: feedback.trim(),
-          }),
+        const create = await apiClient.createFeedbackAlunoSafe({
+          aluno_id: studentId,
+          coach_id: user.id,
+          feedback: feedback.trim(),
         });
         if (!create.success) throw new Error(create.error || "Erro ao salvar");
         if (create.data?.id) setFeedbackId(create.data.id);
       }
 
       if (checkin?.id) {
-        const mark = await apiClient.requestSafe<WeeklyCheckinRecord>(
-          `/api/weekly-checkins/${checkin.id}/respondido`,
-          { method: "PATCH", body: JSON.stringify({}) },
-        );
+        const mark = await apiClient.markWeeklyCheckinRespondidoSafe(checkin.id);
         if (mark.success) {
           setMarkedRespondido(true);
           onRespondido?.(checkin.id);
@@ -162,6 +167,47 @@ export default function CoachCheckinDetailSheet({
   const handleOpenChat = () => {
     onOpenChange(false);
     navigate(`/?tab=messages&aluno_id=${encodeURIComponent(studentId)}`);
+  };
+
+  const handleAiTrends = async () => {
+    setAiTrendsLoading(true);
+    setAiTrends(null);
+    try {
+      const result = await apiClient.weeklyCheckinAiTrendsSafe(studentId);
+      if (!result.success) throw new Error(result.error || "IA indisponível");
+      const bullets =
+        result.data?.highlights?.length > 0
+          ? `\n\n• ${result.data.highlights.join("\n• ")}`
+          : "";
+      setAiTrends(`${result.data?.summary || ""}${bullets}`.trim());
+    } catch (err: unknown) {
+      toast({
+        title: "Resumo IA",
+        description: err instanceof Error ? err.message : "Não foi possível gerar o resumo.",
+        variant: "destructive",
+      });
+    } finally {
+      setAiTrendsLoading(false);
+    }
+  };
+
+  const handleAiDraft = async () => {
+    if (!checkin?.id) return;
+    setAiDraftLoading(true);
+    try {
+      const result = await apiClient.weeklyCheckinAiDraftSafe(checkin.id);
+      if (!result.success) throw new Error(result.error || "IA indisponível");
+      if (result.data?.draft) setFeedback(result.data.draft);
+      toast({ title: "Rascunho gerado", description: "Revise e edite antes de salvar." });
+    } catch (err: unknown) {
+      toast({
+        title: "Rascunho IA",
+        description: err instanceof Error ? err.message : "Não foi possível gerar o rascunho.",
+        variant: "destructive",
+      });
+    } finally {
+      setAiDraftLoading(false);
+    }
   };
 
   const handleExportPdf = async () => {
@@ -241,6 +287,43 @@ export default function CoachCheckinDetailSheet({
 
         <ScrollArea className="flex-1 px-6">
           <div className="space-y-6 py-4">
+            {allCheckins.length >= 2 && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full sm:w-auto"
+                onClick={() => setCompareOpen(true)}
+              >
+                <Columns2 className="mr-2 h-4 w-4" />
+                Comparar 2 semanas
+              </Button>
+            )}
+
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={aiTrendsLoading}
+                onClick={handleAiTrends}
+              >
+                {aiTrendsLoading ? (
+                  <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
+                ) : (
+                  <Sparkles className="mr-2 h-4 w-4" />
+                )}
+                Tendências (4 sem.)
+              </Button>
+            </div>
+
+            {aiTrends && (
+              <div className="rounded-lg border border-border/70 bg-muted/40 p-4 text-sm whitespace-pre-wrap">
+                <p className="mb-2 font-medium text-muted-foreground">Resumo IA</p>
+                {aiTrends}
+              </div>
+            )}
+
             {prioridade && (
               <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4">
                 <p className="text-sm font-semibold text-destructive">Triagem prioritária</p>
@@ -325,6 +408,20 @@ export default function CoachCheckinDetailSheet({
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             <Button
               type="button"
+              variant="secondary"
+              className="flex-1 min-w-[140px]"
+              onClick={handleAiDraft}
+              disabled={aiDraftLoading}
+            >
+              {aiDraftLoading ? (
+                <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
+              ) : (
+                <Sparkles className="mr-2 h-4 w-4" />
+              )}
+              Rascunho IA
+            </Button>
+            <Button
+              type="button"
               className="flex-1 min-w-[140px]"
               onClick={handleSaveFeedback}
               disabled={saving}
@@ -357,6 +454,15 @@ export default function CoachCheckinDetailSheet({
           </div>
         </div>
       </SheetContent>
+
+      <CheckinSideBySideCompare
+        open={compareOpen}
+        onOpenChange={setCompareOpen}
+        checkins={allCheckins}
+        studentName={studentName}
+        initialLeftId={checkin.id}
+        initialRightId={previousCheckin?.id}
+      />
     </Sheet>
   );
 }

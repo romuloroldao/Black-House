@@ -32,3 +32,14 @@ export type WeeklyCheckinRecord = {
   coach_respondido_em?: string | null;
   coach_respondido_por?: string | null;
 };
+
+export type FeedbackAlunoRecord = {
+  id: string;
+  aluno_id: string;
+  coach_id?: string;
+  feedback?: string;
+  updated_at?: string;
+  created_at?: string;
+};
+
+export type { CheckinAiDraftResponse, CheckinAiTrendsResponse } from "@/types/checkin-ai";

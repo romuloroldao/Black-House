@@ -85,6 +85,23 @@ export const API_CONTRACT = {
   checkins: {
     create: () => `${API_BASE}/api/checkins`,
   },
+  weeklyCheckins: {
+    list: (query?: { q?: string }) => {
+      const qs = query?.q ? `?q=${encodeURIComponent(query.q)}` : '';
+      return `${API_BASE}/api/weekly-checkins${qs}`;
+    },
+    pendentesCount: () => `${API_BASE}/api/weekly-checkins/pendentes/count`,
+    markRespondido: (id: string) => `${API_BASE}/api/weekly-checkins/${id}/respondido`,
+    aiTrendsSummary: () => `${API_BASE}/api/weekly-checkins/ai/trends-summary`,
+    aiDraftResponse: (checkinId: string) =>
+      `${API_BASE}/api/weekly-checkins/${encodeURIComponent(checkinId)}/ai/draft-response`,
+  },
+  feedbacksAlunos: {
+    list: (alunoId: string) =>
+      `${API_BASE}/api/feedbacks-alunos?aluno_id=${encodeURIComponent(alunoId)}`,
+    create: () => `${API_BASE}/api/feedbacks-alunos`,
+    byId: (id: string) => `${API_BASE}/api/feedbacks-alunos/${encodeURIComponent(id)}`,
+  },
   videos: {
     list: () => `${API_BASE}/api/videos`,
     byId: (id: string) => `${API_BASE}/api/videos/${id}`,
@@ -220,6 +237,10 @@ const CONTRACT_PATTERNS = [
   '/api/user-roles/:id',
   '/api/checkins',
   '/api/weekly-checkins',
+  '/api/weekly-checkins/ai/trends-summary',
+  '/api/weekly-checkins/:id/ai/draft-response',
+  '/api/weekly-checkins/:id/respondido',
+  '/api/weekly-checkins/pendentes/count',
   '/api/uploads/avatar',
   '/api/uploads/avatar/:userId',
   '/api/uploads/progress-photo',

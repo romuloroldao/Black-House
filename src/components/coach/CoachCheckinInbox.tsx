@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { ChevronRight, ClipboardList, Search } from "lucide-react";
+import { API_CONTRACT } from "@/contracts/api-contract";
 import { apiClient } from "@/lib/api-client";
+import { useAuth } from "@/contexts/AuthContext";
 import { getCheckinSummaryChips, hasRelato, isCheckinRespondido } from "@/lib/checkin-display";
 import { compareCheckinsForTriagem, isCheckinPrioridade } from "@/lib/checkin-highlights";
 import {
@@ -36,8 +38,10 @@ type InboxItem = {
 };
 
 export default function CoachCheckinInbox() {
+  const { role } = useAuth();
   const [items, setItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [teamInboxHint, setTeamInboxHint] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<InboxFilterId>("pendentes");
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -46,12 +50,8 @@ export default function CoachCheckinInbox() {
   const loadInbox = useCallback(async (searchQuery?: string) => {
     setLoading(true);
     const term = searchQuery?.trim() ?? "";
-    const checkinsPath =
-      term.length >= 2
-        ? `/api/weekly-checkins?q=${encodeURIComponent(term)}`
-        : "/api/weekly-checkins";
     const [checkinsResult, alunosResult] = await Promise.all([
-      apiClient.requestSafe<WeeklyCheckinRecord[]>(checkinsPath),
+      apiClient.listWeeklyCheckinsSafe(term.length >= 2 ? { q: term } : undefined),
       apiClient.requestSafe<Array<{ id: string; nome?: string }>>("/api/alunos"),
     ]);
 
@@ -101,6 +101,43 @@ export default function CoachCheckinInbox() {
     setItems(inbox);
     setLoading(false);
   }, []);
+
+  useEffect(() => {
+    if (role !== "coach") {
+      setTeamInboxHint(
+        role === "admin"
+          ? "Visão global de todos os coaches."
+          : "Inbox partilhada com a equipa do coach titular.",
+      );
+      return;
+    }
+    apiClient.requestSafe<Array<{ id: string }>>(API_CONTRACT.coach.teamMembers()).then((r) => {
+      if (r.success && Array.isArray(r.data) && r.data.length > 0) {
+        setTeamInboxHint(
+          `Inbox da equipa — ${r.data.length} ${r.data.length === 1 ? "membro" : "membros"} com acesso aos mesmos alunos.`,
+        );
+      } else {
+        setTeamInboxHint(null);
+      }
+    });
+  }, [role]);
+
+  const checkinsByAluno = useMemo(() => {
+    const map = new Map<string, WeeklyCheckinRecord[]>();
+    for (const item of items) {
+      const sid = item.studentId;
+      if (!sid) continue;
+      if (!map.has(sid)) map.set(sid, []);
+      map.get(sid)!.push(item.checkin);
+    }
+    for (const list of map.values()) {
+      list.sort(
+        (a, b) =>
+          new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime(),
+      );
+    }
+    return map;
+  }, [items]);
 
   useEffect(() => {
     const term = search.trim();
@@ -190,6 +227,9 @@ export default function CoachCheckinInbox() {
         <p className="text-muted-foreground mt-1">
           Triagem de todos os alunos — comece pelos pendentes e responda no drawer
         </p>
+        {teamInboxHint && (
+          <p className="mt-2 text-sm text-muted-foreground">{teamInboxHint}</p>
+        )}
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -345,6 +385,7 @@ export default function CoachCheckinInbox() {
           onOpenChange={setSheetOpen}
           checkin={selected.checkin}
           previousCheckin={selected.previousCheckin}
+          allCheckins={checkinsByAluno.get(selected.studentId) ?? []}
           studentId={selected.studentId}
           studentName={selected.studentName}
           onNavigate={navigateCheckin}

@@ -3,6 +3,8 @@ import { API_CONTRACT, isContractEndpoint, normalizeEndpoint } from '@/contracts
 import type { AlunoHojeResponse } from '@/types/aluno-hoje';
 import type { ImportHistoryRecord } from '@/types/import-history';
 import type { AlunoPortalStatus } from '@/types/aluno-portal-status';
+import type { CheckinAiDraftResponse, CheckinAiTrendsResponse } from '@/types/checkin-ai';
+import type { FeedbackAlunoRecord, WeeklyCheckinRecord } from '@/types/weekly-checkin';
 import { getAvailabilityKeyForEndpoint, isDataAvailable } from '@/lib/dataAvailability';
 
 // FIX-012 — prefixos de rotas semânticas na VPS (PostgreSQL; ver src/contracts/api-contract.ts)
@@ -63,6 +65,8 @@ export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/checkins',
     '/api/weekly-checkins',
     '/api/weekly-checkins/',
+    '/api/weekly-checkins/ai/trends-summary',
+    '/api/weekly-checkins/pendentes/count',
     '/api/uploads/progress-photo',
     '/api/uploads/storage/progress-photos',
     '/api/uploads/storage/progress-photos/',
@@ -994,6 +998,61 @@ class ApiClient {
     /** Estado do portal do aluno (vínculo, email confirmado, match por email). */
     async getAlunoPortalStatusSafe(alunoId: string): Promise<ApiResult<AlunoPortalStatus>> {
         return this.safeRequest(API_CONTRACT.alunos.portalStatus(alunoId));
+    }
+
+    async listFeedbacksAlunosSafe(alunoId: string): Promise<ApiResult<FeedbackAlunoRecord[]>> {
+        return this.safeRequest(API_CONTRACT.feedbacksAlunos.list(alunoId));
+    }
+
+    async createFeedbackAlunoSafe(body: {
+        aluno_id: string;
+        coach_id: string;
+        feedback: string;
+    }): Promise<ApiResult<FeedbackAlunoRecord>> {
+        return this.safeRequest(API_CONTRACT.feedbacksAlunos.create(), {
+            method: 'POST',
+            body: JSON.stringify(body),
+        });
+    }
+
+    async updateFeedbackAlunoSafe(
+        id: string,
+        body: { feedback: string },
+    ): Promise<ApiResult<FeedbackAlunoRecord>> {
+        return this.safeRequest(API_CONTRACT.feedbacksAlunos.byId(id), {
+            method: 'PATCH',
+            body: JSON.stringify(body),
+        });
+    }
+
+    async listWeeklyCheckinsSafe(query?: { q?: string }): Promise<ApiResult<WeeklyCheckinRecord[]>> {
+        return this.safeRequest(API_CONTRACT.weeklyCheckins.list(query));
+    }
+
+    async weeklyCheckinAiTrendsSafe(alunoId: string): Promise<ApiResult<CheckinAiTrendsResponse>> {
+        return this.safeRequest(API_CONTRACT.weeklyCheckins.aiTrendsSummary(), {
+            method: 'POST',
+            body: JSON.stringify({ aluno_id: alunoId }),
+        });
+    }
+
+    async weeklyCheckinAiDraftSafe(
+        checkinId: string,
+        hints?: string,
+    ): Promise<ApiResult<CheckinAiDraftResponse>> {
+        return this.safeRequest(API_CONTRACT.weeklyCheckins.aiDraftResponse(checkinId), {
+            method: 'POST',
+            body: JSON.stringify({ hints: hints ?? '' }),
+        });
+    }
+
+    async markWeeklyCheckinRespondidoSafe(
+        checkinId: string,
+    ): Promise<ApiResult<WeeklyCheckinRecord>> {
+        return this.safeRequest(API_CONTRACT.weeklyCheckins.markRespondido(checkinId), {
+            method: 'PATCH',
+            body: JSON.stringify({}),
+        });
     }
     
     // ============================================================================

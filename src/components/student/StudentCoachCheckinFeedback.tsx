@@ -47,10 +47,7 @@ export default function StudentCoachCheckinFeedback({
         targetAlunoId = me.data.id;
       }
 
-      const query = alunoId ? `?aluno_id=${encodeURIComponent(alunoId)}` : "";
-      const result = await apiClient.requestSafe<FeedbackRecord[]>(
-        `/api/feedbacks-alunos${query}`,
-      );
+      const result = await apiClient.listFeedbacksAlunosSafe(targetAlunoId);
 
       if (cancelled) return;
 

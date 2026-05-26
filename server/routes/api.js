@@ -1904,7 +1904,13 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     updateCoachNotificationPreferences,
   } = require('../services/agenda-coach-reminder.service');
 
-  const { resolveCoachScope, listTeamMembers, addTeamMember, removeTeamMember } = require('../services/coach-team.service');
+  const {
+    resolveCoachScope,
+    listTeamMembers,
+    addTeamMember,
+    removeTeamMember,
+    assertCoachCanAccessAluno,
+  } = require('../services/coach-team.service');
   const {
     getAgendaSuggestions,
     snoozeAgendaEvent,
@@ -4045,11 +4051,64 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
   // ROTA: /api/weekly-checkins — listagem (alias semântico para o dashboard)
   // ============================================================================
 
+  const { trendsSummary: checkinTrendsSummary, draftResponse: checkinDraftResponse } = require('../services/checkin-ai.service');
+
+  router.post(
+    '/weekly-checkins/ai/trends-summary',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'assistant']),
+    attachCoachScope,
+    async (req, res) => {
+      try {
+        const alunoId = req.body?.aluno_id;
+        if (!alunoId) {
+          return res.status(400).json({ error: 'aluno_id é obrigatório', error_code: 'VALIDATION' });
+        }
+        const data = await checkinTrendsSummary(pool, req.coachScope, alunoId);
+        return res.json(data);
+      } catch (error) {
+        const status = error.statusCode || 500;
+        return res.status(status).json({
+          error: error.message || 'Erro ao gerar resumo',
+          error_code: error.error_code,
+        });
+      }
+    },
+  );
+
+  router.post(
+    '/weekly-checkins/:id/ai/draft-response',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'assistant']),
+    attachCoachScope,
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const data = await checkinDraftResponse(
+          pool,
+          req.coachScope,
+          req.params.id,
+          req.body?.hints || '',
+        );
+        return res.json(data);
+      } catch (error) {
+        const status = error.statusCode || 500;
+        return res.status(status).json({
+          error: error.message || 'Erro ao gerar rascunho',
+          error_code: error.error_code,
+        });
+      }
+    },
+  );
+
   router.get(
     '/weekly-checkins/pendentes/count',
     authenticate,
     domainSchemaGuard,
-    validateRole(['coach', 'admin']),
+    validateRole(['coach', 'admin', 'assistant']),
+    attachCoachScope,
     async (req, res) => {
       try {
         const dbCols = await loadWeeklyCheckinsColumns();
@@ -4058,7 +4117,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
         }
 
         let result;
-        if (req.user.role === 'admin') {
+        if (req.user.role === 'admin' && !req.coachScope?.coachIds) {
           result = await pool.query(
             `SELECT COUNT(*)::int AS count
              FROM public.weekly_checkins w
@@ -4066,13 +4125,14 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
                AND w.created_at >= (now() - interval '30 days')`,
           );
         } else {
+          const ids = effectiveCoachIds(req.coachScope) || [req.user.id];
           result = await pool.query(
             `SELECT COUNT(*)::int AS count
              FROM public.weekly_checkins w
-             INNER JOIN public.alunos a ON a.id = w.aluno_id AND a.coach_id = $1
+             INNER JOIN public.alunos a ON a.id = w.aluno_id AND a.coach_id = ANY($1::uuid[])
              WHERE w.coach_respondido_em IS NULL
                AND w.created_at >= (now() - interval '30 days')`,
-            [req.user.id],
+            [ids],
           );
         }
         return res.json({ count: result.rows[0]?.count ?? 0 });
@@ -4086,7 +4146,8 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     '/weekly-checkins/:id/respondido',
     authenticate,
     domainSchemaGuard,
-    validateRole(['coach', 'admin']),
+    validateRole(['coach', 'admin', 'assistant']),
+    attachCoachScope,
     validateUUIDParam('id'),
     async (req, res) => {
       try {
@@ -4100,7 +4161,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
 
         const { id } = req.params;
         const existing = await pool.query(
-          `SELECT w.id, a.coach_id
+          `SELECT w.id, w.aluno_id, a.coach_id
            FROM public.weekly_checkins w
            INNER JOIN public.alunos a ON a.id = w.aluno_id
            WHERE w.id = $1`,
@@ -4109,11 +4170,15 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
         if (existing.rows.length === 0) {
           return res.status(404).json({ error: 'Check-in não encontrado', error_code: 'NOT_FOUND' });
         }
-        if (
-          req.user.role === 'coach' &&
-          String(existing.rows[0].coach_id) !== String(req.user.id)
-        ) {
-          return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+        if (req.user.role !== 'admin') {
+          const ok = await assertCoachCanAccessAluno(
+            pool,
+            req.coachScope,
+            existing.rows[0].aluno_id,
+          );
+          if (!ok) {
+            return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+          }
         }
 
         const upd = await pool.query(
@@ -4135,8 +4200,9 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     '/weekly-checkins',
     authenticate,
     domainSchemaGuard,
-    validateRole(['aluno', 'coach', 'admin']),
+    validateRole(['aluno', 'coach', 'admin', 'assistant']),
     requireAlunoWhenStudent(),
+    attachCoachScope,
     async (req, res) => {
       try {
         const searchPattern = parseWeeklyCheckinSearchQuery(req);
@@ -4159,24 +4225,25 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           );
           return res.json(r.rows);
         }
-        if (req.user.role === 'coach') {
+        if (req.user.role === 'coach' || req.user.role === 'assistant') {
+          const ids = effectiveCoachIds(req.coachScope) || [req.user.id];
           if (searchPattern) {
             const r = await pool.query(
               `SELECT w.* FROM public.weekly_checkins w
-               INNER JOIN public.alunos a ON a.id = w.aluno_id AND a.coach_id = $1
+               INNER JOIN public.alunos a ON a.id = w.aluno_id AND a.coach_id = ANY($1::uuid[])
                WHERE w.nao_cumpriu_porque ILIKE $2 ESCAPE '\\'
                   OR a.nome ILIKE $2 ESCAPE '\\'
                ORDER BY w.created_at DESC NULLS LAST
                LIMIT 500`,
-              [req.user.id, searchPattern],
+              [ids, searchPattern],
             );
             return res.json(r.rows);
           }
           const r = await pool.query(
             `SELECT w.* FROM public.weekly_checkins w
-             INNER JOIN public.alunos a ON a.id = w.aluno_id AND a.coach_id = $1
+             INNER JOIN public.alunos a ON a.id = w.aluno_id AND a.coach_id = ANY($1::uuid[])
              ORDER BY w.created_at DESC NULLS LAST LIMIT 500`,
-            [req.user.id],
+            [ids],
           );
           return res.json(r.rows);
         }

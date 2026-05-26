@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { ChevronRight, ClipboardList } from "lucide-react";
+import { ChevronRight, ClipboardList, Columns2 } from "lucide-react";
+import { CheckinSideBySideCompare } from "@/components/coach/CheckinSideBySideCompare";
+import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import { getCheckinSummaryChips, hasRelato, isCheckinRespondido } from "@/lib/checkin-display";
 import { compareCheckinsForTriagem, isCheckinPrioridade } from "@/lib/checkin-highlights";
@@ -22,13 +24,14 @@ export default function CoachCheckinTimeline({ studentId, studentName }: CoachCh
   const [loading, setLoading] = useState(true);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       setLoading(true);
-      const result = await apiClient.requestSafe<WeeklyCheckinRecord[]>("/api/weekly-checkins");
+      const result = await apiClient.listWeeklyCheckinsSafe();
       if (cancelled) return;
 
       const rows =
@@ -110,12 +113,20 @@ export default function CoachCheckinTimeline({ studentId, studentName }: CoachCh
   return (
     <>
       <Card>
-        <CardHeader>
-          <CardTitle>Histórico de check-ins</CardTitle>
-          <CardDescription>
-            {checkins.length} {checkins.length === 1 ? "registro" : "registros"} — clique para ver
-            todas as respostas
-          </CardDescription>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2">
+          <div>
+            <CardTitle>Histórico de check-ins</CardTitle>
+            <CardDescription>
+              {checkins.length} {checkins.length === 1 ? "registro" : "registros"} — clique para ver
+              todas as respostas
+            </CardDescription>
+          </div>
+          {checkins.length >= 2 && (
+            <Button type="button" variant="outline" size="sm" onClick={() => setCompareOpen(true)}>
+              <Columns2 className="mr-2 h-4 w-4" />
+              Comparar 2 semanas
+            </Button>
+          )}
         </CardHeader>
         <CardContent className="space-y-2">
           {checkins.map((checkin, index) => {
@@ -186,12 +197,26 @@ export default function CoachCheckinTimeline({ studentId, studentName }: CoachCh
         onOpenChange={setSheetOpen}
         checkin={selectedCheckin}
         previousCheckin={previousCheckin}
+        allCheckins={checkins}
         studentId={studentId}
         studentName={studentName}
         onNavigate={navigateCheckin}
         canNavigatePrev={selectedIndex !== null && selectedIndex > 0}
         canNavigateNext={selectedIndex !== null && selectedIndex < checkins.length - 1}
         onRespondido={handleCheckinRespondido}
+      />
+
+      <CheckinSideBySideCompare
+        open={compareOpen}
+        onOpenChange={setCompareOpen}
+        checkins={checkins}
+        studentName={studentName}
+        initialLeftId={selectedCheckin?.id}
+        initialRightId={
+          selectedIndex != null && checkins[selectedIndex + 1]
+            ? checkins[selectedIndex + 1].id
+            : undefined
+        }
       />
     </>
   );
