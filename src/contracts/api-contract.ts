@@ -100,6 +100,13 @@ export const API_CONTRACT = {
     parsePdf: () => `${API_BASE}/api/import/parse-pdf`,
     confirm: () => `${API_BASE}/api/import/confirm`,
     confirmDiet: () => `${API_BASE}/api/import/confirm-diet`,
+    history: (params?: { aluno_id?: string; limit?: number }) => {
+      const q = new URLSearchParams();
+      if (params?.aluno_id) q.set("aluno_id", params.aluno_id);
+      if (params?.limit != null) q.set("limit", String(params.limit));
+      const qs = q.toString();
+      return `${API_BASE}/api/import/history${qs ? `?${qs}` : ""}`;
+    },
   },
   payments: {
     createAsaas: () => `${API_BASE}/api/payments/create-asaas`,
@@ -221,6 +228,7 @@ const CONTRACT_PATTERNS = [
   '/api/import/parse-pdf',
   '/api/import/confirm',
   '/api/import/confirm-diet',
+  '/api/import/history',
   '/api/payments/create-asaas',
   '/api/asaas-payments',
   '/api/asaas-config',

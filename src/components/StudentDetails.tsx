@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare, Trash2, User, Utensils, TrendingUp, Activity, Wallet, Upload } from "lucide-react";
 import StudentImporter, { type ImportCompleteResult } from "./StudentImporter";
+import ImportHistoryPanel from "@/components/import/ImportHistoryPanel";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -105,6 +106,7 @@ export default function StudentDetails() {
   // Estados para criar dieta
   const [isCriarDietaOpen, setIsCriarDietaOpen] = useState(false);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [importHistoryRefresh, setImportHistoryRefresh] = useState(0);
   const [novaDieta, setNovaDieta] = useState({
     nome: "",
     objetivo: "",
@@ -428,6 +430,7 @@ export default function StudentDetails() {
 
   const handleImportComplete = (result?: ImportCompleteResult) => {
     setIsImportDialogOpen(false);
+    setImportHistoryRefresh((k) => k + 1);
     carregarDadosAluno();
     if (result?.dietaId) {
       navigate(`/dieta/${result.dietaId}`);
@@ -684,6 +687,10 @@ export default function StudentDetails() {
               </CardContent>
             </Card>
           </div>
+
+          {id ? (
+            <ImportHistoryPanel alunoId={id} refreshKey={importHistoryRefresh} />
+          ) : null}
         </TabsContent>
 
         {/* TAB: Treinos */}

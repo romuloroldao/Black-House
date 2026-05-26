@@ -897,6 +897,22 @@ const StudentImporter = ({
     return { totals, declared, hasPlanoAB, plano };
   }, [editableData, rotacaoDieta]);
 
+  const buildConfirmMeta = () => {
+    const nome = file?.name || importMeta?.fileName;
+    if (!nome) return undefined;
+    const lower = nome.toLowerCase();
+    let arquivo_tipo = 'outro';
+    if (lower.endsWith('.pdf')) arquivo_tipo = 'pdf';
+    else if (lower.endsWith('.csv')) arquivo_tipo = 'csv';
+    else if (lower.endsWith('.xlsx')) arquivo_tipo = 'xlsx';
+    return {
+      arquivo_nome: nome,
+      arquivo_tipo,
+      source: importMeta?.source,
+      ai_used: importMeta?.aiUsed ?? false,
+    };
+  };
+
   const buildDietaPayload = () => {
     if (!editableData?.dieta) return null;
     const rawReturn = String(editableData.dieta.data_retorno || '').trim();
@@ -956,13 +972,16 @@ const StudentImporter = ({
 
       setIsImporting(true);
       try {
-        const result = await apiClient.importConfirmDietSafe({
-          aluno_id: resolvedTargetAluno.id,
-          replace_active_diet: replaceActiveDiet,
-          dieta: dietaPayload,
-          suplementos: editableData.suplementos || [],
-          farmacos: editableData.farmacos || [],
-        });
+        const result = await apiClient.importConfirmDietSafe(
+          {
+            aluno_id: resolvedTargetAluno.id,
+            replace_active_diet: replaceActiveDiet,
+            dieta: dietaPayload,
+            suplementos: editableData.suplementos || [],
+            farmacos: editableData.farmacos || [],
+          },
+          buildConfirmMeta(),
+        );
 
         if (!result.success) {
           throw new Error(result.error || 'Erro ao importar dieta');
@@ -1039,7 +1058,7 @@ const StudentImporter = ({
           : undefined,
       };
 
-      const result = await apiClient.importConfirmSafe(payload);
+      const result = await apiClient.importConfirmSafe(payload, buildConfirmMeta());
 
       if (!result.success) {
         throw new Error(result.error || 'Erro ao importar aluno');

@@ -2409,6 +2409,16 @@ app.post('/api/import/confirm', authenticate, (req, res) => {
 });
 
 // Reimportar só a dieta para aluno já cadastrado (PDF já parseado no frontend)
+app.get('/api/import/history', authenticate, (req, res) => {
+    importController.listHistory(req, res).catch((err) => {
+        const logger = require('./utils/logger');
+        logger.error('Erro não capturado em listHistory', { error: err.message });
+        if (!res.headersSent) {
+            res.status(500).json({ success: false, error: err.message || 'Erro ao listar histórico' });
+        }
+    });
+});
+
 app.post('/api/import/confirm-diet', authenticate, (req, res) => {
     importController.confirmDietForAluno(req, res).catch((err) => {
         const logger = require('./utils/logger');

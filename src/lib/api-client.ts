@@ -1,6 +1,7 @@
 import { assertDataContextReady, assertNoSupabaseDirectAccess } from './data-context-guard';
 import { API_CONTRACT, isContractEndpoint, normalizeEndpoint } from '@/contracts/api-contract';
 import type { AlunoHojeResponse } from '@/types/aluno-hoje';
+import type { ImportHistoryRecord } from '@/types/import-history';
 import { getAvailabilityKeyForEndpoint, isDataAvailable } from '@/lib/dataAvailability';
 
 // FIX-012 — prefixos de rotas semânticas na VPS (PostgreSQL; ver src/contracts/api-contract.ts)
@@ -68,6 +69,7 @@ export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/lives',
     '/api/uploads/avatar',
     '/api/import/parse-pdf',
+    '/api/import/history',
     '/api/import/confirm',
     '/api/import/confirm-diet',
     '/api/payments/create-asaas',
@@ -949,19 +951,38 @@ class ApiClient {
     }
 
     /** Confirma importação de ficha completa (novo aluno + dieta opcional). */
-    async importConfirmSafe(data: unknown): Promise<ApiResult<unknown>> {
+    async importConfirmSafe(
+        data: unknown,
+        meta?: Record<string, unknown>,
+    ): Promise<ApiResult<unknown>> {
         return this.safeRequest(API_CONTRACT.import.confirm(), {
             method: 'POST',
-            body: JSON.stringify({ data }),
+            body: JSON.stringify({ data, meta: meta ?? undefined }),
         });
     }
 
     /** Reimporta dieta/protocolo para aluno já cadastrado. */
-    async importConfirmDietSafe(data: unknown): Promise<ApiResult<unknown>> {
+    async importConfirmDietSafe(
+        data: unknown,
+        meta?: Record<string, unknown>,
+    ): Promise<ApiResult<unknown>> {
         return this.safeRequest(API_CONTRACT.import.confirmDiet(), {
             method: 'POST',
-            body: JSON.stringify({ data }),
+            body: JSON.stringify({ data, meta: meta ?? undefined }),
         });
+    }
+
+    /** Histórico de importações confirmadas (coach). */
+    async importHistorySafe(params?: {
+        alunoId?: string;
+        limit?: number;
+    }): Promise<ApiResult<ImportHistoryRecord[]>> {
+        return this.safeRequest(
+            API_CONTRACT.import.history({
+                aluno_id: params?.alunoId,
+                limit: params?.limit,
+            }),
+        );
     }
     
     // ============================================================================

@@ -11,7 +11,7 @@
 | `data_retorno` em `confirm-diet` | ✅ | Schema + `buildDietaPayload` envia ISO `YYYY-MM-DD` |
 | Substituir dieta activa | ✅ | `replace_active_diet` + checkbox no import enrich |
 | Wizard «Novo Aluno» → import | ✅ | Após criar aluno, diálogo «Importar ficha agora?» |
-| Histórico de importações | ⏳ | Backlog |
+| Histórico de importações | ✅ | `GET /api/import/history` + painel no perfil do aluno |
 | Card estado portal no perfil | ⏳ | Backlog |
 | Importação em lote | ⏳ | Backlog |
 | Bug telefone no create | ⏳ | Pré-existente |
@@ -46,5 +46,5 @@
 
 1. ~~Deploy + smoke do Import P1~~ ✅
 2. ~~BH-CHECKIN-014 Export PDF~~ ✅ (`CoachCheckinDetailSheet` + `checkinPdfExport.ts`)
-3. **Próximo:** Histórico importações + card portal
+3. **Próximo:** Card estado portal no perfil + importação em lote
 4. IA check-in (011–012) quando API LLM estiver estável

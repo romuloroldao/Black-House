@@ -14,6 +14,7 @@ const PATCH_FILES = [
     '20260519_equivalencia_alimentar_grupos.sql',
     '20260526_checkin_coach_respondido.sql',
     '20260527_checkin_relato_search.sql',
+    '20260528_importacoes_historico.sql',
 ];
 
 async function main() {

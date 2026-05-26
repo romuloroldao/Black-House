@@ -14,6 +14,7 @@ const TipoAlimentoRepository = require('../repositories/tipo-alimento.repository
 const StudentRepository = require('../repositories/student.repository');
 const DietRepository = require('../repositories/diet.repository');
 const FoodMatchingService = require('../services/food-matching.service');
+const { insertImportHistory, listImportHistory } = require('../services/import-history.service');
 
 // STEP-15: Usar helper compartilhado
 const { assertQueryable: assertQueryableShared } = require('../shared/db-guards');
@@ -51,6 +52,7 @@ class ImportController {
         this.parsePDF = this.parsePDF.bind(this);
         this.confirmImport = this.confirmImport.bind(this);
         this.confirmDietForAluno = this.confirmDietForAluno.bind(this);
+        this.listHistory = this.listHistory.bind(this);
         
         // STEP-03: Validar após atribuição
         logger.info('STEP-03: ImportController inicializado', {
@@ -468,6 +470,21 @@ class ImportController {
                     stats: dietaResult?.stats || null
                 };
 
+                const importMeta = req.body?.meta && typeof req.body.meta === 'object'
+                    ? req.body.meta
+                    : {};
+                await insertImportHistory(client, {
+                    coachId: userId,
+                    alunoId: aluno.id,
+                    modo: 'create',
+                    meta: importMeta,
+                    dietaId: dietaResult?.dieta?.id || null,
+                    replaceActiveDiet: false,
+                    stats: dietaResult?.stats || {},
+                    dieta: dietaResult?.dieta || validatedData.dieta || null,
+                    alunoNome: aluno.nome,
+                });
+
                 // STEP-12: Guard antes de COMMIT
                 if (clientReleased) {
                     throw new Error('STEP-12: Tentativa de COMMIT após release');
@@ -630,6 +647,21 @@ class ImportController {
                     }
                 }
 
+                const importMeta = req.body?.meta && typeof req.body.meta === 'object'
+                    ? req.body.meta
+                    : {};
+                await insertImportHistory(client, {
+                    coachId: userId,
+                    alunoId,
+                    modo: 'enrich',
+                    meta: importMeta,
+                    dietaId: dietaResult?.dieta?.id || null,
+                    replaceActiveDiet: Boolean(replaceActiveDiet),
+                    stats: dietaResult?.stats || {},
+                    dieta: dietaResult?.dieta || dieta || null,
+                    alunoNome: alunoRow.nome,
+                });
+
                 await client.query('COMMIT');
 
                 logger.info('Dieta reimportada para aluno existente', {
@@ -668,6 +700,61 @@ class ImportController {
                     error: error.message || 'Erro ao reimportar dieta',
                 });
             }
+        }
+    }
+
+    /**
+     * Lista histórico de importações do coach (opcionalmente filtrado por aluno).
+     */
+    async listHistory(req, res) {
+        try {
+            const userId = req.user?.id;
+            const userRole = req.user?.role;
+            if (!userId) {
+                return res.status(401).json({ success: false, error: 'Não autenticado' });
+            }
+            if (userRole !== 'coach' && userRole !== 'admin') {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Apenas coach ou admin podem ver o histórico de importações',
+                });
+            }
+
+            const alunoId = typeof req.query.aluno_id === 'string' ? req.query.aluno_id.trim() : '';
+            const limit = req.query.limit;
+
+            assertQueryableShared(this._db, 'this._db', 'listHistory');
+
+            if (alunoId && userRole === 'coach') {
+                const own = await this._db.query(
+                    `SELECT id FROM public.alunos WHERE id = $1 AND coach_id = $2`,
+                    [alunoId, userId],
+                );
+                if (own.rows.length === 0) {
+                    return res.status(403).json({
+                        success: false,
+                        error: 'Aluno não pertence ao seu perfil',
+                    });
+                }
+            }
+
+            const rows = await listImportHistory(this._db, {
+                coachId: userId,
+                userRole,
+                alunoId: alunoId || undefined,
+                limit,
+            });
+
+            return res.json(rows);
+        } catch (error) {
+            logger.error('Erro ao listar histórico de importações', {
+                error: error.message,
+                userId: req.user?.id,
+            });
+            return res.status(500).json({
+                success: false,
+                error: error.message || 'Erro ao listar histórico',
+            });
         }
     }
 }

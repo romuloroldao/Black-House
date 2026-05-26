@@ -197,7 +197,7 @@ import: {
 - [x] Wizard «Novo Aluno» com import integrado (2026-05-26)
 - [x] `data_retorno` em `DietOnlyImportSchema` + envio no `confirm-diet`
 - [x] Opção **Substituir dieta activa** (`replace_active_diet`)
-- [ ] Histórico de importações
+- [x] Histórico de importações (2026-05-28)
 - [ ] Card estado portal no perfil
 - [ ] Importação em lote
 
