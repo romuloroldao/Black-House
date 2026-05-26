@@ -28,6 +28,17 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import StudentImporter, { type ImportTargetAluno } from "./StudentImporter";
 import { 
   Search, 
   Filter, 
@@ -48,7 +59,6 @@ import {
   Link2,
   Upload
 } from "lucide-react";
-import StudentImporter from "./StudentImporter";
 import { maskCpfCnpj, maskPhone, onlyNumbers } from "@/utils/MaskFormat";
 
 interface Student {
@@ -101,6 +111,10 @@ const StudentManager = () => {
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(
     () => searchParams.get("import") === "1",
   );
+  const [pendingImportAluno, setPendingImportAluno] = useState<ImportTargetAluno | null>(
+    null,
+  );
+  const [importWizardOfferOpen, setImportWizardOfferOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [paymentPlans, setPaymentPlans] = useState<Array<{ id: string; nome: string }>>([]);
   const [coachEmail, setCoachEmail] = useState<string>("");
@@ -131,6 +145,7 @@ const StudentManager = () => {
 
   const closeImportDialog = () => {
     setIsImportDialogOpen(false);
+    setPendingImportAluno(null);
     if (searchParams.get("import") === "1") {
       const next = new URLSearchParams(searchParams);
       next.delete("import");
@@ -410,6 +425,14 @@ const StudentManager = () => {
           title: "Sucesso!",
           description: "Aluno adicionado com sucesso",
         });
+        if (alunoId) {
+          setPendingImportAluno({
+            id: alunoId,
+            nome: newStudent.nome,
+            email: newStudent.email,
+          });
+          setImportWizardOfferOpen(true);
+        }
       }
 
       // Se o aluno tem um plano associado, criar/atualizar configuração de cobrança recorrente
@@ -702,8 +725,12 @@ const StudentManager = () => {
               </DialogHeader>
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-3 sm:px-6 sm:pb-5">
                 <StudentImporter
+                  mode={pendingImportAluno ? "enrich" : undefined}
+                  targetAluno={pendingImportAluno ?? undefined}
                   existingAlunos={existingAlunosForImport}
-                  showDestinationPicker={existingAlunosForImport.length > 0}
+                  showDestinationPicker={
+                    !pendingImportAluno && existingAlunosForImport.length > 0
+                  }
                   onClose={closeImportDialog}
                   onImportComplete={() => {
                     refetchAlunos();
@@ -938,6 +965,35 @@ const StudentManager = () => {
           </Card>
         )}
       </div>
+      <AlertDialog open={importWizardOfferOpen} onOpenChange={setImportWizardOfferOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Importar ficha agora?</AlertDialogTitle>
+            <AlertDialogDescription>
+              O aluno foi criado. Quer enviar o PDF ou planilha da dieta para vincular ao perfil de{" "}
+              <strong>{pendingImportAluno?.nome}</strong> sem criar outro registo?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => {
+                setPendingImportAluno(null);
+              }}
+            >
+              Depois
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setImportWizardOfferOpen(false);
+                setIsImportDialogOpen(true);
+              }}
+            >
+              Importar ficha
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {isDialogOpen && (
         <Dialog
           open={isDialogOpen}

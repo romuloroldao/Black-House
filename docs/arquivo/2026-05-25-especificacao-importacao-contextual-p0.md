@@ -180,23 +180,26 @@ import: {
 
 ## 8. Testes manuais (checklist)
 
-- [ ] Perfil aluno sem dieta → importar PDF → dieta aparece na tab Nutrição
-- [ ] Perfil com dieta → reimportar → segunda dieta criada (comportamento actual backend)
-- [ ] Lista → novo aluno → confirm → aluno na lista
-- [ ] Lista → aluno existente no picker → não cria duplicado
-- [ ] Lista → nome/email igual a existente → alerta duplicado
-- [ ] Vincular → «Importar Fichas» abre Gestão de Alunos com modal
-- [ ] Mobile: modal scrollável, CTA fixo no rodapé
+**Validação:** aceite 2026-05-26 (deploy + browser coach; cenário Luiz unificado).
+
+- [x] Perfil aluno sem dieta → importar PDF → dieta aparece na tab Nutrição
+- [x] Perfil com dieta → reimportar → segunda dieta criada (comportamento actual backend)
+- [x] Lista → novo aluno → confirm → aluno na lista
+- [x] Lista → aluno existente no picker → não cria duplicado
+- [x] Lista → nome/email igual a existente → alerta duplicado
+- [x] Vincular → «Importar Fichas» abre Gestão de Alunos com modal
+- [x] Mobile: modal scrollável, CTA fixo no rodapé *(aceite operacional)*
 
 ---
 
 ## 9. Fora de P0 (P1+)
 
-- Wizard «Novo Aluno» com import integrado
-- `data_retorno` em `DietOnlyImportSchema`
-- Histórico de importações
-- Card estado portal no perfil
-- Importação em lote
+- [x] Wizard «Novo Aluno» com import integrado (2026-05-26)
+- [x] `data_retorno` em `DietOnlyImportSchema` + envio no `confirm-diet`
+- [x] Opção **Substituir dieta activa** (`replace_active_diet`)
+- [ ] Histórico de importações
+- [ ] Card estado portal no perfil
+- [ ] Importação em lote
 
 ---
 

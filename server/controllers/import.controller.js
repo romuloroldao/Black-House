@@ -562,7 +562,13 @@ class ImportController {
                 });
             }
 
-            const { aluno_id: alunoId, dieta, suplementos, farmacos } = schemaValidation.data;
+            const {
+                aluno_id: alunoId,
+                dieta,
+                suplementos,
+                farmacos,
+                replace_active_diet: replaceActiveDiet,
+            } = schemaValidation.data;
 
             assertQueryableShared(this._db, 'this._db', 'confirmDietForAluno');
             const client = await this._db.connect();
@@ -594,6 +600,13 @@ class ImportController {
                 const foodMatching = new FoodMatchingService(alimentoRepo, tipoAlimentoRepo);
                 const dietService = new DietService(dietRepo, foodMatching);
 
+                if (replaceActiveDiet) {
+                    await client.query(
+                        `UPDATE public.dietas SET ativa = false WHERE aluno_id = $1`,
+                        [alunoId],
+                    );
+                }
+
                 const dietaPayload = {
                     ...dieta,
                     suplementos: suplementos || [],
@@ -605,6 +618,17 @@ class ImportController {
                     alunoId,
                     userId,
                 );
+
+                const newDietaId = dietaResult?.dieta?.id;
+                if (replaceActiveDiet && newDietaId) {
+                    const hasReturn = Boolean(dietaPayload.data_retorno);
+                    if (!hasReturn) {
+                        await client.query(
+                            `UPDATE public.dietas SET ativa = true WHERE id = $1`,
+                            [newDietaId],
+                        );
+                    }
+                }
 
                 await client.query('COMMIT');
 

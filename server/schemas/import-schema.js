@@ -128,9 +128,12 @@ const ImportSchema = z.object({
 /** Reimportação só da dieta para aluno já cadastrado (recuperação pós-migração). */
 const DietOnlyImportSchema = z.object({
     aluno_id: z.string().uuid('aluno_id inválido'),
+    /** Quando true, desactiva outras dietas do aluno e activa a importada. */
+    replace_active_diet: z.boolean().optional().default(false),
     dieta: z.object({
         nome: z.string().min(1).max(255).default('Plano Alimentar Importado'),
         objetivo: z.string().max(1000).nullable().optional(),
+        data_retorno: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
         refeicoes: z.array(RefeicaoSchema).min(1, 'Informe ao menos uma refeição com alimentos'),
         macros: MacroBlockSchema.nullable().optional(),
         ...DietRotationImportFields,

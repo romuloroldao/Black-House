@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
@@ -347,6 +348,8 @@ const StudentImporter = ({
   const [currentStep, setCurrentStep] = useState<'upload' | 'review' | 'complete'>('upload');
   const [reviewTab, setReviewTab] = useState<'aluno' | 'dieta' | 'protocolo'>('aluno');
   const [diasValidadeDieta, setDiasValidadeDieta] = useState('');
+  /** P1: substituir dieta activa em vez de acumular planos. */
+  const [replaceActiveDiet, setReplaceActiveDiet] = useState(false);
 
   useEffect(() => {
     if (effectiveMode === 'enrich') {
@@ -886,9 +889,12 @@ const StudentImporter = ({
 
   const buildDietaPayload = () => {
     if (!editableData?.dieta) return null;
-    const { data_retorno: _dr, ...dietaRest } = editableData.dieta;
+    const rawReturn = String(editableData.dieta.data_retorno || '').trim();
+    const data_retorno =
+      rawReturn && /^\d{4}-\d{2}-\d{2}/.test(rawReturn) ? rawReturn.slice(0, 10) : null;
     return {
-      ...dietaRest,
+      ...editableData.dieta,
+      data_retorno,
       ...dietRotationToPayload(rotacaoDieta),
     };
   };
@@ -942,6 +948,7 @@ const StudentImporter = ({
       try {
         const result = await apiClient.importConfirmDietSafe({
           aluno_id: resolvedTargetAluno.id,
+          replace_active_diet: replaceActiveDiet,
           dieta: dietaPayload,
           suplementos: editableData.suplementos || [],
           farmacos: editableData.farmacos || [],
@@ -1482,6 +1489,28 @@ const StudentImporter = ({
                       />
 
                       <DietRotationFields value={rotacaoDieta} onChange={setRotacaoDieta} />
+
+                      {effectiveMode === 'enrich' ? (
+                        <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+                          <Checkbox
+                            id="replace-active-diet"
+                            checked={replaceActiveDiet}
+                            onCheckedChange={(v) => setReplaceActiveDiet(v === true)}
+                          />
+                          <div className="space-y-1">
+                            <Label
+                              htmlFor="replace-active-diet"
+                              className="cursor-pointer text-sm font-medium leading-snug"
+                            >
+                              Substituir dieta activa
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                              Desactiva o plano actual do aluno e torna este import o plano activo.
+                              Sem marcar, o import adiciona um novo plano (comportamento anterior).
+                            </p>
+                          </div>
+                        </div>
+                      ) : null}
 
                       {editableData.dieta.macros && (
                         <div className="flex gap-2 flex-wrap">

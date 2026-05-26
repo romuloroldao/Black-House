@@ -250,6 +250,6 @@ git checkout melhoria-aluno
 
 ## Próximo passo imediato
 
-1. **QA manual** com `docs/arquivo/2026-05-25-checklist-teste-aluno.md` (5 alunos + coach).  
-2. **Merge** `melhoria-aluno` → `lancamento` quando checklist estiver verde.  
-3. Opcional pós-MVP: histórico de cargas na sessão de treino; macros “só plano activo” na dieta (evitar somar A+B).
+1. ~~**QA manual**~~ — **Concluído** (2026-05-26). Ver `docs/arquivo/2026-05-26-qa-deploy-checkin-aluno.md`.  
+2. ~~**Merge** `melhoria-aluno` → `lancamento`~~ — **Feito** (PR #4).  
+3. **Backlog activo:** import P1 (`docs/arquivo/2026-05-25-especificacao-importacao-contextual-p0.md` §9); check-in Sprint 4+ (IA/PDF); polish pós-MVP (histórico cargas, macros só plano activo).

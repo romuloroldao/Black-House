@@ -1,6 +1,7 @@
 # Tickets técnicos — UX Check-in Coach (Black House)
 
 **Data:** 2026-05-25  
+**Validação Q1:** aceite 2026-05-26 (`docs/arquivo/2026-05-26-qa-deploy-checkin-aluno.md`)  
 **Epic:** Coach visualiza e responde respostas individuais do check-in semanal  
 **Referência UX:** proposta de produto check-in coach (maio/2026)
 
