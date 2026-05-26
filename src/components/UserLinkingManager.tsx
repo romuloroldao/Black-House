@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -58,6 +59,7 @@ interface UnlinkedRegistration {
 }
 
 export default function UserLinkingManager() {
+  const navigate = useNavigate();
   const { confirm } = useConfirm();
   const { user } = useAuth();
   const [alunos, setAlunos] = useState<Aluno[]>([]);
@@ -579,9 +581,9 @@ export default function UserLinkingManager() {
             <p className="text-muted-foreground mb-6 max-w-md mx-auto">
               Compartilhe o link de cadastro acima ou importe fichas para vincular alunos.
             </p>
-            <Button>
+            <Button onClick={() => navigate("/?tab=students&import=1")}>
               <FileText className="w-4 h-4 mr-2" />
-              Importar Fichas
+              Importar fichas
             </Button>
           </CardContent>
         </Card>
