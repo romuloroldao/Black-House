@@ -177,7 +177,7 @@ ALTER TABLE public.weekly_checkins
 | BH-CHECKIN-011 | Resumo IA de tendências (4 semanas) | L |
 | BH-CHECKIN-012 | Rascunho de resposta IA editável | L |
 | BH-CHECKIN-013 | Comparação side-by-side duas semanas | M |
-| BH-CHECKIN-014 | Export PDF do check-in | M |
+| BH-CHECKIN-014 | Export PDF do check-in | M ✅ |
 | BH-CHECKIN-015 | Inbox por equipa (head coach) | L |
 
 ---

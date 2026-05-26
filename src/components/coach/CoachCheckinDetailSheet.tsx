@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { ChevronLeft, ChevronRight, Loader2, MessageSquare, Save } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileDown, Loader2, MessageSquare, Save } from "lucide-react";
+import { exportCheckinToPdf } from "@/utils/checkinPdfExport";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -68,6 +69,7 @@ export default function CoachCheckinDetailSheet({
   const [feedback, setFeedback] = useState("");
   const [feedbackId, setFeedbackId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [markedRespondido, setMarkedRespondido] = useState(false);
 
   useEffect(() => {
@@ -160,6 +162,28 @@ export default function CoachCheckinDetailSheet({
   const handleOpenChat = () => {
     onOpenChange(false);
     navigate(`/?tab=messages&aluno_id=${encodeURIComponent(studentId)}`);
+  };
+
+  const handleExportPdf = async () => {
+    if (!checkin) return;
+    setExportingPdf(true);
+    try {
+      await exportCheckinToPdf({
+        checkin,
+        previousCheckin,
+        studentName,
+        coachFeedback: feedback,
+      });
+      toast({ title: "PDF exportado", description: "O ficheiro foi transferido para o seu dispositivo." });
+    } catch (err: unknown) {
+      toast({
+        title: "Erro ao exportar PDF",
+        description: err instanceof Error ? err.message : "Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   if (!checkin) return null;
@@ -298,10 +322,10 @@ export default function CoachCheckinDetailSheet({
             rows={3}
             className="resize-none"
           />
-          <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             <Button
               type="button"
-              className="flex-1"
+              className="flex-1 min-w-[140px]"
               onClick={handleSaveFeedback}
               disabled={saving}
             >
@@ -312,9 +336,23 @@ export default function CoachCheckinDetailSheet({
               )}
               Salvar resposta
             </Button>
-            <Button type="button" variant="outline" className="flex-1" onClick={handleOpenChat}>
+            <Button type="button" variant="outline" className="flex-1 min-w-[140px]" onClick={handleOpenChat}>
               <MessageSquare className="mr-2 h-4 w-4" />
               Abrir chat
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1 min-w-[140px]"
+              onClick={handleExportPdf}
+              disabled={exportingPdf}
+            >
+              {exportingPdf ? (
+                <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
+              ) : (
+                <FileDown className="mr-2 h-4 w-4" />
+              )}
+              Exportar PDF
             </Button>
           </div>
         </div>

@@ -25,7 +25,7 @@
 | BH-CHECKIN-011 | Resumo IA tendências (4 semanas) | L |
 | BH-CHECKIN-012 | Rascunho resposta IA editável | L |
 | BH-CHECKIN-013 | Comparação side-by-side duas semanas | M |
-| BH-CHECKIN-014 | Export PDF do check-in | M |
+| BH-CHECKIN-014 | Export PDF do check-in | M ✅ |
 | BH-CHECKIN-015 | Inbox por equipa (head coach) | L |
 
 **Dívida:** rota semântica dedicada para `feedbacks_alunos` (sair de `/rest/v1/`).
@@ -44,7 +44,7 @@
 
 ## Ordem sugerida (próximas sprints)
 
-1. Deploy + smoke do Import P1 (substituir dieta + wizard)
-2. BH-CHECKIN-014 Export PDF (valor coach imediato)
-3. Histórico importações + card portal
+1. ~~Deploy + smoke do Import P1~~ ✅
+2. ~~BH-CHECKIN-014 Export PDF~~ ✅ (`CoachCheckinDetailSheet` + `checkinPdfExport.ts`)
+3. **Próximo:** Histórico importações + card portal
 4. IA check-in (011–012) quando API LLM estiver estável
