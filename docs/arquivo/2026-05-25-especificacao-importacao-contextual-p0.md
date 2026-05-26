@@ -206,5 +206,5 @@ import: {
 ## 10. Riscos conhecidos
 
 - `confirm-diet` **adiciona** dieta, não substitui a activa — documentar na UI (P1: opção substituir).
-- Telefone na importação create pode não persistir (bug pré-existente em `StudentService`).
+- ~~Telefone na importação create pode não persistir~~ — corrigido em `StudentService.createAluno` (2026-05-28).
 - Email temporário `import-@blackhouse.local` se omitido no create — manter aviso na revisão.

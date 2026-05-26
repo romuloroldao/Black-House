@@ -14,7 +14,7 @@
 | Histórico de importações | ✅ | `GET /api/import/history` + painel no perfil do aluno |
 | Card estado portal no perfil | ✅ | `GET /api/alunos/:id/portal-status` + `StudentPortalStatusCard` |
 | Importação em lote | ⏳ | Backlog |
-| Bug telefone no create | ⏳ | Pré-existente |
+| Bug telefone no create | ✅ | `StudentService` não repassava `telefone` ao repositório no import |
 
 ---
 

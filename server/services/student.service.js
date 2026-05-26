@@ -21,8 +21,6 @@ class StudentService {
             throw new Error('Coach ID é obrigatório');
         }
 
-        console.log(alunoData)
-
         // Criar aluno
         // Nota: altura não é persistida conforme especificação (forbidden_columns)
         const aluno = await this.repository.createAluno({
@@ -34,7 +32,8 @@ class StudentService {
             idade: alunoData.idade || null,
             objetivo: alunoData.objetivo || null,
             user_id: alunoData.user_id,
-            email: alunoData.email
+            email: alunoData.email,
+            telefone: alunoData.telefone || null,
         });
 
         return aluno;
