@@ -31,7 +31,8 @@ import {
   UsersRound,
   Megaphone,
   Menu,
-  Link2
+  Link2,
+  ListChecks
 } from "lucide-react";
 
 interface SidebarProps {
@@ -52,6 +53,7 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
     students: 0,
     messages: 0,
     payments: 0,
+    "check-ins": 0,
   });
   // DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001: Valores padrão seguros
   const [coachName, setCoachName] = useState<string>("Coach");
@@ -101,25 +103,35 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
         console.warn('[DESIGN-CHECKPOINT-ASYNC-ERROR-SAFETY-001] Erro ao carregar perfil do coach (não crítico):', error);
         // Não quebrar renderização - apenas logar warning
       });
-      // DESIGN-E2E-CHECKLIST-ROLE-004: Coaches não têm endpoint de notificações ainda
-      // loadNotifications(); // Removido: Coaches não fazem polling de notificações
+      loadCheckinPendingCount().catch(() => {});
+      const intervalId = window.setInterval(() => {
+        loadCheckinPendingCount().catch(() => {});
+      }, 60_000);
 
-      // Handle visibility change
       const handleVisibilityChange = () => {
         setIsOnline(!document.hidden);
+        if (!document.hidden) {
+          loadCheckinPendingCount().catch(() => {});
+        }
       };
 
       document.addEventListener('visibilitychange', handleVisibilityChange);
 
+      const onCheckinPendingUpdated = () => {
+        loadCheckinPendingCount().catch(() => {});
+      };
+      window.addEventListener('blackhouse:checkin-pending-updated', onCheckinPendingUpdated);
+
       return () => {
         document.removeEventListener('visibilitychange', handleVisibilityChange);
-        // clearInterval(intervalId); // Removido: Não há polling para limpar
+        window.removeEventListener('blackhouse:checkin-pending-updated', onCheckinPendingUpdated);
+        clearInterval(intervalId);
       };
     } else {
       // DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001: Limpar estados se não for coach ou user null
       setCoachName('Coach');
       setCoachAvatar(null);
-      setNotificationCounts({ students: 0, messages: 0, payments: 0 });
+      setNotificationCounts({ students: 0, messages: 0, payments: 0, "check-ins": 0 });
     }
   }, [user]);
 
@@ -147,6 +159,20 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       setCoachAvatar(normalizeAvatarUrl(profileResult.data?.avatar_url));
     } else {
       setCoachAvatar(null);
+    }
+  };
+
+  const loadCheckinPendingCount = async () => {
+    if (!user || (user.role !== "coach" && user.role !== "admin")) return;
+
+    const result = await apiClient.requestSafe<{ count?: number }>(
+      "/api/weekly-checkins/pendentes/count",
+    );
+    if (result.success) {
+      setNotificationCounts((prev) => ({
+        ...prev,
+        "check-ins": result.data?.count ?? 0,
+      }));
     }
   };
 
@@ -234,6 +260,11 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       id: "messages",
       label: "Mensagens",
       icon: MessageSquare,
+    },
+    {
+      id: "check-ins",
+      label: "Check-ins",
+      icon: ListChecks,
     },
     {
       id: "payment-plans",

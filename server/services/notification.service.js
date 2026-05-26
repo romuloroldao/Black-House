@@ -246,6 +246,88 @@ class NotificationService {
         }
     }
 
+    _buildWeeklyCheckinNotifySummary(checkin = {}) {
+        const parts = [];
+        const adesao = checkin.seguiu_plano_nota;
+        if (adesao != null && !Number.isNaN(Number(adesao))) {
+            parts.push(`Adesão ${adesao}/5`);
+        }
+        if (checkin.estresse_semana === true || checkin.estresse_semana === 'sim') {
+            parts.push('Estresse');
+        }
+        const relato = checkin.nao_cumpriu_porque?.trim?.() || '';
+        if (relato) {
+            parts.push(relato.length > 100 ? `${relato.slice(0, 100)}…` : relato);
+        }
+        return parts.join(' · ') || 'Confira as respostas completas na plataforma.';
+    }
+
+    /**
+     * BH-CHECKIN-010: aluno enviou check-in semanal — coach (in-app + e-mail opcional)
+     */
+    async notifyNewWeeklyCheckin({ checkinId, alunoId, alunoNome, coachUserId, checkin }) {
+        if (!coachUserId || !alunoId) return;
+
+        const nome = (alunoNome && String(alunoNome).trim()) || 'Aluno';
+        const summary = this._buildWeeklyCheckinNotifySummary(checkin || {});
+        const title = 'Novo check-in semanal';
+        const message = `${nome} enviou o check-in da semana. ${summary}`;
+
+        try {
+            if (this.ws) {
+                this.ws.emitToCoach(coachUserId, 'new_weekly_checkin', {
+                    checkinId,
+                    alunoId,
+                    alunoNome: nome,
+                    summary,
+                    message,
+                });
+            }
+
+            await this.notifyUser(coachUserId, 'new_weekly_checkin', title, message, {
+                checkinId,
+                alunoId,
+                alunoNome: nome,
+                link: 'check-ins',
+            });
+
+            const wantsEmail = await shouldSendCoachEmail(this.pool, coachUserId);
+            if (!wantsEmail) return;
+
+            const userR = await this.pool.query(
+                `SELECT email FROM app_auth.users WHERE id = $1 LIMIT 1`,
+                [coachUserId],
+            );
+            const to = userR.rows[0]?.email;
+            if (!to) return;
+
+            const profileR = await this.pool.query(
+                `SELECT nome_completo FROM public.coach_profiles WHERE user_id = $1 LIMIT 1`,
+                [coachUserId],
+            );
+            const coachNome = profileR.rows[0]?.nome_completo || '';
+
+            const { sendCoachNotificationEmail } = require('../utils/send-coach-notification-email');
+            await sendCoachNotificationEmail({
+                to,
+                type: 'new_weekly_checkin',
+                context: {
+                    coachNome,
+                    alunoNome: nome,
+                    message,
+                    summary,
+                },
+            });
+        } catch (error) {
+            logger.warn('checkin.new_weekly_notify_failed', {
+                checkinId,
+                alunoId,
+                coachUserId,
+                error: error.message,
+            });
+        }
+    }
+
     /**
      * Lembrete de check-in semanal — coach e aluno
      */

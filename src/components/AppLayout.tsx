@@ -21,12 +21,16 @@ import { AnnouncementManager } from "./AnnouncementManager";
 import { EventsCalendar } from "./EventsCalendar";
 import SettingsManager from "./SettingsManager";
 import UserLinkingManager from "./UserLinkingManager";
+import CoachCheckinInbox from "./coach/CoachCheckinInbox";
+import { useCoachCheckinNotifications } from "@/hooks/useCoachCheckinNotifications";
 
 
 // DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001: AppLayout deve renderizar mesmo sem dados
 // REACT-RENDER-CRASH-FIX-002: useSearchParams() não deve influenciar render crítico
 // REACT-RENDER-CRASH-FIX-002: Fallback absoluto para render inicial
 const AppLayout = () => {
+  useCoachCheckinNotifications();
+
   // REACT-RENDER-CRASH-FIX-002: useSearchParams() pode existir, mas não decide render crítico
   const [searchParams, setSearchParams] = useSearchParams();
   
@@ -89,6 +93,8 @@ const AppLayout = () => {
           return <NutritionInterface />;
         case "messages":
           return <div className="p-6"><MessageManager /></div>;
+        case "check-ins":
+          return <CoachCheckinInbox />;
         case "payment-plans":
           return <div className="p-6"><PlanManager /></div>;
         case "exceptions":

@@ -11,6 +11,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import escalaBristol from "@/assets/escala-bristol.jpg";
+import StudentCoachCheckinFeedback from "@/components/student/StudentCoachCheckinFeedback";
 import CheckinStepHeader from "@/components/student/checkin/CheckinStepHeader";
 import {
   CHECKIN_SECTIONS,
@@ -152,6 +153,8 @@ export default function StudentWeeklyCheckin() {
           Quatro blocos curtos — salve o envio só no final
         </p>
       </div>
+
+      <StudentCoachCheckinFeedback />
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <CheckinStepHeader step={step} completedSections={completedSections} />

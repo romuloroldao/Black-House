@@ -13,7 +13,7 @@ import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare, Trash2, 
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import StudentProgressDashboard from "./student/StudentProgressDashboard";
+import StudentProgressCoachTabs from "./coach/StudentProgressCoachTabs";
 import StudentFinancialManagement from "./student/StudentFinancialManagement";
 import { DietReturnDateFields } from "@/components/DietReturnDateFields";
 import {
@@ -1034,7 +1034,7 @@ export default function StudentDetails() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <StudentProgressDashboard studentId={id} />
+              <StudentProgressCoachTabs studentId={id} studentName={student.nome} />
             </CardContent>
           </Card>
         </TabsContent>

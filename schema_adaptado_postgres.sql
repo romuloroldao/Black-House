@@ -640,8 +640,11 @@ CREATE TABLE IF NOT EXISTS public.weekly_checkins (
   formato_fezes text NOT NULL CHECK (formato_fezes = ANY (ARRAY['tipo1'::text, 'tipo2'::text, 'tipo3'::text, 'tipo4'::text, 'tipo5'::text, 'tipo6'::text, 'tipo7'::text])),
   nao_cumpriu_porque text,
   status text DEFAULT 'concluido'::text,
+  coach_respondido_em timestamp with time zone,
+  coach_respondido_por uuid,
   CONSTRAINT weekly_checkins_pkey PRIMARY KEY (id),
-  CONSTRAINT weekly_checkins_aluno_id_fkey FOREIGN KEY (aluno_id) REFERENCES public.alunos(id)
+  CONSTRAINT weekly_checkins_aluno_id_fkey FOREIGN KEY (aluno_id) REFERENCES public.alunos(id),
+  CONSTRAINT weekly_checkins_coach_respondido_por_fkey FOREIGN KEY (coach_respondido_por) REFERENCES app_auth.users(id)
 );
 
 -- ============================================================================
@@ -658,6 +661,9 @@ CREATE INDEX IF NOT EXISTS idx_conversas_aluno_id ON public.conversas(aluno_id);
 CREATE INDEX IF NOT EXISTS idx_dietas_aluno_id ON public.dietas(aluno_id);
 CREATE INDEX IF NOT EXISTS idx_mensagens_conversa_id ON public.mensagens(conversa_id);
 CREATE INDEX IF NOT EXISTS idx_weekly_checkins_aluno_id ON public.weekly_checkins(aluno_id);
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX IF NOT EXISTS idx_weekly_checkins_relato_trgm
+  ON public.weekly_checkins USING gin (nao_cumpriu_porque gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_fotos_alunos_aluno_id ON public.fotos_alunos(aluno_id);
 CREATE INDEX IF NOT EXISTS idx_eventos_coach_id ON public.eventos(coach_id);
 CREATE INDEX IF NOT EXISTS idx_asaas_payments_aluno_id ON public.asaas_payments(aluno_id);

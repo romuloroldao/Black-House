@@ -27,3 +27,6 @@ dist-ssr
 .cursor-server/
 .deno/
 .cursor/
+
+# GitHub PAT local (scripts/create-import-contextual-pr.sh)
+.config/blackhouse/gh-token

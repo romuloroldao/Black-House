@@ -43,7 +43,8 @@ const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
   
   // REACT-API-RESILIENCE-FIX-008: Usar hook resiliente para notificações
   // Só buscar se user for aluno
-  const shouldFetch = user?.role === 'aluno';
+  const shouldFetch =
+    user?.role === "aluno" || user?.role === "coach" || user?.role === "admin";
   const { data: notifications, loading, error, refetch } = useApiSafeList(
     () => apiClient.getNotificationsSafe({ limit: 10 }),
     { autoFetch: shouldFetch, endpointKey: '/api/notificacoes', availabilityKey: 'notificacoes' }
@@ -54,13 +55,19 @@ const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
   // REACT-API-RESILIENCE-FIX-008: Polling periódico (apenas se for aluno)
   useEffect(() => {
     if (!shouldFetch) return;
-    
+
     const interval = setInterval(() => {
       refetch();
-    }, 10000); // Atualizar a cada 10 segundos
+    }, 10000);
+
+    const onCheckinUpdated = () => {
+      refetch();
+    };
+    window.addEventListener("blackhouse:checkin-pending-updated", onCheckinUpdated);
 
     return () => {
       clearInterval(interval);
+      window.removeEventListener("blackhouse:checkin-pending-updated", onCheckinUpdated);
     };
   }, [shouldFetch, refetch]);
 
@@ -150,6 +157,7 @@ const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
       case 'payment_reminder':
         return DollarSign;
       case 'checkin_reminder':
+      case 'new_weekly_checkin':
         return ClipboardCheck;
       default:
         return Bell;

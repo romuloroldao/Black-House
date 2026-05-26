@@ -1,12 +1,16 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import StudentCoachCheckinFeedback from "@/components/student/StudentCoachCheckinFeedback";
+import CoachCheckinDetailSheet from "@/components/coach/CoachCheckinDetailSheet";
+import type { WeeklyCheckinRecord } from "@/types/weekly-checkin";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { format, subDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { rechartsLegendProps, rechartsTooltipProps } from "@/lib/recharts-theme";
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -22,6 +26,7 @@ import {
 interface CheckinData {
   id: string;
   created_at: string;
+  coach_respondido_em?: string | null;
   seguiu_plano_nota: number;
   treinou_todas_sessoes: boolean;
   fez_cardio: boolean;
@@ -41,14 +46,41 @@ interface CheckinData {
 }
 
 interface StudentProgressDashboardProps {
-  studentId?: string; // ID do aluno (usado quando o professor está visualizando)
+  studentId?: string;
+  /** Nome do aluno (drawer do coach ao clicar no gráfico). */
+  studentName?: string;
 }
 
-export default function StudentProgressDashboard({ studentId }: StudentProgressDashboardProps = {}) {
+type ChartPoint = {
+  semana: string;
+  checkinId: string;
+  adesao: number;
+  autoestima: number;
+  treino: number;
+  cardio: number;
+  agua: number;
+  sol: number;
+};
+
+type SonoChartPoint = {
+  semana: string;
+  checkinId: string;
+  horas: number;
+};
+
+export default function StudentProgressDashboard({
+  studentId,
+  studentName = "Aluno",
+}: StudentProgressDashboardProps = {}) {
   const { user } = useAuth();
   const [checkins, setCheckins] = useState<CheckinData[]>([]);
   const [loading, setLoading] = useState(true);
   const [periodFilter, setPeriodFilter] = useState<string>("30");
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [selectedCheckin, setSelectedCheckin] = useState<WeeklyCheckinRecord | null>(null);
+  const [previousCheckin, setPreviousCheckin] = useState<WeeklyCheckinRecord | null>(null);
+
+  const coachMode = Boolean(studentId);
 
   useEffect(() => {
     loadCheckins();
@@ -123,6 +155,80 @@ export default function StudentProgressDashboard({ studentId }: StudentProgressD
   const filteredCheckins = getFilteredCheckins();
   const previousPeriodCheckins = getPreviousPeriodCheckins();
 
+  const sortedForNav = useMemo(
+    () =>
+      [...filteredCheckins].sort(
+        (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime(),
+      ),
+    [filteredCheckins],
+  );
+
+  const openCheckinFromChart = useCallback(
+    (checkinId: string) => {
+      if (!coachMode || !studentId) return;
+      const checkin = checkins.find((c) => c.id === checkinId);
+      if (!checkin) return;
+      const idx = sortedForNav.findIndex((c) => c.id === checkinId);
+      const previous = idx >= 0 && idx < sortedForNav.length - 1 ? sortedForNav[idx + 1] : null;
+      setSelectedCheckin(checkin as WeeklyCheckinRecord);
+      setPreviousCheckin(previous as WeeklyCheckinRecord | null);
+      setSheetOpen(true);
+    },
+    [coachMode, studentId, checkins, sortedForNav],
+  );
+
+  const navigateCheckin = (direction: "prev" | "next") => {
+    if (!selectedCheckin) return;
+    const idx = sortedForNav.findIndex((c) => c.id === selectedCheckin.id);
+    if (idx < 0) return;
+    const next = direction === "prev" ? idx - 1 : idx + 1;
+    if (next < 0 || next >= sortedForNav.length) return;
+    const checkin = sortedForNav[next];
+    const previous = next < sortedForNav.length - 1 ? sortedForNav[next + 1] : null;
+    setSelectedCheckin(checkin as WeeklyCheckinRecord);
+    setPreviousCheckin(previous as WeeklyCheckinRecord | null);
+  };
+
+  const handleCheckinRespondido = (checkinId: string) => {
+    const now = new Date().toISOString();
+    setCheckins((prev) =>
+      prev.map((c) => (c.id === checkinId ? { ...c, coach_respondido_em: now } : c)),
+    );
+    if (selectedCheckin?.id === checkinId) {
+      setSelectedCheckin({ ...selectedCheckin, coach_respondido_em: now });
+    }
+  };
+
+  const renderCoachDot =
+    (fill: string) =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (props: any) => {
+      const { cx, cy, payload } = props;
+      if (cx == null || cy == null || !payload?.checkinId) return null;
+      if (!coachMode) {
+        return <circle cx={cx} cy={cy} r={4} fill={fill} />;
+      }
+      return (
+        <circle
+          cx={cx}
+          cy={cy}
+          r={6}
+          fill={fill}
+          className="cursor-pointer"
+          onClick={(e) => {
+            e.stopPropagation();
+            openCheckinFromChart(payload.checkinId as string);
+          }}
+        />
+      );
+    };
+
+  const chartCoachHint = coachMode ? (
+    <p className="text-sm text-muted-foreground">
+      Clique num ponto ou barra para abrir o check-in daquela semana.
+    </p>
+  ) : null;
+
   if (loading) {
     return <div>Carregando dados...</div>;
   }
@@ -168,10 +274,11 @@ export default function StudentProgressDashboard({ studentId }: StudentProgressD
   }
 
   const latestCheckin = filteredCheckins[0];
-  
-  // Preparar dados para gráficos
-  const chartData = [...filteredCheckins].reverse().map((c) => ({
+
+  const chronology = [...filteredCheckins].reverse();
+  const chartData: ChartPoint[] = chronology.map((c) => ({
     semana: format(new Date(c.created_at), "dd/MM", { locale: ptBR }),
+    checkinId: c.id,
     adesao: c.seguiu_plano_nota,
     autoestima: c.autoestima,
     treino: c.treinou_todas_sessoes ? 1 : 0,
@@ -186,10 +293,15 @@ export default function StudentProgressDashboard({ studentId }: StudentProgressD
     "6-8": 7,
   };
 
-  const horasSonoData = checkins.reverse().map((c) => ({
+  const horasSonoData: SonoChartPoint[] = chronology.map((c) => ({
     semana: format(new Date(c.created_at), "dd/MM", { locale: ptBR }),
+    checkinId: c.id,
     horas: sonoMap[c.media_horas_sono] || 0,
   }));
+
+  const selectedNavIndex = selectedCheckin
+    ? sortedForNav.findIndex((c) => c.id === selectedCheckin.id)
+    : -1;
 
   // Análise do último check-in
   const alerts = [];
@@ -234,6 +346,7 @@ export default function StudentProgressDashboard({ studentId }: StudentProgressD
   }
 
   return (
+    <>
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
@@ -569,28 +682,40 @@ export default function StudentProgressDashboard({ studentId }: StudentProgressD
       <Card>
         <CardHeader>
           <CardTitle>Evolução - Adesão e Autoestima</CardTitle>
+          {chartCoachHint}
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={chartData}>
+            <LineChart
+              data={chartData}
+              onClick={(state) => {
+                const id = state?.activePayload?.[0]?.payload?.checkinId as string | undefined;
+                if (id && coachMode) openCheckinFromChart(id);
+              }}
+              style={coachMode ? { cursor: "pointer" } : undefined}
+            >
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="semana" />
               <YAxis domain={[0, 5]} />
-              <Tooltip />
-              <Legend />
-              <Line 
-                type="monotone" 
-                dataKey="adesao" 
-                stroke="hsl(var(--primary))" 
+              <Tooltip {...rechartsTooltipProps} />
+              <Legend {...rechartsLegendProps} />
+              <Line
+                type="monotone"
+                dataKey="adesao"
+                stroke="hsl(var(--primary))"
                 name="Adesão ao Plano"
                 strokeWidth={2}
+                dot={renderCoachDot("hsl(var(--primary))")}
+                activeDot={coachMode ? { r: 8, cursor: "pointer" } : { r: 6 }}
               />
-              <Line 
-                type="monotone" 
-                dataKey="autoestima" 
-                stroke="hsl(var(--chart-2))" 
+              <Line
+                type="monotone"
+                dataKey="autoestima"
+                stroke="hsl(var(--chart-2))"
                 name="Autoestima"
                 strokeWidth={2}
+                dot={renderCoachDot("hsl(var(--chart-2))")}
+                activeDot={coachMode ? { r: 8, cursor: "pointer" } : { r: 6 }}
               />
             </LineChart>
           </ResponsiveContainer>
@@ -604,12 +729,18 @@ export default function StudentProgressDashboard({ studentId }: StudentProgressD
           <p className="text-sm text-muted-foreground">
             Acompanhamento dos principais hábitos ao longo do tempo
           </p>
+          {chartCoachHint}
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={400}>
-            <BarChart 
+            <BarChart
               data={chartData}
               margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
+              onClick={(state) => {
+                const id = state?.activePayload?.[0]?.payload?.checkinId as string | undefined;
+                if (id && coachMode) openCheckinFromChart(id);
+              }}
+              style={coachMode ? { cursor: "pointer" } : undefined}
             >
               <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
               <XAxis 
@@ -629,10 +760,10 @@ export default function StudentProgressDashboard({ studentId }: StudentProgressD
                 content={({ active, payload, label }) => {
                   if (active && payload && payload.length) {
                     return (
-                      <div className="bg-background border rounded-lg p-3 shadow-lg">
-                        <p className="font-semibold mb-2">{label}</p>
+                      <div className="rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-lg">
+                        <p className="mb-2 font-semibold text-foreground">{label}</p>
                         {payload.map((entry: any, index: number) => (
-                          <div key={index} className="flex items-center gap-2 text-sm">
+                          <div key={index} className="flex items-center gap-2 text-sm text-foreground">
                             <div 
                               className="w-3 h-3 rounded-full" 
                               style={{ backgroundColor: entry.color }}
@@ -649,8 +780,9 @@ export default function StudentProgressDashboard({ studentId }: StudentProgressD
                   return null;
                 }}
               />
-              <Legend 
-                wrapperStyle={{ paddingTop: "20px" }}
+              <Legend
+                {...rechartsLegendProps}
+                wrapperStyle={{ ...rechartsLegendProps.wrapperStyle, paddingTop: "20px" }}
                 iconType="circle"
               />
               <Bar 
@@ -827,26 +959,39 @@ export default function StudentProgressDashboard({ studentId }: StudentProgressD
       <Card>
         <CardHeader>
           <CardTitle>Qualidade do Sono</CardTitle>
+          {chartCoachHint}
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={horasSonoData}>
+            <LineChart
+              data={horasSonoData}
+              onClick={(state) => {
+                const id = state?.activePayload?.[0]?.payload?.checkinId as string | undefined;
+                if (id && coachMode) openCheckinFromChart(id);
+              }}
+              style={coachMode ? { cursor: "pointer" } : undefined}
+            >
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="semana" />
               <YAxis domain={[4, 8]} />
-              <Tooltip />
-              <Legend />
-              <Line 
-                type="monotone" 
-                dataKey="horas" 
-                stroke="hsl(var(--chart-5))" 
+              <Tooltip {...rechartsTooltipProps} />
+              <Legend {...rechartsLegendProps} />
+              <Line
+                type="monotone"
+                dataKey="horas"
+                stroke="hsl(var(--chart-5))"
                 name="Horas de Sono"
                 strokeWidth={2}
+                dot={renderCoachDot("hsl(var(--chart-5))")}
+                activeDot={coachMode ? { r: 8, cursor: "pointer" } : { r: 6 }}
               />
             </LineChart>
           </ResponsiveContainer>
         </CardContent>
       </Card>
+
+      {/* Resposta do coach ao check-in */}
+      <StudentCoachCheckinFeedback alunoId={studentId} />
 
       {/* Observações do último check-in */}
       {latestCheckin.nao_cumpriu_porque && (
@@ -863,5 +1008,20 @@ export default function StudentProgressDashboard({ studentId }: StudentProgressD
         </Card>
       )}
     </div>
+    {coachMode && studentId && (
+      <CoachCheckinDetailSheet
+        open={sheetOpen}
+        onOpenChange={setSheetOpen}
+        checkin={selectedCheckin}
+        previousCheckin={previousCheckin}
+        studentId={studentId}
+        studentName={studentName}
+        onNavigate={navigateCheckin}
+        canNavigatePrev={selectedNavIndex > 0}
+        canNavigateNext={selectedNavIndex >= 0 && selectedNavIndex < sortedForNav.length - 1}
+        onRespondido={handleCheckinRespondido}
+      />
+    )}
+    </>
   );
 }

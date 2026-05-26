@@ -10,6 +10,11 @@ function coachAgendaUrl() {
   return `${base}/?tab=agenda`;
 }
 
+function coachCheckinsUrl() {
+  const base = siteBaseUrl().replace(/\/$/, '');
+  return `${base}/?tab=check-ins`;
+}
+
 function formatDateBR(date) {
   if (!date) return '';
   try {
@@ -79,6 +84,25 @@ function buildCoachNotificationEmail(type, ctx = {}) {
         ctx.message || `Retorno atrasado — ${aluno}.`,
         'Marque como concluído ou reagende na Agenda.',
       );
+    case 'new_weekly_checkin': {
+      const summary = ctx.summary ? String(ctx.summary) : '';
+      const intro = ctx.message || `${aluno} enviou o check-in semanal.`;
+      return {
+        subject: `${appName} — Novo check-in de ${aluno}`,
+        text: `${appName}\n\n${greeting}\n\n${intro}\n${summary ? `\n${summary}\n` : ''}\n${coachCheckinsUrl()}\n\n${foot}`,
+        htmlPayload: {
+          preheader: intro,
+          appName,
+          headline: 'Novo check-in semanal',
+          intro,
+          introSecond: summary,
+          ctaUrl: coachCheckinsUrl(),
+          ctaLabel: 'Abrir Check-ins',
+          expiryLine: 'Responda na inbox para manter o aluno engajado.',
+          footnote: foot,
+        },
+      };
+    }
     default:
       if (ctx.message) {
         return basePayload(ctx.message, 'Lembrete da Agenda', String(ctx.message), '');
@@ -87,4 +111,9 @@ function buildCoachNotificationEmail(type, ctx = {}) {
   }
 }
 
-module.exports = { buildCoachNotificationEmail, coachAgendaUrl, DEFAULT_APP };
+module.exports = {
+  buildCoachNotificationEmail,
+  coachAgendaUrl,
+  coachCheckinsUrl,
+  DEFAULT_APP,
+};

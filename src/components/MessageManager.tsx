@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -39,6 +40,8 @@ interface Aluno {
 const MessageManager = () => {
   const { user } = useAuth();
   const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const isCoachScoped = user?.role === 'coach';
   const [conversas, setConversas] = useState<Conversa[]>([]);
   const [conversaSelecionada, setConversaSelecionada] = useState<Conversa | null>(null);
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
@@ -56,8 +59,10 @@ const MessageManager = () => {
 
     const result = await apiClient.requestSafe<any[]>('/api/alunos');
     const data = result.success && Array.isArray(result.data) ? result.data : [];
-    const filtrados = data
-      .filter((a: any) => a.coach_id === user.id)
+    const filtrados = (isCoachScoped
+      ? data.filter((a: any) => a.coach_id === user.id)
+      : data
+    )
       .sort((a: any, b: any) => String(a?.nome || '').localeCompare(String(b?.nome || '')));
     setAlunos(filtrados);
     if (!result.success) {
@@ -82,8 +87,10 @@ const MessageManager = () => {
     const alunosData = alunosResult.success && Array.isArray(alunosResult.data) ? alunosResult.data : [];
     const alunosMap = new Map(alunosData.map((a: any) => [a.id, a]));
 
-    const filtradas = conversasData
-      .filter((c: any) => c.coach_id === user.id)
+    const filtradas = (isCoachScoped
+      ? conversasData.filter((c: any) => c.coach_id === user.id)
+      : conversasData
+    )
       .sort((a: any, b: any) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime());
 
     const conversasComNomes = filtradas.map((conversa: any) => {
@@ -139,7 +146,8 @@ const MessageManager = () => {
     const conversasResult = await apiClient.requestSafe<any[]>('/api/conversas');
     const conversasData = conversasResult.success && Array.isArray(conversasResult.data) ? conversasResult.data : [];
     const conversaExistente = conversasData.find(
-      (c: any) => c.coach_id === user.id && c.aluno_id === alunoId
+      (c: any) =>
+        c.aluno_id === alunoId && (isCoachScoped ? c.coach_id === user.id : true)
     );
 
     if (conversaExistente) {
@@ -151,7 +159,6 @@ const MessageManager = () => {
       const createResult = await apiClient.requestSafe<any>('/api/conversas', {
         method: 'POST',
         body: JSON.stringify({
-          coach_id: user.id,
           aluno_id: alunoId,
         }),
       });
@@ -240,6 +247,21 @@ const MessageManager = () => {
   }, [conversaSelecionada]);
 
   useEffect(() => {
+    if (loading || !user) return;
+
+    const alunoId = searchParams.get("aluno_id");
+    if (!alunoId) return;
+
+    const conversa = conversas.find((c) => c.aluno_id === alunoId);
+    if (conversa) {
+      setConversaSelecionada(conversa);
+      const next = new URLSearchParams(searchParams);
+      next.delete("aluno_id");
+      setSearchParams(next, { replace: true });
+    }
+  }, [loading, user, conversas, searchParams, setSearchParams]);
+
+  useEffect(() => {
     carregarAlunos();
     carregarConversas();
   }, [user]);
@@ -251,12 +273,17 @@ const MessageManager = () => {
   }, [conversaSelecionada]);
 
   const conversasFiltradas = conversas.filter((c) =>
-    c.aluno_nome?.toLowerCase().includes(busca.toLowerCase())
+    (c.aluno_nome ?? '').toLowerCase().includes(busca.toLowerCase())
   );
 
   const alunosFiltrados = alunos.filter((a) =>
-    a.nome.toLowerCase().includes(buscaAluno.toLowerCase()) &&
+    (a.nome ?? '').toLowerCase().includes(buscaAluno.toLowerCase()) &&
     !conversas.some(c => c.aluno_id === a.id)
+  );
+
+  const alunosJaComConversa = alunos.filter((a) =>
+    (a.nome ?? '').toLowerCase().includes(buscaAluno.toLowerCase()) &&
+    conversas.some(c => c.aluno_id === a.id)
   );
 
   if (loading) {
@@ -304,7 +331,11 @@ const MessageManager = () => {
                   <ScrollArea className="h-[300px]">
                     {alunosFiltrados.length === 0 ? (
                       <div className="text-center text-muted-foreground py-8">
-                        {buscaAluno ? "Nenhum aluno encontrado" : "Todos os alunos já têm conversas"}
+                        {buscaAluno && alunosJaComConversa.length > 0
+                          ? "Este aluno já possui conversa — selecione na lista ao lado"
+                          : buscaAluno
+                            ? "Nenhum aluno encontrado"
+                            : "Todos os alunos já têm conversas"}
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -316,11 +347,11 @@ const MessageManager = () => {
                           >
                             <Avatar>
                               <AvatarFallback>
-                                {aluno.nome.charAt(0)}
+                                {(aluno.nome ?? '?').charAt(0)}
                               </AvatarFallback>
                             </Avatar>
                             <div className="flex-1 text-left">
-                              <p className="font-medium">{aluno.nome}</p>
+                              <p className="font-medium">{aluno.nome ?? 'Aluno'}</p>
                               <p className="text-sm text-muted-foreground">
                                 {aluno.email}
                               </p>

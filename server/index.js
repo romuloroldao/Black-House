@@ -1275,7 +1275,7 @@ const domainSchemaGuard = createDomainSchemaGuard(pool);
 const createApiRouter = require('./routes/api');
 
 // Rotas existentes (compatibilidade - outras rotas /api/*)
-app.use('/api', createApiRouter(pool, authenticate, domainSchemaGuard));
+app.use('/api', createApiRouter(pool, authenticate, domainSchemaGuard, notificationService));
 
 // ============================================================================
 // ROTAS /rest/v1/* - DEPRECATED (DESIGN-SUPABASE-PURGE-GLOBAL-002)
