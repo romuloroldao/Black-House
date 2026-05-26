@@ -50,6 +50,12 @@ import {
   ImportExtractionSummary,
   ProtocolItemRow,
 } from '@/components/import/ImportDialogParts';
+import { ImportDestinationBanner } from '@/components/import/ImportDestinationBanner';
+import { ImportDuplicateAlert } from '@/components/import/ImportDuplicateAlert';
+import {
+  findImportDuplicateMatches,
+  type ExistingAlunoForImport,
+} from '@/lib/import-duplicate-detection';
 import { DietReturnDateFields } from '@/components/DietReturnDateFields';
 import {
   DietRotationFields,
@@ -149,9 +155,31 @@ interface ImportMeta {
   fileName?: string;
 }
 
+export type ImportMode = 'create' | 'enrich';
+
+export interface ImportTargetAluno {
+  id: string;
+  nome: string;
+  email?: string | null;
+}
+
+export interface ImportCompleteResult {
+  mode: ImportMode;
+  alunoId: string;
+  dietaId?: string | null;
+  alunoNome: string;
+}
+
 interface StudentImporterProps {
-  onImportComplete?: () => void;
+  onImportComplete?: (result?: ImportCompleteResult) => void;
   onClose?: () => void;
+  /** `enrich` = só dieta/protocolo para aluno existente (perfil ou destino escolhido). */
+  mode?: ImportMode;
+  targetAluno?: ImportTargetAluno;
+  /** Lista do coach para duplicados e selector «aluno existente». */
+  existingAlunos?: ExistingAlunoForImport[];
+  /** Passo «Para quem?» no upload (default: true quando mode !== enrich). */
+  showDestinationPicker?: boolean;
 }
 
 const normalizeAlimento = (alimento: Alimento): Alimento => ({
@@ -264,8 +292,51 @@ const parseQuantidadeNumber = (qtd: string | undefined | null): number => {
   return m ? parseFloat(m[0].replace(',', '.')) : 0;
 };
 
-const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) => {
+type DestinationChoice = 'create' | 'existing';
+
+const StudentImporter = ({
+  onImportComplete,
+  onClose,
+  mode: modeProp,
+  targetAluno: targetAlunoProp,
+  existingAlunos = [],
+  showDestinationPicker: showDestinationPickerProp,
+}: StudentImporterProps) => {
   const { user } = useAuth();
+  const isEnrichLocked = modeProp === 'enrich' && !!targetAlunoProp?.id;
+  const showDestinationPicker =
+    showDestinationPickerProp ?? (!isEnrichLocked && existingAlunos.length > 0);
+
+  const [destinationChoice, setDestinationChoice] = useState<DestinationChoice>(
+    isEnrichLocked ? 'existing' : 'create',
+  );
+  const [selectedExistingId, setSelectedExistingId] = useState<string>(
+    targetAlunoProp?.id || '',
+  );
+  const [duplicateDismissed, setDuplicateDismissed] = useState(false);
+  const [lastCompleteResult, setLastCompleteResult] = useState<ImportCompleteResult | null>(
+    null,
+  );
+
+  const resolvedTargetAluno = useMemo((): ImportTargetAluno | null => {
+    if (isEnrichLocked && targetAlunoProp) return targetAlunoProp;
+    if (destinationChoice === 'existing' && selectedExistingId) {
+      const found = existingAlunos.find((a) => a.id === selectedExistingId);
+      if (found) {
+        return { id: found.id, nome: found.nome, email: found.email };
+      }
+    }
+    return null;
+  }, [
+    isEnrichLocked,
+    targetAlunoProp,
+    destinationChoice,
+    selectedExistingId,
+    existingAlunos,
+  ]);
+
+  const effectiveMode: ImportMode = resolvedTargetAluno ? 'enrich' : 'create';
+
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [parsedData, setParsedData] = useState<ParsedStudentData | null>(null);
@@ -276,6 +347,22 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
   const [currentStep, setCurrentStep] = useState<'upload' | 'review' | 'complete'>('upload');
   const [reviewTab, setReviewTab] = useState<'aluno' | 'dieta' | 'protocolo'>('aluno');
   const [diasValidadeDieta, setDiasValidadeDieta] = useState('');
+
+  useEffect(() => {
+    if (effectiveMode === 'enrich') {
+      setReviewTab('dieta');
+    }
+  }, [effectiveMode]);
+
+  const duplicateMatches = useMemo(() => {
+    if (effectiveMode !== 'create' || !editableData) return [];
+    return findImportDuplicateMatches(editableData.aluno, existingAlunos);
+  }, [effectiveMode, editableData, existingAlunos]);
+
+  const confirmButtonLabel =
+    effectiveMode === 'enrich' && resolvedTargetAluno
+      ? `Confirmar e vincular a ${resolvedTargetAluno.nome.split(/\s+/)[0] || resolvedTargetAluno.nome}`
+      : 'Importar aluno';
   const [rotacaoDieta, setRotacaoDieta] = useState<DietRotationFormState>({
     rotacao_ativa: false,
     rotacao_dias_plano_a: '3',
@@ -356,6 +443,11 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
 
   const processFile = async () => {
     if (!file) return;
+
+    if (showDestinationPicker && destinationChoice === 'existing' && !selectedExistingId) {
+      toast.error('Selecione o aluno existente antes de processar a ficha');
+      return;
+    }
 
     setIsProcessing(true);
     try {
@@ -456,7 +548,10 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
         });
       }
 
-      setReviewTab('aluno');
+      const willEnrich =
+        isEnrichLocked || (destinationChoice === 'existing' && !!selectedExistingId);
+      setReviewTab(willEnrich ? 'dieta' : 'aluno');
+      setDuplicateDismissed(false);
       setCurrentStep('review');
     } catch (error: any) {
       console.error('Erro ao processar ficha:', error);
@@ -789,27 +884,116 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
     return { totals, declared };
   }, [editableData]);
 
+  const buildDietaPayload = () => {
+    if (!editableData?.dieta) return null;
+    const { data_retorno: _dr, ...dietaRest } = editableData.dieta;
+    return {
+      ...dietaRest,
+      ...dietRotationToPayload(rotacaoDieta),
+    };
+  };
+
+  const showImportStatsToasts = (stats: Record<string, unknown> | null | undefined) => {
+    if (!stats) return;
+    const alimentos = stats.alimentos_criados;
+    if (Array.isArray(alimentos) && alimentos.length > 0) {
+      toast.info(
+        `${alimentos.length} novo(s) alimento(s): ${alimentos.slice(0, 3).join(', ')}${
+          alimentos.length > 3 ? ` e mais ${alimentos.length - 3}` : ''
+        }`,
+      );
+    }
+    if (typeof stats.itens_criados === 'number' && stats.itens_criados > 0) {
+      toast.success(`${stats.itens_criados} item(ns) de dieta criado(s)!`);
+    }
+    if (typeof stats.alternativas_criadas === 'number' && stats.alternativas_criadas > 0) {
+      toast.info(`${stats.alternativas_criadas} alternativa(s) como substituto`);
+    }
+    if (typeof stats.farmacos_criados === 'number' && stats.farmacos_criados > 0) {
+      toast.success(`${stats.farmacos_criados} fármaco(s) cadastrado(s)`);
+    }
+    if (typeof stats.suplementos_criados === 'number' && stats.suplementos_criados > 0) {
+      toast.success(`${stats.suplementos_criados} suplemento(s) cadastrado(s)`);
+    }
+  };
+
   const importStudent = async () => {
     if (!editableData) return;
 
-    // Apenas nome do aluno é obrigatório. Email e CPF/CNPJ são opcionais — o
-    // backend gera email temporário quando necessário.
+    if (effectiveMode === 'enrich') {
+      if (!resolvedTargetAluno) {
+        toast.error('Selecione o aluno de destino antes de confirmar');
+        return;
+      }
+      const refeicoes = editableData.dieta?.refeicoes || [];
+      const hasMeals = refeicoes.some((r) => r.alimentos?.length > 0);
+      if (!hasMeals) {
+        toast.error('Informe ao menos uma refeição com alimentos para importar a dieta');
+        setReviewTab('dieta');
+        return;
+      }
+      const dietaPayload = buildDietaPayload();
+      if (!dietaPayload) {
+        toast.error('Nenhuma dieta para importar');
+        return;
+      }
+
+      setIsImporting(true);
+      try {
+        const result = await apiClient.importConfirmDietSafe({
+          aluno_id: resolvedTargetAluno.id,
+          dieta: dietaPayload,
+          suplementos: editableData.suplementos || [],
+          farmacos: editableData.farmacos || [],
+        });
+
+        if (!result.success) {
+          throw new Error(result.error || 'Erro ao importar dieta');
+        }
+
+        const body = result.data as {
+          dieta?: { id?: string };
+          stats?: Record<string, unknown>;
+        } | null;
+
+        showImportStatsToasts(body?.stats);
+
+        const complete: ImportCompleteResult = {
+          mode: 'enrich',
+          alunoId: resolvedTargetAluno.id,
+          dietaId: body?.dieta?.id ?? null,
+          alunoNome: resolvedTargetAluno.nome,
+        };
+        setLastCompleteResult(complete);
+        setCurrentStep('complete');
+        toast.success(`Dieta vinculada a ${resolvedTargetAluno.nome}`);
+        onImportComplete?.(complete);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Erro ao importar dieta';
+        console.error('Erro ao importar dieta:', error);
+        toast.error(message);
+      } finally {
+        setIsImporting(false);
+      }
+      return;
+    }
+
     const alunoNome = editableData.aluno.nome?.trim() || '';
     if (!alunoNome) {
       toast.error('Nome do aluno é obrigatório');
+      setReviewTab('aluno');
+      return;
+    }
+
+    if (duplicateMatches.length > 0 && !duplicateDismissed) {
+      toast.error('Confirme o alerta de possível duplicado ou escolha o aluno existente');
+      setReviewTab('aluno');
       return;
     }
 
     setIsImporting(true);
     try {
       if (!user) throw new Error('Usuário não autenticado');
-
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-      const token = apiClient.getToken();
-
-      if (!token) {
-        throw new Error('Usuário não autenticado');
-      }
 
       const cleanCpf = onlyNumbers(editableData.aluno.cpf_cnpj || '');
       const cleanTel = onlyNumbers(editableData.aluno.telefone || '');
@@ -838,76 +1022,34 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
           : undefined,
       };
 
-      const response = await fetch(`${API_URL}/api/import/confirm`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ data: payload, user: { id: user.id } }),
-      });
-
-      if (!response.ok) {
-        let errorMessage = 'Erro ao importar aluno';
-        try {
-          const errorData = await response.json();
-          const detailList = Array.isArray(errorData.errors)
-            ? errorData.errors
-                .slice(0, 5)
-                .map((e: { path?: string; message?: string }) =>
-                  e.path ? `${e.path}: ${e.message}` : e.message,
-                )
-                .filter(Boolean)
-            : [];
-          errorMessage = errorData.error || errorData.message || errorMessage;
-          if (detailList.length > 0) {
-            errorMessage = `${errorMessage} — ${detailList.join('; ')}`;
-          }
-        } catch {
-          const text = await response.text();
-          errorMessage = text.substring(0, 200) || errorMessage;
-        }
-        throw new Error(errorMessage);
-      }
-
-      const result = await response.json();
+      const result = await apiClient.importConfirmSafe(payload);
 
       if (!result.success) {
         throw new Error(result.error || 'Erro ao importar aluno');
       }
 
-      const stats = result.stats;
-      if (stats) {
-        if (stats.alimentos_criados && stats.alimentos_criados.length > 0) {
-          toast.info(
-            `${stats.alimentos_criados.length} novo(s) alimento(s) cadastrado(s): ${stats.alimentos_criados
-              .slice(0, 3)
-              .join(', ')}${
-              stats.alimentos_criados.length > 3 ? ` e mais ${stats.alimentos_criados.length - 3}` : ''
-            }`,
-          );
-        }
+      const body = result.data as {
+        aluno?: { id?: string; nome?: string };
+        dieta?: { id?: string };
+        stats?: Record<string, unknown>;
+      } | null;
 
-        if (stats.itens_criados > 0) {
-          toast.success(`${stats.itens_criados} item(ns) de dieta criado(s) com sucesso!`);
-        }
-        if (stats.alternativas_criadas > 0) {
-          toast.info(`${stats.alternativas_criadas} alternativa(s) salva(s) como substituto`);
-        }
-        if (stats.farmacos_criados > 0) {
-          toast.success(`${stats.farmacos_criados} fármaco(s) cadastrado(s)`);
-        }
-        if (stats.suplementos_criados > 0) {
-          toast.success(`${stats.suplementos_criados} suplemento(s) cadastrado(s)`);
-        }
-      }
+      showImportStatsToasts(body?.stats);
 
+      const complete: ImportCompleteResult = {
+        mode: 'create',
+        alunoId: body?.aluno?.id || '',
+        dietaId: body?.dieta?.id ?? null,
+        alunoNome: body?.aluno?.nome || alunoNome,
+      };
+      setLastCompleteResult(complete);
       setCurrentStep('complete');
-      toast.success(`Aluno "${editableData.aluno.nome}" importado com sucesso!`);
-      onImportComplete?.();
-    } catch (error: any) {
+      toast.success(`Aluno "${complete.alunoNome}" importado com sucesso!`);
+      onImportComplete?.(complete);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Erro ao importar aluno';
       console.error('Erro ao importar:', error);
-      toast.error(error.message || 'Erro ao importar aluno');
+      toast.error(message);
     } finally {
       setIsImporting(false);
     }
@@ -920,7 +1062,9 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
     setImportMeta(null);
     setImportWarnings([]);
     setCurrentStep('upload');
-    setReviewTab('aluno');
+    setReviewTab(effectiveMode === 'enrich' ? 'dieta' : 'aluno');
+    setDuplicateDismissed(false);
+    setLastCompleteResult(null);
     setDiasValidadeDieta('');
     setRotacaoDieta({
       rotacao_ativa: false,
@@ -929,6 +1073,18 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
       rotacao_plano_inicial: 'A',
       rotacao_data_inicio: '',
     });
+    if (!isEnrichLocked) {
+      setDestinationChoice('create');
+      setSelectedExistingId('');
+    }
+  };
+
+  const handleUseExistingFromDuplicate = (alunoId: string) => {
+    setDestinationChoice('existing');
+    setSelectedExistingId(alunoId);
+    setDuplicateDismissed(true);
+    setReviewTab('dieta');
+    toast.info('Destino alterado para o aluno existente. Revise a dieta e confirme.');
   };
 
   const handleCpfCnpjChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -975,10 +1131,71 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
               Upload da ficha
             </CardTitle>
             <CardDescription>
-              Envie a ficha em PDF, CSV ou Excel (XLSX). O modelo Black House é lido directamente — aba A ou B.
+              {effectiveMode === 'enrich'
+                ? 'Envie a ficha para importar dieta e protocolo ao aluno seleccionado.'
+                : 'Envie a ficha em PDF, CSV ou Excel (XLSX). O modelo Black House é lido directamente — aba A ou B.'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {resolvedTargetAluno ? (
+              <ImportDestinationBanner
+                nome={resolvedTargetAluno.nome}
+                email={resolvedTargetAluno.email}
+                locked={isEnrichLocked || destinationChoice === 'existing'}
+              />
+            ) : null}
+
+            {showDestinationPicker && !isEnrichLocked ? (
+              <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
+                <Label className="text-sm font-medium">Para quem é esta ficha?</Label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={destinationChoice === 'create' ? 'default' : 'outline'}
+                    className="flex-1"
+                    onClick={() => {
+                      setDestinationChoice('create');
+                      setSelectedExistingId('');
+                      setDuplicateDismissed(false);
+                    }}
+                  >
+                    Criar novo aluno
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={destinationChoice === 'existing' ? 'default' : 'outline'}
+                    className="flex-1"
+                    onClick={() => setDestinationChoice('existing')}
+                  >
+                    Aluno existente
+                  </Button>
+                </div>
+                {destinationChoice === 'existing' ? (
+                  <Select
+                    value={selectedExistingId || undefined}
+                    onValueChange={(value) => {
+                      setSelectedExistingId(value);
+                      setDuplicateDismissed(false);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione o aluno..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {existingAlunos.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.nome}
+                          {a.email ? ` · ${a.email}` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-8 text-center hover:border-primary/50 transition-colors">
               <input
                 type="file"
@@ -1014,7 +1231,15 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                   <FileText className="h-4 w-4 text-muted-foreground" />
                   <span className="text-sm font-medium">{file.name}</span>
                 </div>
-                <Button onClick={processFile} size="sm">
+                <Button
+                  onClick={processFile}
+                  size="sm"
+                  disabled={
+                    showDestinationPicker &&
+                    destinationChoice === 'existing' &&
+                    !selectedExistingId
+                  }
+                >
                   Processar ficha
                 </Button>
               </div>
@@ -1032,9 +1257,32 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
 
       {currentStep === 'review' && editableData && (
         <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          {resolvedTargetAluno ? (
+            <ImportDestinationBanner
+              className="shrink-0 mb-2"
+              nome={resolvedTargetAluno.nome}
+              email={resolvedTargetAluno.email}
+              locked
+            />
+          ) : null}
           <p className="shrink-0 text-sm text-muted-foreground">
-            Revise os dados extraídos. Apenas o <strong className="text-foreground">nome</strong> é obrigatório.
+            {effectiveMode === 'enrich'
+              ? 'Revise a dieta e o protocolo antes de confirmar o vínculo.'
+              : (
+                <>
+                  Revise os dados extraídos. Apenas o{' '}
+                  <strong className="text-foreground">nome</strong> é obrigatório.
+                </>
+              )}
           </p>
+          {effectiveMode === 'create' ? (
+            <ImportDuplicateAlert
+              matches={duplicateMatches}
+              dismissed={duplicateDismissed}
+              onUseExisting={handleUseExistingFromDuplicate}
+              onContinueAnyway={() => setDuplicateDismissed(true)}
+            />
+          ) : null}
           <div className="flex flex-col flex-1 min-h-0 overflow-hidden pt-0">
             {importMeta && (
               <div className="mt-3 shrink-0">
@@ -1053,8 +1301,17 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
               onValueChange={(v) => setReviewTab(v as typeof reviewTab)}
               className="mt-3 flex flex-col flex-1 min-h-0 overflow-hidden"
             >
-              <TabsList className="shrink-0 grid h-10 w-full grid-cols-3">
-                <TabsTrigger value="aluno" className="text-xs sm:text-sm">Aluno</TabsTrigger>
+              <TabsList
+                className={cn(
+                  'shrink-0 grid h-10 w-full',
+                  effectiveMode === 'enrich' ? 'grid-cols-2' : 'grid-cols-3',
+                )}
+              >
+                {effectiveMode !== 'enrich' ? (
+                  <TabsTrigger value="aluno" className="text-xs sm:text-sm">
+                    Aluno
+                  </TabsTrigger>
+                ) : null}
                 <TabsTrigger value="dieta" className="gap-1.5 text-xs sm:text-sm">
                   Dieta
                   {editableData.dieta?.refeicoes?.length ? (
@@ -1563,7 +1820,7 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                     Importando...
                   </>
                 ) : (
-                  'Importar Aluno'
+                  confirmButtonLabel
                 )}
               </Button>
             </div>
@@ -1579,14 +1836,16 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                 <Check className="w-8 h-8 text-green-600" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold">Importação Concluída!</h3>
+                <h3 className="text-lg font-semibold">Importação concluída</h3>
                 <p className="text-muted-foreground">
-                  O aluno "{editableData?.aluno.nome}" foi importado com sucesso.
+                  {lastCompleteResult?.mode === 'enrich'
+                    ? `Dieta vinculada a ${lastCompleteResult.alunoNome}.`
+                    : `O aluno "${lastCompleteResult?.alunoNome || editableData?.aluno.nome}" foi importado com sucesso.`}
                 </p>
               </div>
-              <div className="flex gap-2 justify-center">
+              <div className="flex flex-wrap gap-2 justify-center">
                 <Button variant="outline" onClick={resetImporter}>
-                  Importar Outro
+                  Importar outro
                 </Button>
                 <Button onClick={onClose}>Fechar</Button>
               </div>

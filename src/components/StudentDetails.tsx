@@ -9,7 +9,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare, Trash2, User, Utensils, TrendingUp, Activity, Wallet } from "lucide-react";
+import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare, Trash2, User, Utensils, TrendingUp, Activity, Wallet, Upload } from "lucide-react";
+import StudentImporter, { type ImportCompleteResult } from "./StudentImporter";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -103,6 +104,7 @@ export default function StudentDetails() {
   
   // Estados para criar dieta
   const [isCriarDietaOpen, setIsCriarDietaOpen] = useState(false);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [novaDieta, setNovaDieta] = useState({
     nome: "",
     objetivo: "",
@@ -424,6 +426,14 @@ export default function StudentDetails() {
     }
   };
 
+  const handleImportComplete = (result?: ImportCompleteResult) => {
+    setIsImportDialogOpen(false);
+    carregarDadosAluno();
+    if (result?.dietaId) {
+      navigate(`/dieta/${result.dietaId}`);
+    }
+  };
+
   const handleIniciarConversa = async () => {
     if (!id) return;
 
@@ -516,12 +526,42 @@ export default function StudentDetails() {
             )}
             <p className="text-muted-foreground">{student.email}</p>
           </div>
-          <Button onClick={handleIniciarConversa} disabled={saving}>
-            <MessageSquare className="mr-2 h-4 w-4" />
-            Enviar Mensagem
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => setIsImportDialogOpen(true)}>
+              <Upload className="mr-2 h-4 w-4" />
+              Importar ficha
+            </Button>
+            <Button onClick={handleIniciarConversa} disabled={saving}>
+              <MessageSquare className="mr-2 h-4 w-4" />
+              Enviar Mensagem
+            </Button>
+          </div>
         </div>
       </div>
+
+      <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
+        <DialogContent className="!flex max-h-[min(92vh,880px)] w-[min(96vw,56rem)] max-w-none flex-col gap-0 overflow-hidden border p-0 shadow-xl sm:rounded-xl">
+          <DialogHeader className="shrink-0 space-y-0 border-b px-4 py-3 text-left sm:px-6 sm:py-4">
+            <DialogTitle className="text-base sm:text-lg">Importar ficha</DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm">
+              A dieta e o protocolo serão vinculados a {student.nome}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-3 sm:px-6 sm:pb-5">
+            <StudentImporter
+              mode="enrich"
+              targetAluno={{
+                id: student.id,
+                nome: student.nome,
+                email: student.email,
+              }}
+              showDestinationPicker={false}
+              onClose={() => setIsImportDialogOpen(false)}
+              onImportComplete={handleImportComplete}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Tabs defaultValue="overview" className="w-full">
         <TabsList className="grid w-full grid-cols-5">
@@ -833,10 +873,14 @@ export default function StudentDetails() {
                     </p>
                   )}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <Button className="flex-1" variant="outline" onClick={() => navigate(`/dieta/${dieta.id}`)}>
                     <Edit className="mr-2 h-4 w-4" />
                     Editar Dieta
+                  </Button>
+                  <Button className="flex-1" variant="secondary" onClick={() => setIsImportDialogOpen(true)}>
+                    <Upload className="mr-2 h-4 w-4" />
+                    Reimportar ficha
                   </Button>
                   <Dialog open={isCriarDietaOpen} onOpenChange={setIsCriarDietaOpen}>
                     <DialogTrigger asChild>
@@ -912,6 +956,11 @@ export default function StudentDetails() {
             ) : (
               <div className="text-center py-8">
                 <p className="text-muted-foreground mb-4">Nenhuma dieta atribuída</p>
+                <div className="flex flex-col sm:flex-row gap-2 justify-center">
+                  <Button variant="default" onClick={() => setIsImportDialogOpen(true)}>
+                    <Upload className="mr-2 h-4 w-4" />
+                    Importar ficha PDF
+                  </Button>
                 <Dialog open={isCriarDietaOpen} onOpenChange={setIsCriarDietaOpen}>
                   <DialogTrigger asChild>
                     <Button variant="outline">
@@ -981,6 +1030,7 @@ export default function StudentDetails() {
                     </div>
                   </DialogContent>
                 </Dialog>
+                </div>
               </div>
             )}
           </CardContent>

@@ -69,6 +69,7 @@ export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/uploads/avatar',
     '/api/import/parse-pdf',
     '/api/import/confirm',
+    '/api/import/confirm-diet',
     '/api/payments/create-asaas',
     '/api/asaas-payments',
     '/api/asaas-config',
@@ -944,6 +945,22 @@ class ApiClient {
     async deleteNotification(id: string) {
         return this.request(`/api/notificacoes/${id}`, {
             method: 'DELETE',
+        });
+    }
+
+    /** Confirma importação de ficha completa (novo aluno + dieta opcional). */
+    async importConfirmSafe(data: unknown): Promise<ApiResult<unknown>> {
+        return this.safeRequest(API_CONTRACT.import.confirm(), {
+            method: 'POST',
+            body: JSON.stringify({ data }),
+        });
+    }
+
+    /** Reimporta dieta/protocolo para aluno já cadastrado. */
+    async importConfirmDietSafe(data: unknown): Promise<ApiResult<unknown>> {
+        return this.safeRequest(API_CONTRACT.import.confirmDiet(), {
+            method: 'POST',
+            body: JSON.stringify({ data }),
         });
     }
     

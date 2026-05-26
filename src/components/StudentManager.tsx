@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useMemo } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDataContext } from "@/contexts/DataContext";
@@ -77,6 +77,7 @@ const StudentManager = () => {
   const { toast } = useToast();
   const { confirm } = useConfirm();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   
   const coachEndpoint = user?.id ? API_CONTRACT.alunos.byCoach() : undefined;
   const profilesEndpoint = API_CONTRACT.profiles.list();
@@ -97,7 +98,9 @@ const StudentManager = () => {
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(
+    () => searchParams.get("import") === "1",
+  );
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [paymentPlans, setPaymentPlans] = useState<Array<{ id: string; nome: string }>>([]);
   const [coachEmail, setCoachEmail] = useState<string>("");
@@ -114,6 +117,26 @@ const StudentManager = () => {
     peso: "",
     dia_cobranca: ""
   });
+
+  const existingAlunosForImport = useMemo(
+    () =>
+      students.map((s) => ({
+        id: s.id,
+        nome: s.name,
+        email: s.email,
+        cpf_cnpj: s.cpf_cnpj,
+      })),
+    [students],
+  );
+
+  const closeImportDialog = () => {
+    setIsImportDialogOpen(false);
+    if (searchParams.get("import") === "1") {
+      const next = new URLSearchParams(searchParams);
+      next.delete("import");
+      setSearchParams(next, { replace: true });
+    }
+  };
 
   const normalizeAvatarUrl = (raw: unknown): string | undefined => {
     if (typeof raw !== "string") return undefined;
@@ -659,25 +682,33 @@ const StudentManager = () => {
           {/* Import Dialog */}
           <Dialog
             open={isImportDialogOpen}
-            onOpenChange={setIsImportDialogOpen}
+            onOpenChange={(open) => {
+              if (open) setIsImportDialogOpen(true);
+              else closeImportDialog();
+            }}
           >
             <DialogTrigger asChild>
               <Button variant="outline" size="lg">
                 <Upload className="w-5 h-5 mr-2" />
-                Importar
+                Importar ficha
               </Button>
             </DialogTrigger>
             <DialogContent className="!flex max-h-[min(92vh,880px)] w-[min(96vw,56rem)] max-w-none flex-col gap-0 overflow-hidden border p-0 shadow-xl sm:rounded-xl">
               <DialogHeader className="shrink-0 space-y-0 border-b px-4 py-3 text-left sm:px-6 sm:py-4">
-                <DialogTitle className="text-base sm:text-lg">Importar Aluno</DialogTitle>
+                <DialogTitle className="text-base sm:text-lg">Importar ficha</DialogTitle>
                 <DialogDescription className="text-xs sm:text-sm">
-                  Envie a ficha em PDF, revise os dados e confirme a importação.
+                  Escolha o destino, envie o PDF ou planilha e confirme após revisar os dados.
                 </DialogDescription>
               </DialogHeader>
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-3 sm:px-6 sm:pb-5">
                 <StudentImporter
-                  onClose={() => setIsImportDialogOpen(false)}
-                  onImportComplete={refetchAlunos}
+                  existingAlunos={existingAlunosForImport}
+                  showDestinationPicker={existingAlunosForImport.length > 0}
+                  onClose={closeImportDialog}
+                  onImportComplete={() => {
+                    refetchAlunos();
+                    closeImportDialog();
+                  }}
                 />
               </div>
             </DialogContent>
