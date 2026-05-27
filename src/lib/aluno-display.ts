@@ -26,6 +26,15 @@ export function getAlunoDisplayName(
   return deriveNameHintFromEmail(aluno.email) || fallback;
 }
 
+/** Primeiro nome para botões/toasts (nunca chama .split em null). */
+export function getAlunoFirstName(
+  aluno: AlunoNomeLike | null | undefined,
+  fallback = 'aluno',
+): string {
+  const full = getAlunoDisplayName(aluno, fallback);
+  return full.split(/\s+/).filter(Boolean)[0] || full;
+}
+
 /**
  * Nome legível do plano para cards do portal do aluno.
  * Usa `plano_nome` quando a API resolve o `payment_plans`; evita mostrar UUID.

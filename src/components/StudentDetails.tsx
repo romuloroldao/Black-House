@@ -26,6 +26,7 @@ import {
   type DietRotationFormState,
 } from "@/components/DietRotationFields";
 import { DietRotationBadge } from "@/components/DietRotationBadge";
+import { getAlunoDisplayName } from "@/lib/aluno-display";
 import { formatDateBR } from "@/lib/date-format";
 import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
@@ -515,7 +516,7 @@ export default function StudentDetails() {
         </Button>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold">{student.nome}</h1>
+            <h1 className="text-3xl font-bold">{getAlunoDisplayName(student)}</h1>
             {student.ultimo_contato_resumo && (
               <p className="text-sm text-muted-foreground mt-1">
                 Último contacto: {student.ultimo_contato_resumo}
@@ -544,7 +545,7 @@ export default function StudentDetails() {
           <DialogHeader className="shrink-0 space-y-0 border-b px-4 py-3 text-left sm:px-6 sm:py-4">
             <DialogTitle className="text-base sm:text-lg">Importar ficha</DialogTitle>
             <DialogDescription className="text-xs sm:text-sm">
-              A dieta e o protocolo serão vinculados a {student.nome}.
+              A dieta e o protocolo serão vinculados a {getAlunoDisplayName(student)}.
             </DialogDescription>
           </DialogHeader>
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-3 sm:px-6 sm:pb-5">
@@ -552,7 +553,7 @@ export default function StudentDetails() {
               mode="enrich"
               targetAluno={{
                 id: student.id,
-                nome: student.nome,
+                nome: getAlunoDisplayName(student),
                 email: student.email,
               }}
               showDestinationPicker={false}
@@ -1099,7 +1100,7 @@ export default function StudentDetails() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <StudentProgressCoachTabs studentId={id} studentName={student.nome} />
+              <StudentProgressCoachTabs studentId={id} studentName={getAlunoDisplayName(student)} />
             </CardContent>
           </Card>
         </TabsContent>

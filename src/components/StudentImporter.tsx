@@ -63,6 +63,7 @@ import {
   dietRotationToPayload,
   type DietRotationFormState,
 } from '@/components/DietRotationFields';
+import { getAlunoDisplayName, getAlunoFirstName } from '@/lib/aluno-display';
 import { inferRotationFromImport } from '@/lib/diet-rotation-infer';
 import { getPlanoForToday } from '@/lib/diet-rotation';
 import {
@@ -370,7 +371,7 @@ const StudentImporter = ({
 
   const confirmButtonLabel =
     effectiveMode === 'enrich' && resolvedTargetAluno
-      ? `Confirmar e vincular a ${resolvedTargetAluno.nome.split(/\s+/)[0] || resolvedTargetAluno.nome}`
+      ? `Confirmar e vincular a ${getAlunoFirstName(resolvedTargetAluno)}`
       : 'Importar aluno';
   const [rotacaoDieta, setRotacaoDieta] = useState<DietRotationFormState>({
     rotacao_ativa: false,
@@ -998,11 +999,11 @@ const StudentImporter = ({
           mode: 'enrich',
           alunoId: resolvedTargetAluno.id,
           dietaId: body?.dieta?.id ?? null,
-          alunoNome: resolvedTargetAluno.nome,
+          alunoNome: getAlunoDisplayName(resolvedTargetAluno),
         };
         setLastCompleteResult(complete);
         setCurrentStep('complete');
-        toast.success(`Dieta vinculada a ${resolvedTargetAluno.nome}`);
+        toast.success(`Dieta vinculada a ${getAlunoDisplayName(resolvedTargetAluno)}`);
         onImportComplete?.(complete);
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Erro ao importar dieta';
@@ -1175,7 +1176,7 @@ const StudentImporter = ({
           <CardContent className="space-y-4">
             {resolvedTargetAluno ? (
               <ImportDestinationBanner
-                nome={resolvedTargetAluno.nome}
+                nome={getAlunoDisplayName(resolvedTargetAluno)}
                 email={resolvedTargetAluno.email}
                 locked={isEnrichLocked || destinationChoice === 'existing'}
               />
@@ -1296,7 +1297,7 @@ const StudentImporter = ({
           {resolvedTargetAluno ? (
             <ImportDestinationBanner
               className="shrink-0 mb-2"
-              nome={resolvedTargetAluno.nome}
+              nome={getAlunoDisplayName(resolvedTargetAluno)}
               email={resolvedTargetAluno.email}
               locked
             />
@@ -1471,9 +1472,11 @@ const StudentImporter = ({
                       {refeicoesDisponiveis
                         .filter(
                           (ref) =>
-                            !editableData.dieta?.refeicoes.some((r) =>
-                              r.nome.toLowerCase().includes(ref.toLowerCase().split(' ')[0]),
-                            ),
+                            !editableData.dieta?.refeicoes.some((r) => {
+                              const mealName = (r.nome ?? '').toLowerCase();
+                              const refKey = (ref ?? '').toLowerCase().split(/\s+/)[0] ?? '';
+                              return refKey ? mealName.includes(refKey) : false;
+                            }),
                         )
                         .slice(0, 4)
                         .map((ref) => (
