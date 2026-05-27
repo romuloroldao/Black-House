@@ -70,14 +70,11 @@ function pickReturnCountdown(dieta, alunoTreino, treinoNome) {
   };
 }
 
-function weekKeyFromDate(date) {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString().slice(0, 10);
-}
+const {
+  startOfCalendarWeek,
+  weekKeyFromDate,
+  hasCheckinThisWeek,
+} = require('../utils/checkin-week');
 
 function computeCheckinStreak(checkins) {
   const weeks = new Set();
@@ -104,24 +101,6 @@ function computeCheckinStreak(checkins) {
 }
 
 const { getRotationForDate } = require('../utils/diet-rotation');
-
-function startOfCalendarWeek(date = new Date()) {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function hasCheckinThisWeek(rows) {
-  const weekStart = startOfCalendarWeek();
-  return rows.some((c) => {
-    if (!c.created_at) return false;
-    const created = new Date(c.created_at);
-    return !Number.isNaN(created.getTime()) && created >= weekStart;
-  });
-}
 
 function buildPendencias({ checkinDue, unreadChat, unreadAvisos, fotoSemanalDue }) {
   const tasks = [];

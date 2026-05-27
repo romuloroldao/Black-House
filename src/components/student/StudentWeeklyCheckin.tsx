@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -9,7 +11,7 @@ import { Slider } from "@/components/ui/slider";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import escalaBristol from "@/assets/escala-bristol.jpg";
 import StudentCoachCheckinFeedback from "@/components/student/StudentCoachCheckinFeedback";
 import CheckinStepHeader from "@/components/student/checkin/CheckinStepHeader";
@@ -21,10 +23,22 @@ import {
 } from "@/lib/checkin-sections";
 import { CHECKIN_FIELD_LABELS, INITIAL_CHECKIN_FORM, type CheckinFormData } from "@/lib/checkin-types";
 import { buildCheckinPayload } from "@/lib/checkin-payload";
+import { startOfNextCalendarWeek, type CheckinStreakInfo } from "@/lib/checkin-streak";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const SECTION_IDS: CheckinSectionId[] = CHECKIN_SECTIONS.map((s) => s.id);
 
-export default function StudentWeeklyCheckin() {
+type StudentWeeklyCheckinProps = {
+  checkinStreak?: CheckinStreakInfo | null;
+  checkinLoading?: boolean;
+  onCheckinSubmitted?: () => void;
+};
+
+export default function StudentWeeklyCheckin({
+  checkinStreak = null,
+  checkinLoading = false,
+  onCheckinSubmitted,
+}: StudentWeeklyCheckinProps) {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
@@ -100,20 +114,25 @@ export default function StudentWeeklyCheckin() {
 
       // Usar novo endpoint /api/checkins que valida aluno_id automaticamente
       // DESIGN-VPS-ONLY-CANONICAL-DATA-AND-STORAGE-002
-      const response = await apiClient.request('/api/checkins', {
-        method: 'POST',
+      const response = await apiClient.requestSafe<{ success?: boolean }>("/api/checkins", {
+        method: "POST",
         body: JSON.stringify(buildCheckinPayload(formData)),
       });
 
-      if (response.success) {
-        toast.success("Check-in enviado com sucesso! Seu coach já pode visualizar suas respostas.");
-      } else {
-        // DESIGN-CHECKPOINT-ASYNC-ERROR-SAFETY-001: Substituir throw por toast + return
-        toast.error(response.error || "Erro ao enviar check-in. Tente novamente.");
+      if (!response.success) {
+        const errText = response.error || "";
+        if (errText.includes("CHECKIN_ALREADY_THIS_WEEK")) {
+          toast.info("Você já enviou o check-in desta semana.");
+          onCheckinSubmitted?.();
+        } else {
+          toast.error(errText || "Erro ao enviar check-in. Tente novamente.");
+        }
         setLoading(false);
         return;
       }
-      
+
+      toast.success("Check-in enviado com sucesso! Seu coach já pode visualizar suas respostas.");
+      onCheckinSubmitted?.();
       setFormData(INITIAL_CHECKIN_FORM);
       syncStepToUrl(0);
     } catch (error: any) {
@@ -145,17 +164,50 @@ export default function StudentWeeklyCheckin() {
     }
   };
 
+  const jaEnviouEstaSemana = checkinStreak?.fez_esta_semana === true;
+  const proximoEnvio = format(startOfNextCalendarWeek(), "EEEE, d 'de' MMMM", { locale: ptBR });
+
+  if (checkinLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-10 w-64" />
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-96 w-full" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-3xl font-bold tracking-tight">Check-in Semanal</h2>
         <p className="text-muted-foreground mt-2">
-          Quatro blocos curtos — salve o envio só no final
+          Um envio por semana (segunda a domingo) — preencha os quatro blocos e envie no final
         </p>
       </div>
 
       <StudentCoachCheckinFeedback />
 
+      {jaEnviouEstaSemana ? (
+        <Card className="border-primary/30 bg-primary/5">
+          <CardContent className="flex flex-col gap-3 p-6 sm:flex-row sm:items-start">
+            <CheckCircle2 className="h-10 w-10 shrink-0 text-primary" aria-hidden />
+            <div className="space-y-1">
+              <p className="text-lg font-semibold">Check-in desta semana já enviado</p>
+              <p className="text-sm text-muted-foreground">
+                Só é possível um check-in por semana. O próximo ficará disponível na{" "}
+                <span className="font-medium text-foreground">{proximoEnvio}</span>.
+              </p>
+              {checkinStreak && checkinStreak.semanas_consecutivas > 0 && (
+                <p className="text-sm text-muted-foreground pt-1">
+                  Sequência atual: {checkinStreak.semanas_consecutivas}{" "}
+                  {checkinStreak.semanas_consecutivas === 1 ? "semana seguida" : "semanas seguidas"}.
+                </p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
       <form onSubmit={handleSubmit} className="space-y-6">
         <CheckinStepHeader step={step} completedSections={completedSections} />
 
@@ -756,6 +808,7 @@ export default function StudentWeeklyCheckin() {
           )}
         </div>
       </form>
+      )}
     </div>
   );
 }

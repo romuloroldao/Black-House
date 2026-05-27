@@ -4276,12 +4276,37 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
   // Coach_id é inferido via aluno (aluno sempre pertence a um coach)
   // ============================================================================
 
+  const {
+    startOfCalendarWeek,
+    hasCheckinThisWeek,
+    startOfNextCalendarWeek,
+  } = require('../utils/checkin-week');
+
   // POST /api/checkins - Criar check-in semanal
   // DESIGN-GUARD-RAILS-ROLE-ACCESS-003: Rota apenas para alunos
   router.post('/checkins', authenticate, domainSchemaGuard, validateRole(['aluno']), resolveAlunoOrFail, async (req, res) => {
     try {
       const aluno = req.aluno; // Já resolvido pelo middleware resolveAlunoOrFail
       const userId = req.user.id;
+
+      const weekStart = startOfCalendarWeek();
+      const existingWeek = await pool.query(
+        `SELECT id, created_at
+         FROM public.weekly_checkins
+         WHERE aluno_id = $1 AND created_at >= $2::timestamptz
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [aluno.id, weekStart.toISOString()],
+      );
+      if (hasCheckinThisWeek(existingWeek.rows)) {
+        return res.status(409).json({
+          error: 'Você já enviou o check-in desta semana. O próximo estará disponível na segunda-feira.',
+          error_code: 'CHECKIN_ALREADY_THIS_WEEK',
+          existing_checkin_id: existingWeek.rows[0].id,
+          submitted_at: existingWeek.rows[0].created_at,
+          next_available_at: startOfNextCalendarWeek().toISOString(),
+        });
+      }
 
       // Validar se aluno_id fornecido (se houver) corresponde ao aluno do usuário
       // Frontend nunca deve enviar aluno_id - backend sempre resolve via linked_user_id

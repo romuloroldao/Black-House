@@ -9,6 +9,14 @@ export function startOfCalendarWeek(date = new Date()): Date {
   return d;
 }
 
+/** Início da próxima semana (segunda) — quando o aluno pode enviar de novo. */
+export function startOfNextCalendarWeek(date = new Date()): Date {
+  const start = startOfCalendarWeek(date);
+  const next = new Date(start);
+  next.setDate(next.getDate() + 7);
+  return next;
+}
+
 export function weekKeyFromDate(date: Date | string): string {
   return startOfCalendarWeek(new Date(date)).toISOString().slice(0, 10);
 }

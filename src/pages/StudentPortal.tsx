@@ -92,7 +92,13 @@ const StudentPortal = () => {
         case "profile":
           return <StudentProfileView />;
         case "checkin":
-          return <StudentWeeklyCheckin />;
+          return (
+            <StudentWeeklyCheckin
+              checkinStreak={hojeState.data?.checkin_streak ?? null}
+              checkinLoading={hojeState.loading}
+              onCheckinSubmitted={() => void hojeState.refetch()}
+            />
+          );
         default:
           return <StudentTodayView />;
       }

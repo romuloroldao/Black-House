@@ -43,10 +43,10 @@ const CheckinStreakCard = ({
             </p>
             <p className="text-xs text-muted-foreground">
               {streak.fez_esta_semana
-                ? "Você já enviou o check-in desta semana. Parabéns!"
+                ? "Um envio por semana — você já concluiu esta semana."
                 : checkinDue
-                  ? "Pendente: envie até o fim da semana."
-                  : "Mantenha o hábito com seu coach."}
+                  ? "Pendente: um check-in por semana (até domingo)."
+                  : "Um check-in por semana — mantenha o hábito com seu coach."}
             </p>
             {streak.badge && (
               <Badge variant="premium" className="mt-1.5 text-[10px]">
