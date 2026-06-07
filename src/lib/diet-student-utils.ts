@@ -1,6 +1,7 @@
 import { macroScaleFactor } from "@/lib/foodService";
+import { normalizePlanoLetter, sortPlanos, type DietPlano } from "@/lib/diet-plano";
 
-export type DietPlano = "A" | "B";
+export type { DietPlano };
 
 export type DietItemWithFood = {
   id: string;
@@ -21,12 +22,11 @@ export type DietItemWithFood = {
 export type MealGroup = {
   key: string;
   displayName: string;
+  /** @deprecated use hasMultiplosCardapios */
   hasPlanoAB: boolean;
-  itemsByPlano: {
-    A?: DietItemWithFood[];
-    B?: DietItemWithFood[];
-    default?: DietItemWithFood[];
-  };
+  hasMultiplosCardapios: boolean;
+  planosPresentes: DietPlano[];
+  itemsByPlano: Record<string, DietItemWithFood[]>;
 };
 
 export type DietMacros = {
@@ -52,23 +52,20 @@ export function parseRefeicaoLabel(refeicao: string): { base: string; plano: Die
   let plano: DietPlano | null = null;
 
   const setPlano = (letter: string) => {
-    const u = letter.toUpperCase();
-    if (u === "A" || u === "B") plano = u as DietPlano;
+    plano = normalizePlanoLetter(letter);
   };
 
-  // Alternativas do import: "… (Substituto)" — não é plano
   base = base.replace(/\s*\(substituto\)\s*$/i, "").trim();
 
-  // Formato gravado no import: "Almoço (Plano A)" ou "Almoço (Plano A • 12:00)"
   const parenSuffix = base.match(/\s*\(([^)]+)\)\s*$/);
   if (parenSuffix) {
     const inner = parenSuffix[1];
-    const planoInParen = inner.match(/\bplano\s*([ab])\b/i);
+    const planoInParen = inner.match(/\bplano\s*([a-z])\b/i);
     if (planoInParen) {
       setPlano(planoInParen[1]);
       base = base.slice(0, parenSuffix.index).trim();
     } else {
-      const letterOnly = inner.match(/^([ab])\b(?:\s*[•·-]|$)/i);
+      const letterOnly = inner.match(/^([a-z])\b(?:\s*[•·-]|$)/i);
       if (letterOnly) {
         setPlano(letterOnly[1]);
         base = base.slice(0, parenSuffix.index).trim();
@@ -78,10 +75,10 @@ export function parseRefeicaoLabel(refeicao: string): { base: string; plano: Die
 
   if (!plano) {
     const patterns = [
-      /\s*[-–]\s*plano\s*([ab])\s*$/i,
-      /\s+plano\s*([ab])\s*$/i,
-      /\s*\(([ab])\)\s*$/i,
-      /\s*[-–]\s*([ab])\s*$/i,
+      /\s*[-–]\s*plano\s*([a-z])\s*$/i,
+      /\s+plano\s*([a-z])\s*$/i,
+      /\s*\(([a-z])\)\s*$/i,
+      /\s*[-–]\s*([a-z])\s*$/i,
     ];
 
     for (const re of patterns) {
@@ -97,6 +94,14 @@ export function parseRefeicaoLabel(refeicao: string): { base: string; plano: Die
   return { base: base || refeicao, plano };
 }
 
+export function getPlanosFromGroups(groups: MealGroup[]): DietPlano[] {
+  const set = new Set<DietPlano>();
+  for (const g of groups) {
+    for (const p of g.planosPresentes) set.add(p);
+  }
+  return sortPlanos(set);
+}
+
 export function buildMealGroups(itens: DietItemWithFood[]): MealGroup[] {
   const map = new Map<string, MealGroup>();
 
@@ -108,20 +113,27 @@ export function buildMealGroups(itens: DietItemWithFood[]): MealGroup[] {
         key,
         displayName: base,
         hasPlanoAB: false,
+        hasMultiplosCardapios: false,
+        planosPresentes: [],
         itemsByPlano: {},
       });
     }
     const group = map.get(key)!;
-    if (plano === "A") {
-      group.itemsByPlano.A = [...(group.itemsByPlano.A || []), item];
-    } else if (plano === "B") {
-      group.itemsByPlano.B = [...(group.itemsByPlano.B || []), item];
+    if (plano) {
+      group.itemsByPlano[plano] = [...(group.itemsByPlano[plano] || []), item];
     } else {
       group.itemsByPlano.default = [...(group.itemsByPlano.default || []), item];
     }
   }
 
   for (const group of map.values()) {
+    const planos = sortPlanos(
+      Object.keys(group.itemsByPlano).filter(
+        (k) => k !== "default" && (group.itemsByPlano[k]?.length ?? 0) > 0,
+      ),
+    );
+    group.planosPresentes = planos;
+    group.hasMultiplosCardapios = planos.length >= 2;
     group.hasPlanoAB =
       (group.itemsByPlano.A?.length ?? 0) > 0 && (group.itemsByPlano.B?.length ?? 0) > 0;
   }
@@ -129,21 +141,67 @@ export function buildMealGroups(itens: DietItemWithFood[]): MealGroup[] {
   return sortMealGroups([...map.values()]);
 }
 
-export function dietHasPlanoAB(groups: MealGroup[]): boolean {
-  let anyA = false;
-  let anyB = false;
-  for (const g of groups) {
-    if ((g.itemsByPlano.A?.length ?? 0) > 0) anyA = true;
-    if ((g.itemsByPlano.B?.length ?? 0) > 0) anyB = true;
-  }
-  return anyA && anyB;
+export function dietHasMultiplosCardapios(groups: MealGroup[]): boolean {
+  return getPlanosFromGroups(groups).length >= 2;
 }
 
-export function getItemsForPlano(group: MealGroup, plano: DietPlano): DietItemWithFood[] {
-  if (group.hasPlanoAB) {
-    return plano === "A" ? group.itemsByPlano.A || [] : group.itemsByPlano.B || [];
+/** @deprecated use dietHasMultiplosCardapios */
+export function dietHasPlanoAB(groups: MealGroup[]): boolean {
+  return dietHasMultiplosCardapios(groups);
+}
+
+export function getAllItemsInMealGroup(group: MealGroup): DietItemWithFood[] {
+  const out: DietItemWithFood[] = [];
+  for (const items of Object.values(group.itemsByPlano)) {
+    if (items?.length) out.push(...items);
   }
-  return group.itemsByPlano.default || group.itemsByPlano.A || group.itemsByPlano.B || [];
+  return out;
+}
+
+export function isSubstitutoItem(item: DietItemWithFood): boolean {
+  return /\(\s*substituto\s*\)/i.test(String(item.refeicao ?? ""));
+}
+
+export type MealItemsPartition = {
+  principais: DietItemWithFood[];
+  substitutos: DietItemWithFood[];
+};
+
+export function partitionMealItems(items: DietItemWithFood[]): MealItemsPartition {
+  const principais: DietItemWithFood[] = [];
+  const substitutos: DietItemWithFood[] = [];
+  for (const item of items) {
+    if (isSubstitutoItem(item)) substitutos.push(item);
+    else principais.push(item);
+  }
+  return { principais, substitutos };
+}
+
+export function getItemsForPlano(
+  group: MealGroup,
+  plano: DietPlano,
+  options?: { dietHasMultiplosCardapios?: boolean; dietHasPlanoAB?: boolean },
+): DietItemWithFood[] {
+  const all = getAllItemsInMealGroup(group);
+  if (all.length === 0) return [];
+
+  const usePlanoFilter =
+    options?.dietHasMultiplosCardapios ??
+    options?.dietHasPlanoAB ??
+    group.hasMultiplosCardapios;
+
+  if (!usePlanoFilter) {
+    if ((group.itemsByPlano.default?.length ?? 0) > 0) {
+      return group.itemsByPlano.default!;
+    }
+    return all;
+  }
+
+  return all.filter((item) => {
+    const { plano: itemPlano } = parseRefeicaoLabel(item.refeicao);
+    if (itemPlano === null) return true;
+    return itemPlano === plano;
+  });
 }
 
 function mealSortIndex(name: string): number {
@@ -156,7 +214,9 @@ function mealSortIndex(name: string): number {
 
 export function sortMealGroups(groups: MealGroup[]): MealGroup[] {
   return [...groups].sort(
-    (a, b) => mealSortIndex(a.displayName) - mealSortIndex(b.displayName) || a.displayName.localeCompare(b.displayName, "pt-BR"),
+    (a, b) =>
+      mealSortIndex(a.displayName) - mealSortIndex(b.displayName) ||
+      a.displayName.localeCompare(b.displayName, "pt-BR"),
   );
 }
 
@@ -180,7 +240,6 @@ export function calcularMacros(itens: DietItemWithFood[]): DietMacros {
   );
 }
 
-/** Data local (YYYY-MM-DD) para checklist diário de refeições. */
 export function mealCheckDateKey(date: Date = new Date()): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
@@ -256,34 +315,37 @@ export type ImportRefeicaoMacros = {
   } | null;
 };
 
-/** Plano A/B explícito no campo `plano` ou no nome da refeição. */
 export function resolveImportRefeicaoPlano(refeicao: ImportRefeicaoMacros): DietPlano | null {
-  const fromField = String(refeicao.plano ?? "")
-    .trim()
-    .toUpperCase();
-  if (fromField === "A" || fromField === "B") return fromField;
+  const fromField = normalizePlanoLetter(refeicao.plano);
+  if (fromField) return fromField;
   return parseRefeicaoLabel(refeicao.nome).plano;
 }
 
-export function inferImportMacroPlano(refeicoes: ImportRefeicaoMacros[]): {
-  hasPlanoAB: boolean;
-} {
-  let anyA = false;
-  let anyB = false;
+export function collectPlanosFromRefeicoes(
+  refeicoes: ImportRefeicaoMacros[],
+): DietPlano[] {
+  const set = new Set<DietPlano>();
   for (const r of refeicoes) {
     const p = resolveImportRefeicaoPlano(r);
-    if (p === "A") anyA = true;
-    if (p === "B") anyB = true;
+    if (p) set.add(p);
   }
-  return { hasPlanoAB: anyA && anyB };
+  return sortPlanos(set);
+}
+
+export function inferImportMacroPlano(refeicoes: ImportRefeicaoMacros[]): {
+  hasMultiplosCardapios: boolean;
+  planos: DietPlano[];
+} {
+  const planos = collectPlanosFromRefeicoes(refeicoes);
+  return { hasMultiplosCardapios: planos.length >= 2, planos };
 }
 
 export function filterImportRefeicoesForMacroSum<T extends ImportRefeicaoMacros>(
   refeicoes: T[],
   plano: DietPlano,
 ): T[] {
-  const { hasPlanoAB } = inferImportMacroPlano(refeicoes);
-  if (!hasPlanoAB) return refeicoes;
+  const { hasMultiplosCardapios } = inferImportMacroPlano(refeicoes);
+  if (!hasMultiplosCardapios) return refeicoes;
   return refeicoes.filter((r) => {
     const p = resolveImportRefeicaoPlano(r);
     if (p === null) return true;
@@ -310,22 +372,25 @@ export function sumImportDeclaredMacros(
   );
 }
 
-export function dietHasPlanoABFromItens(itens: { refeicao: string }[]): boolean {
-  let anyA = false;
-  let anyB = false;
+export function dietHasMultiplosCardapiosFromItens(itens: { refeicao: string }[]): boolean {
+  const set = new Set<DietPlano>();
   for (const item of itens) {
     const { plano } = parseRefeicaoLabel(item.refeicao);
-    if (plano === "A") anyA = true;
-    if (plano === "B") anyB = true;
+    if (plano) set.add(plano);
   }
-  return anyA && anyB;
+  return set.size >= 2;
+}
+
+/** @deprecated */
+export function dietHasPlanoABFromItens(itens: { refeicao: string }[]): boolean {
+  return dietHasMultiplosCardapiosFromItens(itens);
 }
 
 export function filterItensForPlanoView<T extends { refeicao: string }>(
   itens: T[],
   plano: DietPlano,
 ): T[] {
-  if (!dietHasPlanoABFromItens(itens)) return itens;
+  if (!dietHasMultiplosCardapiosFromItens(itens)) return itens;
   return itens.filter((item) => {
     const { plano: p } = parseRefeicaoLabel(item.refeicao);
     return p === null || p === plano;

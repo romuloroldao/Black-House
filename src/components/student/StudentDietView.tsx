@@ -13,8 +13,9 @@ import {
   buildMealGroups,
   calcularMacros,
   countCompletedMeals,
-  dietHasPlanoAB,
+  dietHasMultiplosCardapios,
   getItemsForPlano,
+  getPlanosFromGroups,
   pickActiveDieta,
   mealCheckDateKey,
   readMealDone,
@@ -28,11 +29,14 @@ import MealTimelineItem from "@/components/student/diet/MealTimelineItem";
 import MealDetailSheet from "@/components/student/diet/MealDetailSheet";
 import PremiumEmptyState from "@/components/student/PremiumEmptyState";
 import DietRotationBanner from "@/components/student/diet/DietRotationBanner";
+import StudentRefeicaoLivreCard from "@/components/student/StudentRefeicaoLivreCard";
+import type { EducationalContent } from "@/lib/educational-content";
 import {
   getRotationForDate,
   isRotationEnabled,
   type DietRotationConfig,
 } from "@/lib/diet-rotation";
+import { STUDENT_REALTIME_EVENT, type StudentRealtimeDetail } from "@/hooks/useStudentPortalRealtime";
 
 const StudentDietView = () => {
   const { user } = useAuth();
@@ -45,6 +49,7 @@ const StudentDietView = () => {
   const [checkTick, setCheckTick] = useState(0);
   const mealDayRef = useRef(mealCheckDateKey());
   const [detailMeal, setDetailMeal] = useState<MealGroup | null>(null);
+  const [refeicaoLivreContent, setRefeicaoLivreContent] = useState<EducationalContent | null>(null);
 
   /** Reinicia o checklist quando muda o dia (dieta diária). */
   useEffect(() => {
@@ -110,6 +115,15 @@ const StudentDietView = () => {
 
     setDieta(dietaData);
 
+    if (dietaData.refeicao_livre_ativa && dietaData.refeicao_livre_content_id) {
+      const contentRes = await apiClient.requestSafe<EducationalContent>(
+        `/api/educational-contents/${dietaData.refeicao_livre_content_id}`,
+      );
+      setRefeicaoLivreContent(contentRes.success ? contentRes.data ?? null : null);
+    } else {
+      setRefeicaoLivreContent(null);
+    }
+
     const [itensRes, farmacosRes] = await Promise.all([
       apiClient.requestSafe<any[]>(`/api/itens-dieta?dieta_id=${dietaData.id}`),
       apiClient.requestSafe<any[]>(`/api/dieta-farmacos?dieta_id=${dietaData.id}`),
@@ -135,11 +149,28 @@ const StudentDietView = () => {
     }
   }, [user, loadDietData]);
 
+  useEffect(() => {
+    const onRealtime = (ev: Event) => {
+      const detail = (ev as CustomEvent<StudentRealtimeDetail>).detail;
+      if (detail?.type === 'dieta_atualizada') {
+        void loadDietData();
+      }
+    };
+    window.addEventListener(STUDENT_REALTIME_EVENT, onRealtime);
+    return () => window.removeEventListener(STUDENT_REALTIME_EVENT, onRealtime);
+  }, [loadDietData]);
+
   const mealGroups = useMemo(() => buildMealGroups(itensDieta), [itensDieta]);
+  const planosCardapio = useMemo(() => getPlanosFromGroups(mealGroups), [mealGroups]);
+  const hasMultiplosCardapios = useMemo(
+    () => dietHasMultiplosCardapios(mealGroups),
+    [mealGroups],
+  );
   const rotationConfig = useMemo((): DietRotationConfig | null => {
     if (!dieta) return null;
     return {
       rotacao_ativa: dieta.rotacao_ativa,
+      rotacao_sequencia: dieta.rotacao_sequencia,
       rotacao_dias_plano_a: dieta.rotacao_dias_plano_a,
       rotacao_dias_plano_b: dieta.rotacao_dias_plano_b,
       rotacao_plano_inicial: dieta.rotacao_plano_inicial,
@@ -155,8 +186,8 @@ const StudentDietView = () => {
 
   const rotationActive = Boolean(rotationConfig && isRotationEnabled(rotationConfig));
   const showPlanoTabs = useMemo(
-    () => !rotationActive && dietHasPlanoAB(mealGroups),
-    [mealGroups, rotationActive],
+    () => !rotationActive && planosCardapio.length >= 2,
+    [planosCardapio.length, rotationActive],
   );
 
   useEffect(() => {
@@ -166,14 +197,19 @@ const StudentDietView = () => {
   }, [rotationToday?.plano]);
 
   const visibleGroups = useMemo(
-    () => mealGroups.filter((g) => getItemsForPlano(g, planoAtivo).length > 0),
-    [mealGroups, planoAtivo],
+    () =>
+      mealGroups.filter(
+        (g) => getItemsForPlano(g, planoAtivo, { dietHasMultiplosCardapios: hasMultiplosCardapios }).length > 0,
+      ),
+    [mealGroups, planoAtivo, hasMultiplosCardapios],
   );
 
   const macrosPlano = useMemo(() => {
-    const itens = visibleGroups.flatMap((g) => getItemsForPlano(g, planoAtivo));
+    const itens = visibleGroups.flatMap((g) =>
+      getItemsForPlano(g, planoAtivo, { dietHasMultiplosCardapios: hasMultiplosCardapios }),
+    );
     return calcularMacros(itens);
-  }, [visibleGroups, planoAtivo]);
+  }, [visibleGroups, planoAtivo, hasMultiplosCardapios]);
 
   const completedCount = useMemo(() => {
     if (!dieta?.id) return 0;
@@ -259,15 +295,29 @@ const StudentDietView = () => {
 
       {rotationToday && <DietRotationBanner info={rotationToday} />}
 
+      {dieta.refeicao_livre_ativa ? (
+        <StudentRefeicaoLivreCard
+          observacao={dieta.refeicao_livre_observacao}
+          contentId={dieta.refeicao_livre_content_id}
+          contentTitle={refeicaoLivreContent?.title}
+        />
+      ) : null}
+
       {showPlanoTabs && (
         <Tabs
           value={planoAtivo}
           onValueChange={(v) => setPlanoAtivo(v as DietPlano)}
-          className="w-full max-w-xs"
+          className="w-full max-w-full"
         >
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="A">Plano A</TabsTrigger>
-            <TabsTrigger value="B">Plano B</TabsTrigger>
+          <TabsList
+            className="grid h-auto w-full gap-1"
+            style={{ gridTemplateColumns: `repeat(${Math.min(planosCardapio.length, 6)}, minmax(0, 1fr))` }}
+          >
+            {planosCardapio.map((p) => (
+              <TabsTrigger key={p} value={p} className="text-xs sm:text-sm">
+                Plano {p}
+              </TabsTrigger>
+            ))}
           </TabsList>
         </Tabs>
       )}
@@ -305,6 +355,7 @@ const StudentDietView = () => {
               key={`${group.key}-${planoAtivo}`}
               group={group}
               plano={planoAtivo}
+              dietHasMultiplosCardapios={hasMultiplosCardapios}
               done={readMealDone(dieta.id, group.key, planoAtivo)}
               isLast={idx === visibleGroups.length - 1}
               isCurrent={idx === firstPendingIdx}
@@ -343,8 +394,9 @@ const StudentDietView = () => {
         open={detailMeal != null}
         onOpenChange={(open) => !open && setDetailMeal(null)}
         mealName={detailMeal?.displayName ?? ""}
+        group={detailMeal}
         plano={planoAtivo}
-        items={detailMeal ? getItemsForPlano(detailMeal, planoAtivo) : []}
+        dietHasMultiplosCardapios={hasMultiplosCardapios}
         onSubstituir={handleVerSubstitutos}
       />
 

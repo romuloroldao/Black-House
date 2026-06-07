@@ -1,7 +1,15 @@
-import type { DietPlano } from "@/lib/diet-student-utils";
+import { normalizePlanoLetter, sortPlanos, type DietPlano } from "@/lib/diet-plano";
+
+export type { DietPlano };
+
+export type RotationBlock = {
+  plano: DietPlano;
+  dias: number;
+};
 
 export type DietRotationConfig = {
   rotacao_ativa?: boolean | null;
+  rotacao_sequencia?: RotationBlock[] | null;
   rotacao_dias_plano_a?: number | null;
   rotacao_dias_plano_b?: number | null;
   rotacao_plano_inicial?: string | null;
@@ -11,14 +19,14 @@ export type DietRotationConfig = {
 
 export type DietRotationDayInfo = {
   plano: DietPlano;
-  /** Ex.: "3 dias Plano A · 1 dia Plano B" */
   cycleSummary: string;
-  /** Ex.: "Hoje: Plano A (dia 2 de 3)" */
   todayLabel: string;
   dayInBlock: number;
   blockLength: number;
   cycleLength: number;
   dayIndexInCycle: number;
+  /** Blocos do ciclo (para UI). */
+  blocks: RotationBlock[];
 };
 
 function parseDateOnly(value: string | null | undefined): Date | null {
@@ -40,24 +48,81 @@ function diffCalendarDays(from: Date, to: Date): number {
   return Math.round((b - a) / 86400000);
 }
 
+function parseJsonBlocks(raw: unknown): RotationBlock[] | null {
+  if (!raw) return null;
+  let arr = raw;
+  if (typeof raw === "string") {
+    try {
+      arr = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  const blocks: RotationBlock[] = [];
+  for (const entry of arr) {
+    const plano = normalizePlanoLetter(entry?.plano);
+    const dias = Number(entry?.dias);
+    if (!plano || !Number.isFinite(dias) || dias < 1) continue;
+    blocks.push({ plano, dias: Math.min(14, Math.floor(dias)) });
+  }
+  return blocks.length > 0 ? blocks : null;
+}
+
+/** Normaliza ciclo: JSON → legado A/B. */
+export function normalizeRotationBlocks(config: DietRotationConfig | null | undefined): RotationBlock[] {
+  const fromJson = parseJsonBlocks(config?.rotacao_sequencia);
+  if (fromJson?.length) return fromJson;
+
+  const a = Number(config?.rotacao_dias_plano_a) || 0;
+  const b = Number(config?.rotacao_dias_plano_b) || 0;
+  if (a < 1 || b < 1) return [];
+
+  const inicial = String(config?.rotacao_plano_inicial || "A").toUpperCase() === "B" ? "B" : "A";
+  if (inicial === "B") {
+    return [
+      { plano: "B", dias: b },
+      { plano: "A", dias: a },
+    ];
+  }
+  return [
+    { plano: "A", dias: a },
+    { plano: "B", dias: b },
+  ];
+}
+
+export function formatRotationBlocksSummary(blocks: RotationBlock[]): string {
+  if (!blocks.length) return "";
+  return blocks
+    .map((b) => `${b.dias} dia${b.dias !== 1 ? "s" : ""} Plano ${b.plano}`)
+    .join(" · ");
+}
+
+export function formatRotationBadgeLabel(
+  config: DietRotationConfig | null | undefined,
+): string | null {
+  if (!isRotationEnabled(config)) return null;
+  const blocks = normalizeRotationBlocks(config);
+  const short = blocks.map((b) => `${b.dias}${b.plano}`).join("·");
+  return `Ciclo ${short} activo`;
+}
+
+export function getPlanosFromRotationConfig(
+  config: DietRotationConfig | null | undefined,
+): DietPlano[] {
+  return sortPlanos(normalizeRotationBlocks(config).map((b) => b.plano));
+}
+
 export function isRotationEnabled(config: DietRotationConfig | null | undefined): boolean {
   if (!config?.rotacao_ativa) return false;
-  const a = Number(config.rotacao_dias_plano_a) || 0;
-  const b = Number(config.rotacao_dias_plano_b) || 0;
-  return a >= 1 && b >= 1;
+  return normalizeRotationBlocks(config).length > 0;
 }
 
 export function buildRotationSequence(config: DietRotationConfig): DietPlano[] {
-  const diasA = Math.max(0, Number(config.rotacao_dias_plano_a) || 0);
-  const diasB = Math.max(0, Number(config.rotacao_dias_plano_b) || 0);
-  const inicial = String(config.rotacao_plano_inicial || "A").toUpperCase() === "B" ? "B" : "A";
+  const blocks = normalizeRotationBlocks(config);
   const seq: DietPlano[] = [];
-  if (inicial === "A") {
-    for (let i = 0; i < diasA; i++) seq.push("A");
-    for (let i = 0; i < diasB; i++) seq.push("B");
-  } else {
-    for (let i = 0; i < diasB; i++) seq.push("B");
-    for (let i = 0; i < diasA; i++) seq.push("A");
+  for (const block of blocks) {
+    for (let i = 0; i < block.dias; i++) seq.push(block.plano);
   }
   return seq;
 }
@@ -81,6 +146,7 @@ export function getRotationForDate(
 ): DietRotationDayInfo | null {
   if (!isRotationEnabled(config)) return null;
 
+  const blocks = normalizeRotationBlocks(config);
   const sequence = buildRotationSequence(config);
   if (sequence.length === 0) return null;
 
@@ -93,18 +159,15 @@ export function getRotationForDate(
   const idx = ((days % sequence.length) + sequence.length) % sequence.length;
   const block = blockAtIndex(sequence, idx);
 
-  const diasA = Number(config.rotacao_dias_plano_a) || 0;
-  const diasB = Number(config.rotacao_dias_plano_b) || 0;
-  const cycleSummary = `${diasA} dia${diasA !== 1 ? "s" : ""} Plano A · ${diasB} dia${diasB !== 1 ? "s" : ""} Plano B`;
-
   return {
     plano: block.plano,
-    cycleSummary,
+    cycleSummary: formatRotationBlocksSummary(blocks),
     todayLabel: `Hoje: Plano ${block.plano} (dia ${block.dayInBlock} de ${block.blockLength})`,
     dayInBlock: block.dayInBlock,
     blockLength: block.blockLength,
     cycleLength: sequence.length,
     dayIndexInCycle: idx + 1,
+    blocks,
   };
 }
 
@@ -112,12 +175,48 @@ export function getPlanoForToday(config: DietRotationConfig): DietPlano | null {
   return getRotationForDate(config)?.plano ?? null;
 }
 
-/** Rótulo curto para badges no coach (ex.: "Ciclo 3A·1B activo"). */
-export function formatRotationBadgeLabel(
-  config: DietRotationConfig | null | undefined,
-): string | null {
-  if (!isRotationEnabled(config)) return null;
-  const a = Number(config?.rotacao_dias_plano_a) || 0;
-  const b = Number(config?.rotacao_dias_plano_b) || 0;
-  return `Ciclo ${a}A·${b}B activo`;
+/** Converte blocos para payload API (com campos legados A/B quando aplicável). */
+export function rotationBlocksToPayload(
+  ativa: boolean,
+  blocks: RotationBlock[],
+  dataInicio: string | null,
+): Record<string, unknown> {
+  const clean = blocks
+    .map((b) => ({
+      plano: normalizePlanoLetter(b.plano),
+      dias: Math.min(14, Math.max(1, Math.floor(Number(b.dias) || 0))),
+    }))
+    .filter((b): b is RotationBlock => Boolean(b.plano && b.dias >= 1));
+
+  const blockA = clean.find((b) => b.plano === "A");
+  const blockB = clean.find((b) => b.plano === "B");
+
+  return {
+    rotacao_ativa: ativa && clean.length > 0,
+    rotacao_sequencia: ativa && clean.length > 0 ? clean : null,
+    rotacao_dias_plano_a: ativa && blockA ? blockA.dias : null,
+    rotacao_dias_plano_b: ativa && blockB ? blockB.dias : null,
+    rotacao_plano_inicial: clean[0]?.plano ?? "A",
+    rotacao_data_inicio: ativa && dataInicio ? dataInicio : null,
+  };
+}
+
+/** Sugere ciclo a partir dos cardápios presentes nas refeições. */
+export function inferRotationBlocksFromPlanos(
+  planos: DietPlano[],
+  options?: { diasA?: number; diasB?: number },
+): RotationBlock[] {
+  const sorted = sortPlanos(planos);
+  if (sorted.length < 2) return [];
+
+  if (sorted.length === 2) {
+    const diasA = options?.diasA ?? 3;
+    const diasB = options?.diasB ?? 1;
+    return [
+      { plano: sorted[0], dias: diasA },
+      { plano: sorted[1], dias: diasB },
+    ];
+  }
+
+  return sorted.map((plano) => ({ plano, dias: 1 }));
 }

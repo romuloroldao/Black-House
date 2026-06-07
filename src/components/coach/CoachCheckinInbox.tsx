@@ -151,12 +151,30 @@ export default function CoachCheckinInbox() {
     return () => window.clearTimeout(timer);
   }, [search, loadInbox]);
 
-  const handleCheckinRespondido = (checkinId: string) => {
-    const now = new Date().toISOString();
+  useEffect(() => {
+    const refresh = () => {
+      const term = search.trim();
+      void loadInbox(term.length >= 2 ? term : undefined);
+    };
+    window.addEventListener("blackhouse:checkin-pending-updated", refresh);
+    window.addEventListener("blackhouse:coach-realtime", refresh);
+    return () => {
+      window.removeEventListener("blackhouse:checkin-pending-updated", refresh);
+      window.removeEventListener("blackhouse:coach-realtime", refresh);
+    };
+  }, [search, loadInbox]);
+
+  const handleCheckinRespondido = (checkinId: string, updated?: WeeklyCheckinRecord) => {
+    const now = updated?.coach_respondido_em || new Date().toISOString();
+    const patch = {
+      coach_respondido_em: now,
+      coach_respondido_por: updated?.coach_respondido_por ?? null,
+      coach_resposta: updated?.coach_resposta ?? null,
+    };
     setItems((prev) =>
       prev.map((item) =>
         item.checkin.id === checkinId
-          ? { ...item, checkin: { ...item.checkin, coach_respondido_em: now } }
+          ? { ...item, checkin: { ...item.checkin, ...patch } }
           : item,
       ),
     );

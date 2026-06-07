@@ -46,6 +46,7 @@ class DietService {
             aluno_id: alunoId,
             data_retorno: dataRetorno,
             rotacao_ativa: Boolean(dietaData.rotacao_ativa),
+            rotacao_sequencia: dietaData.rotacao_sequencia ?? null,
             rotacao_dias_plano_a: dietaData.rotacao_dias_plano_a,
             rotacao_dias_plano_b: dietaData.rotacao_dias_plano_b,
             rotacao_plano_inicial: dietaData.rotacao_plano_inicial,
@@ -183,13 +184,25 @@ class DietService {
      *
      * Ex.: "Almoço (Plano A) - 12:00"
      */
+    _resolveRefeicaoPlano(refeicao) {
+        if (refeicao.plano && String(refeicao.plano).trim()) {
+            const letter = String(refeicao.plano).trim().toUpperCase();
+            if (/^[A-Z]$/.test(letter)) return letter;
+        }
+        const nome = String(refeicao.nome || '');
+        const m = nome.match(/\bplano\s*([a-z])\b/i);
+        if (m && /^[A-Z]$/i.test(m[1])) return m[1].toUpperCase();
+        return null;
+    }
+
     _buildRefeicaoLabel(refeicao) {
         const base = this._mapRefeicaoName(refeicao.nome);
         const extras = [];
-        if (refeicao.plano && String(refeicao.plano).trim()) {
-            const raw = String(refeicao.plano).trim();
-            const letter = raw.toUpperCase();
-            extras.push(letter === 'A' || letter === 'B' ? `Plano ${letter}` : raw);
+        const planoResolved = this._resolveRefeicaoPlano(refeicao);
+        if (planoResolved) {
+            extras.push(`Plano ${planoResolved}`);
+        } else if (refeicao.plano && String(refeicao.plano).trim()) {
+            extras.push(String(refeicao.plano).trim());
         }
         if (refeicao.horario && String(refeicao.horario).trim()) {
             extras.push(String(refeicao.horario).trim());

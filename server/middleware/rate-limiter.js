@@ -6,7 +6,7 @@ const rateLimit = require('express-rate-limit');
 // Rate limiter para endpoints de autenticação
 const authLimiter = rateLimit({
     windowMs: parseInt(process.env.RATE_LIMIT_AUTH_WINDOW) || 15 * 60 * 1000, // 15 minutos
-    max: parseInt(process.env.RATE_LIMIT_AUTH_MAX) || 5, // 5 tentativas
+    max: parseInt(process.env.RATE_LIMIT_AUTH_MAX) || 15, // 15 tentativas (era 5 — bloqueava alunos com typos)
     message: {
         error: 'Muitas tentativas. Tente novamente em alguns minutos.'
     },

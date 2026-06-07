@@ -495,12 +495,15 @@ function parseNutritionPlanText(text) {
             }
             const occurrenceCount = (mealOccurrences.get(mealNumber) || 0) + 1;
             mealOccurrences.set(mealNumber, occurrenceCount);
-            const planPrefix = planIndex > 1 || occurrenceCount > 1
-                ? `Plano ${String.fromCharCode(64 + Math.max(planIndex, 1))} - `
-                : '';
+            const planLetter =
+                planIndex > 1 || occurrenceCount > 1
+                    ? String.fromCharCode(64 + Math.max(planIndex, 1))
+                    : 'A';
+            const planPrefix = planLetter !== 'A' ? `Plano ${planLetter} - ` : '';
             currentMeal = {
                 nome: `${planPrefix}Refeição ${mealNumber}`,
-                alimentos: []
+                plano: planLetter,
+                alimentos: [],
             };
             result.dieta.refeicoes.push(currentMeal);
             pendingCategory = null;

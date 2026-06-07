@@ -375,9 +375,10 @@ const StudentImporter = ({
       : 'Importar aluno';
   const [rotacaoDieta, setRotacaoDieta] = useState<DietRotationFormState>({
     rotacao_ativa: false,
-    rotacao_dias_plano_a: '3',
-    rotacao_dias_plano_b: '1',
-    rotacao_plano_inicial: 'A',
+    blocos: [
+      { plano: 'A', dias: '3' },
+      { plano: 'B', dias: '1' },
+    ],
     rotacao_data_inicio: '',
   });
   const [catalogFoods, setCatalogFoods] = useState<Food[]>([]);
@@ -443,9 +444,10 @@ const StudentImporter = ({
       setCatalogFoods([]);
       setRotacaoDieta({
         rotacao_ativa: false,
-        rotacao_dias_plano_a: '3',
-        rotacao_dias_plano_b: '1',
-        rotacao_plano_inicial: 'A',
+        blocos: [
+          { plano: 'A', dias: '3' },
+          { plano: 'B', dias: '1' },
+        ],
         rotacao_data_inicio: '',
       });
     }
@@ -551,9 +553,10 @@ const StudentImporter = ({
       } else {
         setRotacaoDieta({
           rotacao_ativa: false,
-          rotacao_dias_plano_a: '3',
-          rotacao_dias_plano_b: '1',
-          rotacao_plano_inicial: 'A',
+          blocos: [
+            { plano: 'A', dias: '3' },
+            { plano: 'B', dias: '1' },
+          ],
           rotacao_data_inicio: '',
         });
       }
@@ -881,21 +884,19 @@ const StudentImporter = ({
   const macroStats = useMemo(() => {
     if (!editableData?.dieta) return null;
     const refeicoes = editableData.dieta.refeicoes || [];
-    const { hasPlanoAB } = inferImportMacroPlano(refeicoes);
-    let plano: DietPlano = "A";
-    if (hasPlanoAB && rotacaoDieta.rotacao_ativa) {
+    const { hasMultiplosCardapios, planos } = inferImportMacroPlano(refeicoes);
+    let plano: DietPlano = planos[0] || "A";
+    if (hasMultiplosCardapios && rotacaoDieta.rotacao_ativa) {
       const config = {
         rotacao_ativa: true,
-        rotacao_dias_plano_a: parseInt(rotacaoDieta.rotacao_dias_plano_a, 10) || 3,
-        rotacao_dias_plano_b: parseInt(rotacaoDieta.rotacao_dias_plano_b, 10) || 1,
-        rotacao_plano_inicial: rotacaoDieta.rotacao_plano_inicial,
-        rotacao_data_inicio: rotacaoDieta.rotacao_data_inicio || null,
+        ...dietRotationToPayload(rotacaoDieta),
+        created_at: new Date().toISOString(),
       };
-      plano = getPlanoForToday(config) ?? rotacaoDieta.rotacao_plano_inicial;
+      plano = getPlanoForToday(config) ?? planos[0] ?? "A";
     }
     const totals = sumImportDeclaredMacros(refeicoes, plano);
     const declared = editableData.dieta.macros || {};
-    return { totals, declared, hasPlanoAB, plano };
+    return { totals, declared, hasMultiplosCardapios, plano };
   }, [editableData, rotacaoDieta]);
 
   const buildConfirmMeta = () => {
@@ -1105,9 +1106,10 @@ const StudentImporter = ({
     setDiasValidadeDieta('');
     setRotacaoDieta({
       rotacao_ativa: false,
-      rotacao_dias_plano_a: '3',
-      rotacao_dias_plano_b: '1',
-      rotacao_plano_inicial: 'A',
+      blocos: [
+        { plano: 'A', dias: '3' },
+        { plano: 'B', dias: '1' },
+      ],
       rotacao_data_inicio: '',
     });
     if (!isEnrichLocked) {
@@ -1561,7 +1563,7 @@ const StudentImporter = ({
                           {macroStats && macroStats.totals.calorias > 0 && macroStats.declared.calorias ? (
                             <Badge variant="outline" className="border-blue-500/40 text-blue-600 dark:text-blue-400">
                               Soma refeições
-                              {macroStats.hasPlanoAB ? ` (Plano ${macroStats.plano})` : ""}:{" "}
+                              {macroStats.hasMultiplosCardapios ? ` (Plano ${macroStats.plano})` : ""}:{" "}
                               {Math.round(macroStats.totals.calorias)} kcal
                             </Badge>
                           ) : null}

@@ -18,6 +18,11 @@ const TipoAlimentoRepository = require('../repositories/tipo-alimento.repository
 const DietRepository = require('../repositories/diet.repository');
 const FoodMatchingService = require('../services/food-matching.service');
 const DietService = require('../services/diet.service');
+const {
+    inferRotationBlocksFromPlanos,
+    normalizePlanoLetter,
+    rotationBlocksToPayload,
+} = require('../utils/diet-rotation');
 
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
@@ -88,10 +93,35 @@ async function reimportOne(client, alunoRow, pdfPath, coachUserId) {
     const foodMatching = new FoodMatchingService(alimentoRepo, tipoAlimentoRepo);
     const dietService = new DietService(dietRepo, foodMatching);
 
+    const refeicoes = validation.data.dieta?.refeicoes || [];
+    const planos = [];
+    const seen = new Set();
+    for (const r of refeicoes) {
+        const fromField = normalizePlanoLetter(r.plano);
+        const fromNome = String(r.nome || '').match(/\bplano\s*([a-z])\b/i);
+        const p = fromField || (fromNome ? normalizePlanoLetter(fromNome[1]) : null);
+        if (p && !seen.has(p)) {
+            seen.add(p);
+            planos.push(p);
+        }
+    }
+    planos.sort();
+
+    const rotationExtra =
+        planos.length >= 2
+            ? rotationBlocksToPayload(
+                  true,
+                  inferRotationBlocksFromPlanos(planos),
+                  new Date().toISOString().slice(0, 10),
+              )
+            : {};
+
     const dietaPayload = {
         ...validation.data.dieta,
+        nome: validation.data.dieta?.nome || path.basename(pdfPath, path.extname(pdfPath)),
         suplementos: validation.data.suplementos || [],
         farmacos: validation.data.farmacos || [],
+        ...rotationExtra,
     };
 
     const result = await dietService.createDietaCompleta(
@@ -149,7 +179,15 @@ async function main() {
         try {
             await client.query('BEGIN');
             const aluno = await resolveAlunoId(client, job);
+            await client.query(
+                `UPDATE public.dietas SET ativa = false WHERE aluno_id = $1 AND ativa = true`,
+                [aluno.id],
+            );
             const result = await reimportOne(client, aluno, job.pdf, coachUserId);
+            await client.query(
+                `UPDATE public.dietas SET ativa = true, nome = $2 WHERE id = $1`,
+                [result.dieta.id, path.basename(job.pdf, path.extname(job.pdf))],
+            );
             await client.query('COMMIT');
             ok++;
             console.log(

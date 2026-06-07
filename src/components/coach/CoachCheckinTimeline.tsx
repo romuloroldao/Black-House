@@ -69,12 +69,15 @@ export default function CoachCheckinTimeline({ studentId, studentName }: CoachCh
     setSelectedIndex(next);
   };
 
-  const handleCheckinRespondido = (checkinId: string) => {
-    const now = new Date().toISOString();
+  const handleCheckinRespondido = (checkinId: string, updated?: WeeklyCheckinRecord) => {
+    const now = updated?.coach_respondido_em || new Date().toISOString();
+    const patch = {
+      coach_respondido_em: now,
+      coach_respondido_por: updated?.coach_respondido_por ?? null,
+      coach_resposta: updated?.coach_resposta ?? null,
+    };
     setCheckins((prev) =>
-      prev.map((c) =>
-        c.id === checkinId ? { ...c, coach_respondido_em: now } : c,
-      ),
+      prev.map((c) => (c.id === checkinId ? { ...c, ...patch } : c)),
     );
   };
 

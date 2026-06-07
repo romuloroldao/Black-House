@@ -1,12 +1,13 @@
 import type { CheckinFormData } from "@/lib/checkin-types";
 
-export type CheckinSectionId = "nutricao" | "treino" | "sono" | "bem_estar";
+export type CheckinSectionId = "corpo" | "nutricao" | "treino" | "sono" | "bem_estar";
 
 export const CHECKIN_SECTIONS: Array<{
   id: CheckinSectionId;
   title: string;
   description: string;
 }> = [
+  { id: "corpo", title: "Peso e fotos", description: "Peso atual e fotos de evolução desta semana" },
   { id: "nutricao", title: "Nutrição", description: "Dieta, suplementos e hidratação" },
   { id: "treino", title: "Treino", description: "Sessões, cardio e desafios" },
   { id: "sono", title: "Sono", description: "Descanso e higiene do sono" },
@@ -14,6 +15,7 @@ export const CHECKIN_SECTIONS: Array<{
 ];
 
 export const CHECKIN_SECTION_FIELD_KEYS: Record<CheckinSectionId, (keyof CheckinFormData)[]> = {
+  corpo: [],
   nutricao: [
     "beliscou_fora_plano",
     "seguiu_plano_nota",
@@ -73,11 +75,48 @@ export function isSectionFieldComplete(
   return value !== "" && value !== null && value !== undefined;
 }
 
+export type CheckinCorpoExtras = {
+  pesoKg: string;
+  photoCount: number;
+  minPhotos?: number;
+};
+
+export function isCorpoSectionComplete(
+  extras: CheckinCorpoExtras,
+): boolean {
+  const trimmed = extras.pesoKg.trim().replace(",", ".");
+  if (!trimmed || !/^\d+(\.\d{1,2})?$/.test(trimmed)) return false;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 30 || n > 350) return false;
+  const min = extras.minPhotos ?? 2;
+  return extras.photoCount >= min;
+}
+
+export function getCorpoSectionMissingLabels(extras: CheckinCorpoExtras): string[] {
+  const missing: string[] = [];
+  const trimmed = extras.pesoKg.trim().replace(",", ".");
+  if (!trimmed) missing.push("Peso (kg)");
+  else if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) missing.push("Peso com formato inválido");
+  else {
+    const n = Number(trimmed);
+    if (!Number.isFinite(n) || n < 30 || n > 350) missing.push("Peso fora da faixa (30–350 kg)");
+  }
+  const min = extras.minPhotos ?? 2;
+  if (extras.photoCount < min) {
+    missing.push(`Fotos (mínimo ${min})`);
+  }
+  return missing;
+}
+
 export function getSectionMissingLabels(
   data: CheckinFormData,
   sectionId: CheckinSectionId,
   fieldLabels: Record<string, string>,
+  corpoExtras?: CheckinCorpoExtras,
 ): string[] {
+  if (sectionId === "corpo") {
+    return corpoExtras ? getCorpoSectionMissingLabels(corpoExtras) : ["Peso e fotos"];
+  }
   const missing: string[] = [];
   for (const key of CHECKIN_SECTION_FIELD_KEYS[sectionId]) {
     if (OPTIONAL_IN_SECTION.has(key)) continue;
@@ -91,8 +130,9 @@ export function getSectionMissingLabels(
 export function countCompletedSections(
   data: CheckinFormData,
   fieldLabels: Record<string, string>,
+  corpoExtras?: CheckinCorpoExtras,
 ): number {
   return CHECKIN_SECTIONS.filter(
-    (s) => getSectionMissingLabels(data, s.id, fieldLabels).length === 0,
+    (s) => getSectionMissingLabels(data, s.id, fieldLabels, corpoExtras).length === 0,
   ).length;
 }

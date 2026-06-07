@@ -2,6 +2,7 @@
 // Envia lembretes para alunos fazerem check-in semanal
 
 const cron = require('node-cron');
+const { startOfCalendarWeek } = require('../utils/checkin-week');
 
 class CheckinRemindersJob {
     constructor(pool, notificationService) {
@@ -42,19 +43,19 @@ class CheckinRemindersJob {
      */
     async execute() {
         try {
-            // Buscar alunos que não fizeram check-in na última semana
-            const oneWeekAgo = new Date();
-            oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+            const weekStart = startOfCalendarWeek();
 
             const alunosResult = await this.pool.query(
                 `SELECT DISTINCT a.id, a.nome, a.coach_id
                  FROM public.alunos a
-                 LEFT JOIN public.feedbacks_alunos f 
-                   ON f.aluno_id = a.id 
-                   AND f.created_at >= $1
-                 WHERE f.id IS NULL
-                   AND a.coach_id IS NOT NULL`,
-                [oneWeekAgo]
+                 WHERE a.coach_id IS NOT NULL
+                   AND NOT EXISTS (
+                     SELECT 1
+                     FROM public.weekly_checkins wc
+                     WHERE wc.aluno_id = a.id
+                       AND wc.created_at >= $1::timestamptz
+                   )`,
+                [weekStart.toISOString()],
             );
 
             console.log(`[CheckinRemindersJob] Encontrados ${alunosResult.rows.length} alunos sem check-in`);

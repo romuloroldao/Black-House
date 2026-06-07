@@ -14,6 +14,7 @@ const {
   shouldSendCoachEmail,
   CHANNEL_IN_APP_ONLY: COACH_CHANNEL_IN_APP_ONLY,
 } = require('./agenda-coach-reminder.service');
+const { startOfCalendarWeek } = require('../utils/checkin-week');
 
 class NotificationService {
     constructor(websocketService, pool) {
@@ -262,11 +263,49 @@ class NotificationService {
         return parts.join(' · ') || 'Confira as respostas completas na plataforma.';
     }
 
+    async _hasWeeklyCheckinThisWeek(alunoId) {
+        const weekStart = startOfCalendarWeek();
+        const result = await this.pool.query(
+            `SELECT id FROM public.weekly_checkins
+             WHERE aluno_id = $1 AND created_at >= $2::timestamptz
+             LIMIT 1`,
+            [alunoId, weekStart.toISOString()],
+        );
+        return result.rows.length > 0;
+    }
+
+    /**
+     * Marca como lidos os lembretes de check-in pendentes após envio bem-sucedido.
+     */
+    async dismissCheckinRemindersForAluno(alunoId) {
+        if (!alunoId) return;
+
+        try {
+            const weekStart = startOfCalendarWeek();
+            await this.pool.query(
+                `UPDATE public.notificacoes
+                 SET lida = true, updated_at = NOW()
+                 WHERE aluno_id = $1
+                   AND tipo = 'checkin_reminder'
+                   AND lida = false
+                   AND created_at >= $2::timestamptz`,
+                [alunoId, weekStart.toISOString()],
+            );
+        } catch (error) {
+            logger.warn('checkin.dismiss_reminders_failed', {
+                alunoId,
+                error: error.message,
+            });
+        }
+    }
+
     /**
      * BH-CHECKIN-010: aluno enviou check-in semanal — coach (in-app + e-mail opcional)
      */
     async notifyNewWeeklyCheckin({ checkinId, alunoId, alunoNome, coachUserId, checkin }) {
         if (!coachUserId || !alunoId) return;
+
+        await this.dismissCheckinRemindersForAluno(alunoId);
 
         const nome = (alunoNome && String(alunoNome).trim()) || 'Aluno';
         const summary = this._buildWeeklyCheckinNotifySummary(checkin || {});
@@ -274,16 +313,6 @@ class NotificationService {
         const message = `${nome} enviou o check-in da semana. ${summary}`;
 
         try {
-            if (this.ws) {
-                this.ws.emitToCoach(coachUserId, 'new_weekly_checkin', {
-                    checkinId,
-                    alunoId,
-                    alunoNome: nome,
-                    summary,
-                    message,
-                });
-            }
-
             await this.notifyUser(coachUserId, 'new_weekly_checkin', title, message, {
                 checkinId,
                 alunoId,
@@ -339,6 +368,22 @@ class NotificationService {
             );
 
             if (alunoResult.rows.length === 0) return;
+
+            if (await this._hasWeeklyCheckinThisWeek(alunoId)) {
+                await this.dismissCheckinRemindersForAluno(alunoId);
+                return;
+            }
+
+            const weekStart = startOfCalendarWeek();
+            const duplicate = await this.pool.query(
+                `SELECT id FROM public.notificacoes
+                 WHERE aluno_id = $1
+                   AND tipo = 'checkin_reminder'
+                   AND created_at >= $2::timestamptz
+                 LIMIT 1`,
+                [alunoId, weekStart.toISOString()],
+            );
+            if (duplicate.rows.length > 0) return;
 
             const aluno = alunoResult.rows[0];
 
@@ -682,18 +727,29 @@ class NotificationService {
     }
 
     /**
-     * Emite notificação genérica
+     * Emite notificação genérica (+ evento Socket.io `notification`)
      */
     async notifyUser(userId, type, title, message, data = {}) {
         try {
+            const payload = {
+                type,
+                title,
+                message,
+                data,
+                timestamp: new Date().toISOString(),
+            };
+
             if (this.ws) {
-                this.ws.emitToUser(userId, 'notification', {
-                    type,
-                    title,
-                    message,
-                    data,
-                    timestamp: new Date().toISOString(),
-                });
+                this.ws.emitToUser(userId, 'notification', payload);
+                if (type === 'checkin_respondido') {
+                    this.ws.emitToUser(userId, 'checkin:respondido', payload);
+                }
+                if (type === 'dieta_atualizada') {
+                    this.ws.emitToUser(userId, 'dieta:atualizada', payload);
+                }
+                if (type === 'new_weekly_checkin') {
+                    this.ws.emitToUser(userId, 'new_weekly_checkin', payload);
+                }
             }
 
             await this.saveNotification({
@@ -706,6 +762,44 @@ class NotificationService {
         } catch (error) {
             console.error('Erro ao notificar usuário:', error);
         }
+    }
+
+    /** Aluno: coach respondeu check-in semanal */
+    async notifyCheckinRespondido({ alunoId, checkinId, coachNome }) {
+        const studentUserId = await getAuthUserIdForAluno(this.pool, alunoId);
+        if (!studentUserId) return;
+
+        const coachLabel = coachNome ? String(coachNome).trim() : 'Seu coach';
+        await this.notifyUser(
+            studentUserId,
+            'checkin_respondido',
+            'Resposta do check-in',
+            `${coachLabel} respondeu seu check-in semanal.`,
+            {
+                checkinId,
+                alunoId,
+                link: 'checkin',
+            },
+        );
+    }
+
+    /** Aluno: coach actualizou a dieta */
+    async notifyDietaAtualizada({ alunoId, dietaId, dietaNome }) {
+        const studentUserId = await getAuthUserIdForAluno(this.pool, alunoId);
+        if (!studentUserId) return;
+
+        const nome = dietaNome ? `"${String(dietaNome).trim()}"` : 'sua dieta';
+        await this.notifyUser(
+            studentUserId,
+            'dieta_atualizada',
+            'Dieta atualizada',
+            `Seu coach actualizou ${nome}. Confira em Minha dieta.`,
+            {
+                dietaId,
+                alunoId,
+                link: 'diet',
+            },
+        );
     }
 
     /**

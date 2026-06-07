@@ -1,6 +1,8 @@
+import { Plus, Trash2 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/ui/button";
 import { DateInputBR } from "@/components/ui/date-input-br";
 import {
   Select,
@@ -9,23 +11,46 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { buildRotationSequence, isRotationEnabled, type DietRotationConfig } from "@/lib/diet-rotation";
+import {
+  buildRotationSequence,
+  isRotationEnabled,
+  normalizeRotationBlocks,
+  rotationBlocksToPayload,
+  type DietRotationConfig,
+  type RotationBlock,
+} from "@/lib/diet-rotation";
+import { normalizePlanoLetter } from "@/lib/diet-plano";
+
+const PLANOS_DISPONIVEIS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
 export type DietRotationFormState = {
   rotacao_ativa: boolean;
-  rotacao_dias_plano_a: string;
-  rotacao_dias_plano_b: string;
-  rotacao_plano_inicial: "A" | "B";
+  blocos: Array<{ plano: string; dias: string }>;
   rotacao_data_inicio: string;
 };
 
+function blocksFromRow(row: Record<string, unknown> | null | undefined): RotationBlock[] {
+  const config: DietRotationConfig = {
+    rotacao_ativa: Boolean(row?.rotacao_ativa),
+    rotacao_sequencia: row?.rotacao_sequencia as RotationBlock[] | null,
+    rotacao_dias_plano_a: row?.rotacao_dias_plano_a as number | null,
+    rotacao_dias_plano_b: row?.rotacao_dias_plano_b as number | null,
+    rotacao_plano_inicial: row?.rotacao_plano_inicial as string | null,
+  };
+  return normalizeRotationBlocks(config);
+}
+
 export function dietRotationFromRow(row: Record<string, unknown> | null | undefined): DietRotationFormState {
+  const blocos = blocksFromRow(row);
   return {
     rotacao_ativa: Boolean(row?.rotacao_ativa),
-    rotacao_dias_plano_a: row?.rotacao_dias_plano_a != null ? String(row.rotacao_dias_plano_a) : "3",
-    rotacao_dias_plano_b: row?.rotacao_dias_plano_b != null ? String(row.rotacao_dias_plano_b) : "1",
-    rotacao_plano_inicial:
-      String(row?.rotacao_plano_inicial || "A").toUpperCase() === "B" ? "B" : "A",
+    blocos:
+      blocos.length > 0
+        ? blocos.map((b) => ({ plano: b.plano, dias: String(b.dias) }))
+        : [
+            { plano: "A", dias: "3" },
+            { plano: "B", dias: "1" },
+          ],
     rotacao_data_inicio: row?.rotacao_data_inicio
       ? String(row.rotacao_data_inicio).slice(0, 10)
       : "",
@@ -33,16 +58,18 @@ export function dietRotationFromRow(row: Record<string, unknown> | null | undefi
 }
 
 export function dietRotationToPayload(form: DietRotationFormState): Record<string, unknown> {
-  const ativa = form.rotacao_ativa;
-  const diasA = parseInt(form.rotacao_dias_plano_a, 10);
-  const diasB = parseInt(form.rotacao_dias_plano_b, 10);
-  return {
-    rotacao_ativa: ativa,
-    rotacao_dias_plano_a: ativa && Number.isFinite(diasA) ? diasA : null,
-    rotacao_dias_plano_b: ativa && Number.isFinite(diasB) ? diasB : null,
-    rotacao_plano_inicial: form.rotacao_plano_inicial,
-    rotacao_data_inicio: ativa && form.rotacao_data_inicio ? form.rotacao_data_inicio : null,
-  };
+  const blocks: RotationBlock[] = form.blocos
+    .map((b) => ({
+      plano: normalizePlanoLetter(b.plano) || "A",
+      dias: parseInt(b.dias, 10) || 0,
+    }))
+    .filter((b) => b.dias >= 1);
+
+  return rotationBlocksToPayload(
+    form.rotacao_ativa,
+    blocks,
+    form.rotacao_data_inicio || null,
+  );
 }
 
 type DietRotationFieldsProps = {
@@ -53,9 +80,10 @@ type DietRotationFieldsProps = {
 export function DietRotationFields({ value, onChange }: DietRotationFieldsProps) {
   const previewConfig: DietRotationConfig = {
     rotacao_ativa: value.rotacao_ativa,
-    rotacao_dias_plano_a: parseInt(value.rotacao_dias_plano_a, 10) || 0,
-    rotacao_dias_plano_b: parseInt(value.rotacao_dias_plano_b, 10) || 0,
-    rotacao_plano_inicial: value.rotacao_plano_inicial,
+    rotacao_sequencia: value.blocos.map((b) => ({
+      plano: normalizePlanoLetter(b.plano) || "A",
+      dias: parseInt(b.dias, 10) || 0,
+    })),
     rotacao_data_inicio: value.rotacao_data_inicio || null,
   };
 
@@ -63,14 +91,33 @@ export function DietRotationFields({ value, onChange }: DietRotationFieldsProps)
     ? buildRotationSequence(previewConfig).join(" → ")
     : null;
 
+  const updateBlock = (index: number, patch: Partial<{ plano: string; dias: string }>) => {
+    const blocos = value.blocos.map((b, i) => (i === index ? { ...b, ...patch } : b));
+    onChange({ ...value, blocos });
+  };
+
+  const addBlock = () => {
+    const used = new Set(value.blocos.map((b) => normalizePlanoLetter(b.plano)).filter(Boolean));
+    const nextLetter = PLANOS_DISPONIVEIS.find((l) => !used.has(l)) || "A";
+    onChange({
+      ...value,
+      blocos: [...value.blocos, { plano: nextLetter, dias: "1" }],
+    });
+  };
+
+  const removeBlock = (index: number) => {
+    if (value.blocos.length <= 1) return;
+    onChange({ ...value, blocos: value.blocos.filter((_, i) => i !== index) });
+  };
+
   return (
     <div className="space-y-4 rounded-md border border-border/60 p-3">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-medium">Ciclo rotativo Plano A / B</p>
+          <p className="text-sm font-medium">Ciclo rotativo de cardápios</p>
           <p className="text-xs text-muted-foreground">
-            O aluno vê automaticamente o plano do dia (ex.: 3 dias A, 1 dia B). Marque as refeições
-            com sufixo Plano A ou B no nome.
+            Defina a sequência (ex.: 3 dias A, 1 dia B, 2 dias C). O aluno vê automaticamente o
+            cardápio do dia. Marque cada refeição com Plano A, B, C… no import ou no editor.
           </p>
         </div>
         <Switch
@@ -82,60 +129,73 @@ export function DietRotationFields({ value, onChange }: DietRotationFieldsProps)
 
       {value.rotacao_ativa && (
         <div className="space-y-3 border-t border-border/50 pt-3">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="rot-dias-a">Dias seguidos — Plano A</Label>
-              <Input
-                id="rot-dias-a"
-                type="number"
-                min={1}
-                max={14}
-                value={value.rotacao_dias_plano_a}
-                onChange={(e) => onChange({ ...value, rotacao_dias_plano_a: e.target.value })}
-              />
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>Blocos do ciclo</Label>
+              <Button type="button" variant="outline" size="sm" onClick={addBlock}>
+                <Plus className="mr-1 h-3.5 w-3.5" />
+                Cardápio
+              </Button>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="rot-dias-b">Dias seguidos — Plano B</Label>
-              <Input
-                id="rot-dias-b"
-                type="number"
-                min={1}
-                max={14}
-                value={value.rotacao_dias_plano_b}
-                onChange={(e) => onChange({ ...value, rotacao_dias_plano_b: e.target.value })}
-              />
-            </div>
+            {value.blocos.map((bloco, index) => (
+              <div
+                key={`${index}-${bloco.plano}`}
+                className="flex flex-wrap items-end gap-2 rounded-md border border-border/50 bg-muted/20 p-2"
+              >
+                <div className="space-y-1 min-w-[100px]">
+                  <Label className="text-[11px]">Cardápio</Label>
+                  <Select
+                    value={normalizePlanoLetter(bloco.plano) || "A"}
+                    onValueChange={(v) => updateBlock(index, { plano: v })}
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PLANOS_DISPONIVEIS.map((l) => (
+                        <SelectItem key={l} value={l}>
+                          Plano {l}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1 flex-1 min-w-[80px]">
+                  <Label className="text-[11px]">Dias seguidos</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={14}
+                    value={bloco.dias}
+                    onChange={(e) => updateBlock(index, { dias: e.target.value })}
+                    className="h-9"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 shrink-0 text-destructive"
+                  disabled={value.blocos.length <= 1}
+                  onClick={() => removeBlock(index)}
+                  aria-label="Remover bloco"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Começa por</Label>
-              <Select
-                value={value.rotacao_plano_inicial}
-                onValueChange={(v) =>
-                  onChange({ ...value, rotacao_plano_inicial: v as "A" | "B" })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="A">Plano A</SelectItem>
-                  <SelectItem value="B">Plano B</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="rot-inicio">Início do ciclo (opcional)</Label>
-              <DateInputBR
-                id="rot-inicio"
-                value={value.rotacao_data_inicio}
-                onChange={(iso) => onChange({ ...value, rotacao_data_inicio: iso })}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Vazio = data de criação da dieta
-              </p>
-            </div>
+          <div className="space-y-2">
+            <Label htmlFor="rot-inicio">Início do ciclo (opcional)</Label>
+            <DateInputBR
+              id="rot-inicio"
+              value={value.rotacao_data_inicio}
+              onChange={(iso) => onChange({ ...value, rotacao_data_inicio: iso })}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Vazio = data de criação da dieta
+            </p>
           </div>
 
           {previewSeq && (

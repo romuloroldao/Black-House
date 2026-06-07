@@ -62,6 +62,11 @@ export function formatCheckinFieldValue(key: string, value: unknown): string {
     return `${value} h`;
   }
 
+  if (key === "peso_kg") {
+    const n = Number(value);
+    if (Number.isFinite(n)) return `${n} kg`;
+  }
+
   return String(value);
 }
 
@@ -107,6 +112,9 @@ export function deltaLabel(delta: CheckinFieldDelta): string | null {
 
 export function getCheckinSummaryChips(checkin: WeeklyCheckinRecord): string[] {
   const chips: string[] = [];
+  if (checkin.peso_kg != null && Number.isFinite(Number(checkin.peso_kg))) {
+    chips.push(`${checkin.peso_kg} kg`);
+  }
   const adesao = checkin.seguiu_plano_nota;
   if (adesao != null) chips.push(`Adesão ${adesao}/5`);
 
@@ -121,6 +129,7 @@ export function getCheckinSummaryChips(checkin: WeeklyCheckinRecord): string[] {
 }
 
 export function getFieldLabel(key: string): string {
+  if (key === "peso_kg") return "Peso (kg)";
   return CHECKIN_FIELD_LABELS[key] ?? key;
 }
 

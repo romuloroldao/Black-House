@@ -1,9 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
-  dietHasPlanoABFromItens,
+  dietHasMultiplosCardapiosFromItens,
   filterItensForPlanoView,
+  parseRefeicaoLabel,
   type DietPlano,
 } from '@/lib/diet-student-utils';
+import { sortPlanos } from '@/lib/diet-plano';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '@/lib/api-client';
 import {
@@ -59,10 +61,23 @@ const DietViewer = () => {
     return filterItensForPlanoView(dietaSelecionada.itens, planoVisao);
   }, [dietaSelecionada, planoVisao]);
 
-  const temPlanoAB = useMemo(
-    () => (dietaSelecionada?.itens ? dietHasPlanoABFromItens(dietaSelecionada.itens) : false),
-    [dietaSelecionada],
-  );
+  const planosVisao = useMemo(() => {
+    if (!dietaSelecionada?.itens?.length) return [] as DietPlano[];
+    const set = new Set<DietPlano>();
+    for (const item of dietaSelecionada.itens) {
+      const { plano } = parseRefeicaoLabel(item.refeicao);
+      if (plano) set.add(plano);
+    }
+    return sortPlanos(set);
+  }, [dietaSelecionada]);
+
+  const temMultiplosCardapios = planosVisao.length >= 2;
+
+  useEffect(() => {
+    if (planosVisao.length > 0 && !planosVisao.includes(planoVisao)) {
+      setPlanoVisao(planosVisao[0]);
+    }
+  }, [planosVisao, planoVisao]);
 
   useEffect(() => {
     carregarDietas();
@@ -362,30 +377,25 @@ const DietViewer = () => {
                                 <CardTitle className="flex items-center gap-2 text-base">
                                   <Calculator className="w-4 h-4" />
                                   Resumo Nutricional Total
-                                  {temPlanoAB ? (
+                                  {temMultiplosCardapios ? (
                                     <span className="text-xs font-normal text-muted-foreground">
                                       (Plano {planoVisao})
                                     </span>
                                   ) : null}
                                 </CardTitle>
-                                {temPlanoAB ? (
-                                  <div className="flex gap-2 pt-2">
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant={planoVisao === 'A' ? 'default' : 'outline'}
-                                      onClick={() => setPlanoVisao('A')}
-                                    >
-                                      Plano A
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant={planoVisao === 'B' ? 'default' : 'outline'}
-                                      onClick={() => setPlanoVisao('B')}
-                                    >
-                                      Plano B
-                                    </Button>
+                                {temMultiplosCardapios ? (
+                                  <div className="flex flex-wrap gap-2 pt-2">
+                                    {planosVisao.map((p) => (
+                                      <Button
+                                        key={p}
+                                        type="button"
+                                        size="sm"
+                                        variant={planoVisao === p ? 'default' : 'outline'}
+                                        onClick={() => setPlanoVisao(p)}
+                                      >
+                                        Plano {p}
+                                      </Button>
+                                    ))}
                                   </div>
                                 ) : null}
                               </CardHeader>

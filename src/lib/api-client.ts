@@ -6,6 +6,7 @@ import type { AlunoPortalStatus } from '@/types/aluno-portal-status';
 import type { CheckinAiDraftResponse, CheckinAiTrendsResponse } from '@/types/checkin-ai';
 import type { FeedbackAlunoRecord, WeeklyCheckinRecord } from '@/types/weekly-checkin';
 import { getAvailabilityKeyForEndpoint, isDataAvailable } from '@/lib/dataAvailability';
+import { safeGetItem, safeRemoveItem, safeSetItem } from '@/lib/safe-storage';
 
 // FIX-012 — prefixos de rotas semânticas na VPS (PostgreSQL; ver src/contracts/api-contract.ts)
 export const ALLOWED_ENDPOINTS = new Set<string>([
@@ -67,10 +68,15 @@ export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/weekly-checkins/',
     '/api/weekly-checkins/ai/trends-summary',
     '/api/weekly-checkins/pendentes/count',
-    '/api/uploads/progress-photo',
-    '/api/uploads/storage/progress-photos',
-    '/api/uploads/storage/progress-photos/',
+  '/api/uploads/progress-photo',
+  '/api/uploads/educational-pdf',
+  '/api/uploads/storage/progress-photos',
+  '/api/uploads/storage/progress-photos/',
+  '/api/uploads/storage/educational-contents',
+  '/api/uploads/storage/educational-contents/',
     '/api/videos',
+    '/api/educational-contents',
+    '/api/educational-contents/',
     '/api/lives',
     '/api/uploads/avatar',
     '/api/import/parse-pdf',
@@ -168,12 +174,12 @@ function mapLegacyApiToRestV1(endpoint: string): LegacyMapResult {
         unwrapFirstRow: true,
     });
 
-    match = normalized.match(/^\/api\/alunos\/([^/]+)\/portal-status$/);
+    let match: RegExpMatchArray | null = normalized.match(/^\/api\/alunos\/([^/]+)\/portal-status$/);
     if (match) {
         return { endpoint: `/api/alunos/${match[1]}/portal-status`, unwrapFirstRow: false };
     }
 
-    match = normalized.match(/^\/api\/alunos\/([^/]+)$/);
+    match = normalized.match(/^\/api\/alunos\/([^/]+)$/) ?? null;
     if (match && !['me', 'by-coach', 'link-user', 'unlinked-registrations', 'adopt-registration', 'dismiss-registration'].includes(match[1])) {
         return byIdToQuery('alunos', match[1]);
     }
@@ -282,94 +288,124 @@ const ERROR_MESSAGES = {
     [ErrorType.UNKNOWN]: 'Erro desconhecido na requisição.'
 };
 
+function isNetworkLikeMessage(message: string): boolean {
+    const m = message.toLowerCase();
+    return (
+        m.includes('failed to fetch') ||
+        m.includes('load failed') ||
+        m.includes('networkerror') ||
+        m.includes('network error') ||
+        m.includes('network request failed') ||
+        m.includes('connection refused') ||
+        m.includes('connection reset') ||
+        m.includes('connection timeout') ||
+        m.includes('fetch') ||
+        m.includes('econnrefused') ||
+        m.includes('etimedout') ||
+        m.includes('enotfound') ||
+        m.includes('cors') ||
+        m.includes('aborted')
+    );
+}
+
+function isTlsLikeMessage(message: string): boolean {
+    const m = message.toLowerCase();
+    return (
+        m.includes('ssl') ||
+        m.includes('tls') ||
+        m.includes('certificate') ||
+        m.includes('cert') ||
+        m.includes('secure') ||
+        m.includes('security')
+    );
+}
+
 // DESIGN-API-CONNECTIVITY-GUARD-009: Classificar tipo de erro
 function classifyError(error: unknown, endpoint: string): { type: ErrorType; message: string; originalError: unknown } {
-    // Erros de TLS/SSL
-    if (error instanceof TypeError) {
-        const errorMessage = error.message.toLowerCase();
-        if (
-            errorMessage.includes('failed to fetch') ||
-            errorMessage.includes('networkerror') ||
-            errorMessage.includes('network error') ||
-            errorMessage.includes('ssl') ||
-            errorMessage.includes('tls') ||
-            errorMessage.includes('certificate') ||
-            errorMessage.includes('cert') ||
-            errorMessage.includes('secure') ||
-            errorMessage.includes('security')
-        ) {
-            // Verificar se é especificamente TLS ou rede genérica
-            if (
-                errorMessage.includes('ssl') ||
-                errorMessage.includes('tls') ||
-                errorMessage.includes('certificate') ||
-                errorMessage.includes('cert') ||
-                errorMessage.includes('secure') ||
-                errorMessage.includes('security')
-            ) {
-                console.error('[DESIGN-API-CONNECTIVITY-GUARD-009] Erro TLS detectado:', {
-                    endpoint,
-                    error: errorMessage,
-                    type: 'TLS'
-                });
-                return {
-                    type: ErrorType.TLS,
-                    message: ERROR_MESSAGES[ErrorType.TLS],
-                    originalError: error
-                };
-            }
-            
-            // Erro de rede genérico
-            console.error('[DESIGN-API-CONNECTIVITY-GUARD-009] Erro de rede detectado:', {
+    if (error instanceof SyntaxError) {
+        console.error('[DESIGN-API-CONNECTIVITY-GUARD-009] Resposta JSON inválida:', {
+            endpoint,
+            error: error.message,
+            type: 'BACKEND',
+        });
+        return {
+            type: ErrorType.BACKEND,
+            message: 'Resposta inválida da API. Tente novamente ou contate o suporte.',
+            originalError: error,
+        };
+    }
+
+    const errorName = error instanceof Error ? error.name : '';
+    const errorMessage = error instanceof Error ? error.message : String(error ?? '');
+
+    if (errorName === 'AbortError' || isNetworkLikeMessage(errorMessage)) {
+        if (isTlsLikeMessage(errorMessage)) {
+            console.error('[DESIGN-API-CONNECTIVITY-GUARD-009] Erro TLS detectado:', {
                 endpoint,
                 error: errorMessage,
-                type: 'NETWORK'
+                type: 'TLS',
             });
             return {
-                type: ErrorType.NETWORK,
-                message: ERROR_MESSAGES[ErrorType.NETWORK],
-                originalError: error
+                type: ErrorType.TLS,
+                message: ERROR_MESSAGES[ErrorType.TLS],
+                originalError: error,
             };
         }
+        console.error('[DESIGN-API-CONNECTIVITY-GUARD-009] Erro de rede detectado:', {
+            endpoint,
+            error: errorMessage,
+            errorName,
+            type: 'NETWORK',
+        });
+        return {
+            type: ErrorType.NETWORK,
+            message: ERROR_MESSAGES[ErrorType.NETWORK],
+            originalError: error,
+        };
     }
-    
-    // Erros de conexão recusada, timeout, etc.
-    if (error instanceof Error) {
-        const errorMessage = error.message.toLowerCase();
-        if (
-            errorMessage.includes('connection refused') ||
-            errorMessage.includes('connection reset') ||
-            errorMessage.includes('connection timeout') ||
-            errorMessage.includes('network') ||
-            errorMessage.includes('fetch') ||
-            errorMessage.includes('econnrefused') ||
-            errorMessage.includes('etimedout') ||
-            errorMessage.includes('enotfound')
-        ) {
-            console.error('[DESIGN-API-CONNECTIVITY-GUARD-009] Erro de rede detectado:', {
-                endpoint,
-                error: errorMessage,
-                type: 'NETWORK'
-            });
-            return {
-                type: ErrorType.NETWORK,
-                message: ERROR_MESSAGES[ErrorType.NETWORK],
-                originalError: error
-            };
-        }
+
+    if (error instanceof TypeError || error instanceof DOMException) {
+        console.error('[DESIGN-API-CONNECTIVITY-GUARD-009] Erro de rede (TypeError/DOMException):', {
+            endpoint,
+            error: errorMessage,
+            errorName,
+            type: 'NETWORK',
+        });
+        return {
+            type: ErrorType.NETWORK,
+            message: ERROR_MESSAGES[ErrorType.NETWORK],
+            originalError: error,
+        };
     }
-    
+
     // Erro desconhecido
     console.error('[DESIGN-API-CONNECTIVITY-GUARD-009] Erro desconhecido:', {
         endpoint,
-        error: error instanceof Error ? error.message : String(error),
-        type: 'UNKNOWN'
+        error: errorMessage,
+        errorName,
+        type: 'UNKNOWN',
     });
     return {
         type: ErrorType.UNKNOWN,
         message: ERROR_MESSAGES[ErrorType.UNKNOWN],
-        originalError: error
+        originalError: error,
     };
+}
+
+async function parseJsonResponse(response: Response): Promise<unknown> {
+    const text = await response.text();
+    if (!text || !text.trim()) {
+        return {};
+    }
+    try {
+        return JSON.parse(text);
+    } catch (parseErr) {
+        const syntaxErr = new SyntaxError(
+            `Resposta não-JSON da API (HTTP ${response.status})`,
+        );
+        (syntaxErr as SyntaxError & { cause?: unknown }).cause = parseErr;
+        throw syntaxErr;
+    }
 }
 
 class ApiClient {
@@ -377,7 +413,7 @@ class ApiClient {
     private fatalBlockedEndpoints: Set<string> = new Set();
 
     constructor() {
-        const raw = localStorage.getItem('auth_token');
+        const raw = safeGetItem('auth_token');
         this.token =
             raw == null ? null : String(raw).trim().replace(/^Bearer\s+/i, '').trim() || null;
     }
@@ -387,32 +423,28 @@ class ApiClient {
             const cleaned = String(token).trim().replace(/^Bearer\s+/i, '').trim();
             this.token = cleaned || null;
             if (this.token) {
-                localStorage.setItem('auth_token', this.token);
+                safeSetItem('auth_token', this.token);
             } else {
-                localStorage.removeItem('auth_token');
+                safeRemoveItem('auth_token');
             }
         } else {
             this.token = null;
-            localStorage.removeItem('auth_token');
+            safeRemoveItem('auth_token');
         }
     }
 
     /** JWT cru (sem prefixo Bearer, sem espaços) — útil para multipart e WebSocket. */
     getToken() {
-        const storedToken = localStorage.getItem('auth_token');
+        const storedToken = safeGetItem('auth_token');
         if (storedToken == null) {
             this.token = null;
             return null;
         }
         const cleaned = String(storedToken).trim().replace(/^Bearer\s+/i, '').trim() || null;
         this.token = cleaned;
-        if (cleaned !== storedToken && typeof localStorage !== 'undefined') {
-            try {
-                if (cleaned) localStorage.setItem('auth_token', cleaned);
-                else localStorage.removeItem('auth_token');
-            } catch {
-                /* quota / modo privado */
-            }
+        if (cleaned !== storedToken) {
+            if (cleaned) safeSetItem('auth_token', cleaned);
+            else safeRemoveItem('auth_token');
         }
         return this.token;
     }
@@ -542,7 +574,9 @@ class ApiClient {
 
             if (!response.ok) {
                 // DESIGN-API-CONNECTIVITY-GUARD-009: Erro HTTP do backend
-                const error = await response.json().catch(() => ({ error: 'Erro na requisição' }));
+                const error = (await parseJsonResponse(response).catch(() => ({
+                    error: 'Erro na requisição',
+                }))) as Record<string, unknown>;
                 
                 // AUTH-HARDENING-001: Tratamento especial para 503 (Service Unavailable)
                 // Quando schema inválido, o backend retorna 503 com detalhes
@@ -595,7 +629,7 @@ class ApiClient {
                 throw backendError;
             }
 
-            const payload = await response.json();
+            const payload = await parseJsonResponse(response);
             if (mapped.unwrapFirstRow && Array.isArray(payload)) {
                 return payload[0] ?? null;
             }
@@ -633,9 +667,6 @@ class ApiClient {
             method: 'POST',
             body: JSON.stringify({ email, password, ...metadata }),
         });
-        this.setToken(data.token);
-        // Disparar evento para atualizar AuthContext
-        window.dispatchEvent(new Event('auth-changed'));
         return data;
     }
 
@@ -727,12 +758,13 @@ class ApiClient {
             if (bucket === 'avatars') {
                 const formData = new FormData();
                 formData.append('avatar', file);
+                const token = this.getToken();
 
                 const response = await fetch(API_CONTRACT.uploads.avatar(), {
                     method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${this.token}`,
-                    },
+                    headers: token ? {
+                        'Authorization': `Bearer ${token}`,
+                    } : {},
                     body: formData,
                 });
 
@@ -751,11 +783,10 @@ class ApiClient {
             if (bucket === 'progress-photos') {
                 const formData = new FormData();
                 formData.append('file', file);
+                const token = this.getToken();
                 const response = await fetch(API_CONTRACT.uploads.progressPhoto(), {
                     method: 'POST',
-                    headers: {
-                        Authorization: `Bearer ${this.token}`,
-                    },
+                    headers: token ? { Authorization: `Bearer ${token}` } : {},
                     body: formData,
                 });
                 if (!response.ok) {
@@ -772,12 +803,13 @@ class ApiClient {
             // Para outros buckets, manter compatibilidade temporária
             const formData = new FormData();
             formData.append('file', file);
+            const token = this.getToken();
 
             const response = await fetch(`${API_URL}/storage/v1/object/${bucket}/${path}`, {
                 method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${this.token}`,
-                },
+                headers: token ? {
+                    'Authorization': `Bearer ${token}`,
+                } : {},
                 body: formData,
             });
 
@@ -1043,6 +1075,16 @@ class ApiClient {
         return this.safeRequest(API_CONTRACT.weeklyCheckins.aiDraftResponse(checkinId), {
             method: 'POST',
             body: JSON.stringify({ hints: hints ?? '' }),
+        });
+    }
+
+    async saveWeeklyCheckinRespostaSafe(
+        checkinId: string,
+        resposta: string,
+    ): Promise<ApiResult<WeeklyCheckinRecord>> {
+        return this.safeRequest(API_CONTRACT.weeklyCheckins.saveResposta(checkinId), {
+            method: 'PATCH',
+            body: JSON.stringify({ resposta }),
         });
     }
 

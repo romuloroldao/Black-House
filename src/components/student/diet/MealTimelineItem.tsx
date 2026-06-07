@@ -7,6 +7,7 @@ import { calcularMacros, getItemsForPlano } from "@/lib/diet-student-utils";
 type MealTimelineItemProps = {
   group: MealGroup;
   plano: DietPlano;
+  dietHasMultiplosCardapios?: boolean;
   done: boolean;
   isLast?: boolean;
   isCurrent?: boolean;
@@ -17,13 +18,14 @@ type MealTimelineItemProps = {
 const MealTimelineItem = ({
   group,
   plano,
+  dietHasMultiplosCardapios = false,
   done,
   isLast,
   isCurrent,
   onToggleDone,
   onOpenDetail,
 }: MealTimelineItemProps) => {
-  const items = getItemsForPlano(group, plano);
+  const items = getItemsForPlano(group, plano, { dietHasMultiplosCardapios });
   const macros = calcularMacros(items);
   const preview = items
     .filter((i) => i.alimentos?.name)
@@ -85,7 +87,7 @@ const MealTimelineItem = ({
           <Badge variant="secondary" className="text-[10px]">
             {items.length} item{items.length !== 1 ? "s" : ""}
           </Badge>
-          {group.hasPlanoAB && (
+          {group.hasMultiplosCardapios && (
             <Badge variant="premium" className="text-[10px]">
               Plano {plano}
             </Badge>

@@ -63,11 +63,16 @@ const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
     const onCheckinUpdated = () => {
       refetch();
     };
+    const onStudentRealtime = () => {
+      refetch();
+    };
     window.addEventListener("blackhouse:checkin-pending-updated", onCheckinUpdated);
+    window.addEventListener("blackhouse:student-realtime", onStudentRealtime);
 
     return () => {
       clearInterval(interval);
       window.removeEventListener("blackhouse:checkin-pending-updated", onCheckinUpdated);
+      window.removeEventListener("blackhouse:student-realtime", onStudentRealtime);
     };
   }, [shouldFetch, refetch]);
 

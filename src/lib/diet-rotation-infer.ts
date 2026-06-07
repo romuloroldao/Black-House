@@ -1,46 +1,35 @@
 import type { DietRotationFormState } from "@/components/DietRotationFields";
+import {
+  inferRotationBlocksFromPlanos,
+  type RotationBlock,
+} from "@/lib/diet-rotation";
+import { collectPlanosFromRefeicoes, type ImportRefeicaoMacros } from "@/lib/diet-student-utils";
 
 export type InferRotationResult = {
   form: DietRotationFormState;
-  /** Mensagem curta para toast (ex.: "Detectámos Plano A e B — ciclo 3A·1B sugerido"). */
   hint: string;
 };
 
 function todayIso(): string {
   const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function normalizePlanoToken(value: string | null | undefined): "A" | "B" | null {
-  if (!value) return null;
-  const s = String(value).trim();
-  if (/^a$/i.test(s)) return "A";
-  if (/^b$/i.test(s)) return "B";
-  const m = s.match(/\bplano\s*([ab])\b/i);
-  if (m) return m[1].toUpperCase() === "B" ? "B" : "A";
-  const m2 = s.match(/\(([ab])\)\s*$/i) || s.match(/\s+plano\s*([ab])\s*$/i);
-  if (m2) return m2[1].toUpperCase() === "B" ? "B" : "A";
-  return null;
-}
-
-function extractCycleFromText(text: string): { diasA?: number; diasB?: number; inicial?: "A" | "B" } {
+function extractCycleFromText(text: string): { diasA?: number; diasB?: number; inicial?: string } {
   const t = text.toLowerCase();
   let diasA: number | undefined;
   let diasB: number | undefined;
-  let inicial: "A" | "B" | undefined;
+  let inicial: string | undefined;
 
   const assign = (plano: string, n: number) => {
     if (!Number.isFinite(n) || n < 1) return;
     if (plano === "a") diasA = n;
-    else diasB = n;
+    else if (plano === "b") diasB = n;
   };
 
   for (const re of [
-    /(\d+)\s*dias?\s*(?:do\s+|de\s+|no\s+|em\s+)?plano\s*([ab])\b/gi,
-    /plano\s*([ab])\s*[:\-]?\s*(\d+)\s*dias?\b/gi,
+    /(\d+)\s*dias?\s*(?:do\s+|de\s+|no\s+|em\s+)?plano\s*([a-z])\b/gi,
+    /plano\s*([a-z])\s*[:\-]?\s*(\d+)\s*dias?\b/gi,
   ]) {
     let m: RegExpExecArray | null;
     re.lastIndex = 0;
@@ -59,67 +48,53 @@ function extractCycleFromText(text: string): { diasA?: number; diasB?: number; i
     diasB = parseInt(cicloSlash[2], 10);
   }
 
-  const xy = t.match(/\b(\d+)\s*[x×]\s*(\d+)\b/);
-  if (xy) {
-    diasA = parseInt(xy[1], 10);
-    diasB = parseInt(xy[2], 10);
-  }
-
-  const inicio = t.match(/(?:in[ií]cio|come[cç]a(?:r)?)\s+(?:no\s+)?plano\s*([ab])\b/i);
-  if (inicio) inicial = inicio[1].toUpperCase() === "B" ? "B" : "A";
+  const inicio = t.match(/(?:in[ií]cio|come[cç]a(?:r)?)\s+(?:no\s+)?plano\s*([a-z])\b/i);
+  if (inicio) inicial = inicio[1].toUpperCase();
 
   return { diasA, diasB, inicial };
 }
 
-function detectPlanoInRefeicoes(
-  refeicoes: Array<{ nome?: string; plano?: string | null }>,
-): { hasA: boolean; hasB: boolean } {
-  let hasA = false;
-  let hasB = false;
-  for (const r of refeicoes) {
-    const fromPlano = normalizePlanoToken(r.plano);
-    const fromNome = normalizePlanoToken(r.nome);
-    const p = fromPlano || fromNome;
-    if (p === "A") hasA = true;
-    if (p === "B") hasB = true;
-  }
-  return { hasA, hasB };
-}
-
 /**
- * Sugere ciclo rotativo a partir de orientações, nome da dieta e refeições com Plano A/B.
+ * Sugere ciclo rotativo a partir de orientações, nome da dieta e refeições com Plano A/B/C…
  */
 export function inferRotationFromImport(params: {
-  refeicoes?: Array<{ nome?: string; plano?: string | null }>;
+  refeicoes?: Array<ImportRefeicaoMacros>;
   textHints?: Array<string | null | undefined>;
   dataRetorno?: string | null;
 }): InferRotationResult | null {
   const refeicoes = params.refeicoes ?? [];
+  const planos = collectPlanosFromRefeicoes(refeicoes);
+  if (planos.length < 2) return null;
+
   const blob = (params.textHints ?? []).filter(Boolean).join("\n");
   const fromText = blob ? extractCycleFromText(blob) : {};
-  const { hasA, hasB } = detectPlanoInRefeicoes(refeicoes);
 
-  const diasA = fromText.diasA ?? (hasA && hasB ? 3 : undefined);
-  const diasB = fromText.diasB ?? (hasA && hasB ? 1 : undefined);
+  const blocks: RotationBlock[] = inferRotationBlocksFromPlanos(planos, {
+    diasA: fromText.diasA,
+    diasB: fromText.diasB,
+  });
 
-  if (!diasA || !diasB || diasA < 1 || diasB < 1) return null;
-  if (!hasA && !hasB && !fromText.diasA) return null;
+  if (fromText.inicial && blocks.length > 1) {
+    const idx = blocks.findIndex((b) => b.plano === fromText.inicial);
+    if (idx > 0) {
+      const reordered = [...blocks.slice(idx), ...blocks.slice(0, idx)];
+      blocks.splice(0, blocks.length, ...reordered);
+    }
+  }
 
   const form: DietRotationFormState = {
     rotacao_ativa: true,
-    rotacao_dias_plano_a: String(diasA),
-    rotacao_dias_plano_b: String(diasB),
-    rotacao_plano_inicial: fromText.inicial ?? "A",
-    rotacao_data_inicio:
-      params.dataRetorno?.slice(0, 10) || todayIso(),
+    blocos: blocks.map((b) => ({ plano: b.plano, dias: String(b.dias) })),
+    rotacao_data_inicio: params.dataRetorno?.slice(0, 10) || todayIso(),
   };
 
+  const short = blocks.map((b) => `${b.dias}${b.plano}`).join("·");
   const hint =
-    fromText.diasA != null
-      ? `Ciclo ${diasA}A·${diasB}B detectado no texto da ficha — revê e confirma.`
-      : hasA && hasB
-        ? `Refeições Plano A e B encontradas — ciclo ${diasA}A·${diasB}B sugerido (ajusta se necessário).`
-        : `Ciclo ${diasA}A·${diasB}B sugerido a partir da ficha — revê e confirma.`;
+    planos.length > 2
+      ? `Cardápios ${planos.join(", ")} detectados — ciclo ${short} sugerido (1 dia por cardápio extra; ajusta se necessário).`
+      : fromText.diasA != null
+        ? `Ciclo ${short} detectado no texto — revê e confirma.`
+        : `Planos A e B na ficha — ciclo ${short} sugerido.`;
 
   return { form, hint };
 }

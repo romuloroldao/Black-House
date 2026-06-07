@@ -4,6 +4,8 @@
 
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
+const { resolveEffectiveRole } = require('../utils/identity-resolver');
+const { getAlunoRecordForAuthUser } = require('../utils/aluno-auth-user');
 
 class WebSocketService {
     constructor(httpServer, pool, jwtSecret) {
@@ -43,11 +45,14 @@ class WebSocketService {
 
                 // Verificar JWT
                 const decoded = jwt.verify(token, this.jwtSecret);
-                
-                // Buscar usuário no banco
+                const userId = decoded.userId ?? decoded.sub;
+                if (userId == null || userId === '') {
+                    return next(new Error('Token inválido'));
+                }
+
                 const result = await this.pool.query(
-                    'SELECT id, email, role, coach_id, aluno_id FROM app_auth.users WHERE id = $1',
-                    [decoded.userId]
+                    'SELECT id, email FROM app_auth.users WHERE id = $1',
+                    [userId]
                 );
 
                 if (result.rows.length === 0) {
@@ -55,12 +60,23 @@ class WebSocketService {
                 }
 
                 const user = result.rows[0];
+                const role = await resolveEffectiveRole(this.pool, user.id);
 
-                // Armazenar informações do usuário no socket
+                let coachId = null;
+                let alunoId = null;
+
+                if (role === 'coach' || role === 'admin') {
+                    coachId = user.id;
+                } else if (role === 'aluno') {
+                    const alunoRecord = await getAlunoRecordForAuthUser(this.pool, user.id);
+                    alunoId = alunoRecord?.id || null;
+                    coachId = alunoRecord?.coach_id || null;
+                }
+
                 socket.userId = user.id;
-                socket.userRole = user.role;
-                socket.coachId = user.coach_id;
-                socket.alunoId = user.aluno_id;
+                socket.userRole = role;
+                socket.coachId = coachId;
+                socket.alunoId = alunoId;
 
                 // Mapear socket para usuário
                 if (!this.connectedUsers.has(user.id)) {
@@ -69,9 +85,9 @@ class WebSocketService {
                 this.connectedUsers.get(user.id).push(socket.id);
                 this.userSockets.set(socket.id, {
                     userId: user.id,
-                    role: user.role,
-                    coachId: user.coach_id,
-                    alunoId: user.aluno_id
+                    role,
+                    coachId,
+                    alunoId
                 });
 
                 next();
@@ -91,11 +107,11 @@ class WebSocketService {
 
             // Entrar em salas baseadas no usuário
             socket.join(`user:${socket.userId}`);
-            
-            if (socket.coachId) {
-                socket.join(`coach:${socket.coachId}`);
+
+            if (socket.userRole === 'coach' || socket.userRole === 'admin') {
+                socket.join(`coach:${socket.userId}`);
             }
-            
+
             if (socket.alunoId) {
                 socket.join(`aluno:${socket.alunoId}`);
             }

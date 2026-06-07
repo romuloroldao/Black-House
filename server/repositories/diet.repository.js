@@ -85,6 +85,10 @@ class DietRepository {
             rotacaoAtiva && dietaData.rotacao_data_inicio
                 ? String(dietaData.rotacao_data_inicio).slice(0, 10)
                 : null;
+        const rotacaoSequencia =
+            rotacaoAtiva && dietaData.rotacao_sequencia
+                ? JSON.stringify(dietaData.rotacao_sequencia)
+                : null;
 
         const baseCols = ['nome', 'objetivo', 'aluno_id'];
         const baseVals = [dietaData.nome, dietaData.objetivo || null, dietaData.aluno_id];
@@ -100,12 +104,16 @@ class DietRepository {
             'rotacao_dias_plano_b',
             'rotacao_plano_inicial',
             'rotacao_data_inicio',
+            'rotacao_sequencia',
         );
-        baseVals.push(rotacaoAtiva, rotacaoDiasA, rotacaoDiasB, rotacaoInicial, rotacaoInicio);
+        baseVals.push(rotacaoAtiva, rotacaoDiasA, rotacaoDiasB, rotacaoInicial, rotacaoInicio, rotacaoSequencia);
 
         const placeholders = baseCols.map((col, i) => {
             if (col === 'data_retorno' || col === 'rotacao_data_inicio') {
                 return `$${i + 1}::date`;
+            }
+            if (col === 'rotacao_sequencia') {
+                return `$${i + 1}::jsonb`;
             }
             return `$${i + 1}`;
         });
@@ -115,7 +123,7 @@ class DietRepository {
             VALUES (${placeholders.join(', ')})
             RETURNING id, nome, objetivo, aluno_id, data_retorno, ativa, schedule_cycle_id, created_at,
               rotacao_ativa, rotacao_dias_plano_a, rotacao_dias_plano_b,
-              rotacao_plano_inicial, rotacao_data_inicio
+              rotacao_plano_inicial, rotacao_data_inicio, rotacao_sequencia
         `;
 
         const values = baseVals;

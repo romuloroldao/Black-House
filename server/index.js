@@ -31,6 +31,7 @@ const { sendPasswordResetEmail } = require('./utils/send-password-reset-email');
 const { sendEmailConfirmation } = require('./utils/send-email-confirmation');
 const { errorHandler, notFoundHandler } = require('./middleware/error-handler');
 const requestLogger = require('./middleware/request-logger');
+const { internationalAccessMiddleware } = require('./middleware/international-access');
 const logger = require('./utils/logger');
 const { afterTableMutation } = require('./services/return-reminder.service');
 const SecretsValidator = require('./utils/secrets-validator');
@@ -130,6 +131,7 @@ logger.info('CORS configurado', {
 // MIDDLEWARES GLOBAIS
 // ============================================================================
 app.use(express.json({ limit: '10mb' })); // Limitar tamanho do JSON
+app.use(internationalAccessMiddleware);
 app.use(requestLogger); // Log de requisições
 
 // Pool de conexão PostgreSQL com configuração explícita
@@ -433,7 +435,7 @@ const authenticate = async (req, res, next) => {
 
     try {
         const userResult = await pool.query(
-            'SELECT u.id, u.email, u.created_at FROM app_auth.users u WHERE u.id = $1',
+            'SELECT u.id, u.email, u.created_at, u.email_confirmed_at FROM app_auth.users u WHERE u.id = $1',
             [userId]
         );
 
@@ -443,6 +445,14 @@ const authenticate = async (req, res, next) => {
 
         const user = userResult.rows[0];
         const role = await resolveEffectiveRole(pool, user.id);
+
+        if (role === 'aluno' && !user.email_confirmed_at) {
+            return res.status(403).json({
+                error: 'Confirme seu e-mail para acessar a plataforma.',
+                error_code: 'EMAIL_NOT_CONFIRMED',
+                reason: 'email_not_confirmed'
+            });
+        }
 
         let payment_status = null;
         if (role === 'aluno') {
@@ -547,7 +557,11 @@ app.use('/health', createHealthRouter(pool, websocketService, jobsRunner, app));
 
 // Registro (com rate limiting)
 app.post('/auth/signup', authLimiter, async (req, res) => {
-    const { email, password, full_name: fullName, coach_id: coachIdRaw } = req.body;
+    const emailRaw = req.body?.email;
+    const password = req.body?.password;
+    const email =
+        typeof emailRaw === 'string' ? emailRaw.trim().toLowerCase() : '';
+    const { full_name: fullName, coach_id: coachIdRaw } = req.body;
 
     const { validateAlunoSignupProfile } = require('./utils/aluno-signup-validation');
     const profileValidation = validateAlunoSignupProfile(req.body);
@@ -800,7 +814,10 @@ app.post('/auth/login', authLimiter, async (req, res) => {
         // DOMAIN-SCHEMA-ISOLATION-005: Schema de domínio (alunos) não afeta auth
         // Mesmo que schema de alunos esteja inválido, auth continua funcionando
 
-        const { email, password } = req.body;
+        const emailRaw = req.body?.email;
+        const password = req.body?.password;
+        const email =
+            typeof emailRaw === 'string' ? emailRaw.trim().toLowerCase() : '';
         
         if (!email || !password) {
             logger.warn('AUTH_LOGIN_MISSING_CREDENTIALS', {
@@ -826,19 +843,29 @@ app.post('/auth/login', authLimiter, async (req, res) => {
         
         const role = await resolveEffectiveRole(pool, user_id);
         
+        const userResult = await pool.query(
+            'SELECT id, email, created_at, email_confirmed_at FROM app_auth.users WHERE id = $1',
+            [user_id]
+        );
+
+        if (userResult.rows.length === 0) {
+            return res.status(401).json({ error: 'Usuário não encontrado' });
+        }
+
+        const authUser = userResult.rows[0];
+        if (role === 'aluno' && !authUser.email_confirmed_at) {
+            return res.status(403).json({
+                error: 'Confirme seu e-mail para acessar a plataforma.',
+                error_code: 'EMAIL_NOT_CONFIRMED',
+                reason: 'email_not_confirmed'
+            });
+        }
+
         // Buscar payment_status para alunos, respeitando exceções financeiras ativas.
         let payment_status = 'CURRENT';
         if (role === 'aluno') {
-            const userEmailResult = await pool.query(
-                'SELECT email FROM app_auth.users WHERE id = $1',
-                [user_id]
-            );
-            
-            if (userEmailResult.rows.length > 0) {
-                const email = userEmailResult.rows[0].email;
-                const financialStatus = await getStudentPaymentStatus(pool, { email });
-                payment_status = financialStatus.payment_status;
-            }
+            const financialStatus = await getStudentPaymentStatus(pool, { email: authUser.email });
+            payment_status = financialStatus.payment_status;
         }
         
         // RBAC-01: JWT inclui role e payment_status
@@ -848,12 +875,6 @@ app.post('/auth/login', authLimiter, async (req, res) => {
             payment_status
         }, JWT_SECRET, { expiresIn: '7d' });
         
-        // Buscar dados do usuário
-        const userResult = await pool.query(
-            'SELECT id, email, created_at FROM app_auth.users WHERE id = $1',
-            [user_id]
-        );
-        
         logger.info('AUTH_LOGIN_SUCCESS', {
             request_id: requestId,
             user_id: user_id,
@@ -861,7 +882,7 @@ app.post('/auth/login', authLimiter, async (req, res) => {
         });
         
         res.json({ 
-            user: userResult.rows[0],
+            user: authUser,
             token,
             role,
             payment_status
@@ -897,12 +918,13 @@ app.post('/auth/login', authLimiter, async (req, res) => {
 
 // Obter usuário atual com role e payment_status
 app.get('/auth/user', authenticate, (req, res) => {
-    const { id, email, created_at, role, payment_status } = req.user;
+    const { id, email, created_at, email_confirmed_at, role, payment_status } = req.user;
     res.json({ 
         user: { 
             id, 
             email, 
             created_at,
+            email_confirmed_at,
             role,
             payment_status
         },
@@ -1953,6 +1975,22 @@ app.patch('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) =
                     error: hookErr.message,
                 });
             }
+        }
+
+        if (table === 'dietas' && notificationService && result.rows[0]?.aluno_id) {
+            const dietaRow = result.rows[0];
+            void notificationService
+                .notifyDietaAtualizada({
+                    alunoId: dietaRow.aluno_id,
+                    dietaId: dietaRow.id,
+                    dietaNome: dietaRow.nome,
+                })
+                .catch((err) => {
+                    logger.warn('dieta.notify_student_failed', {
+                        dietaId: dietaRow.id,
+                        error: err?.message || String(err),
+                    });
+                });
         }
         
         res.json(result.rows[0]);

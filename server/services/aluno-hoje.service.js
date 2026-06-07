@@ -102,25 +102,14 @@ function computeCheckinStreak(checkins) {
 
 const { getRotationForDate } = require('../utils/diet-rotation');
 
-function buildPendencias({ checkinDue, unreadChat, unreadAvisos, fotoSemanalDue }) {
+function buildPendencias({ checkinDue, unreadChat, unreadAvisos }) {
   const tasks = [];
-  if (fotoSemanalDue) {
-    tasks.push({
-      id: 'foto-semanal',
-      title: 'Foto desta semana',
-      description:
-        'Envie uma foto de evolução para o coach acompanhar o seu físico na ficha.',
-      tab: 'progress',
-      search_params: { section: 'photos', upload: '1' },
-      priority: 'normal',
-    });
-  }
   if (checkinDue) {
     tasks.push({
       id: 'checkin-weekly',
       title: 'Check-in semanal',
       description:
-        'Envie seu check-in desta semana para o coach acompanhar seu progresso.',
+        'Registe peso, envie pelo menos 2 fotos e complete o questionário semanal.',
       tab: 'checkin',
       priority: 'high',
     });
@@ -205,7 +194,7 @@ async function getAlunoHoje(pool, { aluno, userId }) {
     pool.query(
       `SELECT id, aluno_id, nome, objetivo, data_retorno, ativa, created_at,
               rotacao_ativa, rotacao_dias_plano_a, rotacao_dias_plano_b,
-              rotacao_plano_inicial, rotacao_data_inicio
+              rotacao_plano_inicial, rotacao_data_inicio, rotacao_sequencia
        FROM public.dietas
        WHERE aluno_id = $1
        ORDER BY (CASE WHEN COALESCE(ativa, true) THEN 0 ELSE 1 END), created_at DESC NULLS LAST
@@ -306,7 +295,6 @@ async function getAlunoHoje(pool, { aluno, userId }) {
     ultima_url: ultimaFoto?.url ?? null,
     enviou_esta_semana: enviouEstaSemana,
   };
-  const fotoSemanalDue = !enviouEstaSemana;
   const retorno = pickReturnCountdown(
     dieta,
     alunoTreinoRow,
@@ -324,7 +312,7 @@ async function getAlunoHoje(pool, { aluno, userId }) {
     dieta_rotacao,
     retorno,
     fotos_evolucao,
-    pendencias: buildPendencias({ checkinDue, unreadChat, unreadAvisos, fotoSemanalDue }),
+    pendencias: buildPendencias({ checkinDue, unreadChat, unreadAvisos }),
     proximos_eventos: eventosRes.rows,
     checkin_streak,
     contadores: {
@@ -335,7 +323,6 @@ async function getAlunoHoje(pool, { aluno, userId }) {
         checkinDue,
         unreadChat,
         unreadAvisos,
-        fotoSemanalDue,
       }).length,
     },
     gerado_em: new Date().toISOString(),

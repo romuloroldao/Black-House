@@ -3,6 +3,7 @@ export type WeeklyCheckinRecord = {
   id: string;
   aluno_id?: string;
   created_at: string;
+  peso_kg?: number | null;
   status?: string | null;
   beliscou_fora_plano?: string | null;
   seguiu_plano_nota?: number | null;
@@ -31,6 +32,7 @@ export type WeeklyCheckinRecord = {
   nao_cumpriu_porque?: string | null;
   coach_respondido_em?: string | null;
   coach_respondido_por?: string | null;
+  coach_resposta?: string | null;
 };
 
 export type FeedbackAlunoRecord = {

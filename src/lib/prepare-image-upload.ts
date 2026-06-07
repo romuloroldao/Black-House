@@ -24,7 +24,7 @@ function isHeic(file: File): boolean {
 function defaultOutputName(file: File, ext = ".jpg"): string {
   const base = (file.name || "foto").replace(/\.[^.]+$/, "").trim() || "foto";
   return `${base.slice(0, 48)}-${Date.now()}${ext}`;
-};
+}
 
 async function loadImageSource(file: File): Promise<{
   source: CanvasImageSource;
@@ -107,7 +107,9 @@ async function encodeJpeg(
 }
 
 /**
- * Normaliza fotos da galeria/câmera para JPEG ≤ maxBytes (padrão 5 MB), adequado ao envio no celular.
+ * Prepara fotos para envio: comprime no browser quando possível.
+ * HEIC e formatos que o telemóvel não decodifica são enviados como estão;
+ * o servidor converte automaticamente para JPEG (ver normalize-upload-image).
  */
 export async function prepareImageForUpload(
   file: File,
@@ -123,10 +125,11 @@ export async function prepareImageForUpload(
     );
   }
 
+  // HEIC/HEIF: o browser quase nunca decodifica — o servidor converte com sharp.
   if (isHeic(file)) {
-    throw new Error(
-      "Foto HEIC detectada. No iPhone: Ajustes → Câmera → Formatos → «Mais compatível», ou envie pela opção Galeria.",
-    );
+    return new File([file], defaultOutputName(file, pathExtForHeic(file)), {
+      type: file.type || "image/heic",
+    });
   }
 
   const type = (file.type || "").toLowerCase();
@@ -141,15 +144,36 @@ export async function prepareImageForUpload(
 
   try {
     return await encodeJpeg(file, maxSide, maxBytes, quality);
-  } catch (err) {
+  } catch {
     if (file.size <= maxBytes && (type === "image/png" || type === "image/webp")) {
       const ext = type.includes("png") ? ".png" : ".webp";
       return new File([file], defaultOutputName(file, ext), { type: file.type });
     }
-    const msg = err instanceof Error ? err.message : "";
+    // Falha no canvas (comum no Android): envia original; API normaliza no servidor.
+    if (file.size <= 12 * 1024 * 1024) {
+      const ext = extFromNameOrType(file);
+      return new File([file], defaultOutputName(file, ext), {
+        type: file.type || "application/octet-stream",
+      });
+    }
     throw new Error(
-      msg ||
-        "Não foi possível preparar a foto neste aparelho. Tente outra imagem ou use «Tirar foto».",
+      "A foto é grande demais para enviar. Tente uma imagem mais próxima ou com menos zoom.",
     );
   }
+}
+
+function pathExtForHeic(file: File): string {
+  const name = (file.name || "").toLowerCase();
+  if (name.endsWith(".heif")) return ".heif";
+  return ".heic";
+}
+
+function extFromNameOrType(file: File): string {
+  const name = file.name || "";
+  const m = name.match(/\.(jpe?g|png|webp)$/i);
+  if (m) return `.${m[1].toLowerCase().replace("jpeg", "jpg")}`;
+  const type = (file.type || "").toLowerCase();
+  if (type.includes("png")) return ".png";
+  if (type.includes("webp")) return ".webp";
+  return ".jpg";
 }

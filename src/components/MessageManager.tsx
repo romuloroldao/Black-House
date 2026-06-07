@@ -295,7 +295,7 @@ const MessageManager = () => {
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-200px)]">
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100dvh-200px)] max-h-[calc(100dvh-200px)]">
       {/* Lista de Conversas */}
       <Card className="lg:col-span-1">
         <CardHeader>
@@ -377,7 +377,7 @@ const MessageManager = () => {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <ScrollArea className="h-[calc(100vh-340px)]">
+          <ScrollArea className="h-[calc(100dvh-340px)] max-h-[calc(100dvh-340px)]">
             {conversasFiltradas.length === 0 ? (
               <div className="p-4 text-center text-muted-foreground">
                 Nenhuma conversa encontrada

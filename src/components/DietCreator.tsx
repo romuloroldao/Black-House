@@ -30,6 +30,7 @@ import {
   type DietRotationFormState,
 } from '@/components/DietRotationFields';
 import { DietRotationBadge } from '@/components/DietRotationBadge';
+import DietRefeicaoLivreFields from '@/components/diet/DietRefeicaoLivreFields';
 
 type Alimento = Food;
 
@@ -90,11 +91,15 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
   const [diasValidade, setDiasValidade] = useState('');
   const [rotacao, setRotacao] = useState<DietRotationFormState>({
     rotacao_ativa: false,
-    rotacao_dias_plano_a: '3',
-    rotacao_dias_plano_b: '1',
-    rotacao_plano_inicial: 'A',
+    blocos: [
+      { plano: 'A', dias: '3' },
+      { plano: 'B', dias: '1' },
+    ],
     rotacao_data_inicio: '',
   });
+  const [refeicaoLivreAtiva, setRefeicaoLivreAtiva] = useState(false);
+  const [refeicaoLivreObservacao, setRefeicaoLivreObservacao] = useState('');
+  const [refeicaoLivreContentId, setRefeicaoLivreContentId] = useState<string | null>(null);
   const [editingDietaId, setEditingDietaId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
@@ -209,6 +214,9 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
       );
       setDiasValidade('');
       setRotacao(dietRotationFromRow(dieta));
+      setRefeicaoLivreAtiva(Boolean(dieta.refeicao_livre_ativa));
+      setRefeicaoLivreObservacao(dieta.refeicao_livre_observacao || '');
+      setRefeicaoLivreContentId(dieta.refeicao_livre_content_id || null);
 
       // Reorganizar itens por refeição - usar nomes únicos do banco
       const nomesRefeicoesBanco = [...new Set(itensComAlimentos.map(item => item.refeicao))];
@@ -423,6 +431,9 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
             aluno_id: selectedAluno,
             data_retorno: dataRetorno || null,
             ...dietRotationToPayload(rotacao),
+            refeicao_livre_ativa: refeicaoLivreAtiva,
+            refeicao_livre_observacao: refeicaoLivreObservacao.trim() || null,
+            refeicao_livre_content_id: refeicaoLivreContentId,
           }),
         });
         dietaIdAtual = createResult.success ? createResult.data?.id : null;
@@ -436,6 +447,9 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
             objetivo: objetivo,
             data_retorno: dataRetorno || null,
             ...dietRotationToPayload(rotacao),
+            refeicao_livre_ativa: refeicaoLivreAtiva,
+            refeicao_livre_observacao: refeicaoLivreObservacao.trim() || null,
+            refeicao_livre_content_id: refeicaoLivreContentId,
           }),
         });
         if (!updateResult.success) {
@@ -618,6 +632,15 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
           <DietRotationFields value={rotacao} onChange={setRotacao} />
         </CardContent>
       </Card>
+
+      <DietRefeicaoLivreFields
+        ativa={refeicaoLivreAtiva}
+        observacao={refeicaoLivreObservacao}
+        contentId={refeicaoLivreContentId}
+        onAtivaChange={setRefeicaoLivreAtiva}
+        onObservacaoChange={setRefeicaoLivreObservacao}
+        onContentIdChange={setRefeicaoLivreContentId}
+      />
 
       {/* Resumo Nutricional */}
       <Card>

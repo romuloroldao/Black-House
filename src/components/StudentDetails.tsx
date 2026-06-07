@@ -118,9 +118,10 @@ export default function StudentDetails() {
   });
   const [rotacaoDieta, setRotacaoDieta] = useState<DietRotationFormState>({
     rotacao_ativa: false,
-    rotacao_dias_plano_a: "3",
-    rotacao_dias_plano_b: "1",
-    rotacao_plano_inicial: "A",
+    blocos: [
+      { plano: "A", dias: "3" },
+      { plano: "B", dias: "1" },
+    ],
     rotacao_data_inicio: "",
   });
 
@@ -128,9 +129,10 @@ export default function StudentDetails() {
     setNovaDieta({ nome: "", objetivo: "", data_retorno: "", dias_validade: "" });
     setRotacaoDieta({
       rotacao_ativa: false,
-      rotacao_dias_plano_a: "3",
-      rotacao_dias_plano_b: "1",
-      rotacao_plano_inicial: "A",
+      blocos: [
+        { plano: "A", dias: "3" },
+        { plano: "B", dias: "1" },
+      ],
       rotacao_data_inicio: "",
     });
   };

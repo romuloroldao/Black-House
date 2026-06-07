@@ -28,16 +28,22 @@ function resolveActiveTab(tab: string): BottomNavTab | null {
   return null;
 }
 
+export function shouldShowMobileBottomNav(activeTab: string): boolean {
+  if (activeTab === "dashboard") return true;
+  if (BOTTOM_NAV_TABS.includes(activeTab as BottomNavTab)) return true;
+  if (activeTab === "chat" || activeTab === "messages") return true;
+  return false;
+}
+
 const StudentBottomNav = ({ activeTab, onTabChange, coachBadge = 0 }: StudentBottomNavProps) => {
   const resolved = resolveActiveTab(activeTab);
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-[90] border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/90 md:hidden"
-      style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+      className="student-bottom-nav-safe fixed inset-x-0 bottom-0 z-[90] border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/90 md:hidden"
       aria-label="Navegação principal"
     >
-      <div className="mx-auto grid h-16 max-w-lg grid-cols-4">
+      <div className="mx-auto grid min-h-16 max-w-lg grid-cols-4 py-1">
         {items.map((item) => {
           const Icon = item.icon;
           const isActive = resolved === item.id;
@@ -48,6 +54,11 @@ const StudentBottomNav = ({ activeTab, onTabChange, coachBadge = 0 }: StudentBot
               key={item.id}
               type="button"
               aria-current={isActive ? "page" : undefined}
+              {...(showBadge
+                ? {
+                    "aria-label": `${item.label}, ${coachBadge} mensagem${coachBadge === 1 ? "" : "s"} nova${coachBadge === 1 ? "" : "s"}`,
+                  }
+                : {})}
               className={cn(
                 "relative flex min-h-[44px] flex-col items-center justify-center gap-0.5 px-1 text-[11px] font-medium transition-colors motion-reduce:transition-none",
                 isActive ? "text-primary" : "text-muted-foreground hover:text-foreground",

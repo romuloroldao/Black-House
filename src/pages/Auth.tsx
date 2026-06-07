@@ -72,6 +72,7 @@ const Auth = () => {
   const [emailConfirmationInProgress, setEmailConfirmationInProgress] = useState(false);
   const [emailConfirmationMessage, setEmailConfirmationMessage] = useState<string | null>(null);
   const [emailConfirmationError, setEmailConfirmationError] = useState<string | null>(null);
+  const [pendingConfirmationEmail, setPendingConfirmationEmail] = useState<string | null>(null);
   const [signupCoachId, setSignupCoachId] = useState<string | null>(null);
   
   // Form states
@@ -227,8 +228,8 @@ const Auth = () => {
         description: data?.dev_confirm_url
           ? "Conta criada. Em desenvolvimento, copie o link de confirmação mostrado no console."
           : confirmationRequested
-            ? "Enviamos um e-mail de confirmação. Confirme o e-mail para ativar sua conta (verifique também o spam)."
-            : "Conta criada. O servidor ainda não tem envio de e-mail configurado; peça ao suporte um link de confirmação ou use \"Reenviar confirmação\" quando o envio estiver ativo.",
+            ? "Conta criada. Confirme seu e-mail para liberar o acesso à plataforma."
+            : "Conta criada. O envio de confirmação por e-mail ainda não está ativo; use \"Reenviar confirmação\" ou peça ao suporte.",
       });
       if (data?.dev_confirm_url) {
         console.info('[DEV] Link de confirmação de e-mail:', data.dev_confirm_url);
@@ -299,6 +300,7 @@ const Auth = () => {
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrors({});
+    setPendingConfirmationEmail(null);
     
     // Validate
     const result = signInSchema.safeParse({ email, password });
@@ -329,6 +331,17 @@ const Auth = () => {
       // O redirecionamento acontece automaticamente via useEffect quando user !== null
       // navigate('/');
     } catch (error: any) {
+      if (error.message?.includes('EMAIL_NOT_CONFIRMED')) {
+        const targetEmail = email.trim().toLowerCase();
+        setPendingConfirmationEmail(targetEmail);
+        toast({
+          title: "Confirmação pendente",
+          description: "Confirme seu e-mail para entrar. Se precisar, reenvie o link abaixo.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       // AUTH-HARDENING-001: Tratamento especial para 503 (Service Unavailable por schema inválido)
       if (error.status === 503 && error.reason === 'SCHEMA_INVALID') {
         toast({
@@ -386,13 +399,15 @@ const Auth = () => {
     setEmailConfirmationInProgress(false);
     setEmailConfirmationMessage(null);
     setEmailConfirmationError(null);
+    setPendingConfirmationEmail(null);
   };
 
-  const handleResendConfirmation = async () => {
-    if (!email) return;
+  const handleResendConfirmation = async (targetEmail?: string) => {
+    const emailToResend = (targetEmail || email || '').trim().toLowerCase();
+    if (!emailToResend) return;
     try {
       setLoading(true);
-      const data = await apiClient.resendEmailConfirmation(email) as { dev_confirm_url?: string };
+      const data = await apiClient.resendEmailConfirmation(emailToResend) as { dev_confirm_url?: string };
       if (data?.dev_confirm_url) {
         console.info('[DEV] Novo link de confirmação:', data.dev_confirm_url);
       }
@@ -954,6 +969,26 @@ const Auth = () => {
                       </p>
                     )}
                   </div>
+
+                  {pendingConfirmationEmail && (
+                    <Alert className="border-amber-500/40 bg-amber-500/10">
+                      <AlertDescription className="space-y-3">
+                        <p className="text-sm">
+                          Este cadastro ainda não confirmou o e-mail:{" "}
+                          <strong className="text-foreground">{pendingConfirmationEmail}</strong>
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="w-full"
+                          disabled={loading}
+                          onClick={() => handleResendConfirmation(pendingConfirmationEmail)}
+                        >
+                          {loading ? "Reenviando..." : "Reenviar e-mail de confirmação"}
+                        </Button>
+                      </AlertDescription>
+                    </Alert>
+                  )}
 
                   <Button 
                     type="submit" 

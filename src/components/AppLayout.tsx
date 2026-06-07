@@ -21,15 +21,16 @@ import { AnnouncementManager } from "./AnnouncementManager";
 import { EventsCalendar } from "./EventsCalendar";
 import SettingsManager from "./SettingsManager";
 import UserLinkingManager from "./UserLinkingManager";
+import EducationalContentManager from "./educational/EducationalContentManager";
 import CoachCheckinInbox from "./coach/CoachCheckinInbox";
-import { useCoachCheckinNotifications } from "@/hooks/useCoachCheckinNotifications";
+import { useCoachPortalRealtime } from "@/hooks/useCoachPortalRealtime";
 
 
 // DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001: AppLayout deve renderizar mesmo sem dados
 // REACT-RENDER-CRASH-FIX-002: useSearchParams() não deve influenciar render crítico
 // REACT-RENDER-CRASH-FIX-002: Fallback absoluto para render inicial
 const AppLayout = () => {
-  useCoachCheckinNotifications();
+  useCoachPortalRealtime();
 
   // REACT-RENDER-CRASH-FIX-002: useSearchParams() pode existir, mas não decide render crítico
   const [searchParams, setSearchParams] = useSearchParams();
@@ -89,6 +90,8 @@ const AppLayout = () => {
           return <WorkoutManager />;
         case "videos":
           return <VideoGallery />;
+        case "educational-contents":
+          return <EducationalContentManager />;
         case "nutrition":
           return <NutritionInterface />;
         case "messages":

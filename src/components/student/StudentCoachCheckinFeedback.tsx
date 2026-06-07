@@ -5,28 +5,43 @@ import { MessageSquare } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-
-type FeedbackRecord = {
-  id: string;
-  feedback: string;
-  updated_at?: string;
-  created_at?: string;
-};
+import type { WeeklyCheckinRecord } from "@/types/weekly-checkin";
+import { STUDENT_REALTIME_EVENT, type StudentRealtimeDetail } from "@/hooks/useStudentPortalRealtime";
 
 type StudentCoachCheckinFeedbackProps = {
   /** Quando omitido, usa o aluno autenticado (portal do aluno). */
   alunoId?: string;
+  /** Se informado, mostra a resposta deste check-in específico. */
+  checkinId?: string;
   className?: string;
   compact?: boolean;
 };
 
+function pickCheckinWithResposta(
+  rows: WeeklyCheckinRecord[],
+  checkinId?: string,
+): WeeklyCheckinRecord | null {
+  const withResposta = rows.filter((r) => r.coach_resposta?.trim());
+  if (checkinId) {
+    return withResposta.find((r) => r.id === checkinId) ?? null;
+  }
+  return (
+    [...withResposta].sort(
+      (a, b) =>
+        new Date(b.coach_respondido_em || b.created_at || 0).getTime() -
+        new Date(a.coach_respondido_em || a.created_at || 0).getTime(),
+    )[0] ?? null
+  );
+}
+
 export default function StudentCoachCheckinFeedback({
   alunoId,
+  checkinId,
   className,
   compact = false,
 }: StudentCoachCheckinFeedbackProps) {
   const [loading, setLoading] = useState(true);
-  const [feedback, setFeedback] = useState<FeedbackRecord | null>(null);
+  const [checkin, setCheckin] = useState<WeeklyCheckinRecord | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,7 +54,7 @@ export default function StudentCoachCheckinFeedback({
         const me = await apiClient.getMeSafe();
         if (!me.success || !me.data?.id) {
           if (!cancelled) {
-            setFeedback(null);
+            setCheckin(null);
             setLoading(false);
           }
           return;
@@ -47,21 +62,16 @@ export default function StudentCoachCheckinFeedback({
         targetAlunoId = me.data.id;
       }
 
-      const result = await apiClient.listFeedbacksAlunosSafe(targetAlunoId);
+      const result = await apiClient.listWeeklyCheckinsSafe();
 
       if (cancelled) return;
 
-      const rows = result.success && Array.isArray(result.data) ? result.data : [];
-      const latest =
-        [...rows]
-          .filter((r) => r?.feedback?.trim())
-          .sort(
-            (a, b) =>
-              new Date(b.updated_at || b.created_at || 0).getTime() -
-              new Date(a.updated_at || a.created_at || 0).getTime(),
-          )[0] ?? null;
+      const rows =
+        result.success && Array.isArray(result.data)
+          ? result.data.filter((r) => r.aluno_id === targetAlunoId)
+          : [];
 
-      setFeedback(latest);
+      setCheckin(pickCheckinWithResposta(rows, checkinId));
       setLoading(false);
     };
 
@@ -69,7 +79,36 @@ export default function StudentCoachCheckinFeedback({
     return () => {
       cancelled = true;
     };
-  }, [alunoId]);
+  }, [alunoId, checkinId]);
+
+  useEffect(() => {
+    const onRealtime = (ev: Event) => {
+      const detail = (ev as CustomEvent<StudentRealtimeDetail>).detail;
+      if (detail?.type === "checkin_respondido") {
+        window.dispatchEvent(new CustomEvent("blackhouse:checkin-feedback-reload"));
+      }
+    };
+    window.addEventListener(STUDENT_REALTIME_EVENT, onRealtime);
+    return () => window.removeEventListener(STUDENT_REALTIME_EVENT, onRealtime);
+  }, []);
+
+  useEffect(() => {
+    const reload = () => {
+      void (async () => {
+        const result = await apiClient.listWeeklyCheckinsSafe();
+        const me = alunoId ? { success: true, data: { id: alunoId } } : await apiClient.getMeSafe();
+        const targetId = alunoId || (me.success ? me.data?.id : null);
+        if (!targetId) return;
+        const rows =
+          result.success && Array.isArray(result.data)
+            ? result.data.filter((r) => r.aluno_id === targetId)
+            : [];
+        setCheckin(pickCheckinWithResposta(rows, checkinId));
+      })();
+    };
+    window.addEventListener("blackhouse:checkin-feedback-reload", reload);
+    return () => window.removeEventListener("blackhouse:checkin-feedback-reload", reload);
+  }, [alunoId, checkinId]);
 
   if (loading) {
     return compact ? (
@@ -79,13 +118,17 @@ export default function StudentCoachCheckinFeedback({
     );
   }
 
-  if (!feedback?.feedback?.trim()) {
+  const resposta = checkin?.coach_resposta?.trim();
+  if (!resposta) {
     return null;
   }
 
-  const when = feedback.updated_at || feedback.created_at;
+  const when = checkin?.coach_respondido_em || checkin?.created_at;
   const whenLabel = when
     ? format(new Date(when), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })
+    : null;
+  const checkinDate = checkin?.created_at
+    ? format(new Date(checkin.created_at), "dd/MM/yyyy", { locale: ptBR })
     : null;
 
   if (compact) {
@@ -97,9 +140,12 @@ export default function StudentCoachCheckinFeedback({
           <MessageSquare className="h-4 w-4" />
           Resposta do seu coach
         </p>
-        <p className="whitespace-pre-wrap text-sm leading-relaxed">{feedback.feedback}</p>
+        {checkinDate && (
+          <p className="mb-2 text-xs text-muted-foreground">Check-in de {checkinDate}</p>
+        )}
+        <p className="whitespace-pre-wrap text-sm leading-relaxed">{resposta}</p>
         {whenLabel && (
-          <p className="mt-2 text-xs text-muted-foreground">Atualizado em {whenLabel}</p>
+          <p className="mt-2 text-xs text-muted-foreground">Respondido em {whenLabel}</p>
         )}
       </div>
     );
@@ -112,11 +158,14 @@ export default function StudentCoachCheckinFeedback({
           <MessageSquare className="h-5 w-5" />
           Resposta do seu coach
         </CardTitle>
+        {checkinDate && (
+          <p className="text-xs text-muted-foreground">Referente ao check-in de {checkinDate}</p>
+        )}
       </CardHeader>
       <CardContent>
-        <p className="whitespace-pre-wrap text-sm leading-relaxed">{feedback.feedback}</p>
+        <p className="whitespace-pre-wrap text-sm leading-relaxed">{resposta}</p>
         {whenLabel && (
-          <p className="mt-3 text-xs text-muted-foreground">Atualizado em {whenLabel}</p>
+          <p className="mt-3 text-xs text-muted-foreground">Respondido em {whenLabel}</p>
         )}
       </CardContent>
     </Card>

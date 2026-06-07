@@ -63,6 +63,15 @@ All colors MUST be HSL.
     --student-surface: 0 0% 8%;
     --student-touch-min: 2.75rem;
 
+    /* Safe area mobile — notch/home indicator iOS + fallback barra gestos Android */
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --mobile-bottom-inset: max(12px, env(safe-area-inset-bottom, 0px));
+    --student-bottom-nav-bar: 4rem;
+    --student-bottom-nav-total: calc(var(--student-bottom-nav-bar) + var(--mobile-bottom-inset));
+    --student-main-pad-bottom: calc(var(--student-bottom-nav-total) + 1.25rem);
+    --student-main-pad-bottom-compact: calc(var(--mobile-bottom-inset) + 1.25rem);
+
     /* Scrollbar discreto — alinhado ao tema escuro (não competir com o conteúdo) */
     --scrollbar-size: 8px;
     --scrollbar-thumb: 0 0% 32%;
@@ -134,6 +143,59 @@ All colors MUST be HSL.
 
   body {
     @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-tap-highlight-color: transparent;
+    text-size-adjust: 100%;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /*
+   * Viewport dinâmico — corrige 100vh no Safari iOS (barra de endereço).
+   */
+  .min-h-screen {
+    min-height: 100vh;
+    min-height: -webkit-fill-available;
+    min-height: 100dvh;
+  }
+
+  .h-screen {
+    height: 100vh;
+    height: -webkit-fill-available;
+    height: 100dvh;
+  }
+
+  /*
+   * Inputs < 16px disparam zoom automático no Safari iOS.
+   */
+  input,
+  select,
+  textarea {
+    font-size: max(16px, 1em);
+  }
+
+  /*
+   * Fallback quando backdrop-filter não está disponível (Safari antigo).
+   */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    :where([class*="backdrop-blur"]) {
+      background-color: hsl(var(--background) / 0.96) !important;
+    }
+  }
+
+  /*
+   * Scroll suave em containers internos (iOS WebKit).
+   */
+  :where(.overflow-y-auto, .overflow-auto, .overflow-x-auto) {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /*
+   * Sticky + overflow: Safari precisa de transform isolado no pai flex.
+   */
+  :where([class*="sticky"]) {
+    position: -webkit-sticky;
+    position: sticky;
   }
 
   /*
@@ -142,6 +204,9 @@ All colors MUST be HSL.
    */
   html {
     scrollbar-gutter: stable;
+    height: 100%;
+    height: -webkit-fill-available;
+    height: 100dvh;
   }
 
   html,
@@ -231,6 +296,28 @@ All colors MUST be HSL.
       opacity: 1;
       transform: translateY(0);
     }
+  }
+}
+
+@layer utilities {
+  .student-bottom-nav-safe {
+    padding-bottom: var(--mobile-bottom-inset);
+  }
+
+  .pb-student-main {
+    padding-bottom: var(--student-main-pad-bottom);
+  }
+
+  .pb-student-main-compact {
+    padding-bottom: var(--student-main-pad-bottom-compact);
+  }
+
+  .pb-safe-bottom {
+    padding-bottom: max(1rem, var(--mobile-bottom-inset));
+  }
+
+  .pt-student-header {
+    padding-top: max(0.75rem, var(--safe-area-top));
   }
 }
 

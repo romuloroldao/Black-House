@@ -35,11 +35,17 @@ const MacroBlockSchema = z.object({
     calorias: z.number().nonnegative().nullable().optional()
 }).strict();
 
+const RotationBlockSchema = z.object({
+    plano: z.string().regex(/^[A-Z]$/),
+    dias: z.number().int().min(1).max(14),
+});
+
 const DietRotationImportFields = {
     rotacao_ativa: z.boolean().optional(),
+    rotacao_sequencia: z.array(RotationBlockSchema).nullable().optional(),
     rotacao_dias_plano_a: optionalPositiveInt(30).nullable().optional(),
     rotacao_dias_plano_b: optionalPositiveInt(30).nullable().optional(),
-    rotacao_plano_inicial: z.enum(['A', 'B']).optional(),
+    rotacao_plano_inicial: z.string().regex(/^[A-Z]$/).optional(),
     rotacao_data_inicio: z
         .union([
             z.string().regex(/^\d{4}-\d{2}-\d{2}$/),

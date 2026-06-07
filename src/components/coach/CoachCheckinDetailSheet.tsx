@@ -47,6 +47,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
+const COACH_CHECKIN_SECTIONS = CHECKIN_SECTIONS.filter((s) => s.id !== "corpo");
+
 type CoachCheckinDetailSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -58,7 +60,7 @@ type CoachCheckinDetailSheetProps = {
   onNavigate: (direction: "prev" | "next") => void;
   canNavigatePrev: boolean;
   canNavigateNext: boolean;
-  onRespondido?: (checkinId: string) => void;
+  onRespondido?: (checkinId: string, updated?: WeeklyCheckinRecord) => void;
 };
 
 export default function CoachCheckinDetailSheet({
@@ -79,7 +81,6 @@ export default function CoachCheckinDetailSheet({
   const navigate = useNavigate();
   const [section, setSection] = useState<CheckinSectionId>("nutricao");
   const [feedback, setFeedback] = useState("");
-  const [feedbackId, setFeedbackId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [markedRespondido, setMarkedRespondido] = useState(false);
@@ -93,25 +94,10 @@ export default function CoachCheckinDetailSheet({
   }, [checkin?.id]);
 
   useEffect(() => {
-    if (!open || !studentId) return;
+    if (!open || !checkin?.id) return;
     setSection("nutricao");
-
-    apiClient.listFeedbacksAlunosSafe(studentId).then((result) => {
-        if (!result.success || !Array.isArray(result.data)) return;
-        const forStudent = result.data.filter((row) => row.aluno_id === studentId);
-        const latest = [...forStudent].sort(
-          (a, b) =>
-            new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime(),
-        )[0];
-        if (latest?.feedback) {
-          setFeedback(latest.feedback);
-          setFeedbackId(latest.id ?? null);
-        } else {
-          setFeedback("");
-          setFeedbackId(null);
-        }
-      });
-  }, [open, studentId, checkin?.id]);
+    setFeedback(checkin.coach_resposta?.trim() || "");
+  }, [open, checkin?.id, checkin?.coach_resposta]);
 
   const handleSaveFeedback = async () => {
     if (!feedback.trim()) {
@@ -129,28 +115,17 @@ export default function CoachCheckinDetailSheet({
 
     setSaving(true);
     try {
-      if (feedbackId) {
-        const update = await apiClient.updateFeedbackAlunoSafe(feedbackId, {
-          feedback: feedback.trim(),
-        });
-        if (!update.success) throw new Error(update.error || "Erro ao atualizar");
-      } else {
-        const create = await apiClient.createFeedbackAlunoSafe({
-          aluno_id: studentId,
-          coach_id: user.id,
-          feedback: feedback.trim(),
-        });
-        if (!create.success) throw new Error(create.error || "Erro ao salvar");
-        if (create.data?.id) setFeedbackId(create.data.id);
+      if (!checkin?.id) {
+        throw new Error("Check-in não encontrado");
       }
 
-      if (checkin?.id) {
-        const mark = await apiClient.markWeeklyCheckinRespondidoSafe(checkin.id);
-        if (mark.success) {
-          setMarkedRespondido(true);
-          onRespondido?.(checkin.id);
-        }
+      const save = await apiClient.saveWeeklyCheckinRespostaSafe(checkin.id, feedback.trim());
+      if (!save.success || !save.data) {
+        throw new Error(save.error || "Erro ao salvar");
       }
+
+      setMarkedRespondido(true);
+      onRespondido?.(checkin.id, save.data);
 
       toast({ title: "Resposta salva", description: "O aluno verá na aba Check-in e em Progresso." });
     } catch (err: unknown) {
@@ -344,16 +319,25 @@ export default function CoachCheckinDetailSheet({
               </div>
             )}
 
+            {checkin.peso_kg != null && Number.isFinite(Number(checkin.peso_kg)) && (
+              <div className="flex flex-col gap-1 rounded-lg border border-border/60 bg-muted/30 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <span className="text-sm font-medium">{getFieldLabel("peso_kg")}</span>
+                <span className="text-sm font-semibold">
+                  {formatCheckinFieldValue("peso_kg", checkin.peso_kg)}
+                </span>
+              </div>
+            )}
+
             <Tabs value={section} onValueChange={(v) => setSection(v as CheckinSectionId)}>
               <TabsList className="grid h-auto w-full grid-cols-2 gap-1 md:grid-cols-4">
-                {CHECKIN_SECTIONS.map((s) => (
+                {COACH_CHECKIN_SECTIONS.map((s) => (
                   <TabsTrigger key={s.id} value={s.id} className="text-xs sm:text-sm">
                     {s.title}
                   </TabsTrigger>
                 ))}
               </TabsList>
 
-              {CHECKIN_SECTIONS.map((s) => (
+              {COACH_CHECKIN_SECTIONS.map((s) => (
                 <TabsContent key={s.id} value={s.id} className="mt-4 space-y-3">
                   <p className="text-sm text-muted-foreground">{s.description}</p>
                   {CHECKIN_SECTION_FIELD_KEYS[s.id]

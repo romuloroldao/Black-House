@@ -72,7 +72,7 @@ async function trendsSummary(pool, scope, alunoId) {
     'Foca adesão à dieta, treino, sono, estresse e relatos. Não inventes dados.\n\n' +
     JSON.stringify(rows.map(pickDigest), null, 2);
 
-  const parsed = await aiService.extractStructuredData('', systemPrompt, userPrompt);
+  const parsed = await aiService.extractStructuredData('', null, { systemPrompt, userPrompt });
   return {
     summary: String(parsed.summary || parsed.resumo || '').trim(),
     highlights: Array.isArray(parsed.highlights)
@@ -126,7 +126,7 @@ async function draftResponse(pool, scope, checkinId, hints = '') {
     (hints ? `Instruções do coach: ${hints}\n` : '') +
     `Check-in:\n${JSON.stringify(pickDigest(row), null, 2)}`;
 
-  const parsed = await aiService.extractStructuredData('', systemPrompt, userPrompt);
+  const parsed = await aiService.extractStructuredData('', null, { systemPrompt, userPrompt });
   const draft = String(parsed.draft || parsed.rascunho || parsed.feedback || '').trim();
   if (!draft) {
     const err = new Error('IA não devolveu rascunho utilizável');

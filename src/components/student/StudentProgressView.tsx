@@ -11,13 +11,12 @@ import {
   TrendingUp,
   ChevronRight,
   BarChart3,
+  ClipboardList,
 } from "lucide-react";
 import { toast } from "sonner";
-import { prepareImageForUpload } from "@/lib/prepare-image-upload";
 import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import StudentProgressDashboard from "./StudentProgressDashboard";
 import CheckinStreakCard from "@/components/student/today/CheckinStreakCard";
-import ProgressPhotoUploadDialog from "@/components/student/progress/ProgressPhotoUploadDialog";
 import { useAlunoHoje } from "@/hooks/useAlunoHoje";
 import { useSearchParams } from "react-router-dom";
 import { formatPhotoAgeLabel } from "@/lib/photo-evolution-utils";
@@ -36,24 +35,17 @@ const StudentProgressView = () => {
   const { data: hoje, loading: hojeLoading } = useAlunoHoje(Boolean(user));
   const [fotos, setFotos] = useState<FotoAluno[]>([]);
   const [dataLoaded, setDataLoaded] = useState(false);
-  const [alunoId, setAlunoId] = useState<string | null>(null);
-  const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [preparingImage, setPreparingImage] = useState(false);
-  const [descricao, setDescricao] = useState("");
 
   const sectionParam = searchParams.get("section");
   const focusFotos = searchParams.get("focus") === "fotos";
-  const uploadParam = searchParams.get("upload") === "1";
+  const legacyUploadParam = searchParams.get("upload") === "1";
 
   const defaultTab = useMemo(() => {
     if (sectionParam === "metrics") return "metrics";
-    if (sectionParam === "photos" || focusFotos || uploadParam) return "photos";
+    if (sectionParam === "photos" || focusFotos) return "photos";
     if (!dataLoaded) return "photos";
     return fotos.length === 0 ? "photos" : "metrics";
-  }, [sectionParam, focusFotos, uploadParam, dataLoaded, fotos.length]);
+  }, [sectionParam, focusFotos, dataLoaded, fotos.length]);
 
   const [activeTab, setActiveTab] = useState<string>(defaultTab);
 
@@ -66,26 +58,15 @@ const StudentProgressView = () => {
   }, [user]);
 
   useEffect(() => {
-    return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-    };
-  }, [previewUrl]);
-
-  useEffect(() => {
-    if (!uploadParam) return;
-    setActiveTab("photos");
-    setIsUploadOpen(true);
-    const next = new URLSearchParams(searchParams);
-    next.delete("upload");
-    setSearchParams(next, { replace: true });
-  }, [uploadParam, searchParams, setSearchParams]);
+    if (!legacyUploadParam) return;
+    setSearchParams({ tab: "checkin" }, { replace: true });
+  }, [legacyUploadParam, setSearchParams]);
 
   const loadProgressData = async () => {
     const alunoResult = await apiClient.getMeSafe();
     const aluno = alunoResult.success ? alunoResult.data : null;
 
     if (aluno) {
-      setAlunoId(aluno.id);
       const fotosResult = await apiClient.requestSafe<FotoAluno[]>(
         `/api/fotos-alunos?aluno_id=${aluno.id}`,
       );
@@ -97,81 +78,6 @@ const StudentProgressView = () => {
       setFotos(ordenadas);
     }
     setDataLoaded(true);
-  };
-
-  const clearPreview = () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(null);
-    setSelectedFile(null);
-  };
-
-  const resetUploadDialog = () => {
-    clearPreview();
-    setDescricao("");
-  };
-
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-
-    setPreparingImage(true);
-    try {
-      const prepared = await prepareImageForUpload(file);
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      setSelectedFile(prepared);
-      setPreviewUrl(URL.createObjectURL(prepared));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Não foi possível usar esta foto");
-      clearPreview();
-    } finally {
-      setPreparingImage(false);
-    }
-  };
-
-  const handleUpload = async () => {
-    if (!selectedFile || !alunoId) {
-      toast.error("Selecione ou tire uma foto antes de enviar");
-      return;
-    }
-
-    setUploading(true);
-    try {
-      const uploadResult = await apiClient.uploadFile(
-        "progress-photos",
-        `${alunoId}/${selectedFile.name}`,
-        selectedFile,
-      );
-      const publicUrl =
-        uploadResult?.url ||
-        apiClient.getPublicUrl("progress-photos", `${alunoId}/${selectedFile.name}`);
-
-      const createResult = await apiClient.requestSafe("/api/fotos-alunos", {
-        method: "POST",
-        body: JSON.stringify({
-          aluno_id: alunoId,
-          url: publicUrl,
-          descricao: descricao || null,
-        }),
-      });
-
-      if (!createResult.success) {
-        toast.error(createResult.error || "Erro ao registar a foto");
-        return;
-      }
-
-      toast.success("Foto enviada! O seu coach vê na sua ficha.");
-      setIsUploadOpen(false);
-      resetUploadDialog();
-      loadProgressData();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Erro ao enviar foto";
-      toast.error(
-        msg.includes("fetch") ? "Falha de conexão. Verifique a internet e tente de novo." : msg,
-      );
-    } finally {
-      setUploading(false);
-    }
   };
 
   const handleDeletePhoto = async (foto: FotoAluno) => {
@@ -194,6 +100,7 @@ const StudentProgressView = () => {
   };
 
   const ultimaFoto = fotos[0] ?? null;
+  const openCheckin = () => setSearchParams({ tab: "checkin" });
   const openMetrics = () => {
     setActiveTab("metrics");
     const next = new URLSearchParams(searchParams);
@@ -202,19 +109,12 @@ const StudentProgressView = () => {
     setSearchParams(next);
   };
 
-  const uploadTrigger = (
-    <Button className="w-full min-h-11 sm:w-auto" size="lg">
-      <Camera className="mr-2 h-4 w-4" />
-      {fotos.length === 0 ? "Tirar primeira foto" : "Tirar foto"}
-    </Button>
-  );
-
   return (
     <div className="min-w-0 space-y-6">
       <div className="min-w-0">
         <h1 className="text-2xl font-bold sm:text-3xl">Fotos e evolução</h1>
         <p className="mt-1 text-muted-foreground">
-          Registe o seu físico para o coach e acompanhe métricas semanais
+          Acompanhe o histórico enviado no check-in semanal e as métricas
         </p>
       </div>
 
@@ -252,25 +152,15 @@ const StudentProgressView = () => {
                   <p className="mt-1 text-sm text-muted-foreground">
                     {ultimaFoto
                       ? `${formatPhotoAgeLabel(ultimaFoto.created_at)} · ${fotos.length} foto${fotos.length === 1 ? "" : "s"} no total`
-                      : "Uma foto por semana ajuda o coach a ajustar dieta e treino na sua ficha."}
+                      : "Envie pelo menos 2 fotos no check-in semanal — o coach acompanha na sua ficha."}
                   </p>
                 </div>
               </div>
 
-              <ProgressPhotoUploadDialog
-                open={isUploadOpen}
-                onOpenChange={setIsUploadOpen}
-                trigger={uploadTrigger}
-                uploading={uploading}
-                preparingImage={preparingImage}
-                selectedFile={selectedFile}
-                previewUrl={previewUrl}
-                descricao={descricao}
-                onDescricaoChange={setDescricao}
-                onFileSelect={handleFileSelect}
-                onUpload={handleUpload}
-                onCancel={resetUploadDialog}
-              />
+              <Button className="w-full min-h-11 sm:w-auto" size="lg" onClick={openCheckin}>
+                <ClipboardList className="mr-2 h-4 w-4" />
+                {hoje?.contadores?.checkin_due ? "Fazer check-in semanal" : "Abrir check-in"}
+              </Button>
             </CardContent>
           </Card>
 
@@ -324,13 +214,13 @@ const StudentProgressView = () => {
                 <div>
                   <p className="font-medium">Ainda sem fotos</p>
                   <p className="mt-2 text-sm text-muted-foreground max-w-sm">
-                    Tire uma foto agora — o seu coach vê na ficha do aluno e consegue acompanhar a
-                    evolução ao longo das semanas.
+                    As fotos são enviadas no check-in semanal (mínimo de 2). O seu coach vê na
+                    ficha e acompanha a evolução ao longo das semanas.
                   </p>
                 </div>
-                <Button className="min-h-11" onClick={() => setIsUploadOpen(true)}>
-                  <Camera className="mr-2 h-4 w-4" />
-                  Tirar primeira foto
+                <Button className="min-h-11" onClick={openCheckin}>
+                  <ClipboardList className="mr-2 h-4 w-4" />
+                  Ir para o check-in
                 </Button>
               </CardContent>
             </Card>
@@ -354,7 +244,7 @@ const StudentProgressView = () => {
             loading={hojeLoading}
             streak={hoje?.checkin_streak ?? null}
             checkinDue={hoje?.contadores?.checkin_due}
-            onOpenCheckin={() => setSearchParams({ tab: "checkin" })}
+            onOpenCheckin={openCheckin}
           />
           <StudentProgressDashboard />
         </TabsContent>

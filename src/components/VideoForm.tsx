@@ -21,6 +21,7 @@ import {
   ExternalLink,
   CheckCircle2
 } from "lucide-react";
+import { VIDEO_CATEGORIES } from "@/lib/video-categories";
 
 interface VideoFormProps {
   video?: any;
@@ -48,16 +49,7 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
   const [youtubeData, setYoutubeData] = useState(null);
   const [isValidating, setIsValidating] = useState(false);
 
-  const categories = [
-    "Técnica",
-    "Cardio", 
-    "Força",
-    "Mobilidade",
-    "Funcional",
-    "Reabilitação",
-    "Nutrição",
-    "Motivacional"
-  ];
+  const categories = [...VIDEO_CATEGORIES];
 
   const visibilityOptions = [
     { value: "active-students", label: "Alunos Ativos", description: "Apenas alunos com planos ativos" },

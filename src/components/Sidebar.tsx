@@ -32,7 +32,8 @@ import {
   Megaphone,
   Menu,
   Link2,
-  ListChecks
+  ListChecks,
+  BookOpen
 } from "lucide-react";
 
 interface SidebarProps {
@@ -250,6 +251,11 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       id: "videos",
       label: "Galeria de Vídeos",
       icon: Video,
+    },
+    {
+      id: "educational-contents",
+      label: "Conteúdos Educativos",
+      icon: BookOpen,
     },
     {
       id: "nutrition",

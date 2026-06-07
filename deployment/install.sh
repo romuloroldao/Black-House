@@ -37,7 +37,9 @@ chmod +x /root/scripts/*.sh
 
 # Copiar configuração do Nginx
 echo "Configurando Nginx..."
-cp /root/deployment/nginx.conf /etc/nginx/sites-available/blackhouse
+mkdir -p /etc/nginx/snippets
+cp /root/deployment/cloudflare-real-ip.conf /etc/nginx/snippets/cloudflare-real-ip.conf
+cp /root/deployment/nginx-blackhouse.conf /etc/nginx/sites-available/blackhouse
 ln -sf /etc/nginx/sites-available/blackhouse /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
 

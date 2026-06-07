@@ -92,6 +92,7 @@ export const API_CONTRACT = {
     },
     pendentesCount: () => `${API_BASE}/api/weekly-checkins/pendentes/count`,
     markRespondido: (id: string) => `${API_BASE}/api/weekly-checkins/${id}/respondido`,
+    saveResposta: (id: string) => `${API_BASE}/api/weekly-checkins/${id}/resposta`,
     aiTrendsSummary: () => `${API_BASE}/api/weekly-checkins/ai/trends-summary`,
     aiDraftResponse: (checkinId: string) =>
       `${API_BASE}/api/weekly-checkins/${encodeURIComponent(checkinId)}/ai/draft-response`,
@@ -110,10 +111,25 @@ export const API_CONTRACT = {
     list: () => `${API_BASE}/api/lives`,
     byId: (id: string) => `${API_BASE}/api/lives/${id}`,
   },
+  educationalContents: {
+    list: (query?: { category?: string; q?: string; active?: boolean }) => {
+      const q = new URLSearchParams();
+      if (query?.category) q.set('category', query.category);
+      if (query?.q) q.set('q', query.q);
+      if (query?.active != null) q.set('active', String(query.active));
+      const qs = q.toString();
+      return `${API_BASE}/api/educational-contents${qs ? `?${qs}` : ''}`;
+    },
+    byId: (id: string) => `${API_BASE}/api/educational-contents/${id}`,
+    create: () => `${API_BASE}/api/educational-contents`,
+    update: (id: string) => `${API_BASE}/api/educational-contents/${id}`,
+    delete: (id: string) => `${API_BASE}/api/educational-contents/${id}`,
+  },
   uploads: {
     avatar: () => `${API_BASE}/api/uploads/avatar`,
     avatarForUser: (userId: string) => `${API_BASE}/api/uploads/avatar/${userId}`,
     progressPhoto: () => `${API_BASE}/api/uploads/progress-photo`,
+    educationalPdf: () => `${API_BASE}/api/uploads/educational-pdf`,
   },
   import: {
     parsePdf: () => `${API_BASE}/api/import/parse-pdf`,
@@ -201,6 +217,9 @@ const CONTRACT_PATTERNS = [
   '/api/alunos/me/hoje',
   '/api/alunos/me/notification-preferences',
   '/api/alunos/link-user',
+  '/api/alunos/unlinked-registrations',
+  '/api/alunos/adopt-registration',
+  '/api/alunos/dismiss-registration',
   '/api/alunos',
   '/api/alunos/:id',
   '/api/recurring-charges-config',
@@ -240,6 +259,7 @@ const CONTRACT_PATTERNS = [
   '/api/weekly-checkins/ai/trends-summary',
   '/api/weekly-checkins/:id/ai/draft-response',
   '/api/weekly-checkins/:id/respondido',
+  '/api/weekly-checkins/:id/resposta',
   '/api/weekly-checkins/pendentes/count',
   '/api/uploads/avatar',
   '/api/uploads/avatar/:userId',
@@ -247,6 +267,8 @@ const CONTRACT_PATTERNS = [
   '/api/uploads/storage/progress-photos/:alunoId/:filename',
   '/api/videos',
   '/api/videos/:id',
+  '/api/educational-contents',
+  '/api/educational-contents/:id',
   '/api/lives',
   '/api/lives/:id',
   '/api/import/parse-pdf',

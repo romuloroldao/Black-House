@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import VideoForm from "./VideoForm";
 import LiveManager from "./LiveManager";
+import { VIDEO_CATEGORIES, VIDEO_CATEGORY_FILTER_ALL } from "@/lib/video-categories";
 
 const VideoGallery = () => {
   const { confirm } = useConfirm();
@@ -93,11 +94,12 @@ const VideoGallery = () => {
   };
 
   const categories = [
-    { id: "all", label: "Todos", count: videos.length },
-    { id: "Técnica", label: "Técnica", count: videos.filter(v => v.category === "Técnica").length },
-    { id: "Cardio", label: "Cardio", count: videos.filter(v => v.category === "Cardio").length },
-    { id: "Mobilidade", label: "Mobilidade", count: videos.filter(v => v.category === "Mobilidade").length },
-    { id: "Força", label: "Força", count: videos.filter(v => v.category === "Força").length }
+    { id: VIDEO_CATEGORY_FILTER_ALL, label: "Todos", count: videos.length },
+    ...VIDEO_CATEGORIES.map((cat) => ({
+      id: cat,
+      label: cat,
+      count: videos.filter((v) => v.category === cat).length,
+    })),
   ];
 
   const visibilityLabels = {
@@ -112,7 +114,8 @@ const VideoGallery = () => {
                          (video.description || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                          safeArray(video.tags).some(tag => String(tag).toLowerCase().includes(searchTerm.toLowerCase()));
     
-    const matchesCategory = selectedCategory === "all" || video.category === selectedCategory;
+    const matchesCategory =
+      selectedCategory === VIDEO_CATEGORY_FILTER_ALL || video.category === selectedCategory;
     
     return matchesSearch && matchesCategory;
   });

@@ -1,0 +1,53 @@
+{
+  "results": [
+    {
+      "area": "Coach",
+      "name": "Treinos via rest/v1 (coach)",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Aluno",
+      "name": "Dietas aluno via rest/v1",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Aluno",
+      "name": "Treinos aluno via rest/v1",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Aluno",
+      "name": "Hoje aluno (rota semântica)",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Coach",
+      "name": "Biblioteca educativa coach",
+      "pass": false,
+      "detail": "500 permission denied for table educational_contents",
+      "severity": "P0"
+    },
+    {
+      "area": "Coach",
+      "name": "Check-ins pendentes",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Aluno",
+      "name": "Conteúdos educativos (leitura)",
+      "pass": false,
+      "detail": "403 Acesso negado",
+      "severity": "P1"
+    }
+  ]
+}

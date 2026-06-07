@@ -11,6 +11,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { DateInputBR } from "@/components/ui/date-input-br";
+import { prepareImageForUpload } from "@/lib/prepare-image-upload";
 
 const StudentProfileView = () => {
   const { user } = useAuth();
@@ -88,29 +89,19 @@ const StudentProfileView = () => {
       return;
     }
 
-    // Validate file type
-    if (!file.type.startsWith("image/")) {
-      toast.error("Por favor, selecione uma imagem válida");
-      event.target.value = "";
-      return;
-    }
-
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("A imagem deve ter no máximo 5MB");
+    if (file.size > 12 * 1024 * 1024) {
+      toast.error("A imagem deve ter no máximo 12 MB");
       event.target.value = "";
       return;
     }
 
     setUploadingAvatar(true);
     try {
-      const fileExt = file.name.split(".").pop();
-      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+      const prepared = await prepareImageForUpload(file);
+      const fileName = `${user.id}-${Date.now()}.jpg`;
       const filePath = `${user.id}/${fileName}`;
 
-      // Upload to storage - DESIGN-VPS-ONLY-CANONICAL-DATA-AND-STORAGE-002
-      // Rota canônica /api/avatar gerencia upload e retorna URL
-      const uploadResult = await apiClient.uploadFile("avatars", filePath, file);
+      const uploadResult = await apiClient.uploadFile("avatars", filePath, prepared);
       const publicUrl = uploadResult.url || apiClient.getPublicUrl("avatars", filePath);
 
       // Atualizar avatar via rota semântica

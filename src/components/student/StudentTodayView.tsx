@@ -74,7 +74,7 @@ const StudentTodayView = ({ hojeState }: StudentTodayViewProps) => {
       <TodayPhotoCard
         loading={loading}
         fotos={data?.fotos_evolucao}
-        onTirarFoto={() => openTab("progress", { section: "photos", upload: "1" })}
+        onTirarFoto={() => openTab("checkin")}
         onVerGaleria={() => openTab("progress", { section: "photos" })}
       />
 

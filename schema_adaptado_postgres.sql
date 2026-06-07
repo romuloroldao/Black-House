@@ -377,6 +377,7 @@ CREATE TABLE IF NOT EXISTS public.fotos_alunos (
   coach_id uuid,
   url text NOT NULL,
   descricao text,
+  weekly_checkin_id uuid,
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT fotos_alunos_pkey PRIMARY KEY (id),
   CONSTRAINT fotos_alunos_aluno_id_fkey FOREIGN KEY (aluno_id) REFERENCES public.alunos(id),
@@ -608,6 +609,23 @@ CREATE TABLE IF NOT EXISTS public.user_roles (
   CONSTRAINT user_roles_user_id_fkey FOREIGN KEY (user_id) REFERENCES app_auth.users(id)
 );
 
+CREATE TABLE IF NOT EXISTS public.educational_contents (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  coach_id uuid NOT NULL,
+  title character varying(255) NOT NULL,
+  description text,
+  category character varying(100),
+  content_type character varying(20) NOT NULL CHECK (content_type = ANY (ARRAY['pdf'::text, 'article'::text, 'video'::text])),
+  file_url text,
+  article_content text,
+  video_url text,
+  active boolean NOT NULL DEFAULT true,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT educational_contents_pkey PRIMARY KEY (id),
+  CONSTRAINT educational_contents_coach_id_fkey FOREIGN KEY (coach_id) REFERENCES app_auth.users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS public.videos (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   titulo text NOT NULL,
@@ -656,9 +674,11 @@ CREATE TABLE IF NOT EXISTS public.weekly_checkins (
   media_evacuacoes text NOT NULL CHECK (media_evacuacoes = ANY (ARRAY['dias_sem'::text, '1'::text, '2'::text, '3'::text, 'mais_4'::text])),
   formato_fezes text NOT NULL CHECK (formato_fezes = ANY (ARRAY['tipo1'::text, 'tipo2'::text, 'tipo3'::text, 'tipo4'::text, 'tipo5'::text, 'tipo6'::text, 'tipo7'::text])),
   nao_cumpriu_porque text,
+  peso_kg numeric(6, 2),
   status text DEFAULT 'concluido'::text,
   coach_respondido_em timestamp with time zone,
   coach_respondido_por uuid,
+  coach_resposta text,
   CONSTRAINT weekly_checkins_pkey PRIMARY KEY (id),
   CONSTRAINT weekly_checkins_aluno_id_fkey FOREIGN KEY (aluno_id) REFERENCES public.alunos(id),
   CONSTRAINT weekly_checkins_coach_respondido_por_fkey FOREIGN KEY (coach_respondido_por) REFERENCES app_auth.users(id)
@@ -682,6 +702,7 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE INDEX IF NOT EXISTS idx_weekly_checkins_relato_trgm
   ON public.weekly_checkins USING gin (nao_cumpriu_porque gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_fotos_alunos_aluno_id ON public.fotos_alunos(aluno_id);
+CREATE INDEX IF NOT EXISTS idx_fotos_alunos_weekly_checkin_id ON public.fotos_alunos(weekly_checkin_id) WHERE weekly_checkin_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_eventos_coach_id ON public.eventos(coach_id);
 CREATE INDEX IF NOT EXISTS idx_asaas_payments_aluno_id ON public.asaas_payments(aluno_id);
 CREATE INDEX IF NOT EXISTS idx_asaas_payments_coach_id ON public.asaas_payments(coach_id);
@@ -820,6 +841,24 @@ ALTER TABLE public.itens_dieta ADD CONSTRAINT itens_dieta_unidade_quantidade_che
   unidade_quantidade = ANY (ARRAY['g'::text, 'ml'::text, 'un'::text])
 );
 
+-- Check-in semanal: peso e fotos vinculadas ao registo
+ALTER TABLE public.weekly_checkins
+  ADD COLUMN IF NOT EXISTS peso_kg numeric(6, 2);
+
+ALTER TABLE public.fotos_alunos
+  ADD COLUMN IF NOT EXISTS weekly_checkin_id uuid;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fotos_alunos_weekly_checkin_id_fkey'
+  ) THEN
+    ALTER TABLE public.fotos_alunos
+      ADD CONSTRAINT fotos_alunos_weekly_checkin_id_fkey
+      FOREIGN KEY (weekly_checkin_id) REFERENCES public.weekly_checkins(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
 -- ============================================================================
 -- COMENTÁRIOS
 -- ============================================================================
@@ -860,7 +899,19 @@ ALTER TABLE public.dietas
   ADD COLUMN IF NOT EXISTS rotacao_dias_plano_a smallint,
   ADD COLUMN IF NOT EXISTS rotacao_dias_plano_b smallint,
   ADD COLUMN IF NOT EXISTS rotacao_plano_inicial text NOT NULL DEFAULT 'A',
-  ADD COLUMN IF NOT EXISTS rotacao_data_inicio date;
+  ADD COLUMN IF NOT EXISTS rotacao_data_inicio date,
+  ADD COLUMN IF NOT EXISTS rotacao_sequencia jsonb,
+  ADD COLUMN IF NOT EXISTS refeicao_livre_ativa boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS refeicao_livre_observacao text,
+  ADD COLUMN IF NOT EXISTS refeicao_livre_content_id uuid;
+
+DO $$ BEGIN
+  ALTER TABLE public.dietas
+    ADD CONSTRAINT dietas_refeicao_livre_content_id_fkey
+    FOREIGN KEY (refeicao_livre_content_id)
+    REFERENCES public.educational_contents(id)
+    ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 ALTER TABLE public.alunos_treinos
   ADD COLUMN IF NOT EXISTS data_retorno date,

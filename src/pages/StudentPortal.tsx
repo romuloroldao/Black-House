@@ -6,7 +6,7 @@ import { useSearchParams } from "react-router-dom";
 import { Menu } from "lucide-react";
 import StudentSidebar from "@/components/student/StudentSidebar";
 import StudentTodayView from "@/components/student/StudentTodayView";
-import StudentBottomNav from "@/components/student/StudentBottomNav";
+import StudentBottomNav, { shouldShowMobileBottomNav } from "@/components/student/StudentBottomNav";
 import { useAlunoHoje } from "@/hooks/useAlunoHoje";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDataContext } from "@/contexts/DataContext";
@@ -20,8 +20,10 @@ import StudentProfileView from "@/components/student/StudentProfileView";
 import StudentReportsView from "@/components/student/StudentReportsView";
 import StudentWeeklyCheckin from "@/components/student/StudentWeeklyCheckin";
 import NotificationsPopover from "@/components/NotificationsPopover";
+import { useStudentPortalRealtime } from "@/hooks/useStudentPortalRealtime";
 import { Button } from "@/components/ui/button";
 import logoWhite from "@/assets/logo-white.svg";
+import { cn } from "@/lib/utils";
 
 // RBAC-01: StudentPortal usa payment_status do contexto (via ProtectedRoute)
 // A tela de bloqueio é rota separada (/portal-aluno/blocked)
@@ -65,6 +67,16 @@ const StudentPortal = () => {
     setSearchParams({ tab, ...extra });
     setMobileNavOpen(false);
   };
+
+  useStudentPortalRealtime({ onNavigate: handleTabChange });
+
+  useEffect(() => {
+    const onRealtime = () => {
+      void hojeState.refetch();
+    };
+    window.addEventListener("blackhouse:student-realtime", onRealtime);
+    return () => window.removeEventListener("blackhouse:student-realtime", onRealtime);
+  }, [hojeState.refetch]);
 
   // DESIGN-ROOT-RENDER-UNBLOCK-001: renderContent deve sempre retornar componente válido
   const renderContent = () => {
@@ -112,6 +124,7 @@ const StudentPortal = () => {
   // DESIGN-ROOT-RENDER-UNBLOCK-001: Garantir que sempre retorna JSX válido
   try {
     const content = renderContent();
+    const showMobileBottomNav = shouldShowMobileBottomNav(activeTab);
     if (!content) {
       // DESIGN-ROOT-RENDER-UNBLOCK-001: Se renderContent retornar null/undefined, usar fallback
       console.warn('[DESIGN-ROOT-RENDER-UNBLOCK-001] renderContent retornou null/undefined. Usando fallback.');
@@ -126,6 +139,12 @@ const StudentPortal = () => {
 
     return (
       <div className="relative flex h-dvh min-h-0 w-full min-w-0 overflow-hidden bg-background">
+        <a
+          href="#student-main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[200] focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          Ir para o conteúdo
+        </a>
         <StudentSidebar
           activeTab={activeTab}
           onTabChange={handleTabChange}
@@ -149,7 +168,16 @@ const StudentPortal = () => {
               <NotificationsPopover onNavigate={handleTabChange} />
             </div>
           </header>
-          <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] p-4 pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:p-6 md:pb-6 lg:p-8">
+          <main
+            id="student-main-content"
+            tabIndex={-1}
+            aria-live="polite"
+            className={cn(
+              "min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] p-4 md:p-6 lg:p-8",
+              showMobileBottomNav ? "max-md:pb-student-main" : "max-md:pb-student-main-compact",
+              "md:pb-6",
+            )}
+          >
             <div className="mb-4 hidden justify-end md:flex">
               <NotificationsPopover onNavigate={handleTabChange} />
             </div>
@@ -158,11 +186,13 @@ const StudentPortal = () => {
             </div>
           </main>
           <StudentOnboardingDialog open={onboardingOpen} onOpenChange={setOnboardingOpen} />
-          <StudentBottomNav
-            activeTab={activeTab}
-            onTabChange={handleTabChange}
-            coachBadge={coachUnreadTotal}
-          />
+          {showMobileBottomNav ? (
+            <StudentBottomNav
+              activeTab={activeTab}
+              onTabChange={handleTabChange}
+              coachBadge={coachUnreadTotal}
+            />
+          ) : null}
         </div>
       </div>
     );

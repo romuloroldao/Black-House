@@ -20,6 +20,7 @@ const resolveCoachOrFailMiddleware = require('../middleware/resolveCoachOrFail')
 const validateRole = require('../middleware/validateRole');
 const createAlimentosRouter = require('./alimentos');
 const createUploadsRouter = require('./uploads');
+const createEducationalContentsRouter = require('./educational-contents');
 const { deleteUserByUserRoleId } = require('../utils/deleteUserByUserRoleId');
 const AsaasService = require('../services/asaas.service');
 const { encryptCoachAsaasApiKey, decryptCoachAsaasApiKey } = require('../utils/asaas-coach-secret-crypto');
@@ -90,6 +91,9 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
 
   // ROTAS: UPLOADS — PostgreSQL + ficheiros em disco (sem Supabase Storage)
   router.use('/uploads', createUploadsRouter(pool, authenticate));
+
+  // ROTAS: CONTEÚDOS EDUCATIVOS
+  router.use('/educational-contents', createEducationalContentsRouter(pool, authenticate, domainSchemaGuard));
 
   // ============================================================================
   // ROTAS: ALUNOS
@@ -3426,8 +3430,9 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
         queryParams = [];
         paramIndex = 1;
       } else if (req.user.role === 'coach') {
-        // Coach vê suas próprias notificações
-        query = 'SELECT * FROM public.notificacoes WHERE coach_id = $1';
+        query = `SELECT * FROM public.notificacoes
+                 WHERE coach_id = $1
+                   AND NOT (tipo = 'checkin_reminder' AND titulo = 'Check-in semanal')`;
         queryParams.push(req.user.id);
         paramIndex++;
       } else if (req.user.role === 'aluno') {
@@ -3435,7 +3440,10 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
         if (!alunoRow) {
           return res.json([]);
         }
-        query = 'SELECT * FROM public.notificacoes WHERE aluno_id = $1';
+        query = `SELECT * FROM public.notificacoes
+                 WHERE aluno_id = $1
+                   AND tipo NOT IN ('new_weekly_checkin')
+                   AND NOT (tipo = 'checkin_reminder' AND titulo = 'Lembrete de Check-in')`;
         queryParams.push(alunoRow.id);
         paramIndex++;
       } else {
@@ -3847,37 +3855,11 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     validateRole(['aluno']),
     resolveAlunoOrFail,
     async (req, res) => {
-      try {
-        const { aluno_id: alunoIdBody, url, descricao } = req.body || {};
-        if (!alunoIdBody || !url) {
-          return res.status(400).json({
-            error: 'aluno_id e url são obrigatórios',
-            error_code: 'MISSING_FIELDS',
-          });
-        }
-        if (!isValidUUID(String(alunoIdBody))) {
-          return res.status(400).json({ error: 'aluno_id inválido', error_code: 'INVALID_UUID' });
-        }
-        if (req.aluno.id !== alunoIdBody) {
-          return res.status(403).json({
-            error: 'aluno_id não corresponde ao seu perfil',
-            error_code: 'ALUNO_MISMATCH',
-          });
-        }
-        const ins = await pool.query(
-          `INSERT INTO public.fotos_alunos (aluno_id, url, descricao)
-           VALUES ($1, $2, $3)
-           RETURNING id, aluno_id, coach_id, url, descricao, created_at`,
-          [
-            alunoIdBody,
-            String(url),
-            descricao != null ? String(descricao) : null,
-          ],
-        );
-        return res.status(201).json(ins.rows[0]);
-      } catch (error) {
-        return res.status(500).json({ error: error.message || 'Erro ao registar foto' });
-      }
+      return res.status(403).json({
+        error:
+          'As fotos de evolução devem ser enviadas no check-in semanal (aba Check-in).',
+        error_code: 'CHECKIN_PHOTOS_ONLY_VIA_WEEKLY',
+      });
     },
   );
 
@@ -4196,6 +4178,102 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     },
   );
 
+  router.patch(
+    '/weekly-checkins/:id/resposta',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'assistant']),
+    attachCoachScope,
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const dbCols = await loadWeeklyCheckinsColumns();
+        if (!dbCols.has('coach_respondido_em')) {
+          return res.status(503).json({
+            error: 'Migração pendente: coach_respondido_em',
+            error_code: 'MIGRATION_PENDING',
+          });
+        }
+        if (!dbCols.has('coach_resposta')) {
+          return res.status(503).json({
+            error: 'Migração pendente: coach_resposta',
+            error_code: 'MIGRATION_PENDING',
+          });
+        }
+
+        const { resposta } = req.body || {};
+        if (!resposta || !String(resposta).trim()) {
+          return res.status(400).json({
+            error: 'resposta é obrigatória',
+            error_code: 'MISSING_RESPOSTA',
+          });
+        }
+
+        const { id } = req.params;
+        const existing = await pool.query(
+          `SELECT w.id, w.aluno_id, a.coach_id
+           FROM public.weekly_checkins w
+           INNER JOIN public.alunos a ON a.id = w.aluno_id
+           WHERE w.id = $1`,
+          [id],
+        );
+        if (existing.rows.length === 0) {
+          return res.status(404).json({ error: 'Check-in não encontrado', error_code: 'NOT_FOUND' });
+        }
+        if (req.user.role !== 'admin') {
+          const ok = await assertCoachCanAccessAluno(
+            pool,
+            req.coachScope,
+            existing.rows[0].aluno_id,
+          );
+          if (!ok) {
+            return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+          }
+        }
+
+        const upd = await pool.query(
+          `UPDATE public.weekly_checkins
+           SET coach_resposta = $1,
+               coach_respondido_em = COALESCE(coach_respondido_em, now()),
+               coach_respondido_por = COALESCE(coach_respondido_por, $2)
+           WHERE id = $3
+           RETURNING *`,
+          [String(resposta).trim(), req.user.id, id],
+        );
+
+        const checkinRow = upd.rows[0];
+        const alunoId = existing.rows[0].aluno_id;
+
+        if (notificationService && checkinRow?.id && alunoId) {
+          let coachNome = null;
+          try {
+            const coachR = await pool.query(
+              `SELECT cp.nome_completo FROM public.coach_profiles cp WHERE cp.user_id = $1 LIMIT 1`,
+              [req.user.id],
+            );
+            coachNome = coachR.rows[0]?.nome_completo || null;
+          } catch {
+            /* opcional */
+          }
+          void notificationService
+            .notifyCheckinRespondido({
+              alunoId,
+              checkinId: checkinRow.id,
+              coachNome,
+            })
+            .catch((err) => {
+              console.warn('[checkin] Falha ao notificar aluno:', err?.message || err);
+            });
+        }
+
+        return res.json(checkinRow);
+      } catch (error) {
+        console.error('Erro ao salvar resposta do check-in:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao salvar resposta' });
+      }
+    },
+  );
+
   router.get(
     '/weekly-checkins',
     authenticate,
@@ -4281,6 +4359,10 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     hasCheckinThisWeek,
     startOfNextCalendarWeek,
   } = require('../utils/checkin-week');
+  const { parsePesoKg, MIN_KG, MAX_KG } = require('../utils/checkin-peso');
+  const { validateCheckinFieldValues, mapCheckinDbError } = require('../utils/checkin-field-validation');
+
+  const MIN_CHECKIN_PHOTOS = 2;
 
   // POST /api/checkins - Criar check-in semanal
   // DESIGN-GUARD-RAILS-ROLE-ACCESS-003: Rota apenas para alunos
@@ -4357,6 +4439,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
         'formato_fezes',
         'nao_cumpriu_porque',
         'status',
+        'peso_kg',
       ]);
 
       const REQUIRED_CHECKIN = [
@@ -4385,6 +4468,8 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
 
       let columns;
       let values;
+      let pesoKg = null;
+      let fotosInput = [];
 
       if (isLegacyWeekly) {
         const tipoToBristol = (t) => {
@@ -4458,6 +4543,15 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           if (!dbCols.has(k)) delete insertData[k];
         }
 
+        pesoKg = dbCols.has('peso_kg') ? parsePesoKg(req.body.peso_kg) : null;
+        if (dbCols.has('peso_kg') && pesoKg == null) {
+          return res.status(400).json({
+            error: `Peso inválido. Informe um valor entre ${MIN_KG} e ${MAX_KG} kg.`,
+            error_code: 'CHECKIN_PESO_INVALID',
+          });
+        }
+        if (pesoKg != null) insertData.peso_kg = pesoKg;
+
         const missing = REQUIRED_CHECKIN.filter(
           (k) => insertData[k] === undefined || insertData[k] === null || insertData[k] === '',
         );
@@ -4469,8 +4563,34 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           });
         }
 
+        fotosInput = Array.isArray(req.body.fotos) ? req.body.fotos : [];
+        if (fotosInput.length < MIN_CHECKIN_PHOTOS) {
+          return res.status(400).json({
+            error: `Envie pelo menos ${MIN_CHECKIN_PHOTOS} fotos no check-in semanal.`,
+            error_code: 'CHECKIN_PHOTOS_REQUIRED',
+            min_photos: MIN_CHECKIN_PHOTOS,
+          });
+        }
+        for (const f of fotosInput) {
+          if (!f?.url || typeof f.url !== 'string' || !String(f.url).trim()) {
+            return res.status(400).json({
+              error: 'Cada foto deve ter uma URL válida',
+              error_code: 'CHECKIN_PHOTOS_INVALID',
+            });
+          }
+        }
+
         columns = Object.keys(insertData);
         values = Object.values(insertData);
+
+        const fieldValidation = validateCheckinFieldValues(insertData);
+        if (!fieldValidation.ok) {
+          return res.status(400).json({
+            error: fieldValidation.message,
+            error_code: 'CHECKIN_VALIDATION',
+            field: fieldValidation.field,
+          });
+        }
       }
 
       const placeholders = values.map((_, i) => `$${i + 2}`).join(', ');
@@ -4481,8 +4601,52 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
                 RETURNING *
             `;
 
-      const result = await pool.query(query, [aluno.id, ...values]);
-      const createdCheckin = result.rows[0];
+      const client = await pool.connect();
+      let createdCheckin;
+      try {
+        await client.query('BEGIN');
+        const result = await client.query(query, [aluno.id, ...values]);
+        createdCheckin = result.rows[0];
+
+        const hasCheckinPhotoCol = (
+          await client.query(
+            `SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = 'fotos_alunos' AND column_name = 'weekly_checkin_id'`,
+          )
+        ).rows.length > 0;
+
+        for (const f of fotosInput) {
+          const url = String(f.url).trim();
+          const descricao = f.descricao != null ? String(f.descricao) : null;
+          if (hasCheckinPhotoCol) {
+            await client.query(
+              `INSERT INTO public.fotos_alunos (aluno_id, url, descricao, weekly_checkin_id)
+               VALUES ($1, $2, $3, $4)`,
+              [aluno.id, url, descricao, createdCheckin.id],
+            );
+          } else {
+            await client.query(
+              `INSERT INTO public.fotos_alunos (aluno_id, url, descricao)
+               VALUES ($1, $2, $3)`,
+              [aluno.id, url, descricao],
+            );
+          }
+        }
+
+        if (pesoKg != null && dbCols.has('peso_kg')) {
+          await client.query(`UPDATE public.alunos SET peso = $1 WHERE id = $2`, [
+            Math.round(pesoKg),
+            aluno.id,
+          ]);
+        }
+
+        await client.query('COMMIT');
+      } catch (txErr) {
+        await client.query('ROLLBACK');
+        throw txErr;
+      } finally {
+        client.release();
+      }
 
       if (notificationService && aluno.coach_id && createdCheckin?.id) {
         void notificationService
@@ -4508,6 +4672,10 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
       });
     } catch (error) {
       console.error('Erro ao criar check-in:', error);
+      const mapped = mapCheckinDbError(error);
+      if (mapped) {
+        return res.status(400).json(mapped);
+      }
       res.status(500).json({
         error: error.message || 'Erro ao criar check-in',
         error_code: 'CHECKIN_CREATE_ERROR'
@@ -5111,6 +5279,241 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
       res.status(500).json({
         error: error.message || 'Erro ao deletar vídeo',
         error_code: 'VIDEO_DELETE_ERROR'
+      });
+    }
+  });
+
+  // ============================================================================
+  // ROTAS: TREINOS (templates e fichas do coach)
+  // ============================================================================
+  const TREINO_DIFICULDADES = ['Iniciante', 'Intermediário', 'Avançado'];
+  const TREINO_WRITABLE = new Set([
+    'nome',
+    'descricao',
+    'duracao',
+    'dificuldade',
+    'categoria',
+    'num_exercicios',
+    'is_template',
+    'tags',
+    'exercicios',
+  ]);
+
+  async function fetchTreinoById(treinoId) {
+    const r = await pool.query('SELECT * FROM public.treinos WHERE id = $1 LIMIT 1', [treinoId]);
+    return r.rows[0] || null;
+  }
+
+  async function canReadTreino(req, treinoId) {
+    const treino = await fetchTreinoById(treinoId);
+    if (!treino) return { treino: null, allowed: false, reason: 'NOT_FOUND' };
+    if (req.user.role === 'admin') return { treino, allowed: true };
+    if (req.user.role === 'coach' && String(treino.coach_id) === String(req.user.id)) {
+      return { treino, allowed: true };
+    }
+    if (req.user.role === 'aluno') {
+      const alunoRow = await getAlunoRowForAuthUser(req.user.id);
+      if (!alunoRow) return { treino, allowed: false, reason: 'FORBIDDEN' };
+      const link = await pool.query(
+        `SELECT 1 FROM public.alunos_treinos
+         WHERE aluno_id = $1 AND treino_id = $2
+         LIMIT 1`,
+        [alunoRow.id, treinoId],
+      );
+      if (link.rows.length > 0) return { treino, allowed: true };
+    }
+    return { treino, allowed: false, reason: 'FORBIDDEN' };
+  }
+
+  // GET /api/treinos — coach: próprios treinos; admin: todos
+  router.get('/treinos', authenticate, domainSchemaGuard, validateRole(['coach', 'admin']), async (req, res) => {
+    try {
+      if (req.user.role === 'admin') {
+        const result = await pool.query(
+          `SELECT * FROM public.treinos ORDER BY updated_at DESC NULLS LAST, created_at DESC`,
+        );
+        return res.json(result.rows);
+      }
+      const result = await pool.query(
+        `SELECT * FROM public.treinos WHERE coach_id = $1 ORDER BY updated_at DESC NULLS LAST, created_at DESC`,
+        [req.user.id],
+      );
+      return res.json(result.rows);
+    } catch (error) {
+      console.error('Erro ao listar treinos:', error);
+      return res.status(500).json({
+        error: error.message || 'Erro ao listar treinos',
+        error_code: 'TREINOS_LIST_ERROR',
+      });
+    }
+  });
+
+  // GET /api/treinos/:id — coach (próprio), admin, aluno (se atribuído)
+  router.get('/treinos/:id', authenticate, domainSchemaGuard, validateRole(['coach', 'admin', 'aluno']), validateUUIDParam('id'), async (req, res) => {
+    try {
+      const access = await canReadTreino(req, req.params.id);
+      if (!access.treino) {
+        return res.status(404).json({ error: 'Treino não encontrado', error_code: 'TREINO_NOT_FOUND' });
+      }
+      if (!access.allowed) {
+        return res.status(403).json({ error: 'Acesso negado', error_code: 'TREINO_FORBIDDEN' });
+      }
+      return res.json(access.treino);
+    } catch (error) {
+      console.error('Erro ao buscar treino:', error);
+      return res.status(500).json({
+        error: error.message || 'Erro ao buscar treino',
+        error_code: 'TREINO_GET_ERROR',
+      });
+    }
+  });
+
+  // POST /api/treinos — coach
+  router.post('/treinos', authenticate, domainSchemaGuard, validateRole(['coach']), resolveCoachOrFail, async (req, res) => {
+    try {
+      const body = req.body || {};
+      const nome = body.nome != null ? String(body.nome).trim() : '';
+      const categoria = body.categoria != null ? String(body.categoria).trim() : '';
+      const dificuldade = body.dificuldade != null ? String(body.dificuldade).trim() : '';
+
+      if (!nome || !categoria || !dificuldade) {
+        return res.status(400).json({
+          error: 'nome, categoria e dificuldade são obrigatórios',
+          error_code: 'MISSING_PARAMETERS',
+        });
+      }
+      if (!TREINO_DIFICULDADES.includes(dificuldade)) {
+        return res.status(400).json({
+          error: 'dificuldade inválida',
+          error_code: 'INVALID_DIFFICULTY',
+          allowed: TREINO_DIFICULDADES,
+        });
+      }
+
+      const duracao = parseInt(String(body.duracao ?? 60), 10);
+      const numExercicios =
+        body.num_exercicios != null
+          ? parseInt(String(body.num_exercicios), 10)
+          : Array.isArray(body.exercicios)
+            ? body.exercicios.length
+            : 0;
+      const tags = Array.isArray(body.tags) ? body.tags : [];
+      const exercicios = Array.isArray(body.exercicios) ? body.exercicios : [];
+      const isTemplate = body.is_template === true;
+
+      const insertResult = await pool.query(
+        `INSERT INTO public.treinos (
+          nome, descricao, duracao, dificuldade, categoria, num_exercicios,
+          is_template, tags, exercicios, coach_id, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9::jsonb, $10, now())
+        RETURNING *`,
+        [
+          nome,
+          body.descricao != null ? String(body.descricao) : null,
+          Number.isNaN(duracao) ? 60 : duracao,
+          dificuldade,
+          categoria,
+          Number.isNaN(numExercicios) ? exercicios.length : numExercicios,
+          isTemplate,
+          tags,
+          JSON.stringify(exercicios),
+          req.user.id,
+        ],
+      );
+      return res.status(201).json(insertResult.rows[0]);
+    } catch (error) {
+      console.error('Erro ao criar treino:', error);
+      return res.status(500).json({
+        error: error.message || 'Erro ao criar treino',
+        error_code: 'TREINO_CREATE_ERROR',
+      });
+    }
+  });
+
+  // PATCH /api/treinos/:id — coach, apenas treinos próprios
+  router.patch('/treinos/:id', authenticate, domainSchemaGuard, validateRole(['coach']), resolveCoachOrFail, validateUUIDParam('id'), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const body = req.body || {};
+      const existing = await pool.query(
+        'SELECT id FROM public.treinos WHERE id = $1 AND coach_id = $2 LIMIT 1',
+        [id, req.user.id],
+      );
+      if (existing.rows.length === 0) {
+        return res.status(404).json({ error: 'Treino não encontrado', error_code: 'TREINO_NOT_FOUND' });
+      }
+
+      if (body.dificuldade != null && !TREINO_DIFICULDADES.includes(String(body.dificuldade))) {
+        return res.status(400).json({
+          error: 'dificuldade inválida',
+          error_code: 'INVALID_DIFFICULTY',
+          allowed: TREINO_DIFICULDADES,
+        });
+      }
+
+      const sets = [];
+      const values = [];
+      let idx = 1;
+      for (const [key, raw] of Object.entries(body)) {
+        if (!TREINO_WRITABLE.has(key)) continue;
+        if (key === 'tags') {
+          sets.push(`${key} = $${idx}::text[]`);
+          values.push(Array.isArray(raw) ? raw : []);
+        } else if (key === 'exercicios') {
+          sets.push(`${key} = $${idx}::jsonb`);
+          values.push(JSON.stringify(Array.isArray(raw) ? raw : []));
+        } else if (key === 'duracao' || key === 'num_exercicios') {
+          sets.push(`${key} = $${idx}`);
+          values.push(parseInt(String(raw), 10));
+        } else if (key === 'is_template') {
+          sets.push(`${key} = $${idx}`);
+          values.push(raw === true);
+        } else {
+          sets.push(`${key} = $${idx}`);
+          values.push(raw);
+        }
+        idx += 1;
+      }
+
+      if (sets.length === 0) {
+        return res.status(400).json({ error: 'Nenhum campo para actualizar', error_code: 'NO_FIELDS' });
+      }
+
+      sets.push('updated_at = now()');
+      values.push(id, req.user.id);
+      const updateResult = await pool.query(
+        `UPDATE public.treinos SET ${sets.join(', ')}
+         WHERE id = $${idx} AND coach_id = $${idx + 1}
+         RETURNING *`,
+        values,
+      );
+      return res.json(updateResult.rows[0]);
+    } catch (error) {
+      console.error('Erro ao actualizar treino:', error);
+      return res.status(500).json({
+        error: error.message || 'Erro ao actualizar treino',
+        error_code: 'TREINO_UPDATE_ERROR',
+      });
+    }
+  });
+
+  // DELETE /api/treinos/:id — coach, apenas treinos próprios
+  router.delete('/treinos/:id', authenticate, domainSchemaGuard, validateRole(['coach']), resolveCoachOrFail, validateUUIDParam('id'), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const del = await pool.query(
+        'DELETE FROM public.treinos WHERE id = $1 AND coach_id = $2 RETURNING id',
+        [id, req.user.id],
+      );
+      if (del.rows.length === 0) {
+        return res.status(404).json({ error: 'Treino não encontrado', error_code: 'TREINO_NOT_FOUND' });
+      }
+      return res.json({ ok: true, id: del.rows[0].id });
+    } catch (error) {
+      console.error('Erro ao deletar treino:', error);
+      return res.status(500).json({
+        error: error.message || 'Erro ao deletar treino',
+        error_code: 'TREINO_DELETE_ERROR',
       });
     }
   });

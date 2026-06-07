@@ -17,6 +17,7 @@ import DietaPage from "./pages/DietaPage";
 import StudentPortal from "./pages/StudentPortal";
 import StudentBlocked from "./pages/StudentBlocked";
 import ReportViewPage from "./pages/ReportViewPage";
+import StudentEducationalGuidePage from "./pages/StudentEducationalGuidePage";
 
 const queryClient = new QueryClient();
 
@@ -82,6 +83,14 @@ const App = () => (
                   element={
                     <ProtectedRoute allowedRoles={['aluno']} checkPayment={false}>
                       <StudentBlocked />
+                    </ProtectedRoute>
+                  } 
+                />
+                <Route 
+                  path="/portal-aluno/guia/:contentId" 
+                  element={
+                    <ProtectedRoute allowedRoles={['aluno']} checkPayment={true}>
+                      <StudentEducationalGuidePage />
                     </ProtectedRoute>
                   } 
                 />

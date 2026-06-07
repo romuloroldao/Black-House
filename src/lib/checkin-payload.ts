@@ -12,8 +12,16 @@ function optionalCheckinText(value: string): string | null {
   return trimmed ? trimmed : null;
 }
 
+export type CheckinSubmitExtras = {
+  pesoKg: number;
+  fotos: Array<{ url: string; descricao?: string | null }>;
+};
+
 /** Payload alinhado a POST /api/checkins (server/routes/api.js). */
-export function buildCheckinPayload(data: CheckinFormData): Record<string, unknown> {
+export function buildCheckinPayload(
+  data: CheckinFormData,
+  extras?: CheckinSubmitExtras,
+): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     beliscou_fora_plano: data.beliscou_fora_plano,
     seguiu_plano_nota: data.seguiu_plano_nota,
@@ -40,6 +48,11 @@ export function buildCheckinPayload(data: CheckinFormData): Record<string, unkno
 
   for (const key of CHECKIN_OPTIONAL_KEYS) {
     payload[key] = optionalCheckinText(data[key] as string);
+  }
+
+  if (extras) {
+    payload.peso_kg = extras.pesoKg;
+    payload.fotos = extras.fotos;
   }
 
   return payload;
