@@ -5,7 +5,7 @@ import { ChevronRight, ClipboardList, Columns2 } from "lucide-react";
 import { CheckinSideBySideCompare } from "@/components/coach/CheckinSideBySideCompare";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
-import { getCheckinSummaryChips, hasRelato, isCheckinRespondido } from "@/lib/checkin-display";
+import { getCheckinSummaryChips, hasRelato, isCheckinMarcadoSemTexto, isCheckinRespondido } from "@/lib/checkin-display";
 import { compareCheckinsForTriagem, isCheckinPrioridade } from "@/lib/checkin-highlights";
 import type { WeeklyCheckinRecord } from "@/types/weekly-checkin";
 import CoachCheckinDetailSheet from "@/components/coach/CoachCheckinDetailSheet";
@@ -140,6 +140,7 @@ export default function CoachCheckinTimeline({ studentId, studentName }: CoachCh
             });
 
             const responded = isCheckinRespondido(checkin);
+            const marcadoSemTexto = isCheckinMarcadoSemTexto(checkin);
             const prioridade = isCheckinPrioridade(checkin);
 
             return (
@@ -168,6 +169,10 @@ export default function CoachCheckinTimeline({ studentId, studentName }: CoachCh
                     {responded ? (
                       <Badge variant="outline" className="text-xs">
                         Respondido
+                      </Badge>
+                    ) : marcadoSemTexto ? (
+                      <Badge variant="outline" className="border-amber-500/50 text-xs text-amber-700 dark:text-amber-400">
+                        Sem texto no portal
                       </Badge>
                     ) : (
                       <Badge variant="outline" className="border-amber-500/50 text-xs text-amber-700 dark:text-amber-400">

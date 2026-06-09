@@ -21,6 +21,7 @@ const PATCH_FILES = [
     '20260529_video_categorias_rename.sql',
     '20260530_educational_contents.sql',
     '20260607_educational_contents_grants.sql',
+    '20260609_treino_copia_aluno.sql',
 ];
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations');

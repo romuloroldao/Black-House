@@ -5,7 +5,7 @@ import { ChevronRight, ClipboardList, Search } from "lucide-react";
 import { API_CONTRACT } from "@/contracts/api-contract";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
-import { getCheckinSummaryChips, hasRelato, isCheckinRespondido } from "@/lib/checkin-display";
+import { getCheckinSummaryChips, hasRelato, isCheckinMarcadoSemTexto, isCheckinRespondido } from "@/lib/checkin-display";
 import { compareCheckinsForTriagem, isCheckinPrioridade } from "@/lib/checkin-highlights";
 import {
   countByInboxFilter,
@@ -340,6 +340,7 @@ export default function CoachCheckinInbox() {
                 locale: ptBR,
               });
               const responded = isCheckinRespondido(checkin);
+              const marcadoSemTexto = isCheckinMarcadoSemTexto(checkin);
 
               return (
                 <button
@@ -366,6 +367,13 @@ export default function CoachCheckinInbox() {
                       {responded ? (
                         <Badge variant="outline" className="text-xs">
                           Respondido
+                        </Badge>
+                      ) : marcadoSemTexto ? (
+                        <Badge
+                          variant="outline"
+                          className="border-amber-500/50 text-xs text-amber-700 dark:text-amber-400"
+                        >
+                          Sem texto no portal
                         </Badge>
                       ) : (
                         <Badge

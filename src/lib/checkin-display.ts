@@ -137,6 +137,17 @@ export function hasRelato(checkin: WeeklyCheckinRecord): boolean {
   return Boolean(checkin.nao_cumpriu_porque?.trim());
 }
 
+/** Texto publicado no portal do aluno (campo coach_resposta). */
+export function hasCoachRespostaPublicada(checkin: WeeklyCheckinRecord): boolean {
+  return Boolean(checkin.coach_resposta?.trim());
+}
+
+/** Marcação antiga (só coach_respondido_em) sem texto — aluno não vê no portal. */
+export function isCheckinMarcadoSemTexto(checkin: WeeklyCheckinRecord): boolean {
+  return Boolean(checkin.coach_respondido_em) && !hasCoachRespostaPublicada(checkin);
+}
+
+/** Respondido de verdade = texto salvo via «Salvar resposta». */
 export function isCheckinRespondido(checkin: WeeklyCheckinRecord): boolean {
-  return Boolean(checkin.coach_respondido_em);
+  return hasCoachRespostaPublicada(checkin);
 }

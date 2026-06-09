@@ -14,6 +14,7 @@ import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 import StudentDetails from "./components/StudentDetails";
 import DietaPage from "./pages/DietaPage";
+import TreinoPage from "./pages/TreinoPage";
 import StudentPortal from "./pages/StudentPortal";
 import StudentBlocked from "./pages/StudentBlocked";
 import ReportViewPage from "./pages/ReportViewPage";
@@ -65,6 +66,14 @@ const App = () => (
                   element={
                     <ProtectedRoute allowedRoles={['coach', 'admin']}>
                       <DietaPage />
+                    </ProtectedRoute>
+                  } 
+                />
+                <Route 
+                  path="/treino/:id" 
+                  element={
+                    <ProtectedRoute allowedRoles={['coach', 'admin']}>
+                      <TreinoPage />
                     </ProtectedRoute>
                   } 
                 />

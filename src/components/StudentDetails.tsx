@@ -305,17 +305,15 @@ export default function StudentDetails() {
         dataExpiracao.setDate(dataExpiracao.getDate() + parseInt(diasValidade));
       }
 
-      // Atribuir novo treino com validade
-      const createResult = await apiClient.requestSafe('/api/alunos-treinos', {
+      // Atribuir: copia o treino/template e vincula cópia exclusiva ao aluno
+      const createResult = await apiClient.requestSafe('/api/alunos-treinos/assign', {
         method: 'POST',
         body: JSON.stringify({
           aluno_id: id,
           treino_id: treinoSelecionado,
-          ativo: true,
-          data_expiracao: dataExpiracao?.toISOString().split('T')[0],
-          data_retorno: dataExpiracao?.toISOString().split('T')[0],
+          data_expiracao: dataExpiracao?.toISOString().split('T')[0] ?? null,
+          data_retorno: dataExpiracao?.toISOString().split('T')[0] ?? null,
           dias_antecedencia_notificacao: diasAntecedenciaNotif ? parseInt(diasAntecedenciaNotif) : 7,
-          notificacao_expiracao_enviada: false,
         }),
       });
       if (!createResult.success) {
@@ -324,7 +322,7 @@ export default function StudentDetails() {
 
       toast({
         title: "Sucesso!",
-        description: "Treino atribuído com sucesso",
+        description: "Treino copiado e atribuído — pode personalizar no perfil do aluno.",
       });
 
       setIsAtribuirTreinoOpen(false);
@@ -721,7 +719,8 @@ export default function StudentDetails() {
                   <DialogHeader>
                     <DialogTitle>Atribuir Treino</DialogTitle>
                     <DialogDescription>
-                      Escolha o treino e opcionalmente validade e lembrete de expiração.
+                      Escolha um template ou treino da biblioteca. Será criada uma cópia editável só
+                      para este aluno — o original não muda.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4 py-4">
@@ -832,13 +831,22 @@ export default function StudentDetails() {
                           </Badge>
                         )}
                       </div>
-                      <Button 
-                        variant="destructive" 
-                        size="sm" 
-                        className="w-full"
-                        onClick={() => handleRemoverTreino(treino.alunoTreinoId, treino.nome)}
-                        disabled={saving}
-                      >
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <Button
+                          className="flex-1"
+                          variant="outline"
+                          onClick={() => navigate(`/treino/${treino.id}?from=/alunos/${id}`)}
+                        >
+                          <Edit className="mr-2 h-4 w-4" />
+                          Editar treino
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => handleRemoverTreino(treino.alunoTreinoId, treino.nome)}
+                          disabled={saving}
+                        >
                         {saving ? (
                           <>
                             <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
@@ -850,7 +858,8 @@ export default function StudentDetails() {
                             Remover Treino
                           </>
                         )}
-                      </Button>
+                        </Button>
+                      </div>
                     </div>
                   );
                 })}

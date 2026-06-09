@@ -28,6 +28,7 @@ import {
   formatCheckinFieldValue,
   getFieldLabel,
   hasRelato,
+  isCheckinMarcadoSemTexto,
   isCheckinRespondido,
 } from "@/lib/checkin-display";
 import { getCheckinPrioridadeSummary, isCheckinPrioridade } from "@/lib/checkin-highlights";
@@ -213,6 +214,7 @@ export default function CoachCheckinDetailSheet({
     locale: ptBR,
   });
   const responded = isCheckinRespondido(checkin) || markedRespondido;
+  const marcadoSemTexto = isCheckinMarcadoSemTexto(checkin) && !markedRespondido;
   const prioridade = isCheckinPrioridade(checkin);
 
   return (
@@ -251,6 +253,10 @@ export default function CoachCheckinDetailSheet({
             {responded ? (
               <Badge variant="secondary" className="text-xs">
                 Respondido
+              </Badge>
+            ) : marcadoSemTexto ? (
+              <Badge variant="outline" className="border-amber-500/50 text-xs text-amber-700 dark:text-amber-400">
+                Sem texto no portal
               </Badge>
             ) : (
               <Badge variant="outline" className="border-amber-500/50 text-xs text-amber-700 dark:text-amber-400">
@@ -306,6 +312,18 @@ export default function CoachCheckinDetailSheet({
                   Este check-in reúne estresse, adesão baixa (≤2/5) e relato detalhado (
                   {getCheckinPrioridadeSummary(checkin)}). Recomendamos resposta personalizada em
                   breve.
+                </p>
+              </div>
+            )}
+
+            {marcadoSemTexto && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
+                <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                  Resposta não visível para o aluno
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Este check-in foi marcado como respondido antes, mas o texto não foi salvo. O aluno
+                  não vê nada no portal — use «Salvar resposta» abaixo.
                 </p>
               </div>
             )}

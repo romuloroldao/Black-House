@@ -90,11 +90,15 @@ CREATE TABLE IF NOT EXISTS public.treinos (
   is_template boolean DEFAULT false,
   tags text[] DEFAULT '{}'::text[],
   coach_id uuid,
+  aluno_id uuid,
+  template_origem_id uuid,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   exercicios jsonb DEFAULT '[]'::jsonb,
   CONSTRAINT treinos_pkey PRIMARY KEY (id),
-  CONSTRAINT treinos_coach_id_fkey FOREIGN KEY (coach_id) REFERENCES app_auth.users(id)
+  CONSTRAINT treinos_coach_id_fkey FOREIGN KEY (coach_id) REFERENCES app_auth.users(id),
+  CONSTRAINT treinos_aluno_id_fkey FOREIGN KEY (aluno_id) REFERENCES public.alunos(id) ON DELETE CASCADE,
+  CONSTRAINT treinos_template_origem_id_fkey FOREIGN KEY (template_origem_id) REFERENCES public.treinos(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS public.alunos_treinos (

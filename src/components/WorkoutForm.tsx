@@ -25,6 +25,8 @@ import {
 
 interface WorkoutFormProps {
   workout?: any;
+  /** Cópia exclusiva de um aluno — não permitir virar template global. */
+  studentCopy?: boolean;
   onBack: () => void;
   onSave: () => void;
 }
@@ -41,7 +43,7 @@ interface Exercise {
   order: number;
 }
 
-const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
+const WorkoutForm = ({ workout, studentCopy = false, onBack, onSave }: WorkoutFormProps) => {
   const { user } = useAuth();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
@@ -163,7 +165,7 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
         categoria: formData.category,
         dificuldade: formData.difficulty,
         duracao: formData.duration,
-        is_template: formData.isTemplate,
+        is_template: studentCopy ? false : formData.isTemplate,
         tags: formData.tags,
         num_exercicios: exercises.length,
         exercicios: exercises.map(ex => ({
@@ -242,7 +244,11 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
             {workout ? "Editar Treino" : "Novo Treino"}
           </h1>
           <p className="text-muted-foreground">
-            {workout ? "Modifique os detalhes do treino" : "Crie um novo treino personalizado"}
+            {studentCopy
+              ? "Ajustes só deste aluno — o template original na biblioteca não muda."
+              : workout
+                ? "Modifique os detalhes do treino"
+                : "Crie um novo treino personalizado"}
           </p>
         </div>
         <div className="flex gap-2">
@@ -337,14 +343,16 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
                 />
               </div>
 
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="template"
-                  checked={formData.isTemplate}
-                  onCheckedChange={(checked) => setFormData({...formData, isTemplate: checked})}
-                />
-                <Label htmlFor="template">Salvar como template</Label>
-              </div>
+              {!studentCopy && (
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="template"
+                    checked={formData.isTemplate}
+                    onCheckedChange={(checked) => setFormData({ ...formData, isTemplate: checked })}
+                  />
+                  <Label htmlFor="template">Salvar como template</Label>
+                </div>
+              )}
             </CardContent>
           </Card>
 

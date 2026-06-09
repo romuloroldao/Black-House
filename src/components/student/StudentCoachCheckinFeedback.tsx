@@ -5,6 +5,7 @@ import { MessageSquare } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { hasCoachRespostaPublicada } from "@/lib/checkin-display";
 import type { WeeklyCheckinRecord } from "@/types/weekly-checkin";
 import { STUDENT_REALTIME_EVENT, type StudentRealtimeDetail } from "@/hooks/useStudentPortalRealtime";
 
@@ -17,117 +18,37 @@ type StudentCoachCheckinFeedbackProps = {
   compact?: boolean;
 };
 
-function pickCheckinWithResposta(
+function pickCheckinsWithResposta(
   rows: WeeklyCheckinRecord[],
   checkinId?: string,
-): WeeklyCheckinRecord | null {
-  const withResposta = rows.filter((r) => r.coach_resposta?.trim());
+): WeeklyCheckinRecord[] {
+  const withResposta = rows.filter((r) => hasCoachRespostaPublicada(r));
   if (checkinId) {
-    return withResposta.find((r) => r.id === checkinId) ?? null;
+    const one = withResposta.find((r) => r.id === checkinId);
+    return one ? [one] : [];
   }
-  return (
-    [...withResposta].sort(
-      (a, b) =>
-        new Date(b.coach_respondido_em || b.created_at || 0).getTime() -
-        new Date(a.coach_respondido_em || a.created_at || 0).getTime(),
-    )[0] ?? null
+  return [...withResposta].sort(
+    (a, b) =>
+      new Date(b.coach_respondido_em || b.created_at || 0).getTime() -
+      new Date(a.coach_respondido_em || a.created_at || 0).getTime(),
   );
 }
 
-export default function StudentCoachCheckinFeedback({
-  alunoId,
-  checkinId,
+function FeedbackBlock({
+  checkin,
+  compact,
   className,
-  compact = false,
-}: StudentCoachCheckinFeedbackProps) {
-  const [loading, setLoading] = useState(true);
-  const [checkin, setCheckin] = useState<WeeklyCheckinRecord | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const load = async () => {
-      setLoading(true);
-      let targetAlunoId = alunoId;
-
-      if (!targetAlunoId) {
-        const me = await apiClient.getMeSafe();
-        if (!me.success || !me.data?.id) {
-          if (!cancelled) {
-            setCheckin(null);
-            setLoading(false);
-          }
-          return;
-        }
-        targetAlunoId = me.data.id;
-      }
-
-      const result = await apiClient.listWeeklyCheckinsSafe();
-
-      if (cancelled) return;
-
-      const rows =
-        result.success && Array.isArray(result.data)
-          ? result.data.filter((r) => r.aluno_id === targetAlunoId)
-          : [];
-
-      setCheckin(pickCheckinWithResposta(rows, checkinId));
-      setLoading(false);
-    };
-
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [alunoId, checkinId]);
-
-  useEffect(() => {
-    const onRealtime = (ev: Event) => {
-      const detail = (ev as CustomEvent<StudentRealtimeDetail>).detail;
-      if (detail?.type === "checkin_respondido") {
-        window.dispatchEvent(new CustomEvent("blackhouse:checkin-feedback-reload"));
-      }
-    };
-    window.addEventListener(STUDENT_REALTIME_EVENT, onRealtime);
-    return () => window.removeEventListener(STUDENT_REALTIME_EVENT, onRealtime);
-  }, []);
-
-  useEffect(() => {
-    const reload = () => {
-      void (async () => {
-        const result = await apiClient.listWeeklyCheckinsSafe();
-        const me = alunoId ? { success: true, data: { id: alunoId } } : await apiClient.getMeSafe();
-        const targetId = alunoId || (me.success ? me.data?.id : null);
-        if (!targetId) return;
-        const rows =
-          result.success && Array.isArray(result.data)
-            ? result.data.filter((r) => r.aluno_id === targetId)
-            : [];
-        setCheckin(pickCheckinWithResposta(rows, checkinId));
-      })();
-    };
-    window.addEventListener("blackhouse:checkin-feedback-reload", reload);
-    return () => window.removeEventListener("blackhouse:checkin-feedback-reload", reload);
-  }, [alunoId, checkinId]);
-
-  if (loading) {
-    return compact ? (
-      <Skeleton className={`h-16 w-full ${className ?? ""}`} />
-    ) : (
-      <Skeleton className={`h-28 w-full ${className ?? ""}`} />
-    );
-  }
-
-  const resposta = checkin?.coach_resposta?.trim();
-  if (!resposta) {
-    return null;
-  }
-
-  const when = checkin?.coach_respondido_em || checkin?.created_at;
+}: {
+  checkin: WeeklyCheckinRecord;
+  compact?: boolean;
+  className?: string;
+}) {
+  const resposta = checkin.coach_resposta?.trim() ?? "";
+  const when = checkin.coach_respondido_em || checkin.created_at;
   const whenLabel = when
     ? format(new Date(when), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })
     : null;
-  const checkinDate = checkin?.created_at
+  const checkinDate = checkin.created_at
     ? format(new Date(checkin.created_at), "dd/MM/yyyy", { locale: ptBR })
     : null;
 
@@ -169,5 +90,98 @@ export default function StudentCoachCheckinFeedback({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+export default function StudentCoachCheckinFeedback({
+  alunoId,
+  checkinId,
+  className,
+  compact = false,
+}: StudentCoachCheckinFeedbackProps) {
+  const [loading, setLoading] = useState(true);
+  const [checkins, setCheckins] = useState<WeeklyCheckinRecord[]>([]);
+
+  const loadRows = async () => {
+    let targetAlunoId = alunoId;
+
+    if (!targetAlunoId) {
+      const me = await apiClient.getMeSafe();
+      if (!me.success || !me.data?.id) {
+        return [];
+      }
+      targetAlunoId = me.data.id;
+    }
+
+    const result = await apiClient.listWeeklyCheckinsSafe();
+    const rows =
+      result.success && Array.isArray(result.data)
+        ? result.data.filter((r) => r.aluno_id === targetAlunoId)
+        : [];
+
+    return pickCheckinsWithResposta(rows, checkinId);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      setLoading(true);
+      const picked = await loadRows();
+      if (!cancelled) {
+        setCheckins(picked);
+        setLoading(false);
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [alunoId, checkinId]);
+
+  useEffect(() => {
+    const onRealtime = (ev: Event) => {
+      const detail = (ev as CustomEvent<StudentRealtimeDetail>).detail;
+      if (detail?.type === "checkin_respondido") {
+        window.dispatchEvent(new CustomEvent("blackhouse:checkin-feedback-reload"));
+      }
+    };
+    window.addEventListener(STUDENT_REALTIME_EVENT, onRealtime);
+    return () => window.removeEventListener(STUDENT_REALTIME_EVENT, onRealtime);
+  }, []);
+
+  useEffect(() => {
+    const reload = () => {
+      void loadRows().then(setCheckins);
+    };
+    window.addEventListener("blackhouse:checkin-feedback-reload", reload);
+    return () => window.removeEventListener("blackhouse:checkin-feedback-reload", reload);
+  }, [alunoId, checkinId]);
+
+  if (loading) {
+    return compact ? (
+      <Skeleton className={`h-16 w-full ${className ?? ""}`} />
+    ) : (
+      <Skeleton className={`h-28 w-full ${className ?? ""}`} />
+    );
+  }
+
+  if (checkins.length === 0) {
+    return null;
+  }
+
+  if (checkins.length === 1) {
+    return (
+      <FeedbackBlock checkin={checkins[0]} compact={compact} className={className} />
+    );
+  }
+
+  return (
+    <div className={`space-y-4 ${className ?? ""}`}>
+      {checkins.map((checkin) => (
+        <FeedbackBlock key={checkin.id} checkin={checkin} compact={compact} />
+      ))}
+    </div>
   );
 }
