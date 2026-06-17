@@ -75,12 +75,13 @@ grep "USER_ID_EDERLON\|progress-photo\|/checkins" /root/.pm2/logs/blackhouse-api
 - **Slider autoestima** com `aria-label` explícito
 - **Badge coach** no bottom nav: `aria-label` quando há mensagens novas
 
-### Backlog a11y (não bloqueante)
-- [ ] Contraste secundário em badges `text-[11px]` (validar com axe)
-- [ ] `aria-describedby` nos blocos longos do check-in (secções)
-- [ ] Anunciar erros de formulário com `role="alert"` no toast Sonner (global)
+### Backlog a11y — ✅ fechado (2026-06-14)
 
-**Critério Fase 4.5:** sem regressões WCAG AA **críticas** no portal aluno — estado **🟡 quase fechado**.
+- [x] Contraste secundário em badges pequenos — classe `student-badge-sm` / `student-caption`; bottom nav inactivo `text-foreground/75`
+- [x] `aria-describedby` nos blocos do check-in — região por secção + ids em `CheckinStepHeader`
+- [x] Erros de formulário com `role="alert"` — `SonnerA11ySync` em `components/ui/sonner.tsx`
+
+**Critério Fase 4.5:** sem regressões WCAG AA **críticas** no portal aluno — estado **✅ fechado**.
 
 ---
 
@@ -107,4 +108,4 @@ grep "USER_ID_EDERLON\|progress-photo\|/checkins" /root/.pm2/logs/blackhouse-api
 1. **BH-QA-002** — mensagem Ederlon + Christian para reteste (roteiro acima)
 2. **BH-QA-006** — smoke `GET /api/treinos` em produção ✅
 3. **Fase 4.6** — fechar 3 alunos adicionais no piloto
-4. **Fase 4.5** — fechar itens backlog a11y se o piloto reportar focus/contraste
+4. ~~**Fase 4.5** — fechar itens backlog a11y~~ — ✅ 2026-06-14

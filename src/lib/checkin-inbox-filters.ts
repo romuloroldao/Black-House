@@ -1,5 +1,5 @@
 import { subDays } from "date-fns";
-import { hasRelato, isCheckinRespondido } from "@/lib/checkin-display";
+import { hasRelato, isCheckinMarcadoSemTexto, isCheckinRespondido } from "@/lib/checkin-display";
 import { isCheckinPrioridade } from "@/lib/checkin-highlights";
 import type { WeeklyCheckinRecord } from "@/types/weekly-checkin";
 
@@ -12,7 +12,8 @@ export type InboxFilterId =
   | "all"
   | "relato"
   | "adesao_baixa"
-  | "estresse";
+  | "estresse"
+  | "sem_texto_portal";
 
 export type InboxFilterOption = {
   id: InboxFilterId;
@@ -21,6 +22,7 @@ export type InboxFilterOption = {
 
 export const INBOX_FILTER_OPTIONS: InboxFilterOption[] = [
   { id: "pendentes", label: "Pendentes de resposta" },
+  { id: "sem_texto_portal", label: "Sem texto no portal" },
   { id: "prioridade", label: "Prioridade" },
   { id: "respondidos", label: "Respondidos" },
   { id: "7d", label: "Últimos 7 dias" },
@@ -52,6 +54,8 @@ export function matchesInboxFilter(
       return true;
     case "pendentes":
       return !isCheckinRespondido(checkin);
+    case "sem_texto_portal":
+      return isCheckinMarcadoSemTexto(checkin);
     case "respondidos":
       return isCheckinRespondido(checkin);
     case "prioridade":

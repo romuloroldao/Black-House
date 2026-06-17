@@ -45,3 +45,27 @@ export type FeedbackAlunoRecord = {
 };
 
 export type { CheckinAiDraftResponse, CheckinAiTrendsResponse } from "@/types/checkin-ai";
+
+export type WeeklyCheckinsListQuery = {
+  q?: string;
+  limit?: number;
+  offset?: number;
+  com_resposta?: boolean;
+  year?: number;
+  aluno_id?: string;
+};
+
+export type WeeklyCheckinsPaginatedResponse = {
+  items: WeeklyCheckinRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  years?: number[];
+};
+
+export function isWeeklyCheckinsPaginated(
+  data: WeeklyCheckinRecord[] | WeeklyCheckinsPaginatedResponse | null | undefined,
+): data is WeeklyCheckinsPaginatedResponse {
+  return Boolean(data && typeof data === "object" && !Array.isArray(data) && Array.isArray(data.items));
+}

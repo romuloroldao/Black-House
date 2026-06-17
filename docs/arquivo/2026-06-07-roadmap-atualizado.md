@@ -15,7 +15,7 @@
 | **Fase 1 realtime aluno** (check-in respondido + dieta) | ✅ |
 | **Fase 2 realtime coach** (novo check-in semanal) | ✅ |
 | **BH-QA-006** rotas `/api/treinos` | ✅ |
-| Fase 4 polish (a11y 4.5 + piloto 5 alunos 4.6) | 🟡 em curso |
+| Fase 4 polish (a11y 4.5 ✅ + piloto 5 alunos 4.6) | 🟡 em curso |
 | Import em lote | ⏸️ pausado |
 
 ---
@@ -66,7 +66,7 @@
 
 1. **BH-QA-002** — reteste manual Ederlon + Christian Calhares (mobile check-in)  
 2. **Fase 4.6** — piloto com 5 alunos (`docs/arquivo/2026-06-07-fase4-e-proximos-passos.md`)  
-3. **Fase 4.5** — fechar backlog a11y restante após piloto  
+3. ~~**Fase 4.5** — fechar backlog a11y restante após piloto~~ — ✅ 2026-06-14  
 4. **Import em lote** — quando retomar o epic  
 5. ~~**Dívida:** `applyNutritionPatch.js`~~ — ✅ transacção por ficheiro + `schema_patches` (07/jun)
 

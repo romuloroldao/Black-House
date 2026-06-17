@@ -2,7 +2,8 @@
 export function mapTreinoApiToWorkoutForm(treino: Record<string, unknown>) {
   const rawExercises = Array.isArray(treino.exercicios) ? treino.exercicios : [];
   const exercises = rawExercises.map((ex: Record<string, unknown>, index: number) => ({
-    id: String(ex.id ?? index + 1),
+    id: String(ex.slot_key ?? ex.id ?? index + 1),
+    slotKey: String(ex.slot_key ?? ex.id ?? index + 1),
     name: String(ex.nome ?? ex.name ?? ""),
     sets: Number(ex.series ?? ex.sets ?? 3),
     reps: String(ex.repeticoes ?? ex.reps ?? "12"),
@@ -11,6 +12,8 @@ export function mapTreinoApiToWorkoutForm(treino: Record<string, unknown>) {
     notes: String(ex.observacoes ?? ex.notes ?? ""),
     videoUrl: ex.video_url != null ? String(ex.video_url) : ex.videoUrl != null ? String(ex.videoUrl) : undefined,
     order: Number(ex.ordem ?? ex.order ?? index + 1),
+    isAdded: ex._added === true,
+    isCustomized: ex._customized === true,
   }));
 
   return {
@@ -24,6 +27,9 @@ export function mapTreinoApiToWorkoutForm(treino: Record<string, unknown>) {
     tags: Array.isArray(treino.tags) ? treino.tags : [],
     exercises,
     alunoId: treino.aluno_id ?? null,
-    templateOrigemId: treino.template_origem_id ?? null,
+    templateOrigemId: treino.template_origem_id ?? treino.template_id ?? null,
+    atribuicaoId: treino.aluno_treino_id ?? null,
+    personalizacoes: Number(treino.personalizacoes ?? 0),
+    templateVersao: treino.template_versao ?? treino.versao ?? null,
   };
 }

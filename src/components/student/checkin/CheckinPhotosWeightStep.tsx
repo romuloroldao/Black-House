@@ -104,7 +104,7 @@ export default function CheckinPhotosWeightStep({
             <Label>
               Fotos desta semana <span className="text-destructive">*</span>
             </Label>
-            <Badge variant={photosOk ? "secondary" : "outline"}>
+            <Badge variant={photosOk ? "secondary" : "outline"} className="student-badge-sm">
               {photos.length}/{MIN_CHECKIN_PHOTOS} mínimo
             </Badge>
           </div>

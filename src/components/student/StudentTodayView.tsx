@@ -16,6 +16,7 @@ import TodayHeroCard from "@/components/student/today/TodayHeroCard";
 import TodayPlanCards from "@/components/student/today/TodayPlanCards";
 import CheckinStreakCard from "@/components/student/today/CheckinStreakCard";
 import TodayPhotoCard from "@/components/student/today/TodayPhotoCard";
+import StudentCoachCheckinFeedback from "@/components/student/StudentCoachCheckinFeedback";
 
 type StudentTodayViewProps = {
   /** Evita segunda chamada quando o portal já carregou /api/alunos/me/hoje */
@@ -70,6 +71,8 @@ const StudentTodayView = ({ hojeState }: StudentTodayViewProps) => {
         checkinDue={data?.contadores?.checkin_due}
         onOpenCheckin={() => openTab("checkin")}
       />
+
+      <StudentCoachCheckinFeedback compact limit={1} showHistoryAction className="shadow-sm" />
 
       <TodayPhotoCard
         loading={loading}

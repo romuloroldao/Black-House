@@ -4,7 +4,12 @@ import type { AlunoHojeResponse } from '@/types/aluno-hoje';
 import type { ImportHistoryRecord } from '@/types/import-history';
 import type { AlunoPortalStatus } from '@/types/aluno-portal-status';
 import type { CheckinAiDraftResponse, CheckinAiTrendsResponse } from '@/types/checkin-ai';
-import type { FeedbackAlunoRecord, WeeklyCheckinRecord } from '@/types/weekly-checkin';
+import type {
+  FeedbackAlunoRecord,
+  WeeklyCheckinRecord,
+  WeeklyCheckinsListQuery,
+  WeeklyCheckinsPaginatedResponse,
+} from '@/types/weekly-checkin';
 import { getAvailabilityKeyForEndpoint, isDataAvailable } from '@/lib/dataAvailability';
 import { safeGetItem, safeRemoveItem, safeSetItem } from '@/lib/safe-storage';
 
@@ -184,14 +189,32 @@ function mapLegacyApiToRestV1(endpoint: string): LegacyMapResult {
         return byIdToQuery('alunos', match[1]);
     }
 
+    // Treinos: rotas semânticas (biblioteca sem cópias por aluno) — nunca /rest/v1/treinos
+    if (normalized === '/api/treinos') {
+        return { endpoint, unwrapFirstRow: false };
+    }
+
     match = normalized.match(/^\/api\/treinos\/([^/]+)$/);
-    if (match) return byIdToQuery('treinos', match[1]);
+    if (match) {
+        return { endpoint, unwrapFirstRow: false };
+    }
 
     match = normalized.match(/^\/api\/dietas\/([^/]+)$/);
     if (match) return byIdToQuery('dietas', match[1]);
 
-    match = normalized.match(/^\/api\/alunos-treinos\/([^/]+)$/);
-    if (match) return byIdToQuery('alunos_treinos', match[1]);
+    // /api/alunos-treinos/assign (POST: vincula template) e rotas semânticas de atribuição
+    // usam rotas REAIS no servidor — não reescrever para /rest/v1.
+    if (/^\/api\/alunos-treinos\/[^/]+\/(treino-resolvido|personalizacao)$/.test(normalized)) {
+        return { endpoint, unwrapFirstRow: false };
+    }
+    if (/^\/api\/alunos-treinos\/[^/]+$/.test(normalized)) {
+        return { endpoint, unwrapFirstRow: false };
+    }
+
+    match = normalized.match(/^\/api\/treinos\/([^/]+)\/atribuicoes$/);
+    if (match) {
+        return { endpoint, unwrapFirstRow: false };
+    }
 
     match = normalized.match(/^\/api\/feedbacks-alunos\/([^/]+)$/);
     if (match) return byIdToQuery('feedbacks_alunos', match[1]);
@@ -984,6 +1007,16 @@ class ApiClient {
             body: JSON.stringify(updates),
         });
     }
+
+    async updateNotificationSafe(
+        id: string,
+        updates: { lida?: boolean },
+    ): Promise<ApiResult<unknown>> {
+        return this.safeRequest(`/api/notificacoes/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify(updates),
+        });
+    }
     
     // DELETE /api/notificacoes/:id - Deletar notificação
     async deleteNotification(id: string) {
@@ -1057,8 +1090,39 @@ class ApiClient {
         });
     }
 
-    async listWeeklyCheckinsSafe(query?: { q?: string }): Promise<ApiResult<WeeklyCheckinRecord[]>> {
+    async listWeeklyCheckinsSafe(
+        query?: WeeklyCheckinsListQuery,
+    ): Promise<ApiResult<WeeklyCheckinRecord[] | WeeklyCheckinsPaginatedResponse>> {
         return this.safeRequest(API_CONTRACT.weeklyCheckins.list(query));
+    }
+
+    async listCoachFeedbacksPaginatedSafe(
+        query: WeeklyCheckinsListQuery & { limit?: number; offset?: number },
+    ): Promise<ApiResult<WeeklyCheckinsPaginatedResponse>> {
+        const result = await this.safeRequest<WeeklyCheckinsPaginatedResponse | WeeklyCheckinRecord[]>(
+            API_CONTRACT.weeklyCheckins.list({
+                ...query,
+                com_resposta: true,
+                limit: query.limit ?? 20,
+                offset: query.offset ?? 0,
+            }),
+        );
+        if (!result.success || !result.data) {
+            return { success: false, error: result.error ?? 'Erro ao carregar feedbacks' };
+        }
+        if (Array.isArray(result.data)) {
+            return {
+                success: true,
+                data: {
+                    items: result.data,
+                    total: result.data.length,
+                    limit: query.limit ?? 20,
+                    offset: query.offset ?? 0,
+                    has_more: false,
+                },
+            };
+        }
+        return { success: true, data: result.data };
     }
 
     async weeklyCheckinAiTrendsSafe(alunoId: string): Promise<ApiResult<CheckinAiTrendsResponse>> {

@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Calendar, Utensils, Dumbbell, MessageCircle, Camera } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useStudentOverlayLock } from "@/hooks/useStudentOverlayLock";
 
 const STORAGE_KEY = "bh-student-onboarding-v2";
 
@@ -62,6 +63,7 @@ type StudentOnboardingDialogProps = {
 };
 
 const StudentOnboardingDialog = ({ open, onOpenChange }: StudentOnboardingDialogProps) => {
+  useStudentOverlayLock(open);
   const [step, setStep] = useState(0);
   const current = STEPS[step];
   const Icon = current.icon;

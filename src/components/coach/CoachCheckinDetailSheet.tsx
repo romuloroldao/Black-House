@@ -30,6 +30,7 @@ import {
   hasRelato,
   isCheckinMarcadoSemTexto,
   isCheckinRespondido,
+  isMeaningfulCoachResposta,
 } from "@/lib/checkin-display";
 import { getCheckinPrioridadeSummary, isCheckinPrioridade } from "@/lib/checkin-highlights";
 import type { WeeklyCheckinRecord } from "@/types/weekly-checkin";
@@ -101,10 +102,20 @@ export default function CoachCheckinDetailSheet({
   }, [open, checkin?.id, checkin?.coach_resposta]);
 
   const handleSaveFeedback = async () => {
-    if (!feedback.trim()) {
+    const texto = feedback.trim();
+    if (!texto) {
       toast({
         title: "Digite uma resposta",
         description: "Escreva o feedback antes de salvar.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!isMeaningfulCoachResposta(texto)) {
+      toast({
+        title: "Resposta muito curta",
+        description:
+          "«visto» ou «!» não aparecem para o aluno. Escreva o feedback completo (mín. 12 caracteres).",
         variant: "destructive",
       });
       return;
@@ -120,7 +131,7 @@ export default function CoachCheckinDetailSheet({
         throw new Error("Check-in não encontrado");
       }
 
-      const save = await apiClient.saveWeeklyCheckinRespostaSafe(checkin.id, feedback.trim());
+      const save = await apiClient.saveWeeklyCheckinRespostaSafe(checkin.id, texto);
       if (!save.success || !save.data) {
         throw new Error(save.error || "Erro ao salvar");
       }
@@ -322,8 +333,8 @@ export default function CoachCheckinDetailSheet({
                   Resposta não visível para o aluno
                 </p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Este check-in foi marcado como respondido antes, mas o texto não foi salvo. O aluno
-                  não vê nada no portal — use «Salvar resposta» abaixo.
+                  Só há marcador («visto», «!») ou nenhum texto salvo — o aluno não vê feedback útil.
+                  Escreva a resposta completa abaixo e use «Salvar resposta».
                 </p>
               </div>
             )}

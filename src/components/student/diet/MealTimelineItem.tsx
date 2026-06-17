@@ -81,14 +81,14 @@ const MealTimelineItem = ({
           <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
         </div>
         <div className="mt-2 flex flex-wrap gap-2">
-          <Badge variant="outline" className="text-[10px]">
+          <Badge variant="outline" className="student-badge-sm">
             {Math.round(macros.totalCalorias)} kcal
           </Badge>
-          <Badge variant="secondary" className="text-[10px]">
+          <Badge variant="secondary" className="student-badge-sm">
             {items.length} item{items.length !== 1 ? "s" : ""}
           </Badge>
           {group.hasMultiplosCardapios && (
-            <Badge variant="premium" className="text-[10px]">
+            <Badge variant="premium" className="student-badge-sm">
               Plano {plano}
             </Badge>
           )}

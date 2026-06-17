@@ -67,10 +67,15 @@ All colors MUST be HSL.
     --safe-area-top: env(safe-area-inset-top, 0px);
     --safe-area-bottom: env(safe-area-inset-bottom, 0px);
     --mobile-bottom-inset: max(12px, env(safe-area-inset-bottom, 0px));
-    --student-bottom-nav-bar: 4rem;
+    /* Altura da barra de ícones + labels — usada em sheets e padding do main */
+    --student-bottom-nav-bar: 5rem;
     --student-bottom-nav-total: calc(var(--student-bottom-nav-bar) + var(--mobile-bottom-inset));
     --student-main-pad-bottom: calc(var(--student-bottom-nav-total) + 1.25rem);
     --student-main-pad-bottom-compact: calc(var(--mobile-bottom-inset) + 1.25rem);
+
+    /* Hierarquia mobile — chrome do portal < overlays modais < toasts críticos */
+    --z-student-chrome: 100;
+    --z-overlay: 110;
 
     /* Scrollbar discreto — alinhado ao tema escuro (não competir com o conteúdo) */
     --scrollbar-size: 8px;
@@ -304,6 +309,19 @@ All colors MUST be HSL.
     padding-bottom: var(--mobile-bottom-inset);
   }
 
+  .z-overlay {
+    z-index: var(--z-overlay);
+  }
+
+  /* Conteúdo rolável em sheets/dialogs no mobile — margem para home indicator */
+  .pb-overlay-safe {
+    padding-bottom: max(1rem, var(--mobile-bottom-inset));
+  }
+
+  .student-bottom-nav-bar {
+    min-height: var(--student-bottom-nav-bar);
+  }
+
   .pb-student-main {
     padding-bottom: var(--student-main-pad-bottom);
   }
@@ -318,6 +336,27 @@ All colors MUST be HSL.
 
   .pt-student-header {
     padding-top: max(0.75rem, var(--safe-area-top));
+  }
+
+  /* Fase 4.5 — contraste WCAG AA em badges/captions pequenos do portal aluno */
+  .student-badge-sm {
+    @apply text-xs leading-none;
+  }
+
+  .student-caption {
+    @apply text-xs text-foreground/75;
+  }
+}
+
+/*
+ * Portal aluno mobile — esconder bottom nav enquanto sheet/dialog está aberto.
+ * Evita sobreposição mesmo se z-index falhar em algum browser.
+ */
+@media (max-width: 767px) {
+  body:has([data-state="open"][role="dialog"]) .student-bottom-nav,
+  body:has([data-state="open"][role="alertdialog"]) .student-bottom-nav,
+  body.student-overlay-open .student-bottom-nav {
+    display: none !important;
   }
 }
 

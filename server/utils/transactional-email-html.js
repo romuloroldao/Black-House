@@ -28,10 +28,10 @@ function escapeAttr(s) {
   return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 }
 
+const { getFrontendBaseUrl } = require('./frontend-base-url');
+
 function siteBaseUrl() {
-  const u = process.env.FRONTEND_URL && String(process.env.FRONTEND_URL).trim();
-  if (!u) return 'https://blackhouse.app.br';
-  return u.replace(/\/$/, '');
+  return getFrontendBaseUrl();
 }
 
 /**

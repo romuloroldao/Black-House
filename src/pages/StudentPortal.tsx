@@ -173,9 +173,9 @@ const StudentPortal = () => {
             tabIndex={-1}
             aria-live="polite"
             className={cn(
-              "min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] p-4 md:p-6 lg:p-8",
-              showMobileBottomNav ? "max-md:pb-student-main" : "max-md:pb-student-main-compact",
-              "md:pb-6",
+              "min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch]",
+              "px-4 pt-4 md:px-6 md:pt-6 lg:px-8 lg:pt-8",
+              showMobileBottomNav ? "max-md:pb-student-main md:pb-6" : "max-md:pb-student-main-compact md:pb-6",
             )}
           >
             <div className="mb-4 hidden justify-end md:flex">

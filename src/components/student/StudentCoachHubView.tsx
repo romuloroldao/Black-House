@@ -144,7 +144,7 @@ const StudentCoachHubView = () => {
             <MessageSquare className="h-4 w-4" />
             Chat
             {unreadChat > 0 && (
-              <Badge variant="destructive" className="ml-1 h-5 min-w-5 px-1 text-[10px]">
+              <Badge variant="destructive" className="student-badge-sm ml-1 h-5 min-w-5 px-1">
                 {unreadChat > 9 ? "9+" : unreadChat}
               </Badge>
             )}
@@ -153,7 +153,7 @@ const StudentCoachHubView = () => {
             <Megaphone className="h-4 w-4" />
             Avisos
             {unreadAvisos > 0 && (
-              <Badge variant="destructive" className="ml-1 h-5 min-w-5 px-1 text-[10px]">
+              <Badge variant="destructive" className="student-badge-sm ml-1 h-5 min-w-5 px-1">
                 {unreadAvisos > 9 ? "9+" : unreadAvisos}
               </Badge>
             )}

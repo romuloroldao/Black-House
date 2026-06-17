@@ -2,6 +2,14 @@ import type { CheckinFormData } from "@/lib/checkin-types";
 
 export type CheckinSectionId = "corpo" | "nutricao" | "treino" | "sono" | "bem_estar";
 
+export function getCheckinSectionTitleId(sectionId: CheckinSectionId): string {
+  return `checkin-section-${sectionId}-title`;
+}
+
+export function getCheckinSectionDescId(sectionId: CheckinSectionId): string {
+  return `checkin-section-${sectionId}-desc`;
+}
+
 export const CHECKIN_SECTIONS: Array<{
   id: CheckinSectionId;
   title: string;

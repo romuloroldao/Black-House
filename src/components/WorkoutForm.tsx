@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -25,14 +25,17 @@ import {
 
 interface WorkoutFormProps {
   workout?: any;
-  /** Cópia exclusiva de um aluno — não permitir virar template global. */
+  /** Edição de treino atribuído a um aluno (personalização, não template). */
   studentCopy?: boolean;
+  /** ID do vínculo alunos_treinos para gravar overrides. */
+  atribuicaoId?: string;
   onBack: () => void;
   onSave: () => void;
 }
 
 interface Exercise {
   id: string;
+  slotKey?: string;
   name: string;
   sets: number;
   reps: string;
@@ -43,7 +46,7 @@ interface Exercise {
   order: number;
 }
 
-const WorkoutForm = ({ workout, studentCopy = false, onBack, onSave }: WorkoutFormProps) => {
+const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSave }: WorkoutFormProps) => {
   const { user } = useAuth();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
@@ -60,12 +63,10 @@ const WorkoutForm = ({ workout, studentCopy = false, onBack, onSave }: WorkoutFo
   });
 
   const [exercises, setExercises] = useState<Exercise[]>(() => {
-    // Ensure we always have an array of exercises
-    if (workout?.exercises && Array.isArray(workout.exercises)) {
+    if (workout?.exercises && Array.isArray(workout.exercises) && workout.exercises.length > 0) {
       return workout.exercises;
     }
-    
-    // Default exercise if no valid exercises array
+
     return [
       {
         id: "1",
@@ -82,6 +83,65 @@ const WorkoutForm = ({ workout, studentCopy = false, onBack, onSave }: WorkoutFo
 
   const [newTag, setNewTag] = useState("");
 
+  useEffect(() => {
+    if (!workout) {
+      setFormData({
+        name: "",
+        description: "",
+        category: "",
+        difficulty: "",
+        duration: 60,
+        isTemplate: false,
+        tags: [],
+        objectives: [],
+        notes: "",
+      });
+      setExercises([
+        {
+          id: "1",
+          name: "",
+          sets: 3,
+          reps: "12",
+          weight: "",
+          rest: "60s",
+          notes: "",
+          order: 1,
+        },
+      ]);
+      return;
+    }
+
+    const mappedExercises = Array.isArray(workout.exercises) ? workout.exercises : [];
+    setFormData({
+      name: String(workout.name ?? ""),
+      description: String(workout.description ?? ""),
+      category: String(workout.category ?? ""),
+      difficulty: String(workout.difficulty ?? ""),
+      duration: Number(workout.duration ?? 60),
+      isTemplate: workout.isTemplate === true,
+      tags: Array.isArray(workout.tags) ? workout.tags : [],
+      objectives: Array.isArray(workout.objectives) ? workout.objectives : [],
+      notes: String(workout.notes ?? ""),
+    });
+
+    if (mappedExercises.length > 0) {
+      setExercises(mappedExercises);
+    } else {
+      setExercises([
+        {
+          id: "1",
+          name: "",
+          sets: 3,
+          reps: "12",
+          weight: "",
+          rest: "60s",
+          notes: "",
+          order: 1,
+        },
+      ]);
+    }
+  }, [workout?.id]);
+
   const categories = [
     "Hipertrofia",
     "Força",
@@ -95,8 +155,10 @@ const WorkoutForm = ({ workout, studentCopy = false, onBack, onSave }: WorkoutFo
   const difficulties = ["Iniciante", "Intermediário", "Avançado"];
 
   const addExercise = () => {
+    const slotKey = crypto.randomUUID();
     const newExercise: Exercise = {
-      id: Date.now().toString(),
+      id: slotKey,
+      slotKey,
       name: "",
       sets: 3,
       reps: "12",
@@ -168,7 +230,9 @@ const WorkoutForm = ({ workout, studentCopy = false, onBack, onSave }: WorkoutFo
         is_template: studentCopy ? false : formData.isTemplate,
         tags: formData.tags,
         num_exercicios: exercises.length,
-        exercicios: exercises.map(ex => ({
+        exercicios: exercises.map((ex, index) => ({
+          slot_key: ex.slotKey || ex.id,
+          id: ex.slotKey || ex.id,
           nome: ex.name,
           series: ex.sets,
           repeticoes: ex.reps,
@@ -176,29 +240,52 @@ const WorkoutForm = ({ workout, studentCopy = false, onBack, onSave }: WorkoutFo
           descanso: ex.rest,
           observacoes: ex.notes,
           video_url: ex.videoUrl,
-          ordem: ex.order
+          ordem: ex.order ?? index + 1,
         })),
         coach_id: user.id,
       };
 
       if (workout?.id) {
-        const updateResult = await apiClient.requestSafe(`/api/treinos/${workout.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify(treinoData),
-        });
-        if (!updateResult.success) {
+        if (studentCopy && atribuicaoId) {
+          const updateResult = await apiClient.requestSafe(
+            `/api/alunos-treinos/${atribuicaoId}/personalizacao`,
+            {
+              method: 'PATCH',
+              body: JSON.stringify({ exercicios: treinoData.exercicios }),
+            },
+          );
+          if (!updateResult.success) {
+            toast({
+              title: "Erro ao salvar",
+              description: updateResult.error || "Não foi possível salvar a personalização.",
+              variant: "destructive",
+            });
+            setSaving(false);
+            return;
+          }
           toast({
-            title: "Erro ao salvar",
-            description: updateResult.error || "Não foi possível salvar o treino.",
-            variant: "destructive",
+            title: "Personalização guardada!",
+            description: "Alterações aplicadas só a este aluno. O template original não foi modificado.",
           });
-          setSaving(false);
-          return;
+        } else {
+          const updateResult = await apiClient.requestSafe(`/api/treinos/${workout.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify(treinoData),
+          });
+          if (!updateResult.success) {
+            toast({
+              title: "Erro ao salvar",
+              description: updateResult.error || "Não foi possível salvar o treino.",
+              variant: "destructive",
+            });
+            setSaving(false);
+            return;
+          }
+          toast({
+            title: "Treino atualizado!",
+            description: "As alterações foram salvas com sucesso.",
+          });
         }
-        toast({
-          title: "Treino atualizado!",
-          description: "As alterações foram salvas com sucesso.",
-        });
       } else {
         const createResult = await apiClient.requestSafe('/api/treinos', {
           method: 'POST',
@@ -250,6 +337,11 @@ const WorkoutForm = ({ workout, studentCopy = false, onBack, onSave }: WorkoutFo
                 ? "Modifique os detalhes do treino"
                 : "Crie um novo treino personalizado"}
           </p>
+          {studentCopy && (workout?.personalizacoes ?? 0) > 0 && (
+            <Badge variant="secondary" className="mt-2 bg-warning/10 text-warning border-warning/20">
+              {workout.personalizacoes} personalização{workout.personalizacoes === 1 ? "" : "ões"} activa{workout.personalizacoes === 1 ? "" : "s"}
+            </Badge>
+          )}
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={onBack} disabled={saving}>

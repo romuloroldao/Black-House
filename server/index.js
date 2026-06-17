@@ -29,6 +29,7 @@ const createHealthRouter = require('./routes/health');
 const { authLimiter, apiLimiter, webhookLimiter, uploadLimiter, forgotPasswordLimiter, resetPasswordSubmitLimiter } = require('./middleware/rate-limiter');
 const { sendPasswordResetEmail } = require('./utils/send-password-reset-email');
 const { sendEmailConfirmation } = require('./utils/send-email-confirmation');
+const { getFrontendBaseUrl } = require('./utils/frontend-base-url');
 const { errorHandler, notFoundHandler } = require('./middleware/error-handler');
 const requestLogger = require('./middleware/request-logger');
 const { internationalAccessMiddleware } = require('./middleware/international-access');
@@ -1082,11 +1083,6 @@ app.post('/auth/resend-confirmation', forgotPasswordLimiter, async (req, res) =>
     }
 });
 
-function getFrontendBaseUrl() {
-    const raw = process.env.FRONTEND_URL || process.env.PUBLIC_APP_URL || 'https://blackhouse.app.br';
-    return String(raw).replace(/\/$/, '');
-}
-
 // Esqueci minha senha — gera JWT de uso único (1h) e envia email se Resend/SMTP configurado
 app.post('/auth/forgot-password', forgotPasswordLimiter, async (req, res) => {
     const genericOk = {
@@ -1287,6 +1283,13 @@ app.post('/auth/logout', (req, res) => {
     res.json({ message: 'Logout realizado' });
 });
 
+// Links de email (reset/confirmação) abrem no frontend; redireciona GET /auth na API.
+app.get('/auth', (req, res) => {
+    const base = getFrontendBaseUrl();
+    const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    return res.redirect(302, `${base}/auth${qs}`);
+});
+
 // =============== ROTAS DA API ===============
 
 const domainSchemaGuard = createDomainSchemaGuard(pool);
@@ -1463,6 +1466,11 @@ app.get('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) => 
             queryParams.push(alunoRow.rows[0].id);
             paramIndex++;
         }
+
+        // Treinos: biblioteca — nunca expor cópias por aluno na listagem legada.
+        if (table === 'treinos') {
+            filters.push('aluno_id IS NULL');
+        }
         
         if (filters.length > 0) {
             query += ` WHERE ${filters.join(' AND ')}`;
@@ -1529,6 +1537,18 @@ app.post('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) =>
         const rowsToProcess = Array.isArray(data) ? data : [data];
         if (rowsToProcess.length === 0) {
             return res.status(400).json({ error: 'Nenhum registro para inserir' });
+        }
+
+        if (table === 'treinos') {
+            const hasCopy = rowsToProcess.some(
+                (row) => row && row.aluno_id != null && String(row.aluno_id).trim() !== '',
+            );
+            if (hasCopy) {
+                return res.status(400).json({
+                    error: 'Não é permitido criar cópia de treino por aluno. Use POST /api/alunos-treinos/assign.',
+                    error_code: 'TREINO_COPY_FORBIDDEN',
+                });
+            }
         }
 
         const insertedRows = [];
@@ -1897,6 +1917,33 @@ app.patch('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) =
             sanitizedData = sanitized;
         }
 
+        // JSON-01 (PATCH): campos JSONB (ex.: exercicios) precisam de JSON.stringify + cast ::jsonb.
+        // node-pg converte arrays/objetos JS para literal de array Postgres por omissão, o que
+        // rebenta numa coluna jsonb com "invalid input syntax for type json".
+        const isDateColumn = (col) =>
+            col.startsWith('data_') || col === 'created_at' || col === 'updated_at';
+        const isJsonbColumn = (col) =>
+            col === 'exercicios' || (col.includes('json') && !isDateColumn(col));
+
+        for (const key of Object.keys(sanitizedData)) {
+            const value = sanitizedData[key];
+            if (
+                isJsonbColumn(key) &&
+                typeof value === 'object' &&
+                value !== null &&
+                !(value instanceof Date)
+            ) {
+                try {
+                    sanitizedData[key] = JSON.stringify(value);
+                } catch (jsonError) {
+                    logger.warn('JSON-01.patch: erro ao serializar JSON, mantendo original', {
+                        key,
+                        error: jsonError.message,
+                    });
+                }
+            }
+        }
+
         const columns = Object.keys(sanitizedData);
         
         // Validação: pelo menos um campo opcional deve estar presente
@@ -1928,7 +1975,9 @@ app.patch('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) =
         // Não precisamos atualizar manualmente - o trigger set_updated_at() cuida disso
         // SCHEMA-03: Usar dados sanitizados (com whitelist aplicada para alunos)
         const values = Object.values(sanitizedData);
-        const setClause = columns.map((col, i) => `${col} = $${i + 1}`).join(', ');
+        const setClause = columns
+            .map((col, i) => `${col} = $${i + 1}${isJsonbColumn(col) ? '::jsonb' : ''}`)
+            .join(', ');
         
         const query = `
             UPDATE public.${table}

@@ -27,6 +27,7 @@ import {
 } from "@/lib/foodEquivalence";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
+import { useStudentOverlayLock } from "@/hooks/useStudentOverlayLock";
 import { apiClient } from "@/lib/api-client";
 import { API_CONTRACT } from "@/contracts/api-contract";
 
@@ -49,6 +50,8 @@ export default function FoodSubstitutionDialog({
   alimentosDisponiveis,
   onSubstituir,
 }: FoodSubstitutionDialogProps) {
+  useStudentOverlayLock(open);
+
   const [substituicoes, setSubstituicoes] = useState<SubstituicaoIsocalorica[]>([]);
   const [selectedSubstituicao, setSelectedSubstituicao] = useState<string>("");
   const [busca, setBusca] = useState("");
@@ -147,8 +150,14 @@ export default function FoodSubstitutionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent
+        className={cn(
+          "flex w-full max-w-3xl flex-col gap-0 overflow-hidden p-0",
+          "max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:top-auto max-md:max-h-[min(92dvh,920px)] max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-t-2xl max-md:rounded-b-none",
+          "md:max-h-[min(85dvh,920px)] md:gap-4 md:p-6",
+        )}
+      >
+        <DialogHeader className="shrink-0 space-y-2 px-6 pb-4 pt-6 text-left md:px-0 md:pb-0 md:pt-0">
           <DialogTitle>Substituir alimento</DialogTitle>
           <DialogDescription>
             Equivalência <strong>isocalórica</strong> no grupo{" "}
@@ -156,7 +165,7 @@ export default function FoodSubstitutionDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-5">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-y-contain px-6 pb-4 [-webkit-overflow-scrolling:touch] md:px-0 md:pb-0">
           <div className="rounded-lg border bg-muted/20 p-4">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Referência</p>
             <p className="text-lg font-semibold text-foreground">{nomeAlimentoAtual}</p>
@@ -180,13 +189,13 @@ export default function FoodSubstitutionDialog({
           </Alert>
 
           {substituicaoIndisponivel ? (
-            <p className="text-center text-muted-foreground py-8">
+            <p className="py-8 text-center text-muted-foreground">
               Grupo livre ou sem calorias — substituição isocalórica não se aplica.
             </p>
           ) : (
             <>
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   placeholder="Buscar substituto no grupo..."
                   value={busca}
@@ -196,14 +205,14 @@ export default function FoodSubstitutionDialog({
               </div>
 
               {loading ? (
-                <p className="text-center text-muted-foreground py-6">A calcular equivalências...</p>
+                <p className="py-6 text-center text-muted-foreground">A calcular equivalências...</p>
               ) : filtradas.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8">
+                <p className="py-8 text-center text-muted-foreground">
                   Nenhum substituto neste grupo.
                 </p>
               ) : (
                 <RadioGroup value={selectedSubstituicao} onValueChange={setSelectedSubstituicao}>
-                  <div className="space-y-3 max-h-[40vh] overflow-y-auto pr-1">
+                  <div className="max-h-[min(40dvh,360px)] space-y-3 overflow-y-auto pr-1 md:max-h-[40vh]">
                     {filtradas.map((sub, index) => (
                       <div
                         key={sub.alimento.id}
@@ -216,9 +225,9 @@ export default function FoodSubstitutionDialog({
                       >
                         <div className="flex items-start gap-3">
                           <RadioGroupItem value={sub.alimento.id} id={sub.alimento.id} className="mt-1" />
-                          <Label htmlFor={sub.alimento.id} className="flex-1 cursor-pointer font-normal space-y-2">
+                          <Label htmlFor={sub.alimento.id} className="flex-1 cursor-pointer space-y-2 font-normal">
                             {index === 0 && <Badge className="text-xs">Melhor ajuste</Badge>}
-                            <div className="flex items-center gap-2 flex-wrap">
+                            <div className="flex flex-wrap items-center gap-2">
                               <span className="text-base font-semibold">{sub.alimento.name}</span>
                               <Badge variant="secondary">
                                 {sub.quantidadeEquivalente.toFixed(1)}
@@ -246,16 +255,16 @@ export default function FoodSubstitutionDialog({
               )}
             </>
           )}
+        </div>
 
-          <div className="flex gap-2 justify-end pt-4">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={handleSubstituir} disabled={!selectedSubstituicao || substituicaoIndisponivel}>
-              <ArrowRight className="w-4 h-4 mr-2" />
-              Confirmar
-            </Button>
-          </div>
+        <div className="flex shrink-0 justify-end gap-2 border-t border-border p-4 pb-overlay-safe md:border-0 md:p-0 md:pt-4">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancelar
+          </Button>
+          <Button onClick={handleSubstituir} disabled={!selectedSubstituicao || substituicaoIndisponivel}>
+            <ArrowRight className="mr-2 h-4 w-4" />
+            Confirmar
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

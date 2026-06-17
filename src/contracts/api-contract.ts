@@ -86,9 +86,23 @@ export const API_CONTRACT = {
     create: () => `${API_BASE}/api/checkins`,
   },
   weeklyCheckins: {
-    list: (query?: { q?: string }) => {
-      const qs = query?.q ? `?q=${encodeURIComponent(query.q)}` : '';
-      return `${API_BASE}/api/weekly-checkins${qs}`;
+    list: (query?: {
+      q?: string;
+      limit?: number;
+      offset?: number;
+      com_resposta?: boolean;
+      year?: number;
+      aluno_id?: string;
+    }) => {
+      const params = new URLSearchParams();
+      if (query?.q) params.set('q', query.q);
+      if (query?.limit != null) params.set('limit', String(query.limit));
+      if (query?.offset != null) params.set('offset', String(query.offset));
+      if (query?.com_resposta) params.set('com_resposta', '1');
+      if (query?.year != null) params.set('year', String(query.year));
+      if (query?.aluno_id) params.set('aluno_id', query.aluno_id);
+      const qs = params.toString();
+      return `${API_BASE}/api/weekly-checkins${qs ? `?${qs}` : ''}`;
     },
     pendentesCount: () => `${API_BASE}/api/weekly-checkins/pendentes/count`,
     markRespondido: (id: string) => `${API_BASE}/api/weekly-checkins/${id}/respondido`,
@@ -225,7 +239,10 @@ const CONTRACT_PATTERNS = [
   '/api/recurring-charges-config',
   '/api/recurring-charges-config/:id',
   '/api/alunos-treinos',
+  '/api/alunos-treinos/assign',
   '/api/alunos-treinos/:id',
+  '/api/alunos-treinos/:id/treino-resolvido',
+  '/api/alunos-treinos/:id/personalizacao',
   '/api/alimentos',
   '/api/alimentos/nutrition-audit',
   '/api/alimentos/:id',
@@ -249,6 +266,7 @@ const CONTRACT_PATTERNS = [
   '/api/payment-plans/:id',
   '/api/treinos',
   '/api/treinos/:id',
+  '/api/treinos/:id/atribuicoes',
   '/api/profiles/me',
   '/api/profiles',
   '/api/me',

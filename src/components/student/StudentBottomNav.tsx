@@ -40,10 +40,10 @@ const StudentBottomNav = ({ activeTab, onTabChange, coachBadge = 0 }: StudentBot
 
   return (
     <nav
-      className="student-bottom-nav-safe fixed inset-x-0 bottom-0 z-[90] border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/90 md:hidden"
+      className="student-bottom-nav student-bottom-nav-safe max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:z-40 shrink-0 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/90 md:hidden"
       aria-label="Navegação principal"
     >
-      <div className="mx-auto grid min-h-16 max-w-lg grid-cols-4 py-1">
+      <div className="student-bottom-nav-bar mx-auto grid max-w-lg grid-cols-4 py-1">
         {items.map((item) => {
           const Icon = item.icon;
           const isActive = resolved === item.id;
@@ -61,7 +61,7 @@ const StudentBottomNav = ({ activeTab, onTabChange, coachBadge = 0 }: StudentBot
                 : {})}
               className={cn(
                 "relative flex min-h-[44px] flex-col items-center justify-center gap-0.5 px-1 text-[11px] font-medium transition-colors motion-reduce:transition-none",
-                isActive ? "text-primary" : "text-muted-foreground hover:text-foreground",
+                isActive ? "text-primary" : "text-foreground/75 hover:text-foreground",
               )}
               onClick={() => {
                 if (item.id === "coach") {

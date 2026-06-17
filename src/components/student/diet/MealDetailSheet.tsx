@@ -17,6 +17,7 @@ import {
   type MealGroup,
 } from "@/lib/diet-student-utils";
 import { cn } from "@/lib/utils";
+import { useStudentOverlayLock } from "@/hooks/useStudentOverlayLock";
 
 type MealDetailSheetProps = {
   open: boolean;
@@ -135,11 +136,11 @@ function CardapioBlock({
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-sm font-semibold">Cardápio {cardapio}</h3>
         {isActive && (
-          <Badge variant="premium" className="text-[10px]">
+          <Badge variant="premium" className="student-badge-sm">
             Seleccionado hoje
           </Badge>
         )}
-        <Badge variant="secondary" className="text-[10px]">
+        <Badge variant="secondary" className="student-badge-sm">
           {principais.length} alimento{principais.length !== 1 ? "s" : ""}
           {substitutos.length > 0
             ? ` · ${substitutos.length} substituto${substitutos.length !== 1 ? "s" : ""}`
@@ -168,6 +169,8 @@ const MealDetailSheet = ({
   dietHasMultiplosCardapios,
   onSubstituir,
 }: MealDetailSheetProps) => {
+  useStudentOverlayLock(open);
+
   const planosNoGrupo = group?.planosPresentes ?? [];
   const showAllCardapios = Boolean(
     group?.hasMultiplosCardapios && dietHasMultiplosCardapios && planosNoGrupo.length >= 2,
@@ -198,14 +201,14 @@ const MealDetailSheet = ({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
-        className="flex max-h-[min(88dvh,920px)] flex-col gap-0 overflow-hidden rounded-t-2xl p-0 student-bottom-nav-safe"
+        className="flex max-h-[min(88dvh,920px)] flex-col gap-0 overflow-hidden rounded-t-2xl p-0"
       >
         <SheetHeader className="shrink-0 border-b border-border/60 px-6 pb-4 pr-14 pt-6 text-left">
           <SheetTitle>{mealName}</SheetTitle>
           <SheetDescription>{description}</SheetDescription>
         </SheetHeader>
 
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-y-contain px-6 py-4 [-webkit-overflow-scrolling:touch]">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-y-contain px-6 py-4 pb-overlay-safe [-webkit-overflow-scrolling:touch]">
           {showAllCardapios && group ? (
             planosNoGrupo.map((cardapio) => (
               <CardapioBlock

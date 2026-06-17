@@ -16,6 +16,7 @@ export default function TreinoPage() {
   const [error, setError] = useState<string | null>(null);
 
   const backTo = searchParams.get("from") || "/";
+  const atribuicaoId = searchParams.get("atribuicao") || null;
 
   useEffect(() => {
     if (!id) return;
@@ -23,7 +24,11 @@ export default function TreinoPage() {
 
     (async () => {
       setLoading(true);
-      const result = await apiClient.requestSafe<any>(`/api/treinos/${id}`);
+      const endpoint = atribuicaoId
+        ? `/api/alunos-treinos/${atribuicaoId}/treino-resolvido`
+        : `/api/treinos/${id}${atribuicaoId ? `?atribuicao_id=${atribuicaoId}` : ""}`;
+
+      const result = await apiClient.requestSafe<any>(endpoint);
       if (cancelled) return;
       if (!result.success || !result.data) {
         setError(result.error || "Treino não encontrado");
@@ -38,12 +43,14 @@ export default function TreinoPage() {
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, atribuicaoId]);
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
     if (tab !== "treinos") navigate("/");
   };
+
+  const isStudentAssignment = Boolean(atribuicaoId || workout?.atribuicaoId);
 
   return (
     <div className="flex h-screen bg-background">
@@ -59,7 +66,8 @@ export default function TreinoPage() {
         ) : (
           <WorkoutForm
             workout={workout}
-            studentCopy={Boolean(workout?.alunoId)}
+            studentCopy={isStudentAssignment}
+            atribuicaoId={atribuicaoId || workout?.atribuicaoId || undefined}
             onBack={() => navigate(backTo)}
             onSave={() => navigate(backTo)}
           />

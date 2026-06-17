@@ -12,14 +12,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { 
   Plus, 
   Search, 
-  Filter, 
   Copy, 
   Edit3, 
   Trash2, 
   Clock, 
-  Target, 
   Users,
-  Play,
   Star,
   Calendar,
   Dumbbell,
@@ -27,6 +24,13 @@ import {
 } from "lucide-react";
 import WorkoutForm from "./WorkoutForm";
 import WorkoutTemplates from "./WorkoutTemplates";
+import WorkoutTemplateAssignmentsSheet, {
+  type WorkoutTemplateSummary,
+} from "./WorkoutTemplateAssignmentsSheet";
+import WorkoutTemplatePreviewSheet, {
+  type WorkoutTemplatePreview,
+} from "./WorkoutTemplatePreviewSheet";
+import { mapTreinoApiToWorkoutForm } from "@/lib/treino-form-mapper";
 import { exportWorkoutToPdf, exportMultipleWorkoutsToPdf } from "@/utils/workoutPdfExport";
 
 const WorkoutManager = () => {
@@ -35,7 +39,12 @@ const WorkoutManager = () => {
   const [activeView, setActiveView] = useState("list");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedWorkout, setSelectedWorkout] = useState(null);
+  const [assignmentsTemplate, setAssignmentsTemplate] = useState<WorkoutTemplateSummary | null>(null);
+  const [assignmentsOpen, setAssignmentsOpen] = useState(false);
+  const [previewTemplate, setPreviewTemplate] = useState<WorkoutTemplatePreview | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [workouts, setWorkouts] = useState<any[]>([]);
+  const [formLoading, setFormLoading] = useState(false);
   const { data: treinosRaw, loading: loadingTreinos, error: errorTreinos, refetch: refetchTreinos } = useApiSafeList(
     () => apiClient.requestSafe<any[]>('/api/treinos'),
     { autoFetch: true, endpointKey: '/api/treinos' }
@@ -43,8 +52,14 @@ const WorkoutManager = () => {
 
   useEffect(() => {
     if (!loadingTreinos) {
+      const seen = new Set<string>();
       const treinosFiltrados = safeArray(treinosRaw)
-        .filter((treino: any) => treino && treino.is_template === false)
+        .filter((treino: any) => {
+          if (!treino || treino.aluno_id) return false;
+          if (seen.has(treino.id)) return false;
+          seen.add(treino.id);
+          return true;
+        })
         .sort((a: any, b: any) => {
           const aTime = new Date(a?.created_at || 0).getTime();
           const bTime = new Date(b?.created_at || 0).getTime();
@@ -57,8 +72,9 @@ const WorkoutManager = () => {
         description: treino.descricao || '',
         duration: treino.duracao,
         difficulty: treino.dificuldade,
-        exercises: treino.num_exercicios,
-        studentsAssigned: 0,
+        exerciseCount: treino.num_exercicios ?? 0,
+        studentsAssigned: treino.alunos_ativos ?? 0,
+        studentsCustomized: treino.alunos_com_personalizacao ?? 0,
         category: treino.categoria,
         lastModified: new Date(treino.updated_at || Date.now()).toISOString().split('T')[0],
         isTemplate: treino.is_template,
@@ -92,14 +108,41 @@ const WorkoutManager = () => {
     }
   };
 
-  const handleEditWorkout = (workout: any) => {
-    setSelectedWorkout(workout);
+  const handleEditWorkout = async (workout: { id?: string } | null) => {
+    if (!workout?.id) {
+      setSelectedWorkout(null);
+      setFormLoading(false);
+      setActiveView("form");
+      return;
+    }
+
+    setFormLoading(true);
     setActiveView("form");
+    setSelectedWorkout(null);
+
+    const result = await apiClient.requestSafe<any>(`/api/treinos/${workout.id}`);
+    if (result.success && result.data) {
+      setSelectedWorkout(mapTreinoApiToWorkoutForm(result.data));
+    } else {
+      toast({
+        title: "Erro ao carregar treino",
+        description: result.error || "Não foi possível carregar os exercícios.",
+        variant: "destructive",
+      });
+      setActiveView("list");
+      setSelectedWorkout(null);
+    }
+    setFormLoading(false);
   };
 
   const handleCreateNew = () => {
     setSelectedWorkout(null);
     setActiveView("form");
+  };
+
+  const handleViewStudents = (workout: WorkoutTemplateSummary) => {
+    setAssignmentsTemplate(workout);
+    setAssignmentsOpen(true);
   };
 
   const handleDeleteWorkout = async (workoutId: string) => {
@@ -245,11 +288,16 @@ const WorkoutManager = () => {
             </div>
             <div className="flex items-center gap-2 text-muted-foreground">
               <Dumbbell className="w-4 h-4" />
-              <span>{workout.exercises} exercícios</span>
+              <span>{workout.exerciseCount} exercícios</span>
             </div>
             <div className="flex items-center gap-2 text-muted-foreground">
               <Users className="w-4 h-4" />
               <span>{workout.studentsAssigned} alunos</span>
+              {workout.studentsCustomized > 0 && (
+                <Badge variant="secondary" className="text-xs bg-warning/10 text-warning border-warning/20">
+                  {workout.studentsCustomized} c/ ajustes
+                </Badge>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <Badge className={getDifficultyColor(workout.difficulty)} variant="outline">
@@ -258,14 +306,30 @@ const WorkoutManager = () => {
             </div>
           </div>
           
-          <div className="flex items-center justify-between pt-2 border-t border-border">
+          <div className="flex items-center justify-between pt-2 border-t border-border gap-2">
             <span className="text-xs text-muted-foreground">
               Atualizado em {new Date(workout.lastModified).toLocaleDateString('pt-BR')}
             </span>
-            <Button variant="outline" size="sm" className="h-8">
-              <Play className="w-3 h-3 mr-1" />
-              Visualizar
-            </Button>
+            <div className="flex gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                onClick={() => handleViewStudents(workout)}
+              >
+                <Users className="w-3 h-3 mr-1" />
+                Alunos
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                onClick={() => handleEditWorkout(workout)}
+              >
+                <Edit3 className="w-3 h-3 mr-1" />
+                Editar
+              </Button>
+            </div>
           </div>
         </div>
       </CardContent>
@@ -273,8 +337,18 @@ const WorkoutManager = () => {
   );
 
   if (activeView === "form") {
+    if (formLoading) {
+      return (
+        <div className="p-6 space-y-4">
+          <div className="h-10 w-64 rounded bg-muted motion-safe:animate-pulse" />
+          <div className="h-96 w-full rounded bg-muted motion-safe:animate-pulse" />
+        </div>
+      );
+    }
+
     return (
       <WorkoutForm 
+        key={selectedWorkout?.id ?? "new"}
         workout={selectedWorkout}
         onBack={() => setActiveView("list")}
         onSave={() => {
@@ -309,7 +383,7 @@ const WorkoutManager = () => {
             Gerenciar Treinos
           </h1>
           <p className="text-muted-foreground">
-            Crie, edite e organize seus treinos personalizados
+            Biblioteca do coach — cada treino pode ser atribuído a vários alunos sem duplicar
           </p>
         </div>
         <div className="flex gap-2">
@@ -326,7 +400,7 @@ const WorkoutManager = () => {
 
       <Tabs defaultValue="workouts" className="space-y-6">
         <TabsList className="grid w-full grid-cols-2 lg:w-[400px]">
-          <TabsTrigger value="workouts">Meus Treinos</TabsTrigger>
+          <TabsTrigger value="workouts">Biblioteca</TabsTrigger>
           <TabsTrigger value="templates">Templates</TabsTrigger>
         </TabsList>
 
@@ -369,10 +443,10 @@ const WorkoutManager = () => {
             <Card>
               <CardContent className="p-6">
                 <div className="flex items-center space-x-2">
-                  <Star className="w-5 h-5 text-warning" />
+                  <Users className="w-5 h-5 text-primary" />
                   <div>
-                    <p className="text-2xl font-bold">{workouts.filter(w => w.isTemplate).length}</p>
-                    <p className="text-xs text-muted-foreground">Templates</p>
+                    <p className="text-2xl font-bold">{workouts.reduce((acc, w) => acc + w.studentsAssigned, 0)}</p>
+                    <p className="text-xs text-muted-foreground">Atribuições</p>
                   </div>
                 </div>
               </CardContent>
@@ -381,10 +455,12 @@ const WorkoutManager = () => {
             <Card>
               <CardContent className="p-6">
                 <div className="flex items-center space-x-2">
-                  <Users className="w-5 h-5 text-primary" />
+                  <Users className="w-5 h-5 text-warning" />
                   <div>
-                    <p className="text-2xl font-bold">{workouts.reduce((acc, w) => acc + w.studentsAssigned, 0)}</p>
-                    <p className="text-xs text-muted-foreground">Atribuições</p>
+                    <p className="text-2xl font-bold">
+                      {workouts.reduce((acc, w) => acc + (w.studentsCustomized ?? 0), 0)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">Com personalizações</p>
                   </div>
                 </div>
               </CardContent>
@@ -412,9 +488,29 @@ const WorkoutManager = () => {
         </TabsContent>
 
         <TabsContent value="templates">
-          <WorkoutTemplates onUseTemplate={handleEditWorkout} />
+          <WorkoutTemplates
+            onUseTemplate={handleEditWorkout}
+            onPreview={(template) => {
+              setPreviewTemplate(template);
+              setPreviewOpen(true);
+            }}
+            onViewStudents={handleViewStudents}
+          />
         </TabsContent>
       </Tabs>
+
+      <WorkoutTemplatePreviewSheet
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        template={previewTemplate}
+        onEdit={handleEditWorkout}
+      />
+
+      <WorkoutTemplateAssignmentsSheet
+        open={assignmentsOpen}
+        onOpenChange={setAssignmentsOpen}
+        template={assignmentsTemplate}
+      />
     </div>
   );
 };

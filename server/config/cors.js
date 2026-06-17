@@ -18,6 +18,7 @@ module.exports = {
             'https://www.blackhouse.app.br',
             'https://app.blackhouse.app.br',
             'http://localhost:8080', // Dev
+            'http://127.0.0.1:8080', // Dev / Playwright preview
             'http://localhost:5173', // Dev alternativo
             'http://127.0.0.1:5173'
         ];

@@ -49,7 +49,7 @@ const CheckinStreakCard = ({
                   : "Um check-in por semana — mantenha o hábito com seu coach."}
             </p>
             {streak.badge && (
-              <Badge variant="premium" className="mt-1.5 text-[10px]">
+              <Badge variant="premium" className="student-badge-sm mt-1.5">
                 {streak.badge}
               </Badge>
             )}

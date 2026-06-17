@@ -88,10 +88,13 @@ const StudentWorkoutsView = () => {
       if (alunosTreinosFiltrados.length > 0) {
         const treinosComExpiracao = await Promise.all(
           alunosTreinosFiltrados.map(async (at: any) => {
-            const treinoResult = await apiClient.requestSafe<any>(`/api/treinos/${at.treino_id}`);
+            const treinoResult = await apiClient.requestSafe<any>(
+              `/api/alunos-treinos/${at.id}/treino-resolvido`,
+            );
             const treino = treinoResult.success ? treinoResult.data : null;
             return {
               ...treino,
+              alunoTreinoId: at.id,
               dataExpiracao: at.data_expiracao,
               data_retorno: at.data_retorno,
               diasAntecedenciaNotificacao: at.dias_antecedencia_notificacao,

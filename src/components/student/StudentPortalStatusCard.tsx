@@ -124,7 +124,7 @@ export default function StudentPortalStatusCard({
               <StatusIcon className="h-4 w-4 text-primary" />
               <Badge variant={cfg?.variant ?? "outline"}>{cfg?.label}</Badge>
               {status.is_technical_import_email ? (
-                <Badge variant="outline" className="text-[10px]">
+                <Badge variant="outline" className="student-badge-sm">
                   Email técnico (import)
                 </Badge>
               ) : null}

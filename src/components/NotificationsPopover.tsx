@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useApiSafeList } from "@/hooks/useApiSafe";
@@ -8,9 +8,8 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { Bell, Check, X, Users, Dumbbell, MessageSquare, Calendar, DollarSign, ClipboardCheck } from "lucide-react";
+import { Bell, X, Users, Dumbbell, MessageSquare, Calendar, DollarSign, ClipboardCheck } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
@@ -18,7 +17,6 @@ import {
   getStudentNotificationCategory,
   STUDENT_NOTIFICATION_CATEGORY_LABELS,
 } from "@/lib/student-notification-utils";
-import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
 interface Notification {
   id: string;
@@ -34,25 +32,32 @@ interface NotificationsPopoverProps {
   onNavigate?: (section: string) => void;
 }
 
-// DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001: NotificationsPopover deve renderizar mesmo com user null
 const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
-  const { confirm } = useConfirm();
   const { user } = useAuth();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
-  
-  // REACT-API-RESILIENCE-FIX-008: Usar hook resiliente para notificações
-  // Só buscar se user for aluno
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => new Set());
+
   const shouldFetch =
     user?.role === "aluno" || user?.role === "coach" || user?.role === "admin";
-  const { data: notifications, loading, error, refetch } = useApiSafeList(
-    () => apiClient.getNotificationsSafe({ limit: 10 }),
-    { autoFetch: shouldFetch, endpointKey: '/api/notificacoes', availabilityKey: 'notificacoes' }
-  );
-  
-  const unreadCount = notifications.filter(n => !n.lida).length;
 
-  // REACT-API-RESILIENCE-FIX-008: Polling periódico (apenas se for aluno)
+  const fetchUnread = useCallback(
+    () => apiClient.getNotificationsSafe({ lida: false, limit: 30 }),
+    [],
+  );
+
+  const { data: notifications, refetch } = useApiSafeList(
+    fetchUnread,
+    { autoFetch: shouldFetch, endpointKey: '/api/notificacoes?lida=false', availabilityKey: 'notificacoes' }
+  );
+
+  const visibleNotifications = useMemo(
+    () => notifications.filter((n) => n?.id && !dismissedIds.has(n.id)),
+    [notifications, dismissedIds],
+  );
+
+  const unreadCount = visibleNotifications.length;
+
   useEffect(() => {
     if (!shouldFetch) return;
 
@@ -76,68 +81,69 @@ const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
     };
   }, [shouldFetch, refetch]);
 
+  const dismissLocally = (notificationId: string) => {
+    setDismissedIds((prev) => new Set(prev).add(notificationId));
+  };
+
+  const restoreLocally = (notificationId: string) => {
+    setDismissedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(notificationId);
+      return next;
+    });
+  };
+
   const markAsRead = async (notificationId: string) => {
-    try {
-      await apiClient.updateNotification(notificationId, { lida: true });
-      // REACT-API-RESILIENCE-FIX-008: Recarregar após atualizar
-      refetch();
-    } catch (error) {
-      console.error('Erro ao marcar como lida:', error);
+    dismissLocally(notificationId);
+
+    const result = await apiClient.updateNotificationSafe(notificationId, { lida: true });
+    if (!result.success) {
+      restoreLocally(notificationId);
+      toast({
+        title: "Erro",
+        description: result.error || "Não foi possível marcar como vista",
+        variant: "destructive",
+      });
+      return;
     }
+
+    void refetch();
   };
 
   const markAllAsRead = async () => {
-    if (!user) return;
+    if (!user || visibleNotifications.length === 0) return;
+
+    const ids = visibleNotifications.map((n) => n.id);
+    setDismissedIds((prev) => new Set([...prev, ...ids]));
 
     try {
-      const result = await apiClient.getNotificationsSafe({ lida: false });
-      if (!result.success) {
-        throw new Error(result.error);
-      }
-      
-      // Atualizar cada uma individualmente
-      for (const notif of result.data) {
-        await apiClient.updateNotification(notif.id, { lida: true });
+      for (const notif of visibleNotifications) {
+        const result = await apiClient.updateNotificationSafe(notif.id, { lida: true });
+        if (!result.success) {
+          throw new Error(result.error);
+        }
       }
 
       toast({
         title: "Sucesso",
-        description: "Todas as notificações foram marcadas como lidas"
+        description: "Todas as notificações foram marcadas como vistas",
       });
-      
-      // REACT-API-RESILIENCE-FIX-008: Recarregar após atualizar
-      refetch();
+
+      void refetch();
     } catch (error) {
+      setDismissedIds(new Set());
       console.error('Erro ao marcar todas como lidas:', error);
       toast({
         title: "Erro",
-        description: "Não foi possível marcar todas como lidas",
-        variant: "destructive"
+        description: "Não foi possível marcar todas como vistas",
+        variant: "destructive",
       });
+      void refetch();
     }
   };
 
-  const deleteNotification = async (notificationId: string) => {
-    if (!(await confirmDelete(confirm, "Esta notificação será removida."))) return;
-
-    try {
-      await apiClient.deleteNotification(notificationId);
-
-      toast({
-        title: "Sucesso",
-        description: "Notificação excluída"
-      });
-      
-      // REACT-API-RESILIENCE-FIX-008: Recarregar após deletar
-      refetch();
-    } catch (error) {
-      console.error('Erro ao excluir notificação:', error);
-      toast({
-        title: "Erro",
-        description: "Não foi possível excluir a notificação",
-        variant: "destructive"
-      });
-    }
+  const dismissNotification = (notificationId: string) => {
+    void markAsRead(notificationId);
   };
 
   const getNotificationIcon = (tipo: string) => {
@@ -163,6 +169,7 @@ const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
         return DollarSign;
       case 'checkin_reminder':
       case 'new_weekly_checkin':
+      case 'checkin_respondido':
         return ClipboardCheck;
       default:
         return Bell;
@@ -170,8 +177,8 @@ const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
   };
 
   const handleNotificationClick = (notification: Notification) => {
-    markAsRead(notification.id);
-    
+    void markAsRead(notification.id);
+
     if (notification.link) {
       onNavigate?.(notification.link);
       setOpen(false);
@@ -190,27 +197,37 @@ const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-96 p-0" align="end">
-        <div className="flex items-center justify-between p-4 border-b">
-          <h3 className="font-semibold">Notificações</h3>
+      <PopoverContent
+        className="z-[150] flex w-[min(24rem,calc(100vw-1rem))] max-h-[min(32rem,calc(100dvh-5.5rem))] flex-col overflow-hidden p-0"
+        align="end"
+        sideOffset={8}
+        collisionPadding={16}
+      >
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b p-3 sm:p-4">
+          <div className="min-w-0">
+            <h3 className="font-semibold">Notificações</h3>
+            {unreadCount > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {unreadCount} não {unreadCount === 1 ? "lida" : "lidas"}
+              </p>
+            )}
+          </div>
           {unreadCount > 0 && (
             <Button
               variant="ghost"
               size="sm"
               onClick={markAllAsRead}
-              className="text-xs"
+              className="shrink-0 text-xs"
             >
-              Marcar todas como lidas
+              Marcar todas como vistas
             </Button>
           )}
         </div>
 
-        <ScrollArea className="max-h-[400px]">
-          {/* DESIGN-ROOT-RENDER-UNBLOCK-001: Validar notifications antes de .length e .map() */}
-          {Array.isArray(notifications) && notifications.length > 0 ? (
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
+          {visibleNotifications.length > 0 ? (
             <div className="divide-y">
-              {notifications.map((notification) => {
-                // DESIGN-ROOT-RENDER-UNBLOCK-001: Validar notification antes de renderizar
+              {visibleNotifications.map((notification) => {
                 if (!notification || !notification.id) {
                   return null;
                 }
@@ -222,9 +239,7 @@ const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
                 return (
                   <div
                     key={notification.id}
-                    className={`p-4 hover:bg-muted/50 transition-colors ${
-                      !notification.lida ? 'bg-primary/5' : ''
-                    }`}
+                    className="p-3 transition-colors hover:bg-muted/50 sm:p-4 bg-primary/5"
                   >
                     <div className="flex gap-3">
                       <div className="mt-1">
@@ -233,6 +248,7 @@ const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
                       <div className="flex-1 space-y-1">
                         <div className="flex items-start justify-between gap-2">
                           <button
+                            type="button"
                             onClick={() => handleNotificationClick(notification)}
                             className="text-left flex-1"
                           >
@@ -248,26 +264,16 @@ const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
                               {notification.mensagem}
                             </p>
                           </button>
-                          <div className="flex gap-1">
-                            {!notification.lida && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-6 w-6"
-                                onClick={() => markAsRead(notification.id)}
-                              >
-                                <Check className="w-3 h-3" />
-                              </Button>
-                            )}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6"
-                              onClick={() => deleteNotification(notification.id)}
-                            >
-                              <X className="w-3 h-3" />
-                            </Button>
-                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 shrink-0"
+                            title="Marcar como vista"
+                            aria-label="Marcar como vista"
+                            onClick={() => dismissNotification(notification.id)}
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </Button>
                         </div>
                         <p className="text-xs text-muted-foreground">
                           {formatDistanceToNow(new Date(notification.created_at), {
@@ -283,11 +289,17 @@ const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
             </div>
           ) : (
             <div className="py-8 text-center text-muted-foreground">
-              <Bell className="w-8 h-8 mx-auto mb-2 opacity-50" />
-              <p>Nenhuma notificação</p>
+              <Bell className="mx-auto mb-2 h-8 w-8 opacity-50" />
+              <p>Nenhuma notificação nova</p>
             </div>
           )}
-        </ScrollArea>
+        </div>
+
+        {unreadCount > 3 && (
+          <div className="shrink-0 border-t px-3 py-2 text-center text-[11px] text-muted-foreground">
+            Role para ver todas · use ✓ ou &quot;Marcar todas como vistas&quot;
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   );

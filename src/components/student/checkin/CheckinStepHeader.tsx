@@ -1,6 +1,10 @@
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import { CHECKIN_SECTIONS, type CheckinSectionId } from "@/lib/checkin-sections";
+import {
+  CHECKIN_SECTIONS,
+  getCheckinSectionDescId,
+  getCheckinSectionTitleId,
+} from "@/lib/checkin-sections";
 
 type CheckinStepHeaderProps = {
   step: number;
@@ -14,10 +18,10 @@ const CheckinStepHeader = ({ step, completedSections }: CheckinStepHeaderProps) 
   return (
     <div className="sticky top-0 z-10 -mx-1 mb-4 space-y-3 rounded-lg border border-border/60 bg-background/95 p-3 backdrop-blur md:top-2">
       <div className="flex items-center justify-between gap-2 text-sm">
-        <span className="font-medium">
+        <span id={getCheckinSectionTitleId(current.id)} className="font-medium">
           Bloco {step + 1} de {CHECKIN_SECTIONS.length}: {current.title}
         </span>
-        <span className="text-muted-foreground tabular-nums">{pct}%</span>
+        <span className="text-foreground/70 tabular-nums">{pct}%</span>
       </div>
       <Progress value={pct} className="h-2" />
       <div className="flex gap-1">
@@ -36,7 +40,9 @@ const CheckinStepHeader = ({ step, completedSections }: CheckinStepHeaderProps) 
           />
         ))}
       </div>
-      <p className="text-xs text-muted-foreground">{current.description}</p>
+      <p id={getCheckinSectionDescId(current.id)} className="text-xs text-foreground/75">
+        {current.description}
+      </p>
     </div>
   );
 };

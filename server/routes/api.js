@@ -25,6 +25,10 @@ const { deleteUserByUserRoleId } = require('../utils/deleteUserByUserRoleId');
 const AsaasService = require('../services/asaas.service');
 const { encryptCoachAsaasApiKey, decryptCoachAsaasApiKey } = require('../utils/asaas-coach-secret-crypto');
 const { afterTableMutation } = require('../services/return-reminder.service');
+const {
+  isMeaningfulCoachResposta,
+  sqlMeaningfulCoachRespostaWhere,
+} = require('../utils/coach-resposta-meaningful');
 
 // ============================================================================
 // MIDDLEWARES
@@ -65,6 +69,111 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     if (raw.length < 2) return null;
     const escaped = raw.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
     return `%${escaped}%`;
+  }
+
+  /** Paginação opcional: ?limit=&offset=&com_resposta=1&year= */
+  function parseWeeklyCheckinListQuery(req) {
+    const limitRaw = req.query.limit;
+    const offsetRaw = req.query.offset;
+    const wantsPagination = limitRaw != null || offsetRaw != null;
+    const limit = wantsPagination
+      ? Math.min(Math.max(parseInt(String(limitRaw ?? 20), 10) || 20, 1), 100)
+      : null;
+    const offset = wantsPagination ? Math.max(parseInt(String(offsetRaw ?? 0), 10) || 0, 0) : 0;
+    const comResposta =
+      req.query.com_resposta === '1' ||
+      req.query.com_resposta === 'true' ||
+      req.query.com_resposta === true;
+    const yearRaw = req.query.year;
+    const yearParsed = yearRaw != null && String(yearRaw).trim() !== '' ? parseInt(String(yearRaw), 10) : null;
+    const year =
+      yearParsed != null && Number.isFinite(yearParsed) && yearParsed >= 2000 && yearParsed <= 2100
+        ? yearParsed
+        : null;
+    return { wantsPagination, limit, offset, comResposta, year };
+  }
+
+  async function resolveAlunoIdForPaginatedCheckins(req) {
+    const rawAlunoId = typeof req.query.aluno_id === 'string' ? req.query.aluno_id.trim() : '';
+    if (req.user.role === 'aluno') {
+      if (!req.aluno?.id) return { ok: false, status: 403, error: 'Aluno não resolvido' };
+      return { ok: true, alunoId: req.aluno.id };
+    }
+    if (!rawAlunoId) {
+      return { ok: false, status: 400, error: 'aluno_id é obrigatório com paginação', error_code: 'VALIDATION' };
+    }
+    const alunoRes = await pool.query('SELECT id, coach_id FROM public.alunos WHERE id = $1 LIMIT 1', [
+      rawAlunoId,
+    ]);
+    const aluno = alunoRes.rows[0];
+    if (!aluno) {
+      return { ok: false, status: 404, error: 'Aluno não encontrado', error_code: 'ALUNO_NOT_FOUND' };
+    }
+    if (req.user.role === 'admin') {
+      return { ok: true, alunoId: aluno.id };
+    }
+    if (req.user.role === 'coach' || req.user.role === 'assistant') {
+      const ids = effectiveCoachIds(req.coachScope) || [req.user.id];
+      if (!ids.some((id) => String(id) === String(aluno.coach_id))) {
+        return { ok: false, status: 403, error: 'Acesso negado', error_code: 'FORBIDDEN' };
+      }
+      return { ok: true, alunoId: aluno.id };
+    }
+    return { ok: false, status: 403, error: 'Acesso negado', error_code: 'FORBIDDEN' };
+  }
+
+  async function fetchWeeklyCheckinsPaginated(alunoId, listQuery) {
+    const conditions = ['aluno_id = $1'];
+    const params = [alunoId];
+    let idx = 2;
+
+    if (listQuery.comResposta) {
+      conditions.push(sqlMeaningfulCoachRespostaWhere());
+    }
+    if (listQuery.year != null) {
+      conditions.push(
+        `EXTRACT(YEAR FROM COALESCE(coach_respondido_em, created_at)) = $${idx}`,
+      );
+      params.push(listQuery.year);
+      idx += 1;
+    }
+
+    const where = conditions.join(' AND ');
+    const countRes = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM public.weekly_checkins WHERE ${where}`,
+      params,
+    );
+    const total = countRes.rows[0]?.total ?? 0;
+
+    const itemsRes = await pool.query(
+      `SELECT * FROM public.weekly_checkins
+       WHERE ${where}
+       ORDER BY COALESCE(coach_respondido_em, created_at) DESC NULLS LAST, created_at DESC
+       LIMIT $${idx} OFFSET $${idx + 1}`,
+      [...params, listQuery.limit, listQuery.offset],
+    );
+
+    let years = [];
+    if (listQuery.comResposta) {
+      const yearsRes = await pool.query(
+        `SELECT DISTINCT EXTRACT(YEAR FROM COALESCE(coach_respondido_em, created_at))::int AS y
+         FROM public.weekly_checkins
+         WHERE aluno_id = $1 AND ${sqlMeaningfulCoachRespostaWhere()}
+         ORDER BY y DESC`,
+        [alunoId],
+      );
+      years = yearsRes.rows.map((row) => row.y).filter((y) => Number.isFinite(y));
+    }
+
+    const items = itemsRes.rows;
+    return {
+      items,
+      total,
+      limit: listQuery.limit,
+      offset: listQuery.offset,
+      has_more: listQuery.offset + items.length < total,
+      years,
+    };
   }
 
   /** Só resolve `req.aluno` quando o utilizador é aluno (coach/admin ignoram). */
@@ -4100,8 +4209,15 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
         }
 
         let result;
-        const pendingWhere =
-          `(w.coach_resposta IS NULL OR trim(w.coach_resposta) = '')`;
+        const pendingWhere = `(
+          w.coach_resposta IS NULL
+          OR trim(w.coach_resposta) = ''
+          OR length(trim(w.coach_resposta)) < 12
+          OR lower(trim(w.coach_resposta)) IN (
+            '!', 'vi', 'visto', 'visto!', 'visto.', 'ok', 'ok!',
+            'feito', 'feito!', 'recebido', 'recebido!'
+          )
+        )`;
 
         if (req.user.role === 'admin' && !req.coachScope?.coachIds) {
           result = await pool.query(
@@ -4167,9 +4283,23 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           }
         }
 
+        const hasText = await pool.query(
+          `SELECT 1 FROM public.weekly_checkins
+           WHERE id = $1 AND coach_resposta IS NOT NULL AND trim(coach_resposta) <> ''`,
+          [id],
+        );
+        if (hasText.rows.length === 0) {
+          return res.status(400).json({
+            error:
+              'Marcação sem texto não publica no portal do aluno. Use «Salvar resposta» com o feedback escrito.',
+            error_code: 'USE_SAVE_RESPOSTA',
+          });
+        }
+
         const upd = await pool.query(
           `UPDATE public.weekly_checkins
-           SET coach_respondido_em = now(), coach_respondido_por = $1
+           SET coach_respondido_em = COALESCE(coach_respondido_em, now()),
+               coach_respondido_por = COALESCE(coach_respondido_por, $1)
            WHERE id = $2
            RETURNING *`,
           [req.user.id, id],
@@ -4206,10 +4336,18 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
         }
 
         const { resposta } = req.body || {};
-        if (!resposta || !String(resposta).trim()) {
+        const respostaTrimmed = resposta != null ? String(resposta).trim() : '';
+        if (!respostaTrimmed) {
           return res.status(400).json({
             error: 'resposta é obrigatória',
             error_code: 'MISSING_RESPOSTA',
+          });
+        }
+        if (!isMeaningfulCoachResposta(respostaTrimmed)) {
+          return res.status(400).json({
+            error:
+              'Escreva um feedback com pelo menos algumas frases para o aluno. «visto», «!» ou textos muito curtos não são publicados no portal.',
+            error_code: 'RESPOSTA_PLACEHOLDER',
           });
         }
 
@@ -4242,7 +4380,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
                coach_respondido_por = COALESCE(coach_respondido_por, $2)
            WHERE id = $3
            RETURNING *`,
-          [String(resposta).trim(), req.user.id, id],
+          [respostaTrimmed, req.user.id, id],
         );
 
         const checkinRow = upd.rows[0];
@@ -4287,6 +4425,19 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     attachCoachScope,
     async (req, res) => {
       try {
+        const listQuery = parseWeeklyCheckinListQuery(req);
+        if (listQuery.wantsPagination) {
+          const resolved = await resolveAlunoIdForPaginatedCheckins(req);
+          if (!resolved.ok) {
+            return res.status(resolved.status).json({
+              error: resolved.error,
+              error_code: resolved.error_code,
+            });
+          }
+          const page = await fetchWeeklyCheckinsPaginated(resolved.alunoId, listQuery);
+          return res.json(page);
+        }
+
         const searchPattern = parseWeeklyCheckinSearchQuery(req);
 
         if (req.user.role === 'admin') {
@@ -5290,6 +5441,16 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
   // ============================================================================
   // ROTAS: TREINOS (templates e fichas do coach)
   // ============================================================================
+  const {
+    ensureTemplateSlotKeys,
+    exercisesToApiJson,
+    normalizeExerciseList,
+    resolveEffectiveWorkout,
+    findActiveAssignmentForTemplate,
+    savePersonalizationFromExercises,
+    getTemplateAssignmentStats,
+  } = require('../services/effective-workout.service');
+
   const TREINO_DIFICULDADES = ['Iniciante', 'Intermediário', 'Avançado'];
   const TREINO_WRITABLE = new Set([
     'nome',
@@ -5306,32 +5467,6 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
   async function fetchTreinoById(treinoId) {
     const r = await pool.query('SELECT * FROM public.treinos WHERE id = $1 LIMIT 1', [treinoId]);
     return r.rows[0] || null;
-  }
-
-  async function cloneTreinoForAluno(sourceTreino, alunoId, coachId) {
-    const exercicios = Array.isArray(sourceTreino.exercicios) ? sourceTreino.exercicios : [];
-    const tags = Array.isArray(sourceTreino.tags) ? sourceTreino.tags : [];
-    const insertResult = await pool.query(
-      `INSERT INTO public.treinos (
-         nome, descricao, duracao, dificuldade, categoria, num_exercicios,
-         is_template, tags, exercicios, coach_id, aluno_id, template_origem_id, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, false, $7::text[], $8::jsonb, $9, $10, $11, now())
-       RETURNING *`,
-      [
-        sourceTreino.nome,
-        sourceTreino.descricao,
-        sourceTreino.duracao ?? 60,
-        sourceTreino.dificuldade,
-        sourceTreino.categoria,
-        sourceTreino.num_exercicios ?? exercicios.length,
-        tags,
-        JSON.stringify(exercicios),
-        coachId,
-        alunoId,
-        sourceTreino.id,
-      ],
-    );
-    return insertResult.rows[0];
   }
 
   async function canReadTreino(req, treinoId) {
@@ -5355,7 +5490,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     return { treino, allowed: false, reason: 'FORBIDDEN' };
   }
 
-  // POST /api/alunos-treinos/assign — copia treino/template e vincula ao aluno
+  // POST /api/alunos-treinos/assign — vincula template ao aluno (sem clonar)
   router.post(
     '/alunos-treinos/assign',
     authenticate,
@@ -5386,34 +5521,76 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
         if (!sourceTreino) {
           return res.status(404).json({ error: 'Treino não encontrado', error_code: 'TREINO_NOT_FOUND' });
         }
+        if (sourceTreino.aluno_id) {
+          return res.status(400).json({
+            error: 'Não é possível atribuir uma cópia de aluno; use o template da biblioteca',
+            error_code: 'CANNOT_ASSIGN_COPY',
+          });
+        }
         if (req.user.role === 'coach' && String(sourceTreino.coach_id) !== String(req.user.id)) {
           return res.status(403).json({ error: 'Treino de outro coach', error_code: 'FORBIDDEN' });
         }
 
-        const coachId = req.user.role === 'admin' ? sourceTreino.coach_id : req.user.id;
-        const copy = await cloneTreinoForAluno(sourceTreino, alunoId, coachId);
+        await ensureTemplateSlotKeys(pool, treinoId);
+        const templateVersao = sourceTreino.versao ?? 1;
+
+        const duplicado = await pool.query(
+          `SELECT id FROM public.alunos_treinos
+           WHERE aluno_id = $1 AND treino_id = $2 AND COALESCE(ativo, true) = true
+           LIMIT 1`,
+          [alunoId, treinoId],
+        );
+        if (duplicado.rows.length > 0) {
+          return res.status(409).json({
+            error: 'Este aluno já possui este treino atribuído',
+            error_code: 'ALUNO_TREINO_ALREADY_ASSIGNED',
+            vinculo_id: duplicado.rows[0].id,
+          });
+        }
 
         let dataExpiracao = body.data_expiracao ?? body.data_retorno ?? null;
         if (dataExpiracao != null) {
           dataExpiracao = String(dataExpiracao).slice(0, 10);
         }
 
-        const linkResult = await pool.query(
-          `INSERT INTO public.alunos_treinos (
-             aluno_id, treino_id, ativo, data_expiracao, data_retorno,
-             dias_antecedencia_notificacao, notificacao_expiracao_enviada
-           ) VALUES ($1, $2, true, $3, $4, $5, false)
-           RETURNING *`,
-          [
-            alunoId,
-            copy.id,
-            dataExpiracao,
-            dataExpiracao,
-            body.dias_antecedencia_notificacao != null
-              ? parseInt(String(body.dias_antecedencia_notificacao), 10)
-              : 7,
-          ],
-        );
+        let linkResult;
+        try {
+          linkResult = await pool.query(
+            `INSERT INTO public.alunos_treinos (
+               aluno_id, treino_id, ativo, data_expiracao, data_retorno,
+               dias_antecedencia_notificacao, notificacao_expiracao_enviada, template_versao
+             ) VALUES ($1, $2, true, $3, $4, $5, false, $6)
+             RETURNING *`,
+            [
+              alunoId,
+              treinoId,
+              dataExpiracao,
+              dataExpiracao,
+              body.dias_antecedencia_notificacao != null
+                ? parseInt(String(body.dias_antecedencia_notificacao), 10)
+                : 7,
+              templateVersao,
+            ],
+          );
+        } catch (insertErr) {
+          if (insertErr.code !== '42703') throw insertErr;
+          linkResult = await pool.query(
+            `INSERT INTO public.alunos_treinos (
+               aluno_id, treino_id, ativo, data_expiracao, data_retorno,
+               dias_antecedencia_notificacao, notificacao_expiracao_enviada
+             ) VALUES ($1, $2, true, $3, $4, $5, false)
+             RETURNING *`,
+            [
+              alunoId,
+              treinoId,
+              dataExpiracao,
+              dataExpiracao,
+              body.dias_antecedencia_notificacao != null
+                ? parseInt(String(body.dias_antecedencia_notificacao), 10)
+                : 7,
+            ],
+          );
+        }
 
         try {
           await afterTableMutation(pool, 'alunos_treinos', linkResult.rows[0]);
@@ -5421,10 +5598,12 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           console.warn('[treino] return_reminder hook failed:', hookErr?.message || hookErr);
         }
 
+        const treinoResolvido = await resolveEffectiveWorkout(pool, linkResult.rows[0].id);
+
         return res.status(201).json({
           vinculo: linkResult.rows[0],
-          treino: copy,
-          cloned_from: sourceTreino.id,
+          treino: treinoResolvido,
+          template_id: sourceTreino.id,
         });
       } catch (error) {
         console.error('Erro ao atribuir treino ao aluno:', error);
@@ -5436,23 +5615,232 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     },
   );
 
+  // GET /api/alunos-treinos/:id/treino-resolvido — treino efectivo (template + overrides)
+  router.get(
+    '/alunos-treinos/:id/treino-resolvido',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'aluno']),
+    attachCoachScope,
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const linkRes = await pool.query(
+          'SELECT id, aluno_id, treino_id FROM public.alunos_treinos WHERE id = $1 LIMIT 1',
+          [req.params.id],
+        );
+        const link = linkRes.rows[0];
+        if (!link) {
+          return res.status(404).json({ error: 'Vínculo não encontrado', error_code: 'ALUNO_TREINO_NOT_FOUND' });
+        }
+
+        if (req.user.role === 'aluno') {
+          const alunoRow = await getAlunoRowForAuthUser(req.user.id);
+          if (!alunoRow || String(alunoRow.id) !== String(link.aluno_id)) {
+            return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+          }
+        } else if (req.user.role === 'coach') {
+          const ok = await assertCoachCanAccessAluno(pool, req.coachScope, link.aluno_id);
+          if (!ok) {
+            return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+          }
+        }
+
+        const treino = await resolveEffectiveWorkout(pool, link.id);
+        if (!treino) {
+          return res.status(404).json({ error: 'Treino não encontrado', error_code: 'TREINO_NOT_FOUND' });
+        }
+        return res.json(treino);
+      } catch (error) {
+        console.error('Erro ao resolver treino:', error);
+        return res.status(500).json({
+          error: error.message || 'Erro ao resolver treino',
+          error_code: 'TREINO_RESOLVE_ERROR',
+        });
+      }
+    },
+  );
+
+  // PATCH /api/alunos-treinos/:id/personalizacao — grava overrides (não altera template)
+  router.patch(
+    '/alunos-treinos/:id/personalizacao',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    attachCoachScope,
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const linkRes = await pool.query(
+          'SELECT id, aluno_id FROM public.alunos_treinos WHERE id = $1 LIMIT 1',
+          [req.params.id],
+        );
+        const link = linkRes.rows[0];
+        if (!link) {
+          return res.status(404).json({ error: 'Vínculo não encontrado', error_code: 'ALUNO_TREINO_NOT_FOUND' });
+        }
+
+        if (req.user.role !== 'admin') {
+          const ok = await assertCoachCanAccessAluno(pool, req.coachScope, link.aluno_id);
+          if (!ok) {
+            return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+          }
+        }
+
+        const body = req.body || {};
+        if (!Array.isArray(body.exercicios)) {
+          return res.status(400).json({
+            error: 'exercicios é obrigatório (array)',
+            error_code: 'MISSING_EXERCICIOS',
+          });
+        }
+
+        const treino = await savePersonalizationFromExercises(pool, link.id, body.exercicios);
+        return res.json(treino);
+      } catch (error) {
+        if (error.code === 'LEGACY_COPY') {
+          return res.status(409).json({
+            error: error.message,
+            error_code: 'LEGACY_COPY',
+          });
+        }
+        console.error('Erro ao personalizar treino:', error);
+        return res.status(500).json({
+          error: error.message || 'Erro ao personalizar treino',
+          error_code: 'TREINO_PERSONALIZACAO_ERROR',
+        });
+      }
+    },
+  );
+
+  // DELETE /api/alunos-treinos/:id — remove o vínculo aluno↔treino. Se o treino vinculado
+  // for uma cópia exclusiva do aluno (aluno_id preenchido) e ficar sem qualquer vínculo,
+  // remove também a cópia. Nunca apaga templates/treinos de biblioteca (aluno_id NULL).
+  router.delete(
+    '/alunos-treinos/:id',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    attachCoachScope,
+    validateUUIDParam('id'),
+    async (req, res) => {
+      const client = await pool.connect();
+      try {
+        const linkRes = await client.query(
+          'SELECT id, aluno_id, treino_id FROM public.alunos_treinos WHERE id = $1 LIMIT 1',
+          [req.params.id],
+        );
+        const link = linkRes.rows[0];
+        if (!link) {
+          return res
+            .status(404)
+            .json({ error: 'Vínculo não encontrado', error_code: 'ALUNO_TREINO_NOT_FOUND' });
+        }
+
+        if (req.user.role !== 'admin') {
+          const ok = await assertCoachCanAccessAluno(pool, req.coachScope, link.aluno_id);
+          if (!ok) {
+            return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+          }
+        }
+
+        await client.query('BEGIN');
+        await client.query('DELETE FROM public.alunos_treinos WHERE id = $1', [link.id]);
+
+        let copiaRemovida = false;
+        if (link.treino_id) {
+          const treinoRes = await client.query(
+            'SELECT id, aluno_id FROM public.treinos WHERE id = $1 LIMIT 1',
+            [link.treino_id],
+          );
+          const treino = treinoRes.rows[0];
+          if (treino && treino.aluno_id) {
+            const aindaUsado = await client.query(
+              'SELECT 1 FROM public.alunos_treinos WHERE treino_id = $1 LIMIT 1',
+              [treino.id],
+            );
+            if (aindaUsado.rows.length === 0) {
+              const del = await client.query(
+                'DELETE FROM public.treinos WHERE id = $1 AND aluno_id IS NOT NULL RETURNING id',
+                [treino.id],
+              );
+              copiaRemovida = del.rows.length > 0;
+            }
+          }
+        }
+
+        await client.query('COMMIT');
+        return res.json({ ok: true, id: link.id, copia_removida: copiaRemovida });
+      } catch (error) {
+        try {
+          await client.query('ROLLBACK');
+        } catch {
+          /* transacção pode não ter iniciado */
+        }
+        console.error('Erro ao remover vínculo de treino do aluno:', error);
+        return res.status(500).json({
+          error: error.message || 'Erro ao remover treino do aluno',
+          error_code: 'ALUNO_TREINO_DELETE_ERROR',
+        });
+      } finally {
+        client.release();
+      }
+    },
+  );
+
   // GET /api/treinos — coach: biblioteca (sem cópias por aluno); admin: todos globais
   router.get('/treinos', authenticate, domainSchemaGuard, validateRole(['coach', 'admin']), async (req, res) => {
     try {
-      if (req.user.role === 'admin') {
-        const result = await pool.query(
-          `SELECT * FROM public.treinos
-           WHERE aluno_id IS NULL
-           ORDER BY updated_at DESC NULLS LAST, created_at DESC`,
-        );
-        return res.json(result.rows);
-      }
-      const result = await pool.query(
-        `SELECT * FROM public.treinos
-         WHERE coach_id = $1 AND aluno_id IS NULL
-         ORDER BY updated_at DESC NULLS LAST, created_at DESC`,
-        [req.user.id],
-      );
+      const baseQuery =
+        req.user.role === 'admin'
+          ? {
+              sql: `SELECT t.*,
+                      COALESCE(stats.alunos_ativos, 0) AS alunos_ativos,
+                      COALESCE(stats.com_personalizacao, 0) AS alunos_com_personalizacao
+                    FROM public.treinos t
+                    LEFT JOIN LATERAL (
+                      SELECT
+                        COUNT(*) FILTER (WHERE COALESCE(at.ativo, true))::int AS alunos_ativos,
+                        COUNT(*) FILTER (
+                          WHERE COALESCE(at.ativo, true)
+                            AND (
+                              EXISTS (SELECT 1 FROM public.atribuicao_overrides o WHERE o.aluno_treino_id = at.id)
+                              OR EXISTS (SELECT 1 FROM public.atribuicao_exercicios_adicionados a WHERE a.aluno_treino_id = at.id)
+                              OR EXISTS (SELECT 1 FROM public.atribuicao_exercicios_removidos r WHERE r.aluno_treino_id = at.id)
+                            )
+                        )::int AS com_personalizacao
+                      FROM public.alunos_treinos at
+                      WHERE at.treino_id = t.id
+                    ) stats ON true
+                    WHERE t.aluno_id IS NULL
+                    ORDER BY t.updated_at DESC NULLS LAST, t.created_at DESC`,
+              params: [],
+            }
+          : {
+              sql: `SELECT t.*,
+                      COALESCE(stats.alunos_ativos, 0) AS alunos_ativos,
+                      COALESCE(stats.com_personalizacao, 0) AS alunos_com_personalizacao
+                    FROM public.treinos t
+                    LEFT JOIN LATERAL (
+                      SELECT
+                        COUNT(*) FILTER (WHERE COALESCE(at.ativo, true))::int AS alunos_ativos,
+                        COUNT(*) FILTER (
+                          WHERE COALESCE(at.ativo, true)
+                            AND (
+                              EXISTS (SELECT 1 FROM public.atribuicao_overrides o WHERE o.aluno_treino_id = at.id)
+                              OR EXISTS (SELECT 1 FROM public.atribuicao_exercicios_adicionados a WHERE a.aluno_treino_id = at.id)
+                              OR EXISTS (SELECT 1 FROM public.atribuicao_exercicios_removidos r WHERE r.aluno_treino_id = at.id)
+                            )
+                        )::int AS com_personalizacao
+                      FROM public.alunos_treinos at
+                      WHERE at.treino_id = t.id
+                    ) stats ON true
+                    WHERE t.coach_id = $1 AND t.aluno_id IS NULL
+                    ORDER BY t.updated_at DESC NULLS LAST, t.created_at DESC`,
+              params: [req.user.id],
+            };
+
+      const result = await pool.query(baseQuery.sql, baseQuery.params);
       return res.json(result.rows);
     } catch (error) {
       console.error('Erro ao listar treinos:', error);
@@ -5463,9 +5851,68 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     }
   });
 
+  // GET /api/treinos/:id/atribuicoes — alunos vinculados ao template
+  router.get(
+    '/treinos/:id/atribuicoes',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const treino = await fetchTreinoById(req.params.id);
+        if (!treino || treino.aluno_id) {
+          return res.status(404).json({ error: 'Template não encontrado', error_code: 'TREINO_NOT_FOUND' });
+        }
+        if (req.user.role === 'coach' && String(treino.coach_id) !== String(req.user.id)) {
+          return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+        }
+        const atribuicoes = await getTemplateAssignmentStats(pool, req.params.id);
+        return res.json({
+          template_id: req.params.id,
+          versao: treino.versao ?? 1,
+          total_alunos: atribuicoes.length,
+          atribuicoes,
+        });
+      } catch (error) {
+        console.error('Erro ao listar atribuições:', error);
+        return res.status(500).json({
+          error: error.message || 'Erro ao listar atribuições',
+          error_code: 'TREINO_ATRIBUICOES_ERROR',
+        });
+      }
+    },
+  );
+
   // GET /api/treinos/:id — coach (próprio), admin, aluno (se atribuído)
   router.get('/treinos/:id', authenticate, domainSchemaGuard, validateRole(['coach', 'admin', 'aluno']), validateUUIDParam('id'), async (req, res) => {
     try {
+      const atribuicaoId = req.query.atribuicao_id != null ? String(req.query.atribuicao_id).trim() : '';
+
+      if (atribuicaoId) {
+        const linkRes = await pool.query(
+          'SELECT id, aluno_id, treino_id FROM public.alunos_treinos WHERE id = $1 LIMIT 1',
+          [atribuicaoId],
+        );
+        const link = linkRes.rows[0];
+        if (!link || String(link.treino_id) !== String(req.params.id)) {
+          return res.status(404).json({ error: 'Atribuição não encontrada', error_code: 'ATRIBUICAO_NOT_FOUND' });
+        }
+        if (req.user.role === 'aluno') {
+          const alunoRow = await getAlunoRowForAuthUser(req.user.id);
+          if (!alunoRow || String(alunoRow.id) !== String(link.aluno_id)) {
+            return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+          }
+        } else if (req.user.role === 'coach') {
+          const treino = await fetchTreinoById(req.params.id);
+          if (!treino || String(treino.coach_id) !== String(req.user.id)) {
+            return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
+          }
+        }
+        const resolved = await resolveEffectiveWorkout(pool, atribuicaoId);
+        return res.json(resolved);
+      }
+
       const access = await canReadTreino(req, req.params.id);
       if (!access.treino) {
         return res.status(404).json({ error: 'Treino não encontrado', error_code: 'TREINO_NOT_FOUND' });
@@ -5473,6 +5920,31 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
       if (!access.allowed) {
         return res.status(403).json({ error: 'Acesso negado', error_code: 'TREINO_FORBIDDEN' });
       }
+
+      if (access.treino.aluno_id) {
+        return res.json(access.treino);
+      }
+
+      if (req.user.role === 'aluno') {
+        const alunoRow = await getAlunoRowForAuthUser(req.user.id);
+        if (alunoRow) {
+          const assignmentId = await findActiveAssignmentForTemplate(pool, req.params.id, alunoRow.id);
+          if (assignmentId) {
+            const resolved = await resolveEffectiveWorkout(pool, assignmentId);
+            return res.json(resolved);
+          }
+        }
+      }
+
+      const withSlots = await ensureTemplateSlotKeys(pool, req.params.id);
+      if (withSlots) {
+        const fresh = await fetchTreinoById(req.params.id);
+        return res.json({
+          ...fresh,
+          exercicios: exercisesToApiJson(withSlots),
+        });
+      }
+
       return res.json(access.treino);
     } catch (error) {
       console.error('Erro ao buscar treino:', error);
@@ -5513,14 +5985,14 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
             ? body.exercicios.length
             : 0;
       const tags = Array.isArray(body.tags) ? body.tags : [];
-      const exercicios = Array.isArray(body.exercicios) ? body.exercicios : [];
+      const exercicios = normalizeExerciseList(body.exercicios || []);
       const isTemplate = body.is_template === true;
 
       const insertResult = await pool.query(
         `INSERT INTO public.treinos (
           nome, descricao, duracao, dificuldade, categoria, num_exercicios,
-          is_template, tags, exercicios, coach_id, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9::jsonb, $10, now())
+          is_template, tags, exercicios, coach_id, versao, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9::jsonb, $10, 1, now())
         RETURNING *`,
         [
           nome,
@@ -5531,7 +6003,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           Number.isNaN(numExercicios) ? exercicios.length : numExercicios,
           isTemplate,
           tags,
-          JSON.stringify(exercicios),
+          JSON.stringify(exercisesToApiJson(exercicios)),
           req.user.id,
         ],
       );
@@ -5551,11 +6023,17 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
       const { id } = req.params;
       const body = req.body || {};
       const existing = await pool.query(
-        'SELECT id FROM public.treinos WHERE id = $1 AND coach_id = $2 LIMIT 1',
+        'SELECT id, aluno_id FROM public.treinos WHERE id = $1 AND coach_id = $2 LIMIT 1',
         [id, req.user.id],
       );
       if (existing.rows.length === 0) {
         return res.status(404).json({ error: 'Treino não encontrado', error_code: 'TREINO_NOT_FOUND' });
+      }
+      if (existing.rows[0].aluno_id) {
+        return res.status(400).json({
+          error: 'Cópia legada de aluno; use PATCH /api/alunos-treinos/:id/personalizacao',
+          error_code: 'USE_PERSONALIZACAO_ENDPOINT',
+        });
       }
 
       if (body.dificuldade != null && !TREINO_DIFICULDADES.includes(String(body.dificuldade))) {
@@ -5569,14 +6047,21 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
       const sets = [];
       const values = [];
       let idx = 1;
+      let bumpVersion = false;
       for (const [key, raw] of Object.entries(body)) {
         if (!TREINO_WRITABLE.has(key)) continue;
+        if (key === 'num_exercicios' && body.exercicios != null) continue;
         if (key === 'tags') {
           sets.push(`${key} = $${idx}::text[]`);
           values.push(Array.isArray(raw) ? raw : []);
         } else if (key === 'exercicios') {
+          const normalized = normalizeExerciseList(raw);
           sets.push(`${key} = $${idx}::jsonb`);
-          values.push(JSON.stringify(Array.isArray(raw) ? raw : []));
+          values.push(JSON.stringify(exercisesToApiJson(normalized)));
+          idx += 1;
+          sets.push(`num_exercicios = $${idx}`);
+          values.push(normalized.length);
+          bumpVersion = true;
         } else if (key === 'duracao' || key === 'num_exercicios') {
           sets.push(`${key} = $${idx}`);
           values.push(parseInt(String(raw), 10));
@@ -5592,6 +6077,10 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
 
       if (sets.length === 0) {
         return res.status(400).json({ error: 'Nenhum campo para actualizar', error_code: 'NO_FIELDS' });
+      }
+
+      if (bumpVersion) {
+        sets.push('versao = COALESCE(versao, 1) + 1');
       }
 
       sets.push('updated_at = now()');

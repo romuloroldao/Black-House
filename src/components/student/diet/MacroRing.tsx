@@ -56,7 +56,7 @@ const MacroRing = ({
           {unit && <span className="text-[9px] text-muted-foreground">{unit}</span>}
         </div>
       </div>
-      <span className="text-[10px] font-medium text-muted-foreground">{label}</span>
+      <span className="student-caption font-medium">{label}</span>
     </div>
   );
 };

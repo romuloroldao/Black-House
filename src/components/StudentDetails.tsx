@@ -185,14 +185,17 @@ export default function StudentDetails() {
       // Buscar dados dos treinos para cada aluno_treino
       const treinosFormatados = await Promise.all(
         alunosTreinos.map(async (item: any) => {
-          const treinoResult = await apiClient.requestSafe<any>(`/api/treinos/${item.treino_id}`);
+          const treinoResult = await apiClient.requestSafe<any>(
+            `/api/alunos-treinos/${item.id}/treino-resolvido`,
+          );
           const treino = treinoResult.success ? treinoResult.data : null;
           if (treino) {
             return {
               ...treino,
               alunoTreinoId: item.id,
               dataExpiracao: item.data_expiracao,
-              diasAntecedenciaNotificacao: item.dias_antecedencia_notificacao
+              diasAntecedenciaNotificacao: item.dias_antecedencia_notificacao,
+              personalizacoes: treino.personalizacoes ?? 0,
             };
           }
           return null;
@@ -322,7 +325,7 @@ export default function StudentDetails() {
 
       toast({
         title: "Sucesso!",
-        description: "Treino copiado e atribuído — pode personalizar no perfil do aluno.",
+        description: "Treino atribuído — pode personalizar no perfil do aluno.",
       });
 
       setIsAtribuirTreinoOpen(false);
@@ -719,8 +722,8 @@ export default function StudentDetails() {
                   <DialogHeader>
                     <DialogTitle>Atribuir Treino</DialogTitle>
                     <DialogDescription>
-                      Escolha um template ou treino da biblioteca. Será criada uma cópia editável só
-                      para este aluno — o original não muda.
+                      Escolha um template ou treino da biblioteca. Será vinculado ao aluno
+                      sem duplicar na biblioteca — personalizações ficam só neste aluno.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4 py-4">
@@ -819,6 +822,11 @@ export default function StudentDetails() {
                         <Badge variant="outline">{treino.categoria}</Badge>
                         <Badge variant="outline">{treino.dificuldade}</Badge>
                         <Badge variant="outline">{treino.duracao} min</Badge>
+                        {(treino.personalizacoes ?? 0) > 0 && (
+                          <Badge variant="secondary" className="bg-warning/10 text-warning border-warning/20">
+                            {treino.personalizacoes} personalizações
+                          </Badge>
+                        )}
                         {diasRestantes !== null && (
                           <Badge 
                             variant={diasRestantes <= 7 ? "destructive" : "secondary"}
@@ -835,7 +843,7 @@ export default function StudentDetails() {
                         <Button
                           className="flex-1"
                           variant="outline"
-                          onClick={() => navigate(`/treino/${treino.id}?from=/alunos/${id}`)}
+                          onClick={() => navigate(`/treino/${treino.id}?atribuicao=${treino.alunoTreinoId}&from=/alunos/${id}`)}
                         >
                           <Edit className="mr-2 h-4 w-4" />
                           Editar treino

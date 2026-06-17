@@ -996,7 +996,7 @@ export default function StudentProgressDashboard({
       </Card>
 
       {/* Resposta do coach ao check-in */}
-      <StudentCoachCheckinFeedback alunoId={studentId} />
+      <StudentCoachCheckinFeedback alunoId={studentId} limit={1} showHistoryAction />
 
       {/* Observações do último check-in */}
       {latestCheckin.nao_cumpriu_porque && (

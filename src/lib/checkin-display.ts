@@ -137,14 +137,41 @@ export function hasRelato(checkin: WeeklyCheckinRecord): boolean {
   return Boolean(checkin.nao_cumpriu_porque?.trim());
 }
 
-/** Texto publicado no portal do aluno (campo coach_resposta). */
-export function hasCoachRespostaPublicada(checkin: WeeklyCheckinRecord): boolean {
-  return Boolean(checkin.coach_resposta?.trim());
+/** «visto», «!» etc. — gravados como atalho; o aluno não deve ver como resposta. */
+const COACH_RESPOSTA_PLACEHOLDERS = new Set([
+  "!",
+  "vi",
+  "visto",
+  "visto!",
+  "visto.",
+  "ok",
+  "ok!",
+  "feito",
+  "feito!",
+  "recebido",
+  "recebido!",
+]);
+
+const MIN_COACH_RESPOSTA_LENGTH = 12;
+
+/** Feedback com conteúdo real (não marcador de «vi o check-in»). */
+export function isMeaningfulCoachResposta(text: string | null | undefined): boolean {
+  const trimmed = text?.trim() ?? "";
+  if (!trimmed) return false;
+  if (COACH_RESPOSTA_PLACEHOLDERS.has(trimmed.toLowerCase())) return false;
+  if (trimmed.length < MIN_COACH_RESPOSTA_LENGTH) return false;
+  return true;
 }
 
-/** Marcação antiga (só coach_respondido_em) sem texto — aluno não vê no portal. */
+/** Texto publicado no portal do aluno (campo coach_resposta). */
+export function hasCoachRespostaPublicada(checkin: WeeklyCheckinRecord): boolean {
+  return isMeaningfulCoachResposta(checkin.coach_resposta);
+}
+
+/** Marcação ou texto-placeholder — aluno não vê feedback útil no portal. */
 export function isCheckinMarcadoSemTexto(checkin: WeeklyCheckinRecord): boolean {
-  return Boolean(checkin.coach_respondido_em) && !hasCoachRespostaPublicada(checkin);
+  if (!checkin.coach_respondido_em) return false;
+  return !hasCoachRespostaPublicada(checkin);
 }
 
 /** Respondido de verdade = texto salvo via «Salvar resposta». */

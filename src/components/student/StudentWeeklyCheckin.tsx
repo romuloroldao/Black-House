@@ -18,6 +18,8 @@ import CheckinStepHeader from "@/components/student/checkin/CheckinStepHeader";
 import {
   CHECKIN_SECTIONS,
   countCompletedSections,
+  getCheckinSectionDescId,
+  getCheckinSectionTitleId,
   getSectionMissingLabels,
   type CheckinSectionId,
 } from "@/lib/checkin-sections";
@@ -297,7 +299,7 @@ export default function StudentWeeklyCheckin({
         </p>
       </div>
 
-      <StudentCoachCheckinFeedback />
+      <StudentCoachCheckinFeedback limit={1} showHistoryAction />
 
       {jaEnviouEstaSemana ? (
         <Card className="border-primary/30 bg-primary/5">
@@ -322,6 +324,11 @@ export default function StudentWeeklyCheckin({
       <form onSubmit={handleSubmit} className="space-y-6">
         <CheckinStepHeader step={step} completedSections={completedSections} />
 
+        <div
+          role="region"
+          aria-labelledby={getCheckinSectionTitleId(currentSectionId)}
+          aria-describedby={getCheckinSectionDescId(currentSectionId)}
+        >
         {currentSectionId === "corpo" && (
           <CheckinPhotosWeightStep
             pesoKg={pesoKg}
@@ -877,6 +884,8 @@ export default function StudentWeeklyCheckin({
         </Card>
         </>
         )}
+
+        </div>
 
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
           {step > 0 ? (
