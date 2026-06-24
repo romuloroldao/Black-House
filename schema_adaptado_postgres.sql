@@ -1045,3 +1045,305 @@ CREATE TABLE IF NOT EXISTS public.coach_team_members (
   created_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT coach_team_members_unique UNIQUE (owner_coach_id, member_user_id)
 );
+
+-- ============================================================================
+-- Sincronização financeira Black House ↔ Asaas (2026-06-23)
+-- ============================================================================
+
+ALTER TABLE public.asaas_config
+  ADD COLUMN IF NOT EXISTS webhook_auth_token_encrypted text,
+  ADD COLUMN IF NOT EXISTS webhook_id text,
+  ADD COLUMN IF NOT EXISTS webhook_registered_at timestamptz,
+  ADD COLUMN IF NOT EXISTS initial_sync_status text NOT NULL DEFAULT 'pending',
+  ADD COLUMN IF NOT EXISTS initial_sync_completed_at timestamptz,
+  ADD COLUMN IF NOT EXISTS last_reconciliation_at timestamptz;
+
+ALTER TABLE public.asaas_config DROP CONSTRAINT IF EXISTS asaas_config_initial_sync_status_check;
+ALTER TABLE public.asaas_config ADD CONSTRAINT asaas_config_initial_sync_status_check CHECK (
+  initial_sync_status = ANY (ARRAY['pending','running','completed','failed']::text[])
+);
+
+ALTER TABLE public.asaas_customers
+  ADD COLUMN IF NOT EXISTS coach_id uuid,
+  ADD COLUMN IF NOT EXISTS asaas_external_reference text,
+  ADD COLUMN IF NOT EXISTS sync_status text NOT NULL DEFAULT 'synced',
+  ADD COLUMN IF NOT EXISTS asaas_updated_at timestamptz,
+  ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'asaas_customers_coach_id_fkey') THEN
+    ALTER TABLE public.asaas_customers
+      ADD CONSTRAINT asaas_customers_coach_id_fkey
+      FOREIGN KEY (coach_id) REFERENCES app_auth.users(id);
+  END IF;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_asaas_customers_coach_aluno
+  ON public.asaas_customers (coach_id, aluno_id) WHERE coach_id IS NOT NULL;
+
+ALTER TABLE public.asaas_payments
+  ADD COLUMN IF NOT EXISTS external_reference text,
+  ADD COLUMN IF NOT EXISTS sync_status text NOT NULL DEFAULT 'synced',
+  ADD COLUMN IF NOT EXISTS asaas_updated_at timestamptz,
+  ADD COLUMN IF NOT EXISTS payment_date date,
+  ADD COLUMN IF NOT EXISTS client_payment_date date,
+  ADD COLUMN IF NOT EXISTS net_value numeric,
+  ADD COLUMN IF NOT EXISTS subscription_id uuid,
+  ADD COLUMN IF NOT EXISTS deleted_at timestamptz,
+  ADD COLUMN IF NOT EXISTS reminder_sent boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS overdue_notification_sent boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS last_outbound_attempt_at timestamptz;
+
+ALTER TABLE public.asaas_payments ALTER COLUMN asaas_payment_id DROP NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_asaas_payments_coach_external_ref
+  ON public.asaas_payments (coach_id, external_reference)
+  WHERE external_reference IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_asaas_payments_coach_status_due
+  ON public.asaas_payments (coach_id, status, due_date);
+
+CREATE INDEX IF NOT EXISTS idx_asaas_payments_coach_asaas_updated
+  ON public.asaas_payments (coach_id, asaas_updated_at);
+
+CREATE TABLE IF NOT EXISTS public.asaas_subscriptions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  coach_id uuid NOT NULL REFERENCES app_auth.users(id),
+  aluno_id uuid NOT NULL REFERENCES public.alunos(id),
+  asaas_subscription_id text UNIQUE,
+  asaas_customer_id text NOT NULL,
+  payment_plan_id uuid REFERENCES public.payment_plans(id),
+  external_reference text,
+  status text NOT NULL DEFAULT 'ACTIVE',
+  value numeric NOT NULL,
+  billing_type text NOT NULL DEFAULT 'BOLETO',
+  cycle text,
+  next_due_date date,
+  sync_status text NOT NULL DEFAULT 'synced',
+  asaas_updated_at timestamptz,
+  deleted_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_asaas_subscriptions_coach_id ON public.asaas_subscriptions(coach_id);
+CREATE INDEX IF NOT EXISTS idx_asaas_subscriptions_aluno_id ON public.asaas_subscriptions(aluno_id);
+
+CREATE TABLE IF NOT EXISTS public.financial_sync_inbox (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  coach_id uuid NOT NULL REFERENCES app_auth.users(id),
+  source text NOT NULL,
+  event_id text NOT NULL,
+  event_type text NOT NULL,
+  entity_type text,
+  entity_asaas_id text,
+  payload jsonb NOT NULL,
+  status text NOT NULL DEFAULT 'received',
+  attempts int NOT NULL DEFAULT 0,
+  received_at timestamptz NOT NULL DEFAULT now(),
+  processed_at timestamptz,
+  error_message text,
+  CONSTRAINT financial_sync_inbox_coach_event_unique UNIQUE (coach_id, event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_financial_sync_inbox_status ON public.financial_sync_inbox(status, received_at);
+CREATE INDEX IF NOT EXISTS idx_financial_sync_inbox_coach ON public.financial_sync_inbox(coach_id, status);
+
+CREATE TABLE IF NOT EXISTS public.financial_audit_log (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  coach_id uuid REFERENCES app_auth.users(id),
+  aluno_id uuid REFERENCES public.alunos(id),
+  entity_type text,
+  entity_id uuid,
+  action text NOT NULL,
+  actor_type text NOT NULL DEFAULT 'system',
+  actor_id uuid,
+  before_state jsonb,
+  after_state jsonb,
+  metadata jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_financial_audit_log_coach ON public.financial_audit_log(coach_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.coach_financial_policies (
+  coach_id uuid PRIMARY KEY REFERENCES app_auth.users(id),
+  grace_period_days int NOT NULL DEFAULT 0,
+  block_on_statuses text[] NOT NULL DEFAULT ARRAY['OVERDUE','PENDING_AFTER_DUE_DATE'],
+  unblock_on_statuses text[] NOT NULL DEFAULT ARRAY['RECEIVED','CONFIRMED'],
+  auto_block_enabled boolean NOT NULL DEFAULT true,
+  reminder_days_before int[] NOT NULL DEFAULT ARRAY[3],
+  notify_on_block boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.financial_sync_checkpoints (
+  coach_id uuid NOT NULL REFERENCES app_auth.users(id),
+  resource_type text NOT NULL,
+  last_cursor text,
+  last_success_at timestamptz,
+  PRIMARY KEY (coach_id, resource_type)
+);
+
+CREATE TABLE IF NOT EXISTS public.student_access_state (
+  aluno_id uuid PRIMARY KEY REFERENCES public.alunos(id) ON DELETE CASCADE,
+  coach_id uuid NOT NULL REFERENCES app_auth.users(id),
+  access_status text NOT NULL DEFAULT 'granted',
+  payment_status text NOT NULL DEFAULT 'CURRENT',
+  in_grace_period boolean NOT NULL DEFAULT false,
+  grace_days_remaining int,
+  blocked_at timestamptz,
+  unblocked_at timestamptz,
+  last_calculated_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_student_access_state_coach ON public.student_access_state(coach_id, access_status);
+
+-- Dados corporais, histórico de peso, TMB e completude de perfil (2026-06-23)
+DO $$ BEGIN
+  CREATE TYPE public.body_metric_source AS ENUM (
+    'signup', 'profile_edit', 'weekly_checkin', 'coach_edit', 'import', 'integration'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+ALTER TABLE public.alunos
+  ADD COLUMN IF NOT EXISTS sexo text,
+  ADD COLUMN IF NOT EXISTS peso_kg numeric(6, 2),
+  ADD COLUMN IF NOT EXISTS altura_cm numeric(5, 2),
+  ADD COLUMN IF NOT EXISTS profile_completed_at timestamptz,
+  ADD COLUMN IF NOT EXISTS profile_grace_logins int NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+
+ALTER TABLE public.alunos DROP CONSTRAINT IF EXISTS alunos_sexo_check;
+ALTER TABLE public.alunos ADD CONSTRAINT alunos_sexo_check
+  CHECK (sexo IS NULL OR sexo = ANY (ARRAY['M'::text, 'F'::text]));
+
+CREATE TABLE IF NOT EXISTS public.aluno_peso_historico (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  aluno_id uuid NOT NULL REFERENCES public.alunos(id) ON DELETE CASCADE,
+  peso_kg numeric(6, 2) NOT NULL CHECK (peso_kg >= 30 AND peso_kg <= 350),
+  registrado_em timestamptz NOT NULL DEFAULT now(),
+  origem public.body_metric_source NOT NULL,
+  origem_id uuid,
+  notas text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_peso_hist_aluno_data
+  ON public.aluno_peso_historico (aluno_id, registrado_em DESC);
+
+CREATE TABLE IF NOT EXISTS public.aluno_indicadores_saude (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  aluno_id uuid NOT NULL REFERENCES public.alunos(id) ON DELETE CASCADE,
+  codigo text NOT NULL,
+  valor numeric NOT NULL,
+  unidade text NOT NULL,
+  formula text NOT NULL,
+  inputs jsonb NOT NULL DEFAULT '{}'::jsonb,
+  calculado_em timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (aluno_id, codigo)
+);
+
+CREATE TABLE IF NOT EXISTS public.student_profile_state (
+  aluno_id uuid PRIMARY KEY REFERENCES public.alunos(id) ON DELETE CASCADE,
+  coach_id uuid REFERENCES app_auth.users(id),
+  is_complete boolean NOT NULL DEFAULT false,
+  missing_fields text[] NOT NULL DEFAULT '{}',
+  completion_pct smallint NOT NULL DEFAULT 0,
+  grace_expires_at timestamptz,
+  hard_gate_active boolean NOT NULL DEFAULT false,
+  last_reminder_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_student_profile_state_coach
+  ON public.student_profile_state (coach_id, is_complete);
+
+-- Lembretes inteligentes (2026-06-23)
+DO $$ BEGIN
+  CREATE TYPE public.task_domain AS ENUM (
+    'checkin_weekly',
+    'workout_daily',
+    'photos_weekly',
+    'payment',
+    'profile_incomplete',
+    'return_diet',
+    'return_workout',
+    'agenda_student'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE public.reminder_milestone AS ENUM (
+    'INITIAL',
+    'PRE_DEADLINE_2H',
+    'EXPIRED'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE public.reminder_dispatch_status AS ENUM (
+    'pending',
+    'sent',
+    'cancelled',
+    'skipped'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+ALTER TABLE public.notificacoes
+  ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+CREATE TABLE IF NOT EXISTS public.task_reminder_dispatches (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  domain public.task_domain NOT NULL,
+  entity_id text NOT NULL,
+  aluno_id uuid NOT NULL REFERENCES public.alunos(id) ON DELETE CASCADE,
+  coach_id uuid NOT NULL REFERENCES app_auth.users(id) ON DELETE CASCADE,
+  flow_cycle_id uuid NOT NULL,
+  milestone public.reminder_milestone NOT NULL,
+  scheduled_at timestamptz NOT NULL,
+  deadline_at timestamptz,
+  status public.reminder_dispatch_status NOT NULL DEFAULT 'pending',
+  cancel_reason text,
+  notification_channel public.student_notification_channel,
+  email_status text NOT NULL DEFAULT 'pending'
+    CHECK (email_status IN ('pending', 'sent', 'skipped', 'skipped_no_user', 'skipped_preference', 'failed')),
+  email_provider text,
+  email_error text,
+  sent_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT task_reminder_dispatches_unique
+    UNIQUE (domain, entity_id, flow_cycle_id, milestone)
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_reminder_dispatches_due
+  ON public.task_reminder_dispatches (status, scheduled_at)
+  WHERE status IN ('pending', 'sent');
+
+CREATE INDEX IF NOT EXISTS idx_task_reminder_dispatches_aluno
+  ON public.task_reminder_dispatches (aluno_id, domain, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.task_adherence_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  domain public.task_domain NOT NULL,
+  entity_id text NOT NULL,
+  aluno_id uuid NOT NULL REFERENCES public.alunos(id) ON DELETE CASCADE,
+  coach_id uuid NOT NULL REFERENCES app_auth.users(id) ON DELETE CASCADE,
+  flow_cycle_id uuid NOT NULL,
+  outcome text NOT NULL CHECK (outcome IN ('completed', 'missed', 'cancelled')),
+  occurred_at timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb,
+  CONSTRAINT task_adherence_events_unique
+    UNIQUE (domain, entity_id, flow_cycle_id, outcome)
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_adherence_aluno
+  ON public.task_adherence_events (aluno_id, domain, occurred_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_notificacoes_metadata_flow
+  ON public.notificacoes ((metadata->>'flow_cycle_id'))
+  WHERE metadata IS NOT NULL AND lida = false;

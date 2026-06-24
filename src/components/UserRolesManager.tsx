@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
@@ -37,17 +37,36 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Loader2, Search, Shield, Trash2, User, Users } from "lucide-react";
+import { Loader2, Search, Shield, Trash2, User, Users, UserCog } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
+type UserRole = "coach" | "aluno" | "assistant" | "admin";
+
 interface UserWithRole {
-  id: string; // user_id do usuário
-  user_role_id?: string; // id da tabela user_roles (necessário para atualizar)
+  id: string;
+  user_role_id: string;
   email: string;
-  role: "coach" | "aluno";
+  role: UserRole;
   created_at: string;
   avatar_url?: string;
   display_name?: string;
+}
+
+const ROLE_LABELS: Record<UserRole, string> = {
+  coach: "Coach",
+  aluno: "Aluno",
+  assistant: "Assistente",
+  admin: "Admin",
+};
+
+function formatRoleDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
 }
 
 const UserRolesManager = () => {
@@ -66,173 +85,101 @@ const UserRolesManager = () => {
   const loadUsers = async () => {
     try {
       setLoading(true);
-      
-      // Get all users with roles - buscar user_roles e combinar com dados de app_auth.users, alunos e profiles
-      const rolesResult = await apiClient.requestSafe<any[]>('/api/user-roles');
+      const rolesResult = await apiClient.requestSafe<
+        Array<{
+          id: string;
+          user_id: string;
+          role: UserRole;
+          created_at?: string;
+          email?: string;
+          avatar_url?: string;
+          display_name?: string;
+        }>
+      >("/api/user-roles");
+
       const roles = rolesResult.success && Array.isArray(rolesResult.data) ? rolesResult.data : [];
 
-      // Get all users from app_auth.users to get emails
-      // Buscar emails de todos os usuários através do endpoint /auth/user-by-id
-      const usersEmailsMap = new Map<string, string>();
-      for (const role of roles) {
-        try {
-          const userData = await apiClient.getUserById(role.user_id);
-          if (userData?.email) {
-            usersEmailsMap.set(role.user_id, userData.email);
-          }
-        } catch (err) {
-          console.warn(`Não foi possível buscar email para user_id ${role.user_id}:`, err);
-        }
-      }
-
-      // Get profiles for avatars
-      const profilesResult = await apiClient.requestSafe<any[]>('/api/profiles');
-      const profiles = profilesResult.success && Array.isArray(profilesResult.data) ? profilesResult.data : [];
-      const profilesMap = new Map(
-        profiles.map((p) => [p.id, p.avatar_url])
-      );
-
-      // Get alunos data for display names
-      const alunosResult = await apiClient.requestSafe<any[]>('/api/alunos');
-      const alunos = alunosResult.success && Array.isArray(alunosResult.data) ? alunosResult.data : [];
-      const alunosNameMap = new Map<string, string>();
-      alunos.forEach((a) => {
-        if (a.email && a.nome) {
-          alunosNameMap.set(a.email.toLowerCase(), a.nome);
-        }
-      });
-
-      // Map users data - combinando user_roles com dados de app_auth.users, alunos e profiles
-      const usersWithRoles: UserWithRole[] = roles.map((role: any) => {
-        // Buscar email do app_auth.users
-        // IMPORTANTE: Se não encontrar email, deixar como undefined para que seja buscado novamente
-        const email = usersEmailsMap.get(role.user_id) || undefined;
-        
-        // Buscar nome do aluno correspondente pelo email
-        const displayName = email && email.includes('@') 
-          ? alunosNameMap.get(email.toLowerCase()) || undefined
-          : undefined;
-        
-        // Se não tiver email nem nome, usar fallback mais legível
-        // Mas sempre priorizar email real se existir
-        
-        return {
-          id: role.user_id, // user_id para identificação do usuário
-          user_role_id: role.id, // id da tabela user_roles para atualização
-          email: email || 'email@não.encontrado', // Garantir que sempre haja um email (mesmo que fallback)
-          role: role.role,
-          created_at: role.created_at || new Date().toISOString(),
-          avatar_url: profilesMap.get(role.user_id) || undefined,
-          display_name: displayName,
-        };
-      });
+      const usersWithRoles: UserWithRole[] = roles.map((role) => ({
+        id: role.user_id,
+        user_role_id: role.id,
+        email: role.email?.trim() || "email@não.encontrado",
+        role: role.role,
+        created_at: role.created_at || new Date().toISOString(),
+        avatar_url: role.avatar_url || undefined,
+        display_name: role.display_name?.trim() || undefined,
+      }));
 
       setUsers(usersWithRoles);
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error("Error loading users:", error);
-      toast.error("Erro ao carregar usuários: " + (error.message || String(error)));
+      toast.error("Erro ao carregar usuários: " + message);
     } finally {
       setLoading(false);
     }
   };
 
   const handleRoleChange = async (userId: string, newRole: "coach" | "aluno") => {
-    // Guard clause: Prevenir alteração do próprio papel
     if (userId === user?.id) {
       toast.error("Você não pode alterar seu próprio papel");
-      console.warn("user_roles.update.blocked_self_change", { userId, newRole });
       return;
     }
 
-    // Buscar usuário atual e validar estado
     const currentUser = users.find((u) => u.id === userId);
     if (!currentUser) {
       toast.error("Usuário não encontrado");
-      console.error("user_roles.update.blocked_user_not_found", { userId });
       return;
     }
 
-    // Guard clause: Prevenir rebaixamento do último coach
+    if (currentUser.role === newRole) {
+      return;
+    }
+
+    if (currentUser.role === "admin") {
+      toast.error("Papel de admin só pode ser alterado por outro super admin");
+      return;
+    }
+
+    if (currentUser.role === "assistant") {
+      toast.error("Assistentes são geridos em Configurações → Equipa. Promova a Coach aqui após remover da equipa.");
+      return;
+    }
+
     if (currentUser.role === "coach" && newRole === "aluno") {
       const coachesCount = users.filter((u) => u.role === "coach").length;
       if (coachesCount <= 1) {
         toast.error("Não é possível rebaixar o último coach do sistema. Promova outro usuário a coach primeiro.");
-        console.warn("user_roles.update.blocked_last_coach", { userId, coachesCount });
         return;
       }
     }
 
-    // Guard clause: Validar que user_role_id existe ANTES de fazer a requisição
-    // O backend exige id no payload - não podemos prosseguir sem ele
-    if (!currentUser.user_role_id) {
-      const errorMsg = "Erro: ID do role não encontrado. Recarregue a página e tente novamente.";
-      toast.error(errorMsg);
-      console.error("user_roles.update.blocked_missing_id", {
-        userId,
-        currentUser,
-        error: "user_role_id is undefined"
-      });
-      return;
-    }
-
-    // Validar formato UUID básico (opcional, mas ajuda a detectar problemas cedo)
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(currentUser.user_role_id)) {
-      const errorMsg = "Erro: ID do role inválido. Recarregue a página e tente novamente.";
-      toast.error(errorMsg);
-      console.error("user_roles.update.blocked_invalid_id", {
-        userId,
-        user_role_id: currentUser.user_role_id
-      });
-      return;
-    }
-
     setUpdating(userId);
     try {
-      // Contrato da API: PATCH /rest/v1/user_roles { id: string, role: "coach" | "aluno" }
-      // O backend exige que o 'id' esteja no payload do body
-      // NUNCA usar .eq() para filtro - sempre enviar id diretamente no body
-      console.log("user_roles.update.submit", {
-        userId,
-        user_role_id: currentUser.user_role_id,
-        newRole,
-        oldRole: currentUser.role
-      });
-
       const updateResult = await apiClient.requestSafe(`/api/user-roles/${currentUser.user_role_id}`, {
-        method: 'PATCH',
+        method: "PATCH",
         body: JSON.stringify({ role: newRole }),
       });
       if (!updateResult.success) {
-        throw new Error(updateResult.error || 'Erro ao atualizar papel');
+        throw new Error(updateResult.error || "Erro ao atualizar papel");
       }
 
-      // Atualizar estado local apenas após sucesso
-      setUsers((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
-      );
+      const payload = updateResult.data as { aluno_conflict?: boolean } | undefined;
+      if (payload?.aluno_conflict) {
+        toast.warning(
+          "Papel alterado, mas ainda existe ficha de aluno com este email. Remova-a na Gestão de Alunos.",
+        );
+      }
+
+      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u)));
 
       toast.success(
-        `Papel alterado para ${newRole === "coach" ? "Coach" : "Aluno"} com sucesso!`
+        `Papel alterado para ${ROLE_LABELS[newRole]}.${
+          newRole === "coach" ? " O utilizador deve sair e voltar a entrar para aplicar o acesso ao painel." : ""
+        }`,
       );
-
-      console.log("user_roles.update.success", {
-        userId,
-        user_role_id: currentUser.user_role_id,
-        newRole
-      });
-    } catch (error: any) {
-      // Log estruturado para diagnóstico em produção
-      console.error("user_roles.update.error", {
-        userId,
-        user_role_id: currentUser.user_role_id,
-        newRole,
-        error: error.message,
-        errorStack: error.stack,
-        requestId: error.requestId // Se o backend incluir requestId no erro
-      });
-      
-      toast.error("Erro ao atualizar papel: " + (error.message || "Erro desconhecido"));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
+      toast.error("Erro ao atualizar papel: " + message);
     } finally {
       setUpdating(null);
     }
@@ -241,14 +188,12 @@ const UserRolesManager = () => {
   const handleDeleteUser = async () => {
     if (!userToDelete) return;
 
-    // Prevent deleting yourself
     if (userToDelete.id === user?.id) {
       toast.error("Você não pode excluir a si mesmo");
       setUserToDelete(null);
       return;
     }
 
-    // Prevent deleting the last coach
     if (userToDelete.role === "coach") {
       const coachesCount = users.filter((u) => u.role === "coach").length;
       if (coachesCount <= 1) {
@@ -258,29 +203,26 @@ const UserRolesManager = () => {
       }
     }
 
+    if (userToDelete.role === "admin") {
+      toast.error("Não é possível excluir um administrador por esta tela.");
+      setUserToDelete(null);
+      return;
+    }
+
     setDeleting(userToDelete.id);
     try {
-      // IMPORTANTE: Usar user_role_id para deletar completamente (incluindo app_auth.users)
-      // O endpoint DELETE /rest/v1/user_roles agora remove o usuário completamente
-      if (!userToDelete.user_role_id) {
-        toast.error("Erro: ID do role não encontrado para exclusão");
-        return;
-      }
-
-      // Delete user role (isso vai deletar tudo: user_roles, profiles, alunos e app_auth.users)
-      // Usar delete com ID direto ao invés de filtros
       const deleteResult = await apiClient.requestSafe(`/api/user-roles/${userToDelete.user_role_id}`, {
-        method: 'DELETE',
+        method: "DELETE",
       });
       if (!deleteResult.success) {
-        throw new Error(deleteResult.error || 'Erro ao excluir usuário');
+        throw new Error(deleteResult.error || "Erro ao excluir usuário");
       }
 
       setUsers((prev) => prev.filter((u) => u.id !== userToDelete.id));
       toast.success(`Usuário "${userToDelete.display_name || userToDelete.email}" excluído com sucesso!`);
-    } catch (error: any) {
-      console.error("Error deleting user:", error);
-      toast.error("Erro ao excluir usuário: " + error.message);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error("Erro ao excluir usuário: " + message);
     } finally {
       setDeleting(null);
       setUserToDelete(null);
@@ -290,11 +232,75 @@ const UserRolesManager = () => {
   const filteredUsers = users.filter(
     (u) =>
       u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      u.display_name?.toLowerCase().includes(searchTerm.toLowerCase())
+      u.display_name?.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
-  const coachCount = users.filter((u) => u.role === "coach").length;
-  const alunoCount = users.filter((u) => u.role === "aluno").length;
+  const stats = useMemo(() => {
+    const coachCount = users.filter((u) => u.role === "coach").length;
+    const alunoCount = users.filter((u) => u.role === "aluno").length;
+    const assistantCount = users.filter((u) => u.role === "assistant").length;
+    const adminCount = users.filter((u) => u.role === "admin").length;
+    return { coachCount, alunoCount, assistantCount, adminCount, total: users.length };
+  }, [users]);
+
+  const renderRoleControl = (u: UserWithRole) => {
+    if (u.id === user?.id) {
+      return (
+        <span className="text-sm text-muted-foreground">
+          {ROLE_LABELS[u.role]} (você)
+        </span>
+      );
+    }
+
+    if (u.role === "admin") {
+      return <span className="text-sm text-muted-foreground">Protegido</span>;
+    }
+
+    if (u.role === "assistant") {
+      return (
+        <span className="text-sm text-muted-foreground">
+          Gerido em Equipa
+        </span>
+      );
+    }
+
+    return (
+      <Select
+        value={u.role === "coach" || u.role === "aluno" ? u.role : "aluno"}
+        onValueChange={(value: "coach" | "aluno") => handleRoleChange(u.id, value)}
+        disabled={updating === u.id}
+      >
+        <SelectTrigger className="w-[140px]">
+          {updating === u.id ? (
+            <Loader2 className="h-4 w-4 motion-safe:animate-spin" />
+          ) : (
+            <SelectValue />
+          )}
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="coach">
+            <div className="flex items-center gap-2">
+              <Shield className="h-3 w-3" />
+              Coach
+            </div>
+          </SelectItem>
+          <SelectItem value="aluno">
+            <div className="flex items-center gap-2">
+              <User className="h-3 w-3" />
+              Aluno
+            </div>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    );
+  };
+
+  const roleBadgeVariant = (role: UserRole) => {
+    if (role === "coach") return "default";
+    if (role === "admin") return "default";
+    if (role === "assistant") return "outline";
+    return "secondary";
+  };
 
   if (loading) {
     return (
@@ -309,19 +315,29 @@ const UserRolesManager = () => {
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Gerenciar Papéis de Usuários</h2>
         <p className="text-muted-foreground">
-          Defina quem é coach (administrador) e quem é aluno no sistema
+          Defina quem é coach titular e quem é aluno. Assistentes de equipa são geridos em{" "}
+          <span className="text-foreground">Configurações → Equipa</span>.
         </p>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className={`grid gap-4 ${stats.adminCount > 0 || stats.assistantCount > 0 ? "md:grid-cols-4" : "md:grid-cols-3"}`}>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total de Usuários</CardTitle>
+            <CardTitle className="text-sm font-medium">Total</CardTitle>
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{users.length}</div>
+            <div className="text-2xl font-bold">{stats.total}</div>
+            {(stats.adminCount > 0 || stats.assistantCount > 0) && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {[
+                  stats.adminCount > 0 ? `${stats.adminCount} admin` : null,
+                  stats.assistantCount > 0 ? `${stats.assistantCount} assistente(s)` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -330,9 +346,9 @@ const UserRolesManager = () => {
             <Shield className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-primary">{coachCount}</div>
+            <div className="text-2xl font-bold text-primary">{stats.coachCount}</div>
             <p className="text-xs text-muted-foreground">
-              Podem gerenciar alunos, dietas, treinos e pagamentos
+              Acesso completo ao painel administrativo
             </p>
           </CardContent>
         </Card>
@@ -342,20 +358,35 @@ const UserRolesManager = () => {
             <User className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{alunoCount}</div>
-            <p className="text-xs text-muted-foreground">
-              Acesso ao portal do aluno
-            </p>
+            <div className="text-2xl font-bold">{stats.alunoCount}</div>
+            <p className="text-xs text-muted-foreground">Portal do aluno</p>
           </CardContent>
         </Card>
+        {(stats.adminCount > 0 || stats.assistantCount > 0) && (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Outros papéis</CardTitle>
+              <UserCog className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {stats.adminCount + stats.assistantCount}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Admin e assistentes de equipa
+              </p>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
-      {/* Users Table */}
       <Card>
         <CardHeader>
           <CardTitle>Usuários do Sistema</CardTitle>
           <CardDescription>
-            Altere o papel de cada usuário para definir suas permissões
+            {filteredUsers.length === users.length
+              ? `${users.length} utilizadores com papel definido`
+              : `${filteredUsers.length} de ${users.length} utilizadores`}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -371,14 +402,14 @@ const UserRolesManager = () => {
             </div>
           </div>
 
-          <div className="rounded-md border">
+          <div className="rounded-md border overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Usuário</TableHead>
-                  <TableHead>Papel Atual</TableHead>
-                  <TableHead>Alterar Para</TableHead>
-                  <TableHead>Desde</TableHead>
+                  <TableHead>Papel</TableHead>
+                  <TableHead>Alterar papel</TableHead>
+                  <TableHead>Papel desde</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
@@ -395,93 +426,55 @@ const UserRolesManager = () => {
                   filteredUsers.map((u) => (
                     <TableRow key={u.id}>
                       <TableCell>
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-8 w-8">
+                        <div className="flex items-center gap-3 min-w-[200px]">
+                          <Avatar className="h-8 w-8 shrink-0">
                             <AvatarImage src={u.avatar_url} />
                             <AvatarFallback className="bg-primary/10 text-primary text-xs">
                               {u.display_name?.charAt(0)?.toUpperCase() ||
                                 u.email?.charAt(0)?.toUpperCase() ||
-                                '?'}
+                                "?"}
                             </AvatarFallback>
                           </Avatar>
-                          <div>
-                            <p className="font-medium text-sm">
-                              {/* Prioridade: nome > email (sem @ se necessário) > email completo (nunca mostrar ID) */}
-                              {u.display_name || 
-                               (u.email && u.email.includes('@') ? u.email.split('@')[0] : u.email) || 
-                               'Usuário sem email'}
+                          <div className="min-w-0">
+                            <p className="font-medium text-sm truncate">
+                              {u.display_name ||
+                                (u.email.includes("@") ? u.email.split("@")[0] : u.email)}
                               {u.id === user?.id && (
-                                <Badge variant="outline" className="ml-2 text-xs">
+                                <Badge variant="outline" className="ml-2 text-xs shrink-0">
                                   Você
                                 </Badge>
                               )}
                             </p>
-                            {/* Exibir email completo como subtítulo se tiver nome OU se o display for diferente do email */}
-                            {(u.display_name && u.email && u.email.includes('@')) || 
-                             (u.email && u.email.includes('@') && !u.display_name && u.email.split('@')[0] !== u.email) ? (
-                              <p className="text-xs text-muted-foreground">{u.email}</p>
-                            ) : null}
+                            {u.email.includes("@") && (
+                              <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                            )}
                           </div>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge
-                          variant={u.role === "coach" ? "default" : "secondary"}
-                          className="gap-1"
-                        >
-                          {u.role === "coach" ? (
-                            <>
-                              <Shield className="h-3 w-3" />
-                              Coach
-                            </>
+                        <Badge variant={roleBadgeVariant(u.role)} className="gap-1 whitespace-nowrap">
+                          {u.role === "coach" || u.role === "admin" || u.role === "assistant" ? (
+                            <Shield className="h-3 w-3" />
                           ) : (
-                            <>
-                              <User className="h-3 w-3" />
-                              Aluno
-                            </>
+                            <User className="h-3 w-3" />
                           )}
+                          {ROLE_LABELS[u.role]}
                         </Badge>
                       </TableCell>
-                      <TableCell>
-                        <Select
-                          value={u.role}
-                          onValueChange={(value: "coach" | "aluno") =>
-                            handleRoleChange(u.id, value)
-                          }
-                          disabled={updating === u.id || u.id === user?.id}
-                        >
-                          <SelectTrigger className="w-32">
-                            {updating === u.id ? (
-                              <Loader2 className="h-4 w-4 motion-safe:animate-spin" />
-                            ) : (
-                              <SelectValue />
-                            )}
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="coach">
-                              <div className="flex items-center gap-2">
-                                <Shield className="h-3 w-3" />
-                                Coach
-                              </div>
-                            </SelectItem>
-                            <SelectItem value="aluno">
-                              <div className="flex items-center gap-2">
-                                <User className="h-3 w-3" />
-                                Aluno
-                              </div>
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {new Date(u.created_at).toLocaleDateString("pt-BR")}
+                      <TableCell>{renderRoleControl(u)}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                        {formatRoleDate(u.created_at)}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                          disabled={u.id === user?.id || deleting === u.id}
+                          disabled={
+                            u.id === user?.id ||
+                            deleting === u.id ||
+                            u.role === "admin"
+                          }
                           onClick={() => setUserToDelete(u)}
                         >
                           {deleting === u.id ? (
@@ -500,7 +493,6 @@ const UserRolesManager = () => {
         </CardContent>
       </Card>
 
-      {/* Info Card */}
       <Card className="border-primary/20 bg-primary/5">
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
@@ -509,18 +501,25 @@ const UserRolesManager = () => {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             <div className="space-y-2">
               <h4 className="font-medium flex items-center gap-2">
                 <Badge>Coach</Badge>
               </h4>
               <ul className="text-sm text-muted-foreground space-y-1 ml-4 list-disc">
-                <li>Gerenciar alunos</li>
-                <li>Criar e editar dietas</li>
-                <li>Criar e atribuir treinos</li>
-                <li>Gerenciar planos de pagamento</li>
-                <li>Acessar dashboard administrativo</li>
-                <li>Enviar mensagens e avisos</li>
+                <li>Painel administrativo completo</li>
+                <li>Gestão dos próprios alunos</li>
+                <li>Dietas, treinos e pagamentos</li>
+              </ul>
+            </div>
+            <div className="space-y-2">
+              <h4 className="font-medium flex items-center gap-2">
+                <Badge variant="outline">Assistente</Badge>
+              </h4>
+              <ul className="text-sm text-muted-foreground space-y-1 ml-4 list-disc">
+                <li>Adicionado em Configurações → Equipa</li>
+                <li>Acesso partilhado ao coach titular</li>
+                <li>Para titular, promova a Coach nesta tela</li>
               </ul>
             </div>
             <div className="space-y-2">
@@ -528,19 +527,14 @@ const UserRolesManager = () => {
                 <Badge variant="secondary">Aluno</Badge>
               </h4>
               <ul className="text-sm text-muted-foreground space-y-1 ml-4 list-disc">
-                <li>Visualizar seus treinos</li>
-                <li>Visualizar sua dieta</li>
-                <li>Enviar check-ins semanais</li>
-                <li>Visualizar seus pagamentos</li>
-                <li>Enviar mensagens ao coach</li>
-                <li>Acessar vídeos educativos</li>
+                <li>Portal do aluno (treinos, dieta, check-ins)</li>
+                <li>Sem acesso ao painel do coach</li>
               </ul>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Delete Confirmation Dialog */}
       <AlertDialog open={!!userToDelete} onOpenChange={() => setUserToDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -548,13 +542,10 @@ const UserRolesManager = () => {
             <AlertDialogDescription>
               Tem certeza que deseja excluir o usuário{" "}
               <strong>{userToDelete?.display_name || userToDelete?.email}</strong>?
-              <br /><br />
-              Esta ação irá remover:
-              <ul className="list-disc ml-4 mt-2">
-                <li>Papel do usuário no sistema</li>
-                <li>Perfil e avatar</li>
-                <li>Dados do aluno (se aplicável)</li>
-              </ul>
+              <br />
+              <br />
+              Esta ação irá remover o papel, perfil e dados de aluno associados.
+              <br />
               <br />
               <strong className="text-destructive">Esta ação não pode ser desfeita.</strong>
             </AlertDialogDescription>

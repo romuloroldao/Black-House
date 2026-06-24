@@ -24,6 +24,10 @@ const createEducationalContentsRouter = require('./educational-contents');
 const { deleteUserByUserRoleId } = require('../utils/deleteUserByUserRoleId');
 const AsaasService = require('../services/asaas.service');
 const { encryptCoachAsaasApiKey, decryptCoachAsaasApiKey } = require('../utils/asaas-coach-secret-crypto');
+const { importCoachFinancialData } = require('../financial/sync/initial-import');
+const { getCoachFinancialPolicy, recalculateStudentAccess } = require('../financial/access/access-engine');
+const { registerCoachWebhook } = require('../financial/sync/webhook-registration');
+const { getCoachAsaasService } = require('../financial/coach-asaas');
 const { afterTableMutation } = require('../services/return-reminder.service');
 const {
   isMeaningfulCoachResposta,
@@ -41,6 +45,20 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
   // ============================================================================
   const resolveAlunoOrFail = resolveAlunoOrFailMiddleware(pool);
   const resolveCoachOrFail = resolveCoachOrFailMiddleware(pool);
+  const requireCompleteProfile = require('../middleware/requireCompleteProfile')(pool);
+
+  /** Exclui fichas de utilizadores com papel coach/admin (evita coaches na gestão de alunos). */
+  const EXCLUDE_STAFF_ALUNOS_SQL = `
+    NOT EXISTS (
+      SELECT 1
+      FROM app_auth.users u
+      INNER JOIN public.user_roles ur ON ur.user_id = u.id
+      WHERE ur.role IN ('coach', 'admin')
+        AND (
+          LOWER(TRIM(COALESCE(u.email, ''))) = LOWER(TRIM(COALESCE(a.email, '')))
+          OR u.id = a.user_id
+        )
+    )`;
 
   /** Aluno canónico para o utilizador (BD com ou sem coluna linked_user_id). */
   async function getAlunoRowForAuthUser(userId) {
@@ -263,6 +281,28 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
         return res.status(500).json({
           error: error.message || 'Erro ao carregar resumo do dia',
           error_code: 'ALUNO_HOJE_ERROR',
+        });
+      }
+    },
+  );
+
+  // GET /api/alunos/me/profile-status — completude do perfil (grace period + hard gate)
+  router.get(
+    '/alunos/me/profile-status',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['aluno']),
+    resolveAlunoOrFail,
+    async (req, res) => {
+      try {
+        const { getProfileStatus } = require('../services/profile-completeness.service');
+        const status = await getProfileStatus(pool, req.aluno, { incrementLogin: true });
+        return res.json(status);
+      } catch (error) {
+        console.error('Erro em GET /api/alunos/me/profile-status:', error);
+        return res.status(500).json({
+          error: error.message || 'Erro ao carregar estado do perfil',
+          error_code: 'PROFILE_STATUS_ERROR',
         });
       }
     },
@@ -700,13 +740,10 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
   // DESIGN-LINK-ALUNO-USER-001: NÃO permite alterar user_id (vínculo deve ser via /api/alunos/link-user)
   router.patch('/alunos/me', authenticate, domainSchemaGuard, validateRole(['aluno']), resolveAlunoOrFail, async (req, res) => {
     try {
-      const aluno = req.aluno; // Já resolvido pelo middleware
+      const aluno = req.aluno;
 
-      // API-CONTRACT-001: Frontend NUNCA envia aluno_id ou user_id
-      // DESIGN-LINK-ALUNO-USER-001: user_id NÃO pode ser alterado via update
-      const { aluno_id, user_id, coach_id, ...updateData } = req.body;
+      const { user_id, ...updateData } = req.body;
 
-      // DESIGN-LINK-ALUNO-USER-001: Rejeitar explicitamente tentativa de alterar user_id
       if (user_id !== undefined) {
         return res.status(403).json({
           error: 'user_id não pode ser alterado via esta rota. Use POST /api/alunos/link-user para vincular.',
@@ -714,37 +751,15 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
         });
       }
 
-      // Campos permitidos para atualização
-      const allowedFields = ['nome', 'email', 'telefone', 'cpf_cnpj', 'data_nascimento', 'peso', 'altura', 'objetivo', 'plano', 'status'];
-
-      const updateFields = [];
-      const queryParams = [];
-      let paramIndex = 1;
-
-      for (const field of allowedFields) {
-        if (updateData[field] !== undefined) {
-          updateFields.push(`${field} = $${paramIndex}`);
-          queryParams.push(updateData[field]);
-          paramIndex++;
-        }
-      }
-
-      if (updateFields.length === 0) {
-        return res.status(400).json({ error: 'Nenhum campo para atualizar' });
-      }
-
-      queryParams.push(aluno.id);
-      const query = `
-                UPDATE public.alunos 
-                SET ${updateFields.join(', ')}, updated_at = now()
-                WHERE id = $${paramIndex}
-                RETURNING *
-            `;
-
-      const result = await pool.query(query, queryParams);
-      res.json(result.rows[0]);
+      const { applyAlunoProfileUpdate } = require('../services/aluno-profile-update.service');
+      const result = await applyAlunoProfileUpdate(pool, aluno, updateData);
+      res.json({ ...result.aluno, profile_status: result.profile_status });
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      const status = error.status || (error.code?.startsWith('INVALID') ? 400 : 500);
+      res.status(status).json({
+        error: error.message,
+        error_code: error.code || 'UPDATE_ERROR',
+      });
     }
   });
 
@@ -760,20 +775,26 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
                    INITCAP(REPLACE(SPLIT_PART(COALESCE(a.email, ''), '@', 1), '.', ' '))
                  ) AS nome_exibicao,
                  coach_u.email AS coach_email,
-                 cp.nome_completo AS coach_nome
+                 cp.nome_completo AS coach_nome,
+                 sps.is_complete AS profile_is_complete,
+                 sps.completion_pct AS profile_completion_pct,
+                 sps.missing_fields AS profile_missing_fields
           FROM public.alunos a
           LEFT JOIN app_auth.users coach_u ON coach_u.id = a.coach_id
-          LEFT JOIN public.coach_profiles cp ON cp.user_id = a.coach_id`;
+          LEFT JOIN public.coach_profiles cp ON cp.user_id = a.coach_id
+          LEFT JOIN public.student_profile_state sps ON sps.aluno_id = a.id`;
 
       if (req.user.role === 'admin') {
         result = await pool.query(
           `${alunoSelectWithDisplayName}
+          WHERE ${EXCLUDE_STAFF_ALUNOS_SQL}
           ORDER BY nome_exibicao ASC NULLS LAST, a.created_at DESC NULLS LAST`,
         );
       } else {
         result = await pool.query(
           `${alunoSelectWithDisplayName}
           WHERE a.coach_id = $1
+            AND ${EXCLUDE_STAFF_ALUNOS_SQL}
           ORDER BY nome_exibicao ASC NULLS LAST, a.created_at DESC NULLS LAST`,
           [req.user.id],
         );
@@ -817,6 +838,69 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     },
   );
 
+  // GET /api/alunos/:alunoId/body-metrics — dados corporais + TMB + histórico de peso
+  router.get(
+    '/alunos/:alunoId/body-metrics',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'aluno']),
+    validateUUIDParam('alunoId'),
+    requireAlunoWhenStudent(),
+    async (req, res) => {
+      try {
+        const alunoId = req.params.alunoId;
+        if (req.user.role === 'aluno' && req.aluno.id !== alunoId) {
+          return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+        }
+        if (req.user.role === 'coach') {
+          const ok = await validateAlunoBelongsToCoach(pool, alunoId, req.user.id);
+          if (!ok) {
+            return res.status(403).json({ error: 'Sem permissão para este aluno', error_code: 'FORBIDDEN' });
+          }
+        }
+        const { getBodyMetricsForAluno } = require('../services/body-metrics.service');
+        const { evaluateAlunoProfile } = require('../services/profile-completeness.service');
+        const metrics = await getBodyMetricsForAluno(pool, alunoId);
+        if (!metrics) {
+          return res.status(404).json({ error: 'Aluno não encontrado', error_code: 'NOT_FOUND' });
+        }
+        const alunoRes = await pool.query(`SELECT * FROM public.alunos WHERE id = $1`, [alunoId]);
+        const profile = evaluateAlunoProfile(alunoRes.rows[0]);
+        return res.json({ ...metrics, profile_status: profile });
+      } catch (error) {
+        console.error('Erro em GET body-metrics:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao carregar dados corporais' });
+      }
+    },
+  );
+
+  // GET /api/alunos/:alunoId/task-adherence — aderência a tarefas (lembretes inteligentes)
+  router.get(
+    '/alunos/:alunoId/task-adherence',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    validateUUIDParam('alunoId'),
+    async (req, res) => {
+      try {
+        const alunoId = req.params.alunoId;
+        if (req.user.role === 'coach') {
+          const ok = await validateAlunoBelongsToCoach(pool, alunoId, req.user.id);
+          if (!ok) {
+            return res.status(403).json({ error: 'Sem permissão para este aluno', error_code: 'FORBIDDEN' });
+          }
+        }
+        const { getAdherenceSummary } = require('../services/task-adherence.service');
+        const days = Math.min(365, Math.max(7, Number(req.query.days) || 90));
+        const summary = await getAdherenceSummary(pool, alunoId, { days });
+        return res.json(summary);
+      } catch (error) {
+        console.error('Erro em GET task-adherence:', error);
+        return res.status(500).json({ error: error.message || 'Erro ao carregar aderência' });
+      }
+    },
+  );
+
   // GET /api/alunos - Listar alunos
   router.get('/alunos', authenticate, domainSchemaGuard, async (req, res) => {
     try {
@@ -827,11 +911,11 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
 
       // Filtro por coach_id (coaches só veem seus próprios alunos)
       if (req.user.role === 'coach') {
-        whereConditions.push(`coach_id = $${paramIndex}`);
+        whereConditions.push(`a.coach_id = $${paramIndex}`);
         queryParams.push(req.user.id);
         paramIndex++;
       } else if (coach_id) {
-        whereConditions.push(`coach_id = $${paramIndex}`);
+        whereConditions.push(`a.coach_id = $${paramIndex}`);
         queryParams.push(coach_id);
         paramIndex++;
       }
@@ -847,19 +931,21 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
 
       // Filtro por email
       if (email) {
-        whereConditions.push(`email = $${paramIndex}`);
+        whereConditions.push(`a.email = $${paramIndex}`);
         queryParams.push(email);
         paramIndex++;
       }
+
+      whereConditions.push(EXCLUDE_STAFF_ALUNOS_SQL);
 
       const whereClause = whereConditions.length > 0
         ? `WHERE ${whereConditions.join(' AND ')}`
         : '';
 
       const query = `
-                SELECT * FROM public.alunos 
+                SELECT a.* FROM public.alunos a
                 ${whereClause}
-                ORDER BY created_at DESC
+                ORDER BY a.created_at DESC
             `;
 
       const result = await pool.query(query, queryParams);
@@ -925,6 +1011,12 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
 
       res.status(201).json(alunoRowWithCanonicalUserId(result.rows[0]));
     } catch (error) {
+      if (error.code === '23505' && String(error.constraint || '').includes('alunos_email')) {
+        return res.status(409).json({
+          error: 'Já existe um aluno com este e-mail',
+          error_code: 'DUPLICATE_EMAIL',
+        });
+      }
       res.status(500).json({ error: error.message });
     }
   });
@@ -1183,10 +1275,27 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
       coach_id: row.coach_id,
       is_sandbox: row.is_sandbox,
       webhook_url: row.webhook_url,
+      webhook_registered_at: row.webhook_registered_at,
+      initial_sync_status: row.initial_sync_status,
+      initial_sync_completed_at: row.initial_sync_completed_at,
+      last_reconciliation_at: row.last_reconciliation_at,
       created_at: row.created_at,
       updated_at: row.updated_at,
       has_api_key: !!(row.asaas_api_key && String(row.asaas_api_key).trim()),
     };
+  }
+
+  async function triggerCoachFinancialSetup(coachId) {
+    setImmediate(async () => {
+      try {
+        const ctx = await getCoachAsaasService(pool, coachId);
+        if (!ctx?.service) return;
+        await registerCoachWebhook(pool, coachId, ctx.service);
+        await importCoachFinancialData(pool, coachId, { notificationService });
+      } catch (err) {
+        console.error('financial.setup.background_failed', coachId, err.message);
+      }
+    });
   }
 
   // GET /api/asaas-config — coach (a sua), admin (?coach_id=)
@@ -1270,10 +1379,12 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
              is_sandbox = EXCLUDED.is_sandbox,
              webhook_url = COALESCE(EXCLUDED.webhook_url, public.asaas_config.webhook_url),
              asaas_api_key = EXCLUDED.asaas_api_key,
+             initial_sync_status = 'pending',
              updated_at = now()
            RETURNING *`,
           [coachId, sandbox, wh, storedKey],
         );
+        await triggerCoachFinancialSetup(coachId);
         return res.status(201).json(sanitizeAsaasConfigRow(ins.rows[0]));
       } catch (error) {
         console.error('Erro ao gravar asaas_config:', error);
@@ -1448,6 +1559,128 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           error_code: 'ASAAS_VERIFY_FAILED',
         });
       }
+    },
+  );
+
+  // GET /api/financial/health — estado da sincronização Asaas
+  router.get(
+    '/financial/health',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      try {
+        const coachId = req.user.role === 'admin' && req.query.coach_id
+          ? req.query.coach_id
+          : req.user.id;
+
+        const [config, orphans, conflicts, deadLetter, inboxPending] = await Promise.all([
+          pool.query('SELECT * FROM public.asaas_config WHERE coach_id = $1 LIMIT 1', [coachId]),
+          pool.query(
+            `SELECT COUNT(*)::int AS c FROM public.asaas_payments
+             WHERE coach_id = $1 AND sync_status = 'orphan'`,
+            [coachId],
+          ),
+          pool.query(
+            `SELECT COUNT(*)::int AS c FROM public.asaas_payments
+             WHERE coach_id = $1 AND sync_status = 'conflict'`,
+            [coachId],
+          ),
+          pool.query(
+            `SELECT COUNT(*)::int AS c FROM public.financial_sync_inbox
+             WHERE coach_id = $1 AND status = 'dead_letter'`,
+            [coachId],
+          ),
+          pool.query(
+            `SELECT COUNT(*)::int AS c FROM public.financial_sync_inbox
+             WHERE coach_id = $1 AND status IN ('received', 'failed', 'processing')`,
+            [coachId],
+          ),
+        ]);
+
+        return res.json({
+          config: sanitizeAsaasConfigRow(config.rows[0]),
+          orphans_count: orphans.rows[0]?.c || 0,
+          conflicts_count: conflicts.rows[0]?.c || 0,
+          dead_letter_count: deadLetter.rows[0]?.c || 0,
+          inbox_pending_count: inboxPending.rows[0]?.c || 0,
+        });
+      } catch (error) {
+        return res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
+  // GET/PATCH /api/financial/policies — regras de bloqueio por coach
+  router.get(
+    '/financial/policies',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      const coachId = req.user.role === 'admin' && req.query.coach_id
+        ? req.query.coach_id
+        : req.user.id;
+      const policy = await getCoachFinancialPolicy(pool, coachId);
+      return res.json(policy);
+    },
+  );
+
+  router.patch(
+    '/financial/policies',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      const coachId = req.user.role === 'admin' && req.body.coach_id
+        ? req.body.coach_id
+        : req.user.id;
+      const allowed = [
+        'grace_period_days',
+        'auto_block_enabled',
+        'notify_on_block',
+        'block_on_statuses',
+        'unblock_on_statuses',
+        'reminder_days_before',
+      ];
+      const fields = [];
+      const values = [];
+      let idx = 1;
+      for (const key of allowed) {
+        if (req.body[key] !== undefined) {
+          fields.push(`${key} = $${idx}`);
+          values.push(req.body[key]);
+          idx += 1;
+        }
+      }
+      if (fields.length === 0) {
+        return res.status(400).json({ error: 'Nenhum campo para atualizar' });
+      }
+      await getCoachFinancialPolicy(pool, coachId);
+      values.push(coachId);
+      const result = await pool.query(
+        `UPDATE public.coach_financial_policies
+         SET ${fields.join(', ')}, updated_at = NOW()
+         WHERE coach_id = $${idx}
+         RETURNING *`,
+        values,
+      );
+      return res.json(result.rows[0]);
+    },
+  );
+
+  // POST /api/financial/sync — forçar import/reconciliação
+  router.post(
+    '/financial/sync',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    async (req, res) => {
+      const coachId = req.user.role === 'admin' && req.body.coach_id
+        ? req.body.coach_id
+        : req.user.id;
+      await triggerCoachFinancialSetup(coachId);
+      return res.json({ ok: true, message: 'Sincronização iniciada em background' });
     },
   );
 
@@ -3153,6 +3386,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     domainSchemaGuard,
     validateRole(['aluno']),
     resolveAlunoOrFail,
+    requireCompleteProfile,
     async (req, res) => {
       try {
         const { relatorio_id, aluno_id, comentario } = req.body || {};
@@ -3600,9 +3834,27 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     async (req, res) => {
       try {
         const result = await pool.query(`
-          SELECT id, user_id, role, created_at
-          FROM public.user_roles
-          ORDER BY created_at DESC NULLS LAST
+          SELECT
+            ur.id,
+            ur.user_id,
+            ur.role,
+            ur.created_at,
+            u.email,
+            u.email_confirmed_at,
+            u.created_at AS user_created_at,
+            p.avatar_url,
+            COALESCE(
+              NULLIF(TRIM(cp.nome_completo), ''),
+              NULLIF(TRIM(p.display_name), ''),
+              NULLIF(TRIM(a.nome), ''),
+              INITCAP(REPLACE(SPLIT_PART(COALESCE(u.email, ''), '@', 1), '.', ' '))
+            ) AS display_name
+          FROM public.user_roles ur
+          INNER JOIN app_auth.users u ON u.id = ur.user_id
+          LEFT JOIN public.profiles p ON p.id = u.id
+          LEFT JOIN public.coach_profiles cp ON cp.user_id = u.id
+          LEFT JOIN public.alunos a ON a.user_id = u.id
+          ORDER BY ur.created_at DESC NULLS LAST
         `);
         res.json(result.rows);
       } catch (error) {
@@ -3655,11 +3907,45 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           }
         }
 
+        const targetUserId = existing.rows[0].user_id;
+
         const result = await pool.query(
           `UPDATE public.user_roles SET role = $1::user_role WHERE id = $2 RETURNING id, user_id, role, created_at`,
           [role, req.params.id],
         );
-        res.json(result.rows[0]);
+
+        let aluno_conflict = false;
+        if (role === 'coach') {
+          await pool.query(
+            `INSERT INTO public.coach_profiles (user_id, nome_completo)
+             SELECT $1,
+                    COALESCE(
+                      NULLIF(TRIM(p.display_name), ''),
+                      INITCAP(REPLACE(SPLIT_PART(COALESCE(u.email, ''), '@', 1), '.', ' '))
+                    )
+             FROM app_auth.users u
+             LEFT JOIN public.profiles p ON p.id = u.id
+             WHERE u.id = $1
+             ON CONFLICT (user_id) DO NOTHING`,
+            [targetUserId],
+          );
+          await pool.query(
+            `UPDATE public.coach_team_members
+             SET ativo = false
+             WHERE member_user_id = $1 AND ativo = true`,
+            [targetUserId],
+          );
+          const alunoCheck = await pool.query(
+            `SELECT id FROM public.alunos a
+             WHERE a.user_id = $1
+                OR lower(a.email) = (SELECT lower(email) FROM app_auth.users WHERE id = $1 LIMIT 1)
+             LIMIT 1`,
+            [targetUserId],
+          );
+          aluno_conflict = alunoCheck.rows.length > 0;
+        }
+
+        res.json({ ...result.rows[0], aluno_conflict });
       } catch (error) {
         res.status(500).json({ error: error.message });
       }
@@ -4521,7 +4807,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
 
   // POST /api/checkins - Criar check-in semanal
   // DESIGN-GUARD-RAILS-ROLE-ACCESS-003: Rota apenas para alunos
-  router.post('/checkins', authenticate, domainSchemaGuard, validateRole(['aluno']), resolveAlunoOrFail, async (req, res) => {
+  router.post('/checkins', authenticate, domainSchemaGuard, validateRole(['aluno']), resolveAlunoOrFail, requireCompleteProfile, async (req, res) => {
     try {
       const aluno = req.aluno; // Já resolvido pelo middleware resolveAlunoOrFail
       const userId = req.user.id;
@@ -4789,10 +5075,10 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
         }
 
         if (pesoKg != null && dbCols.has('peso_kg')) {
-          await client.query(`UPDATE public.alunos SET peso = $1 WHERE id = $2`, [
-            Math.round(pesoKg),
-            aluno.id,
-          ]);
+          const { updateAlunoPeso, syncIndicatorsForAluno } = require('../services/body-metrics.service');
+          await updateAlunoPeso(client, aluno.id, pesoKg, 'weekly_checkin', createdCheckin.id);
+          const refreshed = await client.query(`SELECT * FROM public.alunos WHERE id = $1`, [aluno.id]);
+          await syncIndicatorsForAluno(client, refreshed.rows[0]);
         }
 
         await client.query('COMMIT');
@@ -4801,6 +5087,18 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
         throw txErr;
       } finally {
         client.release();
+      }
+
+      if (pesoKg != null) {
+        void (async () => {
+          try {
+            const { refreshProfileState } = require('../services/profile-completeness.service');
+            const row = await pool.query(`SELECT * FROM public.alunos WHERE id = $1`, [aluno.id]);
+            if (row.rows[0]) await refreshProfileState(pool, row.rows[0]);
+          } catch (e) {
+            console.warn('[checkin] refreshProfileState:', e?.message);
+          }
+        })();
       }
 
       if (notificationService && aluno.coach_id && createdCheckin?.id) {
@@ -4815,6 +5113,27 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           .catch((notifyErr) => {
             console.warn('[checkin] Falha ao notificar coach:', notifyErr?.message || notifyErr);
           });
+
+        void (async () => {
+          try {
+            const smartReminderEngine = require('../services/smart-reminder/engine');
+            const { DOMAINS } = require('../services/smart-reminder/types');
+            const { weekKeyInTimeZone } = require('../utils/zoned-time');
+            const tz =
+              aluno.timezone && String(aluno.timezone).trim()
+                ? String(aluno.timezone).trim()
+                : 'America/Sao_Paulo';
+            await smartReminderEngine.onTaskCompleted(pool, notificationService, {
+              domain: DOMAINS.CHECKIN_WEEKLY,
+              alunoId: aluno.id,
+              coachId: aluno.coach_id,
+              weekKey: weekKeyInTimeZone(new Date(), tz),
+              metadata: { checkinId: createdCheckin.id },
+            });
+          } catch (e) {
+            console.warn('[checkin] smart reminder cancel:', e?.message);
+          }
+        })();
       }
 
       res.status(201).json({

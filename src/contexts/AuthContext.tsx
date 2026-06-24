@@ -175,6 +175,26 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     window.addEventListener('storage', handleStorageChange);
     window.addEventListener('auth-changed', handleAuthChange);
 
+    const handlePaymentStatusChanged = () => {
+      const token = apiClient.getToken();
+      if (!token) return;
+      apiClient.getUser()
+        .then((response) => {
+          const userWithRole = {
+            ...response.user,
+            role: response.role || response.user?.role || 'aluno',
+            payment_status: response.payment_status || response.user?.payment_status || 'CURRENT',
+          };
+          setUser(userWithRole);
+          setRole(userWithRole.role);
+          setPaymentStatus(userWithRole.payment_status);
+          setSession({ token, user: userWithRole });
+        })
+        .catch(() => {});
+    };
+
+    window.addEventListener('auth-payment-status-changed', handlePaymentStatusChanged);
+
     return () => {
       // REACT-SOFT-LOCK-FIX-003: Cleanup do timeout
       if (timeoutId) {
@@ -182,6 +202,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('auth-changed', handleAuthChange);
+      window.removeEventListener('auth-payment-status-changed', handlePaymentStatusChanged);
     };
   }, []);
 

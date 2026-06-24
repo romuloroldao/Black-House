@@ -53,7 +53,14 @@ const FREQUENCIAS = [
   { value: "anual", label: "Anual" },
 ];
 
-export default function PlanManager() {
+interface PlanManagerProps {
+  /** Oculta cabeçalho e padding quando embutido no hub Financeiro */
+  embedded?: boolean;
+  /** catalog: só CRUD de planos; subscriptions: só alunos em planos; full: tudo */
+  mode?: "full" | "catalog" | "subscriptions";
+}
+
+export default function PlanManager({ embedded = false, mode = "full" }: PlanManagerProps) {
   const { user } = useAuth();
   const { confirm } = useConfirm();
   const coachEndpoint = user?.id ? API_CONTRACT.alunos.byCoach() : undefined;
@@ -349,30 +356,89 @@ export default function PlanManager() {
     return alunos.filter(a => !assignedStudentIds.includes(a.id));
   };
 
+  const showCatalog = mode === "full" || mode === "catalog";
+  const showSubscriptions = mode === "full" || mode === "subscriptions";
+  const catalogPlans = mode === "subscriptions" ? [] : plans;
+
   if (loading) {
-    return <div className="p-8">Carregando planos...</div>;
+    return <div className={embedded ? "py-8" : "p-8"}>Carregando planos...</div>;
   }
 
-  return (
-    <div className="p-8">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-3xl font-bold">Planos de Pagamento</h1>
-          <p className="text-muted-foreground">Gerencie seus planos e atribua alunos diretamente</p>
-        </div>
-        <Button
-          onClick={() => {
-            resetForm();
-            setIsDialogOpen(true);
-          }}
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          Novo Plano
-        </Button>
-      </div>
+  const activeSubscriptions = recurringConfigs.filter((c) => c.ativo);
 
+  return (
+    <div className={embedded ? "" : "p-8"}>
+      {!embedded && (
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h1 className="text-3xl font-bold">Planos de Pagamento</h1>
+            <p className="text-muted-foreground">Gerencie seus planos e atribua alunos diretamente</p>
+          </div>
+          {showCatalog && (
+            <Button
+              onClick={() => {
+                resetForm();
+                setIsDialogOpen(true);
+              }}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Novo Plano
+            </Button>
+          )}
+        </div>
+      )}
+
+      {embedded && showCatalog && (
+        <div className="flex justify-end mb-4">
+          <Button
+            onClick={() => {
+              resetForm();
+              setIsDialogOpen(true);
+            }}
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Novo Plano
+          </Button>
+        </div>
+      )}
+
+      {showSubscriptions && mode === "subscriptions" && (
+        <div className="space-y-3 mb-6">
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <Users className="h-5 w-5" />
+            Assinaturas ativas ({activeSubscriptions.length})
+          </h2>
+          {activeSubscriptions.length === 0 ? (
+            <p className="text-muted-foreground text-sm">Nenhuma assinatura ativa. Atribua alunos em Planos.</p>
+          ) : (
+            <div className="space-y-2">
+              {activeSubscriptions.map((config) => {
+                const plan = plans.find((p) => p.id === config.payment_plan_id);
+                return (
+                  <Card key={config.id}>
+                    <CardContent className="py-3 flex items-center justify-between">
+                      <div>
+                        <p className="font-medium">{config.aluno?.nome || "Aluno"}</p>
+                        <p className="text-sm text-muted-foreground">{plan?.nome || "Plano"}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="default">Ativa</Badge>
+                        <Button variant="ghost" size="sm" onClick={() => handleRemoveStudent(config.id)}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {showCatalog && (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {plans.map((plan) => {
+        {catalogPlans.map((plan) => {
           const planStudents = getStudentsForPlan(plan.id);
           
           return (
@@ -383,6 +449,7 @@ export default function PlanManager() {
                   <CardTitle className="text-lg">{plan.nome}</CardTitle>
                 </div>
                 <div className="flex gap-2">
+                  {showSubscriptions && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -391,6 +458,7 @@ export default function PlanManager() {
                     <UserPlus className="h-4 w-4 mr-1" />
                     Adicionar Aluno
                   </Button>
+                  )}
                   <Button
                     variant="outline"
                     size="icon"
@@ -425,6 +493,7 @@ export default function PlanManager() {
 
                   <Separator />
 
+                  {showSubscriptions && mode !== "catalog" && (
                   <div>
                     <div className="flex items-center gap-2 mb-3">
                       <Users className="h-4 w-4 text-muted-foreground" />
@@ -469,14 +538,16 @@ export default function PlanManager() {
                       </p>
                     )}
                   </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
           );
         })}
       </div>
+      )}
 
-      {plans.length === 0 && (
+      {showCatalog && catalogPlans.length === 0 && mode !== "subscriptions" && (
         <div className="text-center py-12">
           <CreditCard className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
           <p className="text-muted-foreground">

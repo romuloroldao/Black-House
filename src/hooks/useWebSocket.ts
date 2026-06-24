@@ -96,6 +96,15 @@ export function useWebSocket() {
       ]);
     });
 
+    socket.on('payment_status_changed', (data: {
+      payment_status?: string;
+      access_status?: string;
+      in_grace_period?: boolean;
+      grace_days_remaining?: number | null;
+    }) => {
+      window.dispatchEvent(new CustomEvent('auth-payment-status-changed', { detail: data }));
+    });
+
     socket.on('payment_reminder', (data: any) => {
       setNotifications((prev) => [
         {

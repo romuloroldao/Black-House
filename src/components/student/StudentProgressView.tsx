@@ -16,6 +16,8 @@ import {
 import { toast } from "sonner";
 import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import StudentProgressDashboard from "./StudentProgressDashboard";
+import WeightTimelineChart from "@/components/coach/WeightTimelineChart";
+import type { BodyMetricsResponse } from "@/types/profile-completeness";
 import CheckinStreakCard from "@/components/student/today/CheckinStreakCard";
 import { useAlunoHoje } from "@/hooks/useAlunoHoje";
 import { useSearchParams } from "react-router-dom";
@@ -35,6 +37,8 @@ const StudentProgressView = () => {
   const { data: hoje, loading: hojeLoading } = useAlunoHoje(Boolean(user));
   const [fotos, setFotos] = useState<FotoAluno[]>([]);
   const [dataLoaded, setDataLoaded] = useState(false);
+  const [bodyMetrics, setBodyMetrics] = useState<BodyMetricsResponse | null>(null);
+  const [bodyMetricsLoading, setBodyMetricsLoading] = useState(false);
 
   const sectionParam = searchParams.get("section");
   const focusFotos = searchParams.get("focus") === "fotos";
@@ -76,6 +80,16 @@ const StudentProgressView = () => {
         (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime(),
       );
       setFotos(ordenadas);
+
+      setBodyMetricsLoading(true);
+      const metricsResult = await apiClient.requestSafe<BodyMetricsResponse>(
+        `/api/alunos/${aluno.id}/body-metrics`,
+      );
+      setBodyMetrics(metricsResult.success ? metricsResult.data ?? null : null);
+      setBodyMetricsLoading(false);
+    } else {
+      setBodyMetrics(null);
+      setBodyMetricsLoading(false);
     }
     setDataLoaded(true);
   };
@@ -245,6 +259,12 @@ const StudentProgressView = () => {
             streak={hoje?.checkin_streak ?? null}
             checkinDue={hoje?.contadores?.checkin_due}
             onOpenCheckin={openCheckin}
+          />
+          <WeightTimelineChart
+            historico={bodyMetrics?.peso_historico}
+            pesoAtual={bodyMetrics?.peso_kg}
+            loading={bodyMetricsLoading}
+            compact
           />
           <StudentProgressDashboard />
         </TabsContent>

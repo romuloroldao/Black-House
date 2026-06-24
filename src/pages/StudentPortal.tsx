@@ -17,6 +17,8 @@ import StudentCoachHubView from "@/components/student/StudentCoachHubView";
 import StudentProgressView from "@/components/student/StudentProgressView";
 import StudentFinancialView from "@/components/student/StudentFinancialView";
 import StudentProfileView from "@/components/student/StudentProfileView";
+import ProfileCompletionWizard from "@/components/student/ProfileCompletionWizard";
+import { useProfileCompleteness } from "@/hooks/useProfileCompleteness";
 import StudentReportsView from "@/components/student/StudentReportsView";
 import StudentWeeklyCheckin from "@/components/student/StudentWeeklyCheckin";
 import NotificationsPopover from "@/components/NotificationsPopover";
@@ -24,6 +26,7 @@ import { useStudentPortalRealtime } from "@/hooks/useStudentPortalRealtime";
 import { Button } from "@/components/ui/button";
 import logoWhite from "@/assets/logo-white.svg";
 import { cn } from "@/lib/utils";
+import { apiClient } from "@/lib/api-client";
 
 // RBAC-01: StudentPortal usa payment_status do contexto (via ProtectedRoute)
 // A tela de bloqueio é rota separada (/portal-aluno/blocked)
@@ -35,8 +38,18 @@ const StudentPortal = () => {
   const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "hoje");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [profileWizardOpen, setProfileWizardOpen] = useState(false);
   const hojeState = useAlunoHoje(Boolean(isReady && user));
   const { coachUnreadTotal } = hojeState;
+  const { status: profileStatus, refetch: refetchProfile } = useProfileCompleteness();
+  const [profileSeed, setProfileSeed] = useState<{
+    nome?: string;
+    telefone?: string;
+    data_nascimento?: string;
+    sexo?: string;
+    peso_kg?: string;
+    altura_cm?: string;
+  }>({});
 
   useEffect(() => {
     let tab = searchParams.get("tab") || "hoje";
@@ -62,6 +75,40 @@ const StudentPortal = () => {
     }
   }, [isReady, user?.role]);
 
+  useEffect(() => {
+    if (!isReady || !profileStatus || profileStatus.is_complete) return;
+    const key = "bh-profile-wizard-shown";
+    try {
+      if (sessionStorage.getItem(key) === "1") return;
+      sessionStorage.setItem(key, "1");
+    } catch {
+      /* ignore */
+    }
+    void (async () => {
+      const me = await apiClient.getMeSafe();
+      const aluno = me.success ? me.data : null;
+      setProfileSeed({
+        nome: aluno?.nome || "",
+        telefone: aluno?.telefone || "",
+        data_nascimento: (aluno?.data_nascimento || "").split("T")[0] || "",
+        sexo: aluno?.sexo || "",
+        peso_kg:
+          aluno?.peso_kg != null
+            ? String(aluno.peso_kg)
+            : aluno?.peso != null
+              ? String(aluno.peso)
+              : "",
+        altura_cm:
+          aluno?.altura_cm != null
+            ? String(aluno.altura_cm)
+            : aluno?.altura != null
+              ? String(aluno.altura)
+              : "",
+      });
+      setProfileWizardOpen(true);
+    })();
+  }, [isReady, profileStatus?.is_complete]);
+
   const handleTabChange = (tab: string, extra?: Record<string, string>) => {
     setActiveTab(tab);
     setSearchParams({ tab, ...extra });
@@ -84,7 +131,13 @@ const StudentPortal = () => {
       switch (activeTab) {
         case "hoje":
         case "dashboard":
-          return <StudentTodayView hojeState={hojeState} />;
+          return (
+            <StudentTodayView
+              hojeState={hojeState}
+              profileStatus={profileStatus}
+              onOpenProfileWizard={() => setProfileWizardOpen(true)}
+            />
+          );
         case "diet":
           return <StudentDietView />;
         case "workouts":
@@ -109,6 +162,8 @@ const StudentPortal = () => {
               checkinStreak={hojeState.data?.checkin_streak ?? null}
               checkinLoading={hojeState.loading}
               onCheckinSubmitted={() => void hojeState.refetch()}
+              profileStatus={profileStatus}
+              onRequireProfile={() => setProfileWizardOpen(true)}
             />
           );
         default:
@@ -186,6 +241,13 @@ const StudentPortal = () => {
             </div>
           </main>
           <StudentOnboardingDialog open={onboardingOpen} onOpenChange={setOnboardingOpen} />
+          <ProfileCompletionWizard
+            open={profileWizardOpen}
+            onOpenChange={setProfileWizardOpen}
+            status={profileStatus}
+            initialData={profileSeed}
+            onCompleted={() => void refetchProfile()}
+          />
           {showMobileBottomNav ? (
             <StudentBottomNav
               activeTab={activeTab}

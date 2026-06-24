@@ -51,10 +51,18 @@ const App = () => (
                     <ProtectedRoute allowedRoles={['coach', 'admin']}>
                       <Index />
                     </ProtectedRoute>
-                  } 
+                  }
                 />
-                <Route 
-                  path="/alunos/:id" 
+                <Route
+                  path="/financeiro/*"
+                  element={
+                    <ProtectedRoute allowedRoles={['coach', 'admin']}>
+                      <Index />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/alunos/:id"
                   element={
                     <ProtectedRoute allowedRoles={['coach', 'admin']}>
                       <StudentDetails />

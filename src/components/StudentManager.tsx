@@ -79,6 +79,8 @@ interface Student {
   nextPayment: string;
   data_nascimento?: string;
   peso?: number;
+  profileIncomplete?: boolean;
+  profileCompletionPct?: number;
 }
 
 const StudentManager = () => {
@@ -105,6 +107,7 @@ const StudentManager = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterGoal, setFilterGoal] = useState("all");
+  const [filterProfile, setFilterProfile] = useState("all");
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -181,13 +184,8 @@ const StudentManager = () => {
         }
       }
 
-      // Get emails of all users with 'coach' role to exclude them from student list
-      const coachEmails: string[] = [];
-
-      // Filter out any alunos whose email matches a coach's email
-      const filteredData = alunosRaw.filter(aluno => 
-        !coachEmails.includes(aluno.email?.toLowerCase())
-      );
+      // Backend exclui coaches/admins em GET /api/alunos/by-coach; filtro local é defesa adicional.
+      const filteredData = alunosRaw;
 
       const deriveNameHintFromEmail = (addr?: string) => {
         if (!addr || addr.includes("@blackhouse.local")) return null;
@@ -242,7 +240,12 @@ const StudentManager = () => {
           tags: [],
           nextPayment: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR'),
           data_nascimento: alunoDataNascimento,
-          peso: alunoPeso
+          peso: alunoPeso,
+          profileIncomplete: aluno?.profile_is_complete === false,
+          profileCompletionPct:
+            typeof aluno?.profile_completion_pct === "number"
+              ? aluno.profile_completion_pct
+              : undefined,
         };
       });
 
@@ -645,8 +648,12 @@ const StudentManager = () => {
                          studentEmail.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = filterStatus === "all" || studentStatus === filterStatus;
     const matchesGoal = filterGoal === "all" || studentGoal === filterGoal;
-    
-    return matchesSearch && matchesStatus && matchesGoal;
+    const matchesProfile =
+      filterProfile === "all" ||
+      (filterProfile === "incomplete" && student.profileIncomplete) ||
+      (filterProfile === "complete" && !student.profileIncomplete);
+
+    return matchesSearch && matchesStatus && matchesGoal && matchesProfile;
   });
 
   // DESIGN-023-RUNTIME-CRASH-RESOLUTION-001: Guard defensivo - componente NÃO renderiza fora de READY
@@ -788,6 +795,16 @@ const StudentManager = () => {
                 <SelectItem value="Reabilitação">Reabilitação</SelectItem>
               </SelectContent>
             </Select>
+            <Select value={filterProfile} onValueChange={setFilterProfile}>
+              <SelectTrigger className="w-full sm:w-[180px]">
+                <SelectValue placeholder="Perfil" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os perfis</SelectItem>
+                <SelectItem value="incomplete">Perfil incompleto</SelectItem>
+                <SelectItem value="complete">Perfil completo</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </CardContent>
       </Card>
@@ -849,13 +866,18 @@ const StudentManager = () => {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {/* Status and Plan */}
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Badge className={getStatusColor(studentStatus)}>
                       {studentStatus === "active" ? "Ativo" : "Inativo"}
                     </Badge>
                     <Badge className={getPlanColor(studentPlan)}>
                       {resolveFriendlyPlanLabel(studentPlan)}
                     </Badge>
+                    {student.profileIncomplete && (
+                      <Badge variant="outline" className="border-amber-500/50 text-amber-700">
+                        Perfil {student.profileCompletionPct ?? 0}%
+                      </Badge>
+                    )}
                   </div>
 
                   {/* Goal and Progress */}

@@ -275,6 +275,134 @@ class NotificationService {
     }
 
     /**
+     * Cancela lembretes in-app pendentes associados a um fluxo de tarefa.
+     */
+    async cancelRemindersForTask({
+        flowCycleId,
+        alunoId,
+        domain,
+        notificationTypes = ['checkin_reminder', 'task_reminder'],
+    }) {
+        if (!alunoId) return;
+
+        try {
+            const types = Array.isArray(notificationTypes) ? notificationTypes : ['checkin_reminder'];
+            if (flowCycleId) {
+                const hasMetadata = await this._notificacoesHasMetadata();
+                if (hasMetadata) {
+                    await this.pool.query(
+                        `UPDATE public.notificacoes
+                         SET lida = true, updated_at = NOW()
+                         WHERE aluno_id = $1
+                           AND lida = false
+                           AND metadata->>'flow_cycle_id' = $2`,
+                        [alunoId, flowCycleId],
+                    );
+                }
+            }
+
+            if (types.includes('checkin_reminder')) {
+                await this.dismissCheckinRemindersForAluno(alunoId);
+            }
+        } catch (error) {
+            logger.warn('smart_reminder.cancel_failed', {
+                alunoId,
+                domain,
+                flowCycleId,
+                error: error.message,
+            });
+        }
+    }
+
+    async _notificacoesHasMetadata() {
+        if (this._metadataColumnChecked) return this._hasMetadataColumn;
+        const r = await this.pool.query(
+            `SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'public'
+               AND table_name = 'notificacoes'
+               AND column_name = 'metadata'
+             LIMIT 1`,
+        );
+        this._metadataColumnChecked = true;
+        this._hasMetadataColumn = r.rows.length > 0;
+        return this._hasMetadataColumn;
+    }
+
+    /**
+     * Lembrete inteligente de tarefa (domínio + marco).
+     */
+    async notifySmartTaskReminder({ flow, copy, coachOnly = false }) {
+        const alunoNome = (flow.alunoNome && String(flow.alunoNome).trim()) || 'Aluno';
+        const metadata = {
+            flow_cycle_id: flow.flowCycleId,
+            task_domain: flow.domain,
+            milestone: flow.milestone,
+            entity_id: flow.entityId,
+        };
+
+        if (!coachOnly && copy.studentTitle && copy.studentMessage) {
+            const studentUserId = await getAuthUserIdForAluno(this.pool, flow.alunoId);
+            if (studentUserId) {
+                this.ws.emitToUser(studentUserId, copy.notificationType || 'task_reminder', {
+                    alunoId: flow.alunoId,
+                    domain: flow.domain,
+                    milestone: flow.milestone,
+                });
+
+                await this.saveNotification({
+                    userId: studentUserId,
+                    type: copy.notificationType || 'task_reminder',
+                    title: copy.studentTitle,
+                    message: copy.studentMessage,
+                    data: {
+                        alunoId: flow.alunoId,
+                        link: copy.link,
+                        metadata,
+                    },
+                });
+
+                if (copy.emailType) {
+                    const wantsEmail = await shouldSendEmail(this.pool, flow.alunoId);
+                    if (wantsEmail) {
+                        await this.sendStudentEmail(studentUserId, copy.emailType, {
+                            alunoNome,
+                            message: copy.studentMessage,
+                        });
+                    }
+                }
+            }
+        }
+
+        if (copy.coachTitle && flow.coachId) {
+            const coachMessage =
+                typeof copy.coachMessage === 'function'
+                    ? copy.coachMessage(alunoNome)
+                    : copy.coachMessage;
+
+            this.ws.emitToCoach(flow.coachId, copy.notificationType || 'task_reminder', {
+                alunoId: flow.alunoId,
+                alunoNome,
+                domain: flow.domain,
+                milestone: flow.milestone,
+            });
+
+            await this.saveNotification({
+                userId: flow.coachId,
+                type: copy.notificationType || 'task_reminder',
+                title: copy.coachTitle,
+                message: coachMessage,
+                data: {
+                    alunoId: flow.alunoId,
+                    link: copy.link,
+                    metadata,
+                },
+            });
+        }
+
+        return { emailStatus: 'sent' };
+    }
+
+    /**
      * Marca como lidos os lembretes de check-in pendentes após envio bem-sucedido.
      */
     async dismissCheckinRemindersForAluno(alunoId) {
@@ -423,6 +551,66 @@ class NotificationService {
             });
         } catch (error) {
             console.error('Erro ao notificar lembrete de check-in:', error);
+        }
+    }
+
+    /**
+     * Lembrete de perfil incompleto — in-app + e-mail (não invasivo)
+     */
+    async notifyProfileIncompleteReminder(alunoId, { missingFields = [], completionPct = 0 } = {}) {
+        try {
+            const alunoResult = await this.pool.query(
+                'SELECT id, nome, coach_id FROM public.alunos WHERE id = $1',
+                [alunoId],
+            );
+            if (alunoResult.rows.length === 0) return;
+
+            const aluno = alunoResult.rows[0];
+            const studentUserId = await getAuthUserIdForAluno(this.pool, aluno.id);
+            if (!studentUserId) return;
+
+            const weekAgo = new Date();
+            weekAgo.setDate(weekAgo.getDate() - 7);
+            const duplicate = await this.pool.query(
+                `SELECT id FROM public.notificacoes
+                 WHERE aluno_id = $1 AND tipo = 'profile_incomplete'
+                   AND created_at >= $2::timestamptz
+                 LIMIT 1`,
+                [alunoId, weekAgo.toISOString()],
+            );
+            if (duplicate.rows.length > 0) return;
+
+            const missingLabel =
+                missingFields.length > 0
+                    ? `Faltam: ${missingFields.slice(0, 3).join(', ')}${missingFields.length > 3 ? '…' : ''}.`
+                    : '';
+
+            this.ws.emitToUser(studentUserId, 'profile_incomplete', {
+                alunoId: aluno.id,
+                completionPct,
+            });
+
+            await this.saveNotification({
+                userId: studentUserId,
+                type: 'profile_incomplete',
+                title: 'Complete seu perfil',
+                message: `Seu perfil está ${completionPct}% completo. ${missingLabel} Isso ajuda seu coach a acompanhar melhor sua evolução.`,
+                data: { alunoId: aluno.id, link: 'profile', missingFields },
+            });
+
+            await this.sendStudentEmail(studentUserId, 'profile_incomplete', {
+                alunoNome: aluno.nome,
+                completionPct,
+            });
+
+            await this.pool.query(
+                `UPDATE public.student_profile_state
+                 SET last_reminder_at = now(), updated_at = now()
+                 WHERE aluno_id = $1`,
+                [alunoId],
+            );
+        } catch (error) {
+            console.error('Erro ao notificar perfil incompleto:', error);
         }
     }
 
@@ -841,6 +1029,20 @@ class NotificationService {
             }
 
             if (!coachId) {
+                return;
+            }
+
+            const hasMetadata = await this._notificacoesHasMetadata();
+            const metadataPayload =
+                hasMetadata && data?.metadata ? JSON.stringify(data.metadata) : null;
+
+            if (hasMetadata) {
+                await this.pool.query(
+                    `INSERT INTO public.notificacoes
+                     (coach_id, aluno_id, tipo, titulo, mensagem, lida, link, metadata, created_at, updated_at)
+                     VALUES ($1, $2, $3, $4, $5, false, $6, $7::jsonb, NOW(), NOW())`,
+                    [coachId, alunoId, type, title, message, link, metadataPayload],
+                );
                 return;
             }
 

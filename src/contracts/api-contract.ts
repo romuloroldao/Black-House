@@ -19,6 +19,9 @@ export const API_CONTRACT = {
   alunos: {
     byCoach: () => `${API_BASE}/api/alunos/by-coach`,
     me: () => `${API_BASE}/api/alunos/me`,
+    profileStatus: () => `${API_BASE}/api/alunos/me/profile-status`,
+    bodyMetrics: (alunoId: string) =>
+      `${API_BASE}/api/alunos/${encodeURIComponent(alunoId)}/body-metrics`,
     hoje: () => `${API_BASE}/api/alunos/me/hoje`,
     notificationPreferences: () => `${API_BASE}/api/alunos/me/notification-preferences`,
     list: () => `${API_BASE}/api/alunos`,
@@ -168,6 +171,11 @@ export const API_CONTRACT = {
     byId: (id: string) => `${API_BASE}/api/asaas-config/${id}`,
     verifyConnection: () => `${API_BASE}/api/asaas-config/verify-connection`,
   },
+  financialSync: {
+    health: () => `${API_BASE}/api/financial/health`,
+    policies: () => `${API_BASE}/api/financial/policies`,
+    triggerSync: () => `${API_BASE}/api/financial/sync`,
+  },
   twilioConfig: {
     list: () => `${API_BASE}/api/twilio-config`,
     byId: (id: string) => `${API_BASE}/api/twilio-config/${id}`,
@@ -228,7 +236,9 @@ const CONTRACT_PATTERNS = [
   '/api/alunos/by-coach',
   '/api/alunos/:alunoId/portal-status',
   '/api/alunos/me',
+  '/api/alunos/me/profile-status',
   '/api/alunos/me/hoje',
+  '/api/alunos/:alunoId/body-metrics',
   '/api/alunos/me/notification-preferences',
   '/api/alunos/link-user',
   '/api/alunos/unlinked-registrations',
@@ -298,6 +308,9 @@ const CONTRACT_PATTERNS = [
   '/api/asaas-config',
   '/api/asaas-config/:id',
   '/api/asaas-config/verify-connection',
+  '/api/financial/health',
+  '/api/financial/policies',
+  '/api/financial/sync',
   '/api/twilio-config',
   '/api/twilio-config/:id',
   '/api/financial-exceptions',

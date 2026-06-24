@@ -7,11 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Combobox } from '@/components/ui/combobox';
-import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Textarea } from '@/components/ui/textarea';
-import { Plus, Trash2, Calculator, Users, Pill } from 'lucide-react';
+import { Plus, Trash2, Users, Pill } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import {
   Food,
@@ -21,8 +19,10 @@ import {
 } from '@/lib/foodService';
 import { listarSubstituicoesIsocaloricas } from '@/lib/foodEquivalence';
 import { getAlunoDisplayName } from '@/lib/aluno-display';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DietReturnDateFields } from '@/components/DietReturnDateFields';
+import DietRefeicaoLivreFields from '@/components/diet/DietRefeicaoLivreFields';
+import DietCreatorMealsSection from '@/components/diet/DietCreatorMealsSection';
+import DietCreatorNutritionSummary from '@/components/diet/DietCreatorNutritionSummary';
 import {
   DietRotationFields,
   dietRotationFromRow,
@@ -30,8 +30,11 @@ import {
   type DietRotationFormState,
 } from '@/components/DietRotationFields';
 import { DietRotationBadge } from '@/components/DietRotationBadge';
-import DietRefeicaoLivreFields from '@/components/diet/DietRefeicaoLivreFields';
-
+import {
+  buildRefeicaoStorageLabel,
+  splitRefeicaoForEditor,
+  type DietPlano,
+} from '@/lib/diet-student-utils';
 type Alimento = Food;
 
 interface Aluno {
@@ -53,7 +56,25 @@ interface ItemRefeicao {
 
 interface Refeicao {
   nome: string;
+  /** Letra do cardápio (A, B, C…); vazio = refeição única / todos os dias */
+  plano: DietPlano | '';
   itens: ItemRefeicao[];
+}
+
+function emptyRefeicao(nome: string): Refeicao {
+  return { nome, plano: '', itens: [] };
+}
+
+function refeicaoLabel(refeicao: Refeicao): string {
+  return buildRefeicaoStorageLabel(refeicao.nome, refeicao.plano || null);
+}
+
+function syncItensRefeicao(refeicao: Refeicao): Refeicao {
+  const label = refeicaoLabel(refeicao);
+  return {
+    ...refeicao,
+    itens: refeicao.itens.map((item) => ({ ...item, refeicao: label })),
+  };
 }
 
 interface Farmaco {
@@ -82,9 +103,9 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
   const [dietName, setDietName] = useState('');
   const [objetivo, setObjetivo] = useState('');
   const [refeicoes, setRefeicoes] = useState<Refeicao[]>([
-    { nome: 'Café da Manhã', itens: [] },
-    { nome: 'Almoço', itens: [] },
-    { nome: 'Jantar', itens: [] }
+    emptyRefeicao('Café da Manhã'),
+    emptyRefeicao('Almoço'),
+    emptyRefeicao('Jantar'),
   ]);
   const [farmacos, setFarmacos] = useState<Farmaco[]>([]);
   const [dataRetorno, setDataRetorno] = useState('');
@@ -226,22 +247,20 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
         ? nomesRefeicoesBanco 
         : ['Café da Manhã', 'Almoço', 'Jantar'];
       
-      const novasRefeicoes = nomesRefeicoes.map(nomeRefeicao => {
+      const novasRefeicoes = nomesRefeicoes.map((nomeRefeicao) => {
+        const { nome, plano } = splitRefeicaoForEditor(nomeRefeicao);
         const itensRefeicao = itensComAlimentos
-          .filter(item => item.refeicao === nomeRefeicao)
-          .map(item => ({
+          .filter((item) => item.refeicao === nomeRefeicao)
+          .map((item) => ({
             id: item.id,
             alimento_id: item.alimento_id || '',
             quantidade: typeof item.quantidade === 'string' ? parseFloat(item.quantidade) || 0 : (item.quantidade || 0),
             unidade_quantidade: normalizeUnidadeItem(item.unidade_quantidade),
             refeicao: nomeRefeicao,
-            alimento: item.alimentos as Alimento
+            alimento: item.alimentos as Alimento,
           }));
 
-        return {
-          nome: nomeRefeicao,
-          itens: itensRefeicao
-        };
+        return syncItensRefeicao({ nome, plano, itens: itensRefeicao });
       });
 
       setRefeicoes(novasRefeicoes);
@@ -267,47 +286,6 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
     }
   };
 
-  const adicionarItem = (refeicaoIndex: number) => {
-    const novoItem: ItemRefeicao = {
-      id: Math.random().toString(36).substr(2, 9),
-      alimento_id: '',
-      quantidade: 100,
-      unidade_quantidade: 'g',
-      refeicao: refeicoes[refeicaoIndex].nome
-    };
-
-    const novasRefeicoes = [...refeicoes];
-    novasRefeicoes[refeicaoIndex].itens.push(novoItem);
-    setRefeicoes(novasRefeicoes);
-  };
-
-  const removerItem = (refeicaoIndex: number, itemIndex: number) => {
-    const novasRefeicoes = [...refeicoes];
-    novasRefeicoes[refeicaoIndex].itens.splice(itemIndex, 1);
-    setRefeicoes(novasRefeicoes);
-  };
-
-  const adicionarRefeicao = () => {
-    const novaRefeicao: Refeicao = {
-      nome: `Refeição ${refeicoes.length + 1}`,
-      itens: []
-    };
-    setRefeicoes([...refeicoes, novaRefeicao]);
-  };
-
-  const removerRefeicao = (refeicaoIndex: number) => {
-    if (refeicoes.length > 1) {
-      const novasRefeicoes = refeicoes.filter((_, index) => index !== refeicaoIndex);
-      setRefeicoes(novasRefeicoes);
-    }
-  };
-
-  const editarNomeRefeicao = (refeicaoIndex: number, novoNome: string) => {
-    const novasRefeicoes = [...refeicoes];
-    novasRefeicoes[refeicaoIndex].nome = novoNome;
-    setRefeicoes(novasRefeicoes);
-  };
-
   const adicionarFarmaco = () => {
     const novoFarmaco: Farmaco = {
       id: Math.random().toString(36).substr(2, 9),
@@ -329,24 +307,6 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
       [campo]: valor
     };
     setFarmacos(novosFarmacos);
-  };
-
-  const atualizarItem = (refeicaoIndex: number, itemIndex: number, campo: keyof ItemRefeicao, valor: any) => {
-    const novasRefeicoes = [...refeicoes];
-    novasRefeicoes[refeicaoIndex].itens[itemIndex] = {
-      ...novasRefeicoes[refeicaoIndex].itens[itemIndex],
-      [campo]: valor
-    };
-
-    // Se mudou o alimento, buscar os dados
-    if (campo === 'alimento_id') {
-      const alimento = alimentos.find(a => a.id === valor);
-      if (alimento) {
-        novasRefeicoes[refeicaoIndex].itens[itemIndex].alimento = alimento;
-      }
-    }
-
-    setRefeicoes(novasRefeicoes);
   };
 
   const calcularSubstituicoes = (item: ItemRefeicao): Array<{nome: string, quantidade: number, nutriente: string}> => {
@@ -389,18 +349,6 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
         proteinas: total.proteinas + (ptn * fator),
         carboidratos: total.carboidratos + (cho * fator),
         lipidios: total.lipidios + (lip * fator)
-      };
-    }, { kcal: 0, proteinas: 0, carboidratos: 0, lipidios: 0 });
-  };
-
-  const calcularTotaisDieta = () => {
-    return refeicoes.reduce((total, refeicao) => {
-      const totaisRefeicao = calcularTotaisRefeicao(refeicao);
-      return {
-        kcal: total.kcal + totaisRefeicao.kcal,
-        proteinas: total.proteinas + totaisRefeicao.proteinas,
-        carboidratos: total.carboidratos + totaisRefeicao.carboidratos,
-        lipidios: total.lipidios + totaisRefeicao.lipidios
       };
     }, { kcal: 0, proteinas: 0, carboidratos: 0, lipidios: 0 });
   };
@@ -485,7 +433,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
             alimento_id: item.alimento_id,
             quantidade: item.quantidade,
             unidade_quantidade: item.unidade_quantidade || 'g',
-            refeicao: refeicao.nome
+            refeicao: refeicaoLabel(refeicao),
           }))
       );
 
@@ -535,9 +483,9 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
         setObjetivo('');
         setSelectedAluno('');
         setRefeicoes([
-          { nome: 'Café da Manhã', itens: [] },
-          { nome: 'Almoço', itens: [] },
-          { nome: 'Jantar', itens: [] }
+          emptyRefeicao('Café da Manhã'),
+          emptyRefeicao('Almoço'),
+          emptyRefeicao('Jantar'),
         ]);
         setFarmacos([]);
       }
@@ -561,8 +509,6 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
       </div>
     );
   }
-
-  const totaisDieta = calcularTotaisDieta();
 
   return (
     <div className="p-6 space-y-6">
@@ -642,35 +588,10 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
         onContentIdChange={setRefeicaoLivreContentId}
       />
 
-      {/* Resumo Nutricional */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Calculator className="w-5 h-5" />
-            Resumo Nutricional Total
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-primary">{Math.round(totaisDieta.kcal)}</div>
-              <div className="text-sm text-muted-foreground">Calorias</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-primary">{Math.round(totaisDieta.proteinas)}g</div>
-              <div className="text-sm text-muted-foreground">Proteínas</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-warning">{Math.round(totaisDieta.carboidratos)}g</div>
-              <div className="text-sm text-muted-foreground">Carboidratos</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-destructive">{Math.round(totaisDieta.lipidios)}g</div>
-              <div className="text-sm text-muted-foreground">Lipídios</div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <DietCreatorNutritionSummary
+        refeicoes={refeicoes}
+        calcularTotaisRefeicao={calcularTotaisRefeicao}
+      />
 
       {/* Fármacos */}
       <Card>
@@ -746,155 +667,17 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
         </CardContent>
       </Card>
 
-      {/* Refeições */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold">Refeições</h2>
-          <Button onClick={adicionarRefeicao} variant="outline" size="sm">
-            <Plus className="w-4 h-4 mr-2" />
-            Adicionar Refeição
-          </Button>
-        </div>
-        
-        {refeicoes.map((refeicao, refeicaoIndex) => {
-          const totaisRefeicao = calcularTotaisRefeicao(refeicao);
-          
-          return (
-            <Card key={refeicaoIndex}>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 flex-1">
-                    <Input
-                      value={refeicao.nome}
-                      onChange={(e) => editarNomeRefeicao(refeicaoIndex, e.target.value)}
-                      className="font-semibold bg-transparent border-none p-0 h-auto text-lg"
-                    />
-                    {refeicoes.length > 1 && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removerRefeicao(refeicaoIndex)}
-                        className="text-destructive hover:text-destructive"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    )}
-                  </div>
-                  <div className="flex gap-2 text-sm">
-                    <Badge variant="outline">{Math.round(totaisRefeicao.kcal)} kcal</Badge>
-                    <Badge variant="outline">{Math.round(totaisRefeicao.proteinas)}g prot</Badge>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {refeicao.itens.map((item, itemIndex) => (
-                  <div key={item.id} className="border rounded-lg p-4 space-y-3">
-                    <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
-                      <div className="space-y-2 md:col-span-2">
-                        <Label>Alimento</Label>
-                        <Combobox
-                          options={alimentos.map(alimento => ({
-                            value: alimento.id,
-                            label: alimento.name,
-                            description: `${alimento.calories}kcal/${alimento.portion}g`
-                          }))}
-                          value={item.alimento_id}
-                          onSelect={(value) => atualizarItem(refeicaoIndex, itemIndex, 'alimento_id', value)}
-                          placeholder="Selecione um alimento"
-                          searchPlaceholder="Buscar alimento..."
-                          emptyText="Nenhum alimento encontrado."
-                        />
-                      </div>
-
-                      <div className="space-y-2 md:col-span-2">
-                        <Label>Quantidade e unidade</Label>
-                        <div className="flex gap-2">
-                          <Input
-                            type="number"
-                            className="flex-1"
-                            value={item.quantidade}
-                            onChange={(e) =>
-                              atualizarItem(refeicaoIndex, itemIndex, 'quantidade', Number(e.target.value))
-                            }
-                          />
-                          <Select
-                            value={item.unidade_quantidade}
-                            onValueChange={(v: QuantityUnit) =>
-                              atualizarItem(refeicaoIndex, itemIndex, 'unidade_quantidade', v)
-                            }
-                          >
-                            <SelectTrigger className="w-[100px]">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="g">g</SelectItem>
-                              <SelectItem value="ml">ml</SelectItem>
-                              <SelectItem value="un">un.</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          Mesma base que a porção do alimento (100g/100ml ou 1 un.).
-                        </p>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label>Calorias</Label>
-                        <div className="flex items-center h-10 px-3 border rounded-md bg-muted">
-                          {item.alimento ? (() => {
-                            const qtd =
-                              typeof item.quantidade === 'string'
-                                ? parseFloat(item.quantidade) || 0
-                                : item.quantidade || 0;
-                            const kcalRef = item.alimento.calories || 0;
-                            const qtdRef = item.alimento.portion || 100;
-                            const f = macroScaleFactor(qtd, item.unidade_quantidade, qtdRef);
-                            return Math.round(kcalRef * f);
-                          })() : 0}
-                        </div>
-                      </div>
-
-                      <div className="flex items-end">
-                        <Button
-                          variant="destructive"
-                          size="icon"
-                          onClick={() => removerItem(refeicaoIndex, itemIndex)}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </div>
-
-                    {/* Substituições */}
-                    {item.alimento && (
-                      <div className="pt-3 border-t">
-                        <Label className="text-sm font-medium text-muted-foreground">Substituições equivalentes:</Label>
-                        <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2">
-                          {calcularSubstituicoes(item).map((sub, idx) => (
-                            <div key={idx} className="flex items-center justify-between p-2 bg-muted/50 rounded text-sm">
-                              <span>{sub.nome}</span>
-                              <Badge variant="secondary">{sub.quantidade}g ({sub.nutriente})</Badge>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-
-                <Button
-                  variant="outline"
-                  onClick={() => adicionarItem(refeicaoIndex)}
-                  className="w-full"
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Adicionar Alimento
-                </Button>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
+      <DietCreatorMealsSection
+        refeicoes={refeicoes}
+        alimentos={alimentos}
+        rotacao={rotacao}
+        onRefeicoesChange={setRefeicoes}
+        calcularSubstituicoes={calcularSubstituicoes}
+        calcularTotaisRefeicao={calcularTotaisRefeicao}
+        refeicaoLabel={refeicaoLabel}
+        syncItensRefeicao={syncItensRefeicao}
+        emptyRefeicao={emptyRefeicao}
+      />
 
       <div className="flex justify-end">
         <Button onClick={salvarDieta} size="lg" className="px-8">

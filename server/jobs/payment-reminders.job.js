@@ -120,10 +120,9 @@ class PaymentRemindersJob {
                         { overdue: true }
                     );
 
-                    // Atualizar status no banco
                     await this.pool.query(
-                        `UPDATE public.asaas_payments 
-                         SET status = 'OVERDUE', overdue_notification_sent = true 
+                        `UPDATE public.asaas_payments
+                         SET overdue_notification_sent = true
                          WHERE id = $1`,
                         [payment.id]
                     );

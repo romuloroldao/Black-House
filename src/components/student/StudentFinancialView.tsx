@@ -8,7 +8,7 @@ import { useDataContext } from "@/contexts/DataContext";
 import { DollarSign, CreditCard, Calendar, Download } from "lucide-react";
 
 const StudentFinancialView = () => {
-  const { user } = useAuth();
+  const { user, payment_status } = useAuth();
   const { isReady } = useDataContext();
   const [pagamentos, setPagamentos] = useState<any[]>([]);
   const [alunoData, setAlunoData] = useState<any>(null);
@@ -66,6 +66,23 @@ const StudentFinancialView = () => {
     return null;
   }
 
+  const overdueCount = pagamentos.filter((p) => p.status === 'OVERDUE').length;
+  const pendingOverdue = pagamentos.filter(
+    (p) => p.status === 'PENDING' && p.due_date && new Date(p.due_date) < new Date(),
+  ).length;
+  const statusLabel =
+    payment_status === 'OVERDUE' || payment_status === 'PENDING_AFTER_DUE_DATE'
+      ? 'Inadimplente'
+      : overdueCount > 0 || pendingOverdue > 0
+        ? 'Atenção'
+        : 'Em dia';
+  const statusVariant =
+    statusLabel === 'Inadimplente'
+      ? 'destructive'
+      : statusLabel === 'Atenção'
+        ? 'outline'
+        : 'premium';
+
   return (
     <div className="space-y-6">
       <div>
@@ -104,9 +121,11 @@ const StudentFinancialView = () => {
             <Calendar className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <Badge variant="premium" className="mt-1">Em dia</Badge>
+            <Badge variant={statusVariant} className="mt-1">{statusLabel}</Badge>
             <p className="text-xs text-muted-foreground mt-2">
-              Nenhuma pendência
+              {statusLabel === 'Em dia'
+                ? 'Nenhuma pendência'
+                : `${overdueCount + pendingOverdue} cobrança(s) em aberto`}
             </p>
           </CardContent>
         </Card>

@@ -159,8 +159,76 @@ class AsaasService {
         }
     }
 
+    async updateCustomer(customerId, data) {
+        try {
+            const response = await this.client.put(`/customers/${customerId}`, {
+                name: data.name,
+                email: data.email,
+                cpfCnpj: data.cpfCnpj,
+                phone: data.phone,
+                externalReference: data.externalReference,
+            });
+            return response.data;
+        } catch (error) {
+            console.error('Erro ao atualizar cliente no Asaas:', error.response?.data || error.message);
+            throw new Error(`Erro ao atualizar cliente no Asaas: ${error.response?.data?.errors?.[0]?.description || error.message}`);
+        }
+    }
+
+    async listCustomers({ offset = 0, limit = 100 } = {}) {
+        const response = await this.client.get('/customers', { params: { offset, limit } });
+        return response.data;
+    }
+
+    async listPayments({ offset = 0, limit = 100, updatedSince = null } = {}) {
+        const params = { offset, limit };
+        if (updatedSince) params['dateUpdated[ge]'] = updatedSince;
+        const response = await this.client.get('/payments', { params });
+        return response.data;
+    }
+
+    async listSubscriptions({ offset = 0, limit = 100 } = {}) {
+        const response = await this.client.get('/subscriptions', { params: { offset, limit } });
+        return response.data;
+    }
+
+    async createSubscription(data) {
+        const response = await this.client.post('/subscriptions', data);
+        return response.data;
+    }
+
+    async updateSubscription(subscriptionId, data) {
+        const response = await this.client.put(`/subscriptions/${subscriptionId}`, data);
+        return response.data;
+    }
+
+    async cancelSubscription(subscriptionId) {
+        const response = await this.client.delete(`/subscriptions/${subscriptionId}`);
+        return response.data;
+    }
+
+    async createWebhook(data) {
+        const response = await this.client.post('/webhooks', data);
+        return response.data;
+    }
+
+    async updateWebhook(webhookId, data) {
+        const response = await this.client.put(`/webhooks/${webhookId}`, data);
+        return response.data;
+    }
+
+    async listWebhooks() {
+        const response = await this.client.get('/webhooks');
+        return response.data;
+    }
+
+    async deleteWebhook(webhookId) {
+        const response = await this.client.delete(`/webhooks/${webhookId}`);
+        return response.data;
+    }
+
     /**
-     * Cria pagamento completo (cliente + pagamento)
+     * Cria pagamento completo (cliente + pagamento) — legado; preferir outbound-commander
      */
     async createCompletePayment({ 
         alunoId,

@@ -1,8 +1,8 @@
 // Check-in Reminders Job
-// Envia lembretes para alunos fazerem check-in semanal
+// Delega ao motor de lembretes inteligentes (domínio checkin_weekly)
 
 const cron = require('node-cron');
-const { startOfCalendarWeek } = require('../utils/checkin-week');
+const smartReminderEngine = require('../services/smart-reminder/engine');
 
 class CheckinRemindersJob {
     constructor(pool, notificationService) {
@@ -11,11 +11,7 @@ class CheckinRemindersJob {
         this.isRunning = false;
     }
 
-    /**
-     * Inicia o job
-     */
     start() {
-        // Executa toda segunda-feira às 10h
         cron.schedule('0 10 * * 1', async () => {
             if (this.isRunning) {
                 console.log('CheckinRemindersJob já está em execução, pulando...');
@@ -23,7 +19,7 @@ class CheckinRemindersJob {
             }
 
             this.isRunning = true;
-            console.log('[CheckinRemindersJob] Iniciando execução...');
+            console.log('[CheckinRemindersJob] Iniciando execução (smart engine)...');
 
             try {
                 await this.execute();
@@ -38,44 +34,8 @@ class CheckinRemindersJob {
         console.log('[CheckinRemindersJob] Agendado para executar toda segunda-feira às 10h');
     }
 
-    /**
-     * Executa a lógica do job
-     */
     async execute() {
-        try {
-            const weekStart = startOfCalendarWeek();
-
-            const alunosResult = await this.pool.query(
-                `SELECT DISTINCT a.id, a.nome, a.coach_id
-                 FROM public.alunos a
-                 WHERE a.coach_id IS NOT NULL
-                   AND NOT EXISTS (
-                     SELECT 1
-                     FROM public.weekly_checkins wc
-                     WHERE wc.aluno_id = a.id
-                       AND wc.created_at >= $1::timestamptz
-                   )`,
-                [weekStart.toISOString()],
-            );
-
-            console.log(`[CheckinRemindersJob] Encontrados ${alunosResult.rows.length} alunos sem check-in`);
-
-            for (const aluno of alunosResult.rows) {
-                try {
-                    await this.notificationService.notifyCheckinReminder(
-                        aluno.id,
-                        aluno.coach_id
-                    );
-
-                    console.log(`[CheckinRemindersJob] Lembrete enviado para aluno ${aluno.id}`);
-                } catch (error) {
-                    console.error(`[CheckinRemindersJob] Erro ao processar aluno ${aluno.id}:`, error);
-                }
-            }
-        } catch (error) {
-            console.error('[CheckinRemindersJob] Erro na execução:', error);
-            throw error;
-        }
+        return smartReminderEngine.processAll(this.pool, this.notificationService);
     }
 }
 

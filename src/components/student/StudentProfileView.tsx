@@ -27,6 +27,8 @@ const StudentProfileView = () => {
     telefone: "",
     data_nascimento: "",
     peso: "",
+    altura_cm: "",
+    sexo: "" as "" | "M" | "F",
     objetivo: "",
   });
   const [notificationChannel, setNotificationChannel] = useState<
@@ -58,7 +60,14 @@ const StudentProfileView = () => {
         email: user.email || "",
         telefone: aluno?.telefone || "",
         data_nascimento: (aluno?.data_nascimento || "").split("T")[0] || "",
-        peso: aluno?.peso ? String(aluno.peso) : "",
+        peso: aluno?.peso_kg != null ? String(aluno.peso_kg) : aluno?.peso ? String(aluno.peso) : "",
+        altura_cm:
+          aluno?.altura_cm != null
+            ? String(aluno.altura_cm)
+            : aluno?.altura != null
+              ? String(aluno.altura)
+              : "",
+        sexo: aluno?.sexo === "M" || aluno?.sexo === "F" ? aluno.sexo : "",
         objetivo: aluno?.objetivo || "",
       });
 
@@ -145,13 +154,15 @@ const StudentProfileView = () => {
       return;
     }
 
-    const updateResult = await apiClient.requestSafe(`/api/alunos/${aluno.id}`, {
+    const updateResult = await apiClient.requestSafe(`/api/alunos/me`, {
       method: 'PATCH',
       body: JSON.stringify({
         nome: formData?.nome || null,
         telefone: formData?.telefone || null,
         data_nascimento: formData?.data_nascimento || null,
-        peso: formData?.peso ? parseInt(formData.peso) : null,
+        peso_kg: formData?.peso ? String(formData.peso).replace(",", ".") : null,
+        altura_cm: formData?.altura_cm ? String(formData.altura_cm).replace(",", ".") : null,
+        sexo: formData?.sexo || null,
         objetivo: formData?.objetivo || null,
       }),
     });
@@ -308,7 +319,7 @@ const StudentProfileView = () => {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="telefone">Telefone</Label>
+              <Label htmlFor="telefone">WhatsApp</Label>
               <Input
                 id="telefone"
                 value={formData?.telefone || ''}
@@ -330,11 +341,46 @@ const StudentProfileView = () => {
               <Label htmlFor="peso">Peso Atual (kg)</Label>
               <Input
                 id="peso"
-                type="number"
+                type="text"
+                inputMode="decimal"
                 value={formData?.peso || ''}
-                onChange={(e) => setFormData({ ...formData, peso: e.target.value })}
-                placeholder="Ex: 75"
+                onChange={(e) =>
+                  setFormData({ ...formData, peso: e.target.value.replace(/[^\d,.]/g, "") })
+                }
+                placeholder="Ex: 75,5"
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="altura_cm">Altura (cm)</Label>
+              <Input
+                id="altura_cm"
+                type="text"
+                inputMode="numeric"
+                value={formData?.altura_cm || ''}
+                onChange={(e) =>
+                  setFormData({ ...formData, altura_cm: e.target.value.replace(/[^\d]/g, "") })
+                }
+                placeholder="Ex: 178"
+              />
+            </div>
+
+            <div className="space-y-2 md:col-span-2">
+              <Label>Sexo</Label>
+              <RadioGroup
+                value={formData.sexo}
+                onValueChange={(v) => setFormData({ ...formData, sexo: v as "M" | "F" })}
+                className="flex gap-6"
+              >
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem value="M" id="profile-sexo-m" />
+                  <Label htmlFor="profile-sexo-m" className="font-normal">Masculino</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem value="F" id="profile-sexo-f" />
+                  <Label htmlFor="profile-sexo-f" className="font-normal">Feminino</Label>
+                </div>
+              </RadioGroup>
             </div>
 
             <div className="space-y-2">

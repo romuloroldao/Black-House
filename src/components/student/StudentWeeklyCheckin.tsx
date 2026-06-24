@@ -35,6 +35,8 @@ import CheckinPhotosWeightStep, {
   revokeCheckinPhotoDrafts,
 } from "@/components/student/checkin/CheckinPhotosWeightStep";
 import { Skeleton } from "@/components/ui/skeleton";
+import ProfileCompletenessBanner from "@/components/student/ProfileCompletenessBanner";
+import type { ProfileCompletenessStatus } from "@/types/profile-completeness";
 
 const SECTION_IDS: CheckinSectionId[] = CHECKIN_SECTIONS.map((s) => s.id);
 
@@ -42,12 +44,16 @@ type StudentWeeklyCheckinProps = {
   checkinStreak?: CheckinStreakInfo | null;
   checkinLoading?: boolean;
   onCheckinSubmitted?: () => void;
+  profileStatus?: ProfileCompletenessStatus | null;
+  onRequireProfile?: () => void;
 };
 
 export default function StudentWeeklyCheckin({
   checkinStreak = null,
   checkinLoading = false,
   onCheckinSubmitted,
+  profileStatus = null,
+  onRequireProfile,
 }: StudentWeeklyCheckinProps) {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -137,6 +143,12 @@ export default function StudentWeeklyCheckin({
       return;
     }
 
+    if (profileStatus?.hard_gate_active && !profileStatus.is_complete) {
+      toast.error("Complete seu perfil antes de enviar o check-in.");
+      onRequireProfile?.();
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -198,6 +210,9 @@ export default function StudentWeeklyCheckin({
           toast.error(
             "Alguns valores do check-in são inválidos. Volte às perguntas anteriores e confira as respostas.",
           );
+        } else if (errText.includes("PROFILE_INCOMPLETE")) {
+          toast.error("Complete seu perfil antes de enviar o check-in.");
+          onRequireProfile?.();
         } else if (errText.includes("CHECKIN_CREATE_ERROR")) {
           toast.error("Erro ao guardar o check-in. Tente novamente ou contacte seu coach.");
         } else {
@@ -300,6 +315,14 @@ export default function StudentWeeklyCheckin({
       </div>
 
       <StudentCoachCheckinFeedback limit={1} showHistoryAction />
+
+      {profileStatus && !profileStatus.is_complete && onRequireProfile && (
+        <ProfileCompletenessBanner
+          status={profileStatus}
+          onComplete={onRequireProfile}
+          compact={profileStatus.hard_gate_active}
+        />
+      )}
 
       {jaEnviouEstaSemana ? (
         <Card className="border-primary/30 bg-primary/5">

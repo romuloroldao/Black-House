@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Collapsible,
@@ -251,7 +250,7 @@ export default function StudentCoachFeedbackHistorySheet({
           </div>
         )}
 
-        <ScrollArea className="min-h-0 flex-1 px-6">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain touch-pan-y px-6 [-webkit-overflow-scrolling:touch]">
           <div className="space-y-8 pb-overlay-safe pt-2">
             {loading &&
               Array.from({ length: 3 }).map((_, i) => (
@@ -307,7 +306,7 @@ export default function StudentCoachFeedbackHistorySheet({
               </div>
             )}
           </div>
-        </ScrollArea>
+        </div>
       </SheetContent>
     </Sheet>
   );

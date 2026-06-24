@@ -29,6 +29,9 @@ async function resolveEffectiveRole(pool, userId) {
   if (explicit === 'admin') {
     return 'admin';
   }
+  if (explicit === 'assistant') {
+    return 'assistant';
+  }
 
   const cp = await pool.query(
     'SELECT 1 FROM public.coach_profiles WHERE user_id = $1 LIMIT 1',

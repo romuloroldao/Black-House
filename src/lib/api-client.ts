@@ -17,6 +17,7 @@ import { safeGetItem, safeRemoveItem, safeSetItem } from '@/lib/safe-storage';
 export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/alunos/by-coach',
     '/api/alunos/me',
+    '/api/alunos/me/profile-status',
     '/api/alunos/me/hoje',
     '/api/alunos/me/notification-preferences',
     '/api/alunos/link-user',

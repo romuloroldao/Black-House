@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useLocation, useNavigate, Navigate } from "react-router-dom";
 import { RouterSafeComponent } from "./RouterSafeComponent";
 import Sidebar from "./Sidebar";
 import NotificationsPopover from "./NotificationsPopover";
@@ -10,11 +10,6 @@ import VideoGallery from "./VideoGallery";
 import NutritionInterface from "./NutritionInterface";
 import MessageManager from "./MessageManager";
 import AgendaManager from "./AgendaManager";
-import PlanManager from "./PlanManager";
-import FinancialExceptionsManager from "./FinancialExceptionsManager";
-import ExpenseManager from "./ExpenseManager";
-import FinancialDashboard from "./FinancialDashboard";
-import PaymentStatusTracker from "./PaymentStatusTracker";
 import ReportManager from "./ReportManager";
 import { ClassGroupManager } from "./ClassGroupManager";
 import { AnnouncementManager } from "./AnnouncementManager";
@@ -23,63 +18,93 @@ import SettingsManager from "./SettingsManager";
 import UserLinkingManager from "./UserLinkingManager";
 import EducationalContentManager from "./educational/EducationalContentManager";
 import CoachCheckinInbox from "./coach/CoachCheckinInbox";
+import FinancialRouter from "./financial/FinancialRouter";
 import { useCoachPortalRealtime } from "@/hooks/useCoachPortalRealtime";
+import {
+  isFinancialPath,
+  pathToFinancialTabId,
+  financialTabIdToPath,
+  LEGACY_TAB_REDIRECTS,
+  FINANCIAL_PATHS,
+} from "@/lib/financial-routes";
 
-
-// DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001: AppLayout deve renderizar mesmo sem dados
-// REACT-RENDER-CRASH-FIX-002: useSearchParams() não deve influenciar render crítico
-// REACT-RENDER-CRASH-FIX-002: Fallback absoluto para render inicial
 const AppLayout = () => {
   useCoachPortalRealtime();
 
-  // REACT-RENDER-CRASH-FIX-002: useSearchParams() pode existir, mas não decide render crítico
   const [searchParams, setSearchParams] = useSearchParams();
-  
-  // REACT-RENDER-CRASH-FIX-002: Valor padrão absoluto - nunca depende de searchParams para render inicial
-  // Leitura defensiva: se searchParams falhar, usar "dashboard" como padrão
+  const location = useLocation();
+  const navigate = useNavigate();
+
   let tabFromUrl = "dashboard";
   try {
     const tab = searchParams?.get?.("tab");
-    if (tab && typeof tab === 'string' && tab.trim().length > 0) {
+    if (tab && typeof tab === "string" && tab.trim().length > 0) {
       tabFromUrl = tab;
     }
-  } catch (error) {
-    // REACT-RENDER-CRASH-FIX-002: Se searchParams falhar, usar padrão seguro
-    console.warn('[REACT-RENDER-CRASH-FIX-002] Erro ao ler searchParams. Usando padrão "dashboard":', error);
+  } catch {
     tabFromUrl = "dashboard";
   }
-  
-  const [activeTab, setActiveTab] = useState(tabFromUrl);
+
+  const financialTabFromPath = pathToFinancialTabId(location.pathname);
+  const initialTab = financialTabFromPath ?? tabFromUrl;
+
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  // Redirect tabs legacy para rotas /financeiro/*
+  useEffect(() => {
+    const legacyRedirect = LEGACY_TAB_REDIRECTS[tabFromUrl];
+    if (legacyRedirect && !isFinancialPath(location.pathname)) {
+      navigate(legacyRedirect, { replace: true });
+      const newTabId = pathToFinancialTabId(legacyRedirect);
+      if (newTabId) setActiveTab(newTabId);
+    }
+  }, [tabFromUrl, location.pathname, navigate]);
 
   useEffect(() => {
-    // REACT-RENDER-CRASH-FIX-002: Leitura defensiva de searchParams - não crítico para render
+    if (isFinancialPath(location.pathname)) {
+      const tabId = pathToFinancialTabId(location.pathname);
+      if (tabId) setActiveTab(tabId);
+      return;
+    }
     try {
       const tab = searchParams?.get?.("tab");
-      if (tab && typeof tab === 'string' && tab.trim().length > 0) {
-        setActiveTab(tab);
+      if (tab && typeof tab === "string" && tab.trim().length > 0) {
+        if (!LEGACY_TAB_REDIRECTS[tab]) {
+          setActiveTab(tab);
+        }
+      } else if (location.pathname === "/") {
+        setActiveTab("dashboard");
       }
-    } catch (error) {
-      // REACT-RENDER-CRASH-FIX-002: Se searchParams falhar, manter tab atual
-      console.warn('[REACT-RENDER-CRASH-FIX-002] Erro ao ler searchParams no useEffect:', error);
+    } catch {
+      // manter tab actual
     }
-  }, [searchParams]);
+  }, [searchParams, location.pathname]);
 
   const handleTabChange = (tab: string) => {
-    // REACT-RENDER-CRASH-FIX-002: Atualizar estado local primeiro (não depende de Router)
+    const financialPath = financialTabIdToPath(tab);
+    if (financialPath) {
+      setActiveTab(tab);
+      navigate(financialPath);
+      return;
+    }
     setActiveTab(tab);
-    // REACT-RENDER-CRASH-FIX-002: Atualizar URL de forma não-crítica (pode falhar sem quebrar render)
     try {
-      if (setSearchParams && typeof setSearchParams === 'function') {
+      if (setSearchParams && typeof setSearchParams === "function") {
         setSearchParams({ tab });
       }
-    } catch (error) {
-      // REACT-RENDER-CRASH-FIX-002: Se setSearchParams falhar, apenas logar - não quebra render
-      console.warn('[REACT-RENDER-CRASH-FIX-002] Erro ao atualizar searchParams (não crítico):', error);
+    } catch {
+      // não crítico
+    }
+    if (location.pathname !== "/") {
+      navigate(`/?tab=${encodeURIComponent(tab)}`);
     }
   };
 
-  // DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001: renderContent deve sempre retornar componente válido
   const renderContent = () => {
+    if (isFinancialPath(location.pathname)) {
+      return <FinancialRouter />;
+    }
+
     try {
       switch (activeTab) {
         case "dashboard":
@@ -99,15 +124,15 @@ const AppLayout = () => {
         case "check-ins":
           return <CoachCheckinInbox />;
         case "payment-plans":
-          return <div className="p-6"><PlanManager /></div>;
-        case "exceptions":
-          return <div className="p-6"><FinancialExceptionsManager /></div>;
-        case "expenses":
-          return <div className="p-6"><ExpenseManager /></div>;
-        case "financial-dashboard":
-          return <FinancialDashboard />;
+          return <Navigate to={FINANCIAL_PATHS.plans} replace />;
         case "payments-tracker":
-          return <div className="p-6"><PaymentStatusTracker /></div>;
+          return <Navigate to={FINANCIAL_PATHS.charges} replace />;
+        case "exceptions":
+          return <Navigate to={FINANCIAL_PATHS.settings} replace />;
+        case "expenses":
+          return <Navigate to={FINANCIAL_PATHS.expenses} replace />;
+        case "financial-dashboard":
+          return <Navigate to={FINANCIAL_PATHS.overview} replace />;
         case "calendar":
           return <AgendaManager />;
         case "reports":
@@ -128,15 +153,11 @@ const AppLayout = () => {
           return <Dashboard onTabChange={handleTabChange} />;
       }
     } catch (error) {
-      // DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001: Fallback seguro em caso de erro
-      console.warn('[DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001] Erro ao renderizar conteúdo. Usando fallback:', error);
+      console.warn("[AppLayout] Erro ao renderizar conteúdo:", error);
       return <Dashboard onTabChange={handleTabChange} />;
     }
   };
 
-  // DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001: Layout deve sempre renderizar estrutura base
-  // DESIGN-ROOT-RENDER-UNBLOCK-001: Garantir que sempre retorna JSX válido
-  // REACT-RENDER-CRASH-FIX-002: Envolver com RouterSafeComponent para garantir Router disponível
   return (
     <RouterSafeComponent
       fallback={
@@ -150,11 +171,8 @@ const AppLayout = () => {
     >
       {(() => {
         try {
-          // DESIGN-ROOT-RENDER-UNBLOCK-001: Validar que renderContent retorna JSX válido
           const content = renderContent();
           if (!content) {
-            // DESIGN-ROOT-RENDER-UNBLOCK-001: Se renderContent retornar null/undefined, usar fallback
-            console.warn('[DESIGN-ROOT-RENDER-UNBLOCK-001] renderContent retornou null/undefined. Usando fallback.');
             return (
               <div className="flex h-screen bg-background overflow-hidden items-center justify-center">
                 <div className="text-center">
@@ -176,9 +194,7 @@ const AppLayout = () => {
             </div>
           );
         } catch (error) {
-          // DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001: Fallback mínimo se houver erro estrutural
-          // DESIGN-ROOT-RENDER-UNBLOCK-001: Garantir que fallback sempre retorna JSX válido
-          console.error('[DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001] Erro crítico no AppLayout:', error);
+          console.error("[AppLayout] Erro crítico:", error);
           return (
             <div className="flex h-screen bg-background overflow-hidden items-center justify-center">
               <div className="text-center">

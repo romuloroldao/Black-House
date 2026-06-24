@@ -11,6 +11,8 @@ import {
   type PendingTask,
 } from "@/lib/student-portal-utils";
 import ReturnCountdownBanner from "@/components/student/ReturnCountdownBanner";
+import ProfileCompletenessBanner from "@/components/student/ProfileCompletenessBanner";
+import type { ProfileCompletenessStatus } from "@/types/profile-completeness";
 import PendingTasksList from "@/components/student/PendingTasksList";
 import TodayHeroCard from "@/components/student/today/TodayHeroCard";
 import TodayPlanCards from "@/components/student/today/TodayPlanCards";
@@ -24,9 +26,11 @@ type StudentTodayViewProps = {
     data: AlunoHojeResponse | null;
     loading: boolean;
   };
+  profileStatus?: ProfileCompletenessStatus | null;
+  onOpenProfileWizard?: () => void;
 };
 
-const StudentTodayView = ({ hojeState }: StudentTodayViewProps) => {
+const StudentTodayView = ({ hojeState, profileStatus, onOpenProfileWizard }: StudentTodayViewProps) => {
   const { user } = useAuth();
   const { isReady } = useDataContext();
   const [, setSearchParams] = useSearchParams();
@@ -62,6 +66,13 @@ const StudentTodayView = ({ hojeState }: StudentTodayViewProps) => {
         aluno={data?.aluno as { nome?: string; email?: string; objetivo?: string }}
         pendenciasCount={data?.contadores?.pendencias_total ?? pendingTasks.length}
       />
+
+      {profileStatus && !profileStatus.is_complete && onOpenProfileWizard && (
+        <ProfileCompletenessBanner
+          status={profileStatus}
+          onComplete={onOpenProfileWizard}
+        />
+      )}
 
       <ReturnCountdownBanner loading={loading} countdown={returnCountdown} />
 

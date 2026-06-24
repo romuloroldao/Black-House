@@ -8,6 +8,8 @@ const COACH_TYPES = new Set([
   "aluno",
   "checkin_reminder",
   "checkin_respondido",
+  "checkin_missed",
+  "task_reminder",
   "dieta_atualizada",
 ]);
 

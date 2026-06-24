@@ -1,16 +1,21 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
-import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/lib/api-client";
 import { RouterSafeComponent } from "./RouterSafeComponent";
+import {
+  FINANCIAL_PATHS,
+  FINANCIAL_TAB_IDS,
+} from "@/lib/financial-routes";
 import logoWhite from "@/assets/logo-white.svg";
 import {
   LayoutDashboard,
@@ -25,7 +30,6 @@ import {
   LogOut,
   CreditCard,
   TrendingDown,
-  AlertCircle,
   Wallet,
   FileText,
   UsersRound,
@@ -33,7 +37,13 @@ import {
   Menu,
   Link2,
   ListChecks,
-  BookOpen
+  BookOpen,
+  ChevronDown,
+  Landmark,
+  UserCircle,
+  LineChart,
+  Plug,
+  SlidersHorizontal,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -60,6 +70,7 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
   const [coachName, setCoachName] = useState<string>("Coach");
   const [coachAvatar, setCoachAvatar] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(true);
+  const [financialOpen, setFinancialOpen] = useState(false);
 
   const getCoachFirstName = (email?: string | null) => {
     const rawEmail = (email || "").trim().toLowerCase();
@@ -231,6 +242,27 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
     return notificationCounts[itemId] || 0;
   };
 
+  const financialNavItems = [
+    { id: FINANCIAL_TAB_IDS.overview, label: "Visão Geral", icon: BarChart3, path: FINANCIAL_PATHS.overview },
+    { id: FINANCIAL_TAB_IDS.charges, label: "Cobranças", icon: CreditCard, path: FINANCIAL_PATHS.charges },
+    { id: FINANCIAL_TAB_IDS.subscriptions, label: "Assinaturas", icon: Users, path: FINANCIAL_PATHS.subscriptions },
+    { id: FINANCIAL_TAB_IDS.plans, label: "Planos", icon: Wallet, path: FINANCIAL_PATHS.plans },
+    { id: FINANCIAL_TAB_IDS.clients, label: "Clientes", icon: UserCircle, path: FINANCIAL_PATHS.clients },
+    { id: FINANCIAL_TAB_IDS.expenses, label: "Despesas", icon: TrendingDown, path: FINANCIAL_PATHS.expenses },
+    { id: FINANCIAL_TAB_IDS.cashFlow, label: "Fluxo de Caixa", icon: LineChart, path: FINANCIAL_PATHS.cashFlow },
+    { id: FINANCIAL_TAB_IDS.reports, label: "Relatórios", icon: FileText, path: FINANCIAL_PATHS.reports },
+    { id: FINANCIAL_TAB_IDS.integration, label: "Integração Asaas", icon: Plug, path: FINANCIAL_PATHS.integration },
+    { id: FINANCIAL_TAB_IDS.settings, label: "Configurações", icon: SlidersHorizontal, path: FINANCIAL_PATHS.settings },
+  ];
+
+  const isFinancialActive = financialNavItems.some((item) => item.id === activeTab) || activeTab === "financeiro";
+
+  useEffect(() => {
+    if (isFinancialActive) {
+      setFinancialOpen(true);
+    }
+  }, [isFinancialActive]);
+
   const navigationItems = [
     {
       id: "dashboard",
@@ -273,31 +305,6 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       icon: ListChecks,
     },
     {
-      id: "payment-plans",
-      label: "Planos de Pagamento",
-      icon: Wallet,
-    },
-    {
-      id: "payments-tracker",
-      label: "Acompanhar Pagamentos",
-      icon: CreditCard,
-    },
-    {
-      id: "exceptions",
-      label: "Exceções",
-      icon: AlertCircle,
-    },
-    {
-      id: "expenses",
-      label: "Despesas",
-      icon: TrendingDown,
-    },
-    {
-      id: "financial-dashboard",
-      label: "Dashboard Financeiro",
-      icon: BarChart3,
-    },
-    {
       id: "calendar",
       label: "Agenda",
       icon: Calendar,
@@ -338,12 +345,34 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
     }
   ];
 
+  const handleFinancialNavigate = (path: string, tabId: string) => {
+    if (notificationCounts[tabId] > 0) {
+      clearNotifications(tabId);
+    }
+    navigate(path);
+    onTabChange(tabId);
+    if (isMobile) {
+      setMobileMenuOpen(false);
+    }
+  };
+
   const handleTabChange = (tab: string) => {
     // Clear notifications for this tab
     if (notificationCounts[tab] > 0) {
       clearNotifications(tab);
     }
     
+    onTabChange(tab);
+    if (isMobile) {
+      setMobileMenuOpen(false);
+    }
+  };
+
+  const handleMainNav = (tab: string) => {
+    if (notificationCounts[tab] > 0) {
+      clearNotifications(tab);
+    }
+    navigate("/");
     onTabChange(tab);
     if (isMobile) {
       setMobileMenuOpen(false);
@@ -374,12 +403,13 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
           <TooltipProvider delayDuration={0}>
             {/* DESIGN-ROOT-RENDER-UNBLOCK-001: Validar navigationItems antes de .map() */}
             {Array.isArray(navigationItems) && navigationItems.length > 0 ? navigationItems.map((item) => {
-              // DESIGN-ROOT-RENDER-UNBLOCK-001: Validar item antes de renderizar
               if (!item || !item.id) {
                 return null;
               }
+              const insertFinancialAfter = item.id === "check-ins";
               return (
-              <Tooltip key={item.id}>
+              <div key={item.id}>
+              <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant={activeTab === item.id ? "premium" : "ghost"}
@@ -389,7 +419,7 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
                         ? "bg-gradient-primary text-primary-foreground shadow-glow motion-safe:scale-[1.02]" 
                         : "hover:bg-muted/50 motion-safe:hover:scale-[1.01]"
                     )}
-                    onClick={() => handleTabChange(item.id)}
+                    onClick={() => handleMainNav(item.id)}
                   >
                     <item.icon className="w-5 h-5" />
                     <span className="flex-1">{item.label}</span>
@@ -407,6 +437,41 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
                   <p>{item.label}</p>
                 </TooltipContent>
               </Tooltip>
+              {insertFinancialAfter && (
+                <Collapsible open={financialOpen} onOpenChange={setFinancialOpen} className="mt-1">
+                  <CollapsibleTrigger asChild>
+                    <Button
+                      variant={isFinancialActive ? "premium" : "ghost"}
+                      className={cn(
+                        "w-full justify-start text-left font-medium",
+                        isFinancialActive && "bg-gradient-primary/80 text-primary-foreground",
+                      )}
+                    >
+                      <Landmark className="w-5 h-5" />
+                      <span className="flex-1">Financeiro</span>
+                      <ChevronDown className={cn("w-4 h-4 transition-transform", financialOpen && "rotate-180")} />
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pl-3 mt-1 space-y-1 border-l border-border ml-4">
+                    {financialNavItems.map((fItem) => (
+                      <Button
+                        key={fItem.id}
+                        variant={activeTab === fItem.id ? "secondary" : "ghost"}
+                        size="sm"
+                        className={cn(
+                          "w-full justify-start text-left text-sm",
+                          activeTab === fItem.id && "bg-muted font-medium",
+                        )}
+                        onClick={() => handleFinancialNavigate(fItem.path, fItem.id)}
+                      >
+                        <fItem.icon className="w-4 h-4 mr-2 shrink-0" />
+                        {fItem.label}
+                      </Button>
+                    ))}
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+              </div>
               );
             }).filter(Boolean) : null}
           </TooltipProvider>

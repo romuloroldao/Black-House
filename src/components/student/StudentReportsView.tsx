@@ -16,6 +16,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useProfileCompleteness } from "@/hooks/useProfileCompleteness";
+import ProfileCompletionWizard from "@/components/student/ProfileCompletionWizard";
 
 interface Report {
   id: string;
@@ -52,6 +54,8 @@ const StudentReportsView = () => {
   const [newFeedback, setNewFeedback] = useState("");
   const [loading, setLoading] = useState(true);
   const [alunoId, setAlunoId] = useState<string | null>(null);
+  const { status: profileStatus, refetch: refetchProfile } = useProfileCompleteness();
+  const [profileWizardOpen, setProfileWizardOpen] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -133,6 +137,12 @@ const StudentReportsView = () => {
     });
 
     if (!result.success) {
+      const err = result.error || "";
+      if (err.includes("PROFILE_INCOMPLETE") || err.toLowerCase().includes("perfil")) {
+        toast.error("Complete seu perfil antes de comentar no relatório.");
+        setProfileWizardOpen(true);
+        return;
+      }
       toast.error("Erro ao enviar feedback: " + result.error);
       return;
     }
@@ -331,6 +341,13 @@ const StudentReportsView = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      <ProfileCompletionWizard
+        open={profileWizardOpen}
+        onOpenChange={setProfileWizardOpen}
+        status={profileStatus}
+        onCompleted={() => void refetchProfile()}
+      />
     </div>
   );
 };

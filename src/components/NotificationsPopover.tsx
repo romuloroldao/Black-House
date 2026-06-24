@@ -168,6 +168,8 @@ const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
       case 'payment_reminder':
         return DollarSign;
       case 'checkin_reminder':
+      case 'task_reminder':
+      case 'checkin_missed':
       case 'new_weekly_checkin':
       case 'checkin_respondido':
         return ClipboardCheck;

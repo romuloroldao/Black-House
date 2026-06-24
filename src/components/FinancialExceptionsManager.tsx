@@ -38,7 +38,7 @@ interface Aluno {
   email: string;
 }
 
-export default function FinancialExceptionsManager() {
+export default function FinancialExceptionsManager({ embedded = false }: { embedded?: boolean }) {
   const { confirm } = useConfirm();
   const { user } = useAuth();
   const [exceptions, setExceptions] = useState<FinancialException[]>([]);
@@ -215,6 +215,7 @@ export default function FinancialExceptionsManager() {
 
   return (
     <div className="space-y-6">
+      {!embedded && (
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold">Exceções Financeiras</h2>
@@ -225,6 +226,16 @@ export default function FinancialExceptionsManager() {
           Nova Exceção
         </Button>
       </div>
+      )}
+
+      {embedded && (
+        <div className="flex justify-end">
+          <Button onClick={() => setDialogOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            Nova exceção
+          </Button>
+        </div>
+      )}
 
       <div className="grid gap-4">
         {exceptions.length === 0 ? (

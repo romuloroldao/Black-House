@@ -59,6 +59,28 @@ async function getStudentPaymentStatus(pool, { alunoId = null, email = null } = 
         };
     }
 
+    const cached = await pool.query(
+        'SELECT payment_status, access_status, in_grace_period, grace_days_remaining FROM public.student_access_state WHERE aluno_id = $1 LIMIT 1',
+        [aluno.id],
+    );
+    if (cached.rows[0]) {
+        const activeException = await getActiveFinancialException(pool, aluno.id);
+        const row = cached.rows[0];
+        const effectiveStatus =
+          row.access_status === 'blocked' ? row.payment_status
+          : row.in_grace_period ? 'CURRENT'
+          : row.payment_status;
+        return {
+            payment_status: effectiveStatus,
+            aluno,
+            active_exception: activeException,
+            access_status: row.access_status,
+            in_grace_period: row.in_grace_period,
+            grace_days_remaining: row.grace_days_remaining,
+            reason: 'access_state_cache',
+        };
+    }
+
     const activeException = await getActiveFinancialException(pool, aluno.id);
     if (activeException && NON_BLOCKING_EXCEPTION_TYPES.has(activeException.tipo)) {
         return {

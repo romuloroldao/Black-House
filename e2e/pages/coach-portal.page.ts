@@ -10,7 +10,25 @@ export class CoachPortalPage {
 
   async openSidebarTab(label: string): Promise<void> {
     await this.page.getByRole('button', { name: label, exact: true }).click();
-    await this.page.waitForURL(new RegExp(`tab=`));
+    await this.page.waitForURL(new RegExp(`tab=|/financeiro`));
+  }
+
+  async openFinancialHub(): Promise<void> {
+    await this.page.getByRole('button', { name: 'Financeiro' }).click();
+  }
+
+  async openFinancialSubItem(label: string): Promise<void> {
+    await this.openFinancialHub();
+    await this.page.getByRole('button', { name: label, exact: true }).click();
+    await this.page.waitForURL(/\/financeiro/);
+  }
+
+  async expectFinancialOverview(): Promise<void> {
+    await this.page.getByRole('heading', { name: 'Visão Geral' }).waitFor({ state: 'visible' });
+  }
+
+  async expectChargesPage(): Promise<void> {
+    await this.page.getByRole('heading', { name: 'Cobranças' }).waitFor({ state: 'visible' });
   }
 
   async expectStudentsManager(): Promise<void> {

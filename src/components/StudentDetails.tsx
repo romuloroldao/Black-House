@@ -17,6 +17,9 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import StudentProgressCoachTabs from "./coach/StudentProgressCoachTabs";
+import BodyMetricsCard from "./coach/BodyMetricsCard";
+import WeightTimelineChart from "./coach/WeightTimelineChart";
+import type { BodyMetricsResponse } from "@/types/profile-completeness";
 import StudentFinancialManagement from "./student/StudentFinancialManagement";
 import { DietReturnDateFields } from "@/components/DietReturnDateFields";
 import {
@@ -110,6 +113,8 @@ export default function StudentDetails() {
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [importHistoryRefresh, setImportHistoryRefresh] = useState(0);
   const [portalStatusRefresh, setPortalStatusRefresh] = useState(0);
+  const [bodyMetrics, setBodyMetrics] = useState<BodyMetricsResponse | null>(null);
+  const [bodyMetricsLoading, setBodyMetricsLoading] = useState(false);
   const [novaDieta, setNovaDieta] = useState({
     nome: "",
     objetivo: "",
@@ -168,6 +173,13 @@ export default function StudentDetails() {
         return;
       }
       setStudent(aluno);
+
+      setBodyMetricsLoading(true);
+      const metricsResult = await apiClient.requestSafe<BodyMetricsResponse>(
+        `/api/alunos/${id}/body-metrics`,
+      );
+      setBodyMetrics(metricsResult.success ? metricsResult.data ?? null : null);
+      setBodyMetricsLoading(false);
 
       // Carregar feedback
       const feedbackResult = await apiClient.listFeedbacksAlunosSafe(id);
@@ -604,21 +616,21 @@ export default function StudentDetails() {
             />
           ) : null}
 
+          <BodyMetricsCard metrics={bodyMetrics} loading={bodyMetricsLoading} />
+
+          <WeightTimelineChart
+            historico={bodyMetrics?.peso_historico}
+            pesoAtual={bodyMetrics?.peso_kg}
+            loading={bodyMetricsLoading}
+          />
+
           <div className="grid gap-6 md:grid-cols-2">
-            {/* Dados Básicos */}
+            {/* Objetivo e cadastro */}
             <Card>
               <CardHeader>
-                <CardTitle>Informações Básicas</CardTitle>
+                <CardTitle>Objetivo e cadastro</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                <div>
-                  <span className="font-semibold">Data de Nascimento: </span>
-                  <span>{student.data_nascimento ? new Date(student.data_nascimento).toLocaleDateString('pt-BR') : "Não informado"}</span>
-                </div>
-                <div>
-                  <span className="font-semibold">Peso: </span>
-                  <span>{student.peso ? `${student.peso} kg` : "Não informado"}</span>
-                </div>
                 <div>
                   <span className="font-semibold">Objetivo: </span>
                   <span>{student.objetivo || "Não informado"}</span>
@@ -627,6 +639,9 @@ export default function StudentDetails() {
                   <span className="font-semibold">Aluno desde: </span>
                   <span>{new Date(student.created_at).toLocaleDateString('pt-BR')}</span>
                 </div>
+                <p className="text-xs text-muted-foreground pt-2">
+                  Peso, altura, idade e TMB estão no card «Dados corporais» acima.
+                </p>
               </CardContent>
             </Card>
 

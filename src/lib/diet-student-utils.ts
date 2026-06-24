@@ -94,6 +94,26 @@ export function parseRefeicaoLabel(refeicao: string): { base: string; plano: Die
   return { base: base || refeicao, plano };
 }
 
+/** Nome guardado em `itens_dieta.refeicao` (compatível com parseRefeicaoLabel). */
+export function buildRefeicaoStorageLabel(
+  nomeBase: string,
+  plano: DietPlano | null | undefined | "",
+): string {
+  const base = String(nomeBase || "").trim() || "Refeição";
+  const letter = plano ? normalizePlanoLetter(plano) : null;
+  if (!letter) return base;
+  return `${base} (Plano ${letter})`;
+}
+
+/** Separa rótulo da BD em nome editável + cardápio para o editor. */
+export function splitRefeicaoForEditor(refeicao: string): {
+  nome: string;
+  plano: DietPlano | "";
+} {
+  const { base, plano } = parseRefeicaoLabel(refeicao);
+  return { nome: base, plano: plano ?? "" };
+}
+
 export function getPlanosFromGroups(groups: MealGroup[]): DietPlano[] {
   const set = new Set<DietPlano>();
   for (const g of groups) {
@@ -204,7 +224,7 @@ export function getItemsForPlano(
   });
 }
 
-function mealSortIndex(name: string): number {
+export function mealSortIndex(name: string): number {
   const n = name.toLowerCase();
   for (const row of MEAL_ORDER_KEYWORDS) {
     if (row.keys.some((k) => n.includes(k))) return row.order;

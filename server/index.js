@@ -25,6 +25,9 @@ const AsaasService = require('./services/asaas.service');
 const { decryptCoachAsaasApiKey } = require('./utils/asaas-coach-secret-crypto');
 const JobsRunner = require('./jobs');
 const createWebhookRouter = require('./routes/webhooks');
+const createFinancialWebhookRouter = require('./routes/financial-webhooks');
+const { createFinancialSync } = require('./financial');
+const { createPaymentOutbound } = require('./financial/sync/outbound-commander');
 const createHealthRouter = require('./routes/health');
 const { authLimiter, apiLimiter, webhookLimiter, uploadLimiter, forgotPasswordLimiter, resetPasswordSubmitLimiter } = require('./middleware/rate-limiter');
 const { sendPasswordResetEmail } = require('./utils/send-password-reset-email');
@@ -48,6 +51,39 @@ const {
     applyFinancialExceptionToAmount,
 } = require('./utils/financial-status');
 // dotenv já foi carregado no topo do arquivo
+
+// JSON-01: colunas jsonb em rotas genéricas /rest/v1 cujo nome não contém "json"
+const REST_V1_JSONB_COLUMNS = new Set(['exercicios', 'rotacao_sequencia']);
+
+function isRestV1DateColumn(col) {
+    return col.startsWith('data_') || col === 'data_inicio' || col === 'data_expiracao' ||
+        col === 'data_vencimento' || col === 'data_pagamento' || col === 'data_agendamento' ||
+        col === 'created_at' || col === 'updated_at';
+}
+
+function isRestV1JsonbColumn(col) {
+    return REST_V1_JSONB_COLUMNS.has(col) ||
+        (col.includes('json') && !isRestV1DateColumn(col));
+}
+
+async function assertCoachOwnsAluno(pool, coachUserId, alunoId) {
+    const r = await pool.query(
+        'SELECT 1 FROM public.alunos WHERE id = $1 AND coach_id = $2 LIMIT 1',
+        [alunoId, coachUserId],
+    );
+    return r.rows.length > 0;
+}
+
+async function assertCoachOwnsDieta(pool, coachUserId, dietaId) {
+    const r = await pool.query(
+        `SELECT 1 FROM public.dietas d
+         INNER JOIN public.alunos a ON a.id = d.aluno_id
+         WHERE d.id = $1 AND a.coach_id = $2
+         LIMIT 1`,
+        [dietaId, coachUserId],
+    );
+    return r.rows.length > 0;
+}
 
 // INFRA-03: Logar BOOT_ID no logger também
 logger.info('🔥 INFRA-03: Servidor iniciando', {
@@ -367,12 +403,20 @@ if (process.env.ASAAS_API_KEY) {
     logger.warn('ASAAS_API_KEY não configurada, funcionalidades de pagamento limitadas');
 }
 
+// =============== FINANCIAL SYNC ===============
+let financialSync = null;
+if (notificationService) {
+    financialSync = createFinancialSync(pool, notificationService);
+    financialSync.startWorker();
+    logger.info('Financial Sync inicializado');
+}
+
 // =============== BACKGROUND JOBS ===============
 let jobsRunner = null;
 
 if (process.env.ENABLE_JOBS !== 'false' && notificationService) {
     try {
-        jobsRunner = new JobsRunner(pool, notificationService, asaasService);
+        jobsRunner = new JobsRunner(pool, notificationService, financialSync);
         jobsRunner.start();
         logger.info('Background Jobs inicializados', { jobsCount: jobsRunner.jobs?.length || 0 });
     } catch (error) {
@@ -383,15 +427,21 @@ if (process.env.ENABLE_JOBS !== 'false' && notificationService) {
 }
 
 // =============== WEBHOOKS ===============
+app.use(
+    '/api/webhooks',
+    webhookLimiter,
+    createFinancialWebhookRouter(pool, financialSync?.inboundProcessor),
+);
+
 if (process.env.ASAAS_WEBHOOK_TOKEN) {
     app.use('/api/webhooks', webhookLimiter, createWebhookRouter(
         pool,
         notificationService,
         process.env.ASAAS_WEBHOOK_TOKEN
     ));
-    logger.info('Webhook routes configuradas');
+    logger.info('Webhook legado (token global) também montado em /api/webhooks/asaas');
 } else {
-    logger.warn('ASAAS_WEBHOOK_TOKEN não configurada, webhooks desabilitados');
+    logger.info('Webhook financeiro multi-tenant activo em /api/webhooks/asaas/:coachId');
 }
 
 // Inicializar websocketService e notificationService antes de usar
@@ -1471,6 +1521,26 @@ app.get('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) => 
         if (table === 'treinos') {
             filters.push('aluno_id IS NULL');
         }
+
+        // Coach titular: limitar tabelas dependentes de aluno/dieta à carteira própria.
+        const hasAlunoScopedFilter = Object.keys(req.query || {}).some(
+            (k) => k === 'aluno_id' || k.startsWith('aluno_id.') || k === 'dieta_id' || k.startsWith('dieta_id.'),
+        );
+        if (userRole === 'coach' && !hasAlunoScopedFilter) {
+            if (table === 'dietas' || table === 'alunos_treinos' || table === 'feedbacks_alunos') {
+                filters.push(`aluno_id IN (SELECT id FROM public.alunos WHERE coach_id = $${paramIndex})`);
+                queryParams.push(userId);
+                paramIndex++;
+            } else if (table === 'itens_dieta' || table === 'dieta_farmacos') {
+                filters.push(`dieta_id IN (
+                    SELECT d.id FROM public.dietas d
+                    INNER JOIN public.alunos a ON a.id = d.aluno_id
+                    WHERE a.coach_id = $${paramIndex}
+                )`);
+                queryParams.push(userId);
+                paramIndex++;
+            }
+        }
         
         if (filters.length > 0) {
             query += ` WHERE ${filters.join(' AND ')}`;
@@ -1548,6 +1618,25 @@ app.post('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) =>
                     error: 'Não é permitido criar cópia de treino por aluno. Use POST /api/alunos-treinos/assign.',
                     error_code: 'TREINO_COPY_FORBIDDEN',
                 });
+            }
+        }
+
+        if (table === 'dietas' && req.user?.role === 'coach') {
+            for (const row of rowsToProcess) {
+                const alunoId = row?.aluno_id;
+                if (!alunoId) {
+                    return res.status(400).json({
+                        error: 'aluno_id é obrigatório para criar dieta',
+                        error_code: 'VALIDATION',
+                    });
+                }
+                const owns = await assertCoachOwnsAluno(pool, userId, alunoId);
+                if (!owns) {
+                    return res.status(403).json({
+                        error: 'Sem permissão para criar dieta deste aluno',
+                        error_code: 'FORBIDDEN',
+                    });
+                }
             }
         }
 
@@ -1638,12 +1727,9 @@ app.post('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) =>
                 // PostgreSQL aceita objetos JavaScript diretamente via pg, mas vamos serializar para garantir
                 // Não aplicar em campos DATE (data_expiracao, data_inicio, etc.) - apenas em campos JSONB reais
                 // Campos DATE comuns: data_expiracao, data_inicio, data_vencimento, data_pagamento, data_agendamento
-                const isDateField = key.startsWith('data_') || key === 'data_inicio' || key === 'data_expiracao' || 
-                                    key === 'data_vencimento' || key === 'data_pagamento' || key === 'data_agendamento' ||
-                                    key === 'created_at' || key === 'updated_at';
-                const isJsonbField = key === 'exercicios' || (key.includes('json') && !isDateField);
+                const isJsonbField = isRestV1JsonbColumn(key);
                 
-                if (isJsonbField && !isDateField) {
+                if (isJsonbField && !isRestV1DateColumn(key)) {
                     // Se é objeto ou array, serializar para JSON string
                     if (typeof value === 'object' && value !== null && !(value instanceof Date)) {
                         try {
@@ -1700,14 +1786,7 @@ app.post('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) =>
         // PostgreSQL aceita objetos JavaScript diretamente via pg, mas vamos garantir
         // Não aplicar cast em campos DATE (data_expiracao, data_inicio, etc.)
         const placeholders = columns.map((col, i) => {
-            // Verificar se é campo DATE
-            const isDateField = col.startsWith('data_') || col === 'data_inicio' || col === 'data_expiracao' || 
-                                col === 'data_vencimento' || col === 'data_pagamento' || col === 'data_agendamento' ||
-                                col === 'created_at' || col === 'updated_at';
-            // Se é campo JSONB real (exercicios ou campos com json no nome, mas não DATE)
-            const isJsonbField = col === 'exercicios' || (col.includes('json') && !isDateField);
-            
-            if (isJsonbField && !isDateField) {
+            if (isRestV1JsonbColumn(col) && !isRestV1DateColumn(col)) {
                 // Usar cast ::jsonb para garantir conversão correta
                 // pg aceita objetos JS diretamente, mas cast garante compatibilidade
                 return `$${i + 1}::jsonb`;
@@ -1813,6 +1892,17 @@ app.patch('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) =
             hint: 'O campo "id" deve ser um UUID válido',
             requestId
         });
+    }
+
+    if (table === 'dietas' && req.user?.role === 'coach') {
+        const owns = await assertCoachOwnsDieta(pool, actorUserId, id);
+        if (!owns) {
+            return res.status(403).json({
+                error: 'Sem permissão para editar esta dieta',
+                error_code: 'FORBIDDEN',
+                requestId,
+            });
+        }
     }
     
     try {
@@ -1920,15 +2010,10 @@ app.patch('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) =
         // JSON-01 (PATCH): campos JSONB (ex.: exercicios) precisam de JSON.stringify + cast ::jsonb.
         // node-pg converte arrays/objetos JS para literal de array Postgres por omissão, o que
         // rebenta numa coluna jsonb com "invalid input syntax for type json".
-        const isDateColumn = (col) =>
-            col.startsWith('data_') || col === 'created_at' || col === 'updated_at';
-        const isJsonbColumn = (col) =>
-            col === 'exercicios' || (col.includes('json') && !isDateColumn(col));
-
         for (const key of Object.keys(sanitizedData)) {
             const value = sanitizedData[key];
             if (
-                isJsonbColumn(key) &&
+                isRestV1JsonbColumn(key) &&
                 typeof value === 'object' &&
                 value !== null &&
                 !(value instanceof Date)
@@ -1976,7 +2061,7 @@ app.patch('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) =
         // SCHEMA-03: Usar dados sanitizados (com whitelist aplicada para alunos)
         const values = Object.values(sanitizedData);
         const setClause = columns
-            .map((col, i) => `${col} = $${i + 1}${isJsonbColumn(col) ? '::jsonb' : ''}`)
+            .map((col, i) => `${col} = $${i + 1}${isRestV1JsonbColumn(col) ? '::jsonb' : ''}`)
             .join(', ');
         
         const query = `
@@ -2599,7 +2684,7 @@ app.post('/functions/parse-student-pdf', authenticate, async (req, res) => {
 
 // =============== PAYMENTS (Asaas Integration) ===============
 
-// Endpoint para criar pagamento no Asaas (substitui Edge Function)
+// Endpoint para criar pagamento no Asaas (sincronização outbound)
 app.post('/api/payments/create-asaas', authenticate, async (req, res) => {
     try {
         const { alunoId, value, billingType, dueDate, description } = req.body;
@@ -2607,20 +2692,19 @@ app.post('/api/payments/create-asaas', authenticate, async (req, res) => {
         if (!alunoId || !value || !billingType || !dueDate) {
             return res.status(400).json({
                 success: false,
-                error: 'Campos obrigatórios: alunoId, value, billingType, dueDate'
+                error: 'Campos obrigatórios: alunoId, value, billingType, dueDate',
             });
         }
 
-        // Buscar dados do aluno
         const alunoResult = await pool.query(
             'SELECT * FROM public.alunos WHERE id = $1 AND coach_id = $2',
-            [alunoId, req.user.id]
+            [alunoId, req.user.id],
         );
 
         if (alunoResult.rows.length === 0) {
             return res.status(404).json({
                 success: false,
-                error: 'Aluno não encontrado'
+                error: 'Aluno não encontrado',
             });
         }
 
@@ -2629,14 +2713,6 @@ app.post('/api/payments/create-asaas', authenticate, async (req, res) => {
         const amountDecision = applyFinancialExceptionToAmount(value, activeException);
 
         if (!amountDecision.shouldCharge) {
-            logger.info('payments.create_asaas.skipped_by_financial_exception', {
-                alunoId: aluno.id,
-                coachId: req.user.id,
-                exceptionType: activeException?.tipo || null,
-                reason: amountDecision.reason,
-                originalValue: amountDecision.originalValue,
-            });
-
             return res.status(409).json({
                 success: false,
                 error: activeException
@@ -2652,167 +2728,27 @@ app.post('/api/payments/create-asaas', authenticate, async (req, res) => {
             ? `${description || `Pagamento - ${aluno.nome}`} (desconto financeiro aplicado)`
             : description;
 
-        let payment = null;
-        let asaasPaymentData = null;
+        const payment = await createPaymentOutbound(pool, {
+            coachId: req.user.id,
+            aluno,
+            value: effectiveValue,
+            billingType,
+            dueDate,
+            description: effectiveDescription || `Pagamento - ${aluno.nome}`,
+            actorId: req.user.id,
+        });
 
-        let effectiveAsaas = asaasService;
-        try {
-            const cfgResult = await pool.query(
-                'SELECT asaas_api_key, is_sandbox FROM public.asaas_config WHERE coach_id = $1 LIMIT 1',
-                [req.user.id],
+        if (notificationService) {
+            await notificationService.notifyPaymentStatus(
+                payment.id,
+                req.user.id,
+                payment.status,
+                {
+                    asaasPaymentId: payment.asaas_payment_id,
+                    pixCopyPaste: payment.pix_copy_paste,
+                    invoiceUrl: payment.invoice_url,
+                },
             );
-            if (
-                cfgResult.rows.length > 0 &&
-                cfgResult.rows[0].asaas_api_key &&
-                String(cfgResult.rows[0].asaas_api_key).trim()
-            ) {
-                const row = cfgResult.rows[0];
-                let plainKey = '';
-                try {
-                    plainKey = decryptCoachAsaasApiKey(row.asaas_api_key);
-                } catch (decErr) {
-                    logger.error('payments.create_asaas.decrypt_coach_key_failed', {
-                        error: decErr.message,
-                        coach_id: req.user.id,
-                    });
-                    return res.status(503).json({
-                        success: false,
-                        error:
-                            'Configure ASAAS_COACH_SECRETS_KEY no servidor para usar a chave Asaas guardada, ou atualize a chave nas Configurações.',
-                        error_code: 'ASAAS_SECRET_DECRYPT_FAILED',
-                    });
-                }
-                effectiveAsaas = new AsaasService(
-                    plainKey,
-                    row.is_sandbox ? 'sandbox' : 'production',
-                );
-            }
-        } catch (cfgErr) {
-            logger.warn('payments.create_asaas.config_lookup_failed', { error: cfgErr.message });
-        }
-
-        // Chave por coach (asaas_config) ou variável de ambiente global
-        if (effectiveAsaas) {
-            try {
-                // Criar pagamento completo no Asaas
-                const result = await effectiveAsaas.createCompletePayment({
-                    alunoId: aluno.id,
-                    alunoNome: aluno.nome,
-                    alunoEmail: aluno.email || `${aluno.nome.toLowerCase().replace(/\s+/g, '.')}@aluno.temp`,
-                    alunoCpf: aluno.cpf || null,
-                    alunoTelefone: aluno.telefone || null,
-                    value: effectiveValue,
-                    billingType: billingType,
-                    dueDate: dueDate,
-                    description: effectiveDescription || `Pagamento - ${aluno.nome}`
-                });
-
-                asaasPaymentData = result.payment;
-
-                // Criar registro no banco com dados do Asaas
-                const paymentResult = await pool.query(
-                    `INSERT INTO public.asaas_payments (
-                        aluno_id, 
-                        coach_id, 
-                        value, 
-                        billing_type, 
-                        due_date, 
-                        description,
-                        status,
-                        asaas_payment_id,
-                        asaas_customer_id,
-                        pix_copy_paste,
-                        invoice_url
-                    ) VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7, $8, $9, $10)
-                    RETURNING *`,
-                    [
-                        alunoId,
-                        req.user.id,
-                        effectiveValue,
-                        billingType,
-                        dueDate,
-                        effectiveDescription || null,
-                        asaasPaymentData.id,
-                        result.customer.id,
-                        asaasPaymentData.pix?.copyPaste || null,
-                        asaasPaymentData.invoiceUrl || null
-                    ]
-                );
-
-                payment = paymentResult.rows[0];
-
-                // Notificar via WebSocket se disponível
-                if (notificationService) {
-                    await notificationService.notifyPaymentStatus(
-                        payment.id,
-                        req.user.id,
-                        'PENDING',
-                        {
-                            asaasPaymentId: asaasPaymentData.id,
-                            pixCopyPaste: asaasPaymentData.pix?.copyPaste,
-                            invoiceUrl: asaasPaymentData.invoiceUrl
-                        }
-                    );
-                }
-            } catch (asaasError) {
-                console.error('Erro ao criar pagamento no Asaas:', asaasError);
-                // Criar registro local mesmo em caso de erro no Asaas
-                // Gerar IDs temporários únicos para asaas_payment_id e asaas_customer_id
-                const tempPaymentId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                const tempCustomerId = `temp_customer_${alunoId}_${Date.now()}`;
-                
-                const paymentResult = await pool.query(
-                    `INSERT INTO public.asaas_payments (
-                        aluno_id, 
-                        coach_id, 
-                        value, 
-                        billing_type, 
-                        due_date, 
-                        description,
-                        status,
-                        asaas_payment_id,
-                        asaas_customer_id
-                    ) VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7, $8)
-                    RETURNING *`,
-                    [alunoId, req.user.id, effectiveValue, billingType, dueDate, effectiveDescription || null, tempPaymentId, tempCustomerId]
-                );
-                payment = paymentResult.rows[0];
-                
-                logger.warn('Pagamento criado localmente sem Asaas (IDs temporários)', {
-                    paymentId: payment.id,
-                    tempAsaasPaymentId: tempPaymentId,
-                    tempAsaasCustomerId: tempCustomerId,
-                    error: asaasError.message
-                });
-            }
-        } else {
-            // Criar apenas registro local se Asaas não estiver disponível
-            // Gerar IDs temporários únicos para asaas_payment_id e asaas_customer_id
-            const tempPaymentId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            const tempCustomerId = `temp_customer_${alunoId}_${Date.now()}`;
-            
-            const paymentResult = await pool.query(
-                `INSERT INTO public.asaas_payments (
-                    aluno_id, 
-                    coach_id, 
-                    value, 
-                    billing_type, 
-                    due_date, 
-                    description,
-                    status,
-                    asaas_payment_id,
-                    asaas_customer_id
-                ) VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7, $8)
-                RETURNING *`,
-                [alunoId, req.user.id, effectiveValue, billingType, dueDate, effectiveDescription || null, tempPaymentId, tempCustomerId]
-            );
-            payment = paymentResult.rows[0];
-            
-            logger.warn('Pagamento criado localmente sem Asaas Service (IDs temporários)', {
-                paymentId: payment.id,
-                tempAsaasPaymentId: tempPaymentId,
-                tempAsaasCustomerId: tempCustomerId
-            });
         }
 
         res.json({
@@ -2827,15 +2763,16 @@ app.post('/api/payments/create-asaas', authenticate, async (req, res) => {
                 status: payment.status,
                 asaas_payment_id: payment.asaas_payment_id || null,
                 pix_copy_paste: payment.pix_copy_paste || null,
-                invoice_url: payment.invoice_url || null
-            }
+                invoice_url: payment.invoice_url || null,
+                sync_status: payment.sync_status,
+            },
         });
-
     } catch (error) {
-        console.error('Erro ao criar pagamento:', error);
-        res.status(500).json({
+        logger.error('payments.create_asaas.failed', { error: error.message });
+        res.status(error.statusCode || 500).json({
             success: false,
-            error: error.message || 'Erro ao criar pagamento'
+            error: error.message || 'Erro ao criar pagamento',
+            error_code: error.error_code || 'PAYMENT_CREATE_FAILED',
         });
     }
 });
