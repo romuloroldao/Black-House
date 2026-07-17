@@ -32,6 +32,8 @@ import { DietRotationBadge } from "@/components/DietRotationBadge";
 import { getAlunoDisplayName } from "@/lib/aluno-display";
 import { formatDateBR } from "@/lib/date-format";
 import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
+import EvolutionTimelineExperience from "@/components/student/progress/evolution/EvolutionTimelineExperience";
+import type { EvolutionPhoto } from "@/lib/evolution-timeline";
 
 interface Student {
   id: string;
@@ -77,7 +79,7 @@ interface Dieta {
   rotacao_data_inicio?: string | null;
 }
 
-interface Foto {
+interface Foto extends EvolutionPhoto {
   id: string;
   url: string;
   descricao: string | null;
@@ -99,7 +101,6 @@ export default function StudentDetails() {
   const [treinos, setTreinos] = useState<Array<Treino & { alunoTreinoId: string }>>([]);
   const [dieta, setDieta] = useState<Dieta | null>(null);
   const [fotos, setFotos] = useState<Foto[]>([]);
-  const [selectedFoto, setSelectedFoto] = useState<string | null>(null);
   
   // Estados para atribuir treino
   const [treinosDisponiveis, setTreinosDisponiveis] = useState<Treino[]>([]);
@@ -159,7 +160,6 @@ export default function StudentDetails() {
       setTreinos([]);
       setDieta(null);
       setFotos([]);
-      setSelectedFoto(null);
 
       // Carregar dados do aluno
       const alunoResult = await apiClient.requestSafe<any>(`/api/alunos/${id}`);
@@ -1089,41 +1089,7 @@ export default function StudentDetails() {
 
         {/* TAB: Progresso */}
         <TabsContent value="progress" className="space-y-6 mt-6">
-          {/* Fotos do Aluno */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Galeria de Fotos</CardTitle>
-              <CardDescription>Progresso visual do aluno</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {fotos.length > 0 ? (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {fotos.map((foto) => (
-                    <div
-                      key={foto.id}
-                      className="relative aspect-square rounded-lg overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
-                      onClick={() => setSelectedFoto(foto.url)}
-                    >
-                      <img
-                        src={foto.url}
-                        alt={foto.descricao || "Foto do aluno"}
-                        className="w-full h-full object-cover"
-                      />
-                      {foto.descricao && (
-                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs p-2">
-                          {foto.descricao}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <p>Nenhuma foto disponível</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <EvolutionTimelineExperience photos={fotos} readonly />
 
           {/* Dashboard de Progresso do Aluno */}
           <Card>
@@ -1148,22 +1114,6 @@ export default function StudentDetails() {
         </TabsContent>
       </Tabs>
 
-      {/* Dialog para ampliar foto */}
-      <Dialog open={!!selectedFoto} onOpenChange={() => setSelectedFoto(null)}>
-        <DialogContent className="max-w-4xl">
-          <DialogHeader className="sr-only">
-            <DialogTitle>Foto ampliada</DialogTitle>
-            <DialogDescription>Visualização em tamanho maior da foto do aluno.</DialogDescription>
-          </DialogHeader>
-          {selectedFoto && (
-            <img
-              src={selectedFoto}
-              alt="Foto ampliada"
-              className="w-full h-auto"
-            />
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

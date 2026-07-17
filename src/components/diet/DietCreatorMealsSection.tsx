@@ -3,7 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Combobox } from "@/components/ui/combobox";
+import { AsyncFoodCombobox } from "@/components/nutrition/AsyncFoodCombobox";
+import { FoodSubstitutionsList } from "@/components/nutrition/FoodSubstitutionsList";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -33,6 +34,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import {
   Food,
+  getFoodByIdSafe,
   macroScaleFactor,
   QuantityUnit,
 } from "@/lib/foodService";
@@ -91,10 +93,11 @@ type TotaisRefeicao = {
 
 export type DietCreatorMealsSectionProps = {
   refeicoes: RefeicaoEditor[];
-  alimentos: Food[];
+  /** @deprecated Lista completa — preferir busca async no combobox */
+  alimentos?: Food[];
   rotacao: DietRotationFormState;
   onRefeicoesChange: (next: RefeicaoEditor[]) => void;
-  calcularSubstituicoes: (item: ItemRefeicaoEditor) => Substituicao[];
+  calcularSubstituicoes?: (item: ItemRefeicaoEditor) => Substituicao[];
   calcularTotaisRefeicao: (refeicao: RefeicaoEditor) => TotaisRefeicao;
   refeicaoLabel: (refeicao: RefeicaoEditor) => string;
   syncItensRefeicao: (refeicao: RefeicaoEditor) => RefeicaoEditor;
@@ -278,9 +281,7 @@ function CreateMealDialog({
 function MealSlotEditor({
   refeicao,
   refeicaoIndex,
-  alimentos,
   canRemoveSlot,
-  calcularSubstituicoes,
   calcularTotaisRefeicao,
   onPlanoChange,
   onRemoveSlot,
@@ -291,9 +292,7 @@ function MealSlotEditor({
 }: {
   refeicao: RefeicaoEditor;
   refeicaoIndex: number;
-  alimentos: Food[];
   canRemoveSlot: boolean;
-  calcularSubstituicoes: (item: ItemRefeicaoEditor) => Substituicao[];
   calcularTotaisRefeicao: (refeicao: RefeicaoEditor) => TotaisRefeicao;
   onPlanoChange: (index: number, plano: DietPlano | "") => void;
   onRemoveSlot: (index: number) => void;
@@ -304,6 +303,7 @@ function MealSlotEditor({
     itemIndex: number,
     campo: keyof ItemRefeicaoEditor,
     valor: unknown,
+    food?: Food | null,
   ) => void;
   onDuplicateCardapio: (index: number) => void;
 }) {
@@ -371,19 +371,13 @@ function MealSlotEditor({
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="space-y-1 sm:col-span-2">
                 <Label className="text-xs">Alimento</Label>
-                <Combobox
-                  options={alimentos.map((alimento) => ({
-                    value: alimento.id,
-                    label: alimento.name,
-                    description: `${alimento.calories}kcal/${alimento.portion}g`,
-                  }))}
+                <AsyncFoodCombobox
                   value={item.alimento_id}
-                  onSelect={(value) =>
-                    onUpdateItem(refeicaoIndex, itemIndex, "alimento_id", value)
-                  }
-                  placeholder="Selecione um alimento"
-                  searchPlaceholder="Buscar alimento..."
-                  emptyText="Nenhum alimento encontrado."
+                  selectedLabel={item.alimento?.name}
+                  onSelect={(foodId, food) => {
+                    onUpdateItem(refeicaoIndex, itemIndex, "alimento_id", foodId, food);
+                  }}
+                  placeholder="Buscar alimento..."
                 />
               </div>
 
@@ -441,24 +435,7 @@ function MealSlotEditor({
             </div>
 
             {item.alimento ? (
-              <div className="border-t pt-2">
-                <p className="text-xs font-medium text-muted-foreground mb-1">
-                  Substituições equivalentes
-                </p>
-                <div className="grid grid-cols-1 gap-1">
-                  {calcularSubstituicoes(item).map((sub, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center justify-between rounded bg-muted/50 px-2 py-1 text-xs"
-                    >
-                      <span className="truncate">{sub.nome}</span>
-                      <Badge variant="secondary" className="shrink-0 ml-2 text-[10px]">
-                        {sub.quantidade}g ({sub.nutriente})
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <FoodSubstitutionsList item={item} />
             ) : null}
           </div>
         ))}
@@ -648,10 +625,9 @@ function PreviewMealsList({
 
 export function DietCreatorMealsSection({
   refeicoes,
-  alimentos,
+  alimentos = [],
   rotacao,
   onRefeicoesChange,
-  calcularSubstituicoes,
   calcularTotaisRefeicao,
   refeicaoLabel,
   syncItensRefeicao,
@@ -712,6 +688,7 @@ export function DietCreatorMealsSection({
     itemIndex: number,
     campo: keyof ItemRefeicaoEditor,
     valor: unknown,
+    food?: Food | null,
   ) => {
     const next = [...refeicoes];
     next[refeicaoIndex].itens[itemIndex] = {
@@ -720,9 +697,24 @@ export function DietCreatorMealsSection({
     } as ItemRefeicaoEditor;
 
     if (campo === "alimento_id") {
-      const alimento = alimentos.find((a) => a.id === valor);
-      if (alimento) {
-        next[refeicaoIndex].itens[itemIndex].alimento = alimento;
+      if (food) {
+        next[refeicaoIndex].itens[itemIndex].alimento = food;
+      } else {
+        const cached = alimentos.find((a) => a.id === valor);
+        if (cached) {
+          next[refeicaoIndex].itens[itemIndex].alimento = cached;
+        } else if (typeof valor === "string" && valor) {
+          void getFoodByIdSafe(valor).then((res) => {
+            if (res.success && res.data) {
+              const updated = [...refeicoes];
+              const item = updated[refeicaoIndex]?.itens[itemIndex];
+              if (item && item.alimento_id === valor) {
+                updated[refeicaoIndex].itens[itemIndex] = { ...item, alimento: res.data };
+                onRefeicoesChange(updated);
+              }
+            }
+          });
+        }
       }
     }
 
@@ -944,9 +936,7 @@ export function DietCreatorMealsSection({
                         key={`${group.key}-${index}-${refeicao.plano}`}
                         refeicao={refeicao}
                         refeicaoIndex={index}
-                        alimentos={alimentos}
                         canRemoveSlot={refeicoes.length > 1}
-                        calcularSubstituicoes={calcularSubstituicoes}
                         calcularTotaisRefeicao={calcularTotaisRefeicao}
                         onPlanoChange={editarPlanoRefeicao}
                         onRemoveSlot={removerRefeicao}

@@ -13,11 +13,10 @@ import { Plus, Trash2, Users, Pill } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import {
   Food,
-  getAllFoodsSafe,
+  getFoodByIdSafe,
   macroScaleFactor,
   QuantityUnit,
 } from '@/lib/foodService';
-import { listarSubstituicoesIsocaloricas } from '@/lib/foodEquivalence';
 import { getAlunoDisplayName } from '@/lib/aluno-display';
 import { DietReturnDateFields } from '@/components/DietReturnDateFields';
 import DietRefeicaoLivreFields from '@/components/diet/DietRefeicaoLivreFields';
@@ -97,7 +96,6 @@ function normalizeUnidadeItem(raw: unknown): QuantityUnit {
 const DietCreator = ({ dietaId }: DietCreatorProps) => {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [alimentos, setAlimentos] = useState<Alimento[]>([]);
   const [alunos, setAlunos] = useState<Aluno[]>([]);
   const [selectedAluno, setSelectedAluno] = useState<string>('');
   const [dietName, setDietName] = useState('');
@@ -137,12 +135,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
 
   const carregarDados = async () => {
     try {
-      const [alimentosRes, alunosRes] = await Promise.all([
-        getAllFoodsSafe(),
-        apiClient.getAlunosByCoachSafe()
-      ]);
-
-      setAlimentos(alimentosRes.success && Array.isArray(alimentosRes.data) ? alimentosRes.data : []);
+      const alunosRes = await apiClient.getAlunosByCoachSafe();
       setAlunos(alunosRes.success && Array.isArray(alunosRes.data) ? alunosRes.data : []);
     } catch (error) {
       toast({
@@ -206,24 +199,26 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
       const itens = itensRes.success && Array.isArray(itensRes.data) ? itensRes.data : [];
       const farmacosData = farmacosRes.success && Array.isArray(farmacosRes.data) ? farmacosRes.data : [];
 
-      // Buscar alimentos para cada item
-      let alimentosBase: Alimento[] = alimentos;
-      if (alimentosBase.length === 0) {
-        const alimentosRes = await getAllFoodsSafe();
-        alimentosBase = alimentosRes.success && Array.isArray(alimentosRes.data) ? alimentosRes.data : [];
-      }
-      const alimentosMap = new Map((Array.isArray(alimentosBase) ? alimentosBase : []).map((a: Alimento) => [a.id, a]));
-      const itensComAlimentos = await Promise.all(
-        itens.map(async (item) => {
-          if (item.alimento_id) {
-            return {
-              ...item,
-              alimentos: alimentosMap.get(item.alimento_id) || null
-            };
-          }
-          return { ...item, alimentos: null };
-        })
+      // Resolver alimentos dos itens (busca por ID, sem carregar catálogo inteiro)
+      const alimentoIds = [...new Set(
+        itens.map((item: { alimento_id?: string }) => item.alimento_id).filter(Boolean),
+      )] as string[];
+      const alimentosMap = new Map<string, Alimento>();
+      await Promise.all(
+        alimentoIds.map(async (id) => {
+          const res = await getFoodByIdSafe(id);
+          if (res.success && res.data) alimentosMap.set(id, res.data);
+        }),
       );
+      const itensComAlimentos = itens.map((item) => {
+        if (item.alimento_id) {
+          return {
+            ...item,
+            alimentos: alimentosMap.get(item.alimento_id) || null,
+          };
+        }
+        return { ...item, alimentos: null };
+      });
 
       // Preencher os dados
       setDietName(dieta.nome);
@@ -307,25 +302,6 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
       [campo]: valor
     };
     setFarmacos(novosFarmacos);
-  };
-
-  const calcularSubstituicoes = (item: ItemRefeicao): Array<{nome: string, quantidade: number, nutriente: string}> => {
-    if (!item.alimento) return [];
-    const quantidade = typeof item.quantidade === 'string'
-      ? parseFloat(item.quantidade) || 0
-      : (item.quantidade || 0);
-
-    return listarSubstituicoesIsocaloricas(
-      item.alimento,
-      quantidade,
-      item.unidade_quantidade || 'g',
-      alimentos,
-      { limit: 3 },
-    ).map((s) => ({
-      nome: s.alimento.name,
-      quantidade: Math.round(s.quantidadeEquivalente),
-      nutriente: `${s.kcalEquivalente.toFixed(0)} kcal`,
-    }));
   };
 
   const calcularTotaisRefeicao = (refeicao: Refeicao) => {
@@ -669,10 +645,8 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
 
       <DietCreatorMealsSection
         refeicoes={refeicoes}
-        alimentos={alimentos}
         rotacao={rotacao}
         onRefeicoesChange={setRefeicoes}
-        calcularSubstituicoes={calcularSubstituicoes}
         calcularTotaisRefeicao={calcularTotaisRefeicao}
         refeicaoLabel={refeicaoLabel}
         syncItensRefeicao={syncItensRefeicao}

@@ -2,6 +2,15 @@
 
 export const MIN_CHECKIN_PHOTOS = 2;
 
+export const CHECKIN_PHOTO_POSES = [
+  "frente",
+  "costas",
+  "lado_esquerdo",
+  "lado_direito",
+] as const;
+
+export type CheckinPhotoPose = (typeof CHECKIN_PHOTO_POSES)[number];
+
 export function parsePesoKgInput(raw: string): number | null {
   const trimmed = raw.trim().replace(",", ".");
   if (!trimmed) return null;
@@ -19,4 +28,5 @@ export type CheckinPhotoDraft = {
   id: string;
   file: File;
   previewUrl: string;
+  descricao?: CheckinPhotoPose;
 };

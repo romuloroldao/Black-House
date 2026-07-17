@@ -32,7 +32,17 @@ const adaptFood = (row) => {
         alcool_por_referencia: toNumber(row.alcool_por_referencia),
         info_adicional: row.info_adicional,
         autor: row.autor,
-        created_at: row.created_at
+        created_at: row.created_at,
+        updated_at: row.updated_at || row.created_at,
+        status: row.status || 'active',
+        scope: row.scope || 'platform',
+        versao_actual: row.versao_actual ?? 1,
+        unidade_referencia: row.unidade_referencia || 'g',
+        fibra_por_referencia: toNumber(row.fibra_por_referencia),
+        acucar_por_referencia: toNumber(row.acucar_por_referencia),
+        sodio_por_referencia_mg: toNumber(row.sodio_por_referencia_mg),
+        qualidade_score: row.qualidade_score != null ? Number(row.qualidade_score) : null,
+        flags_qualidade: Array.isArray(row.flags_qualidade) ? row.flags_qualidade : [],
     };
 };
 

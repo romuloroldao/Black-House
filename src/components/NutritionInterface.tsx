@@ -2,7 +2,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import DietCreator from './DietCreator';
 import NutritionManager from './NutritionManager';
 import FoodManager from './FoodManager';
-import { ChefHat, Apple, Database } from 'lucide-react';
+import FoodCatalogPage from '@/modules/food-catalog/pages/FoodCatalogPage';
+import { ChefHat, Apple, Database, ClipboardList } from 'lucide-react';
 
 const NutritionInterface = () => {
   return (
@@ -16,8 +17,12 @@ const NutritionInterface = () => {
                 Lista de Alimentos
               </TabsTrigger>
               <TabsTrigger value="manage" className="flex items-center gap-2 px-6 py-3">
-                <Database className="w-4 h-4" />
+                <ClipboardList className="w-4 h-4" />
                 Gerenciar Alimentos
+              </TabsTrigger>
+              <TabsTrigger value="catalog" className="flex items-center gap-2 px-6 py-3">
+                <Database className="w-4 h-4" />
+                Catálogo
               </TabsTrigger>
               <TabsTrigger value="creator" className="flex items-center gap-2 px-6 py-3">
                 <ChefHat className="w-4 h-4" />
@@ -33,6 +38,10 @@ const NutritionInterface = () => {
         
         <TabsContent value="manage" className="mt-0">
           <FoodManager />
+        </TabsContent>
+
+        <TabsContent value="catalog" className="mt-0">
+          <FoodCatalogPage />
         </TabsContent>
         
         <TabsContent value="creator" className="mt-0">

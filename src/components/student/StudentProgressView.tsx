@@ -1,17 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   Camera,
-  Trash2,
   Activity,
-  TrendingUp,
   ChevronRight,
   BarChart3,
-  ClipboardList,
 } from "lucide-react";
 import { toast } from "sonner";
 import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
@@ -21,14 +16,10 @@ import type { BodyMetricsResponse } from "@/types/profile-completeness";
 import CheckinStreakCard from "@/components/student/today/CheckinStreakCard";
 import { useAlunoHoje } from "@/hooks/useAlunoHoje";
 import { useSearchParams } from "react-router-dom";
-import { formatPhotoAgeLabel } from "@/lib/photo-evolution-utils";
+import EvolutionTimelineExperience from "@/components/student/progress/evolution/EvolutionTimelineExperience";
+import type { EvolutionPhoto } from "@/lib/evolution-timeline";
 
-type FotoAluno = {
-  id: string;
-  url: string;
-  descricao?: string | null;
-  created_at: string;
-};
+type FotoAluno = EvolutionPhoto;
 
 const StudentProgressView = () => {
   const { user } = useAuth();
@@ -113,7 +104,6 @@ const StudentProgressView = () => {
     loadProgressData();
   };
 
-  const ultimaFoto = fotos[0] ?? null;
   const openCheckin = () => setSearchParams({ tab: "checkin" });
   const openMetrics = () => {
     setActiveTab("metrics");
@@ -145,100 +135,11 @@ const StudentProgressView = () => {
         </TabsList>
 
         <TabsContent value="photos" className="mt-6 space-y-6">
-          <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
-            <CardContent className="space-y-4 p-5">
-              <div className="flex gap-4">
-                {ultimaFoto ? (
-                  <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl border bg-muted">
-                    <img
-                      src={ultimaFoto.url}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
-                  </div>
-                ) : (
-                  <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-xl border border-dashed border-primary/30 bg-primary/10">
-                    <Camera className="h-8 w-8 text-primary" aria-hidden />
-                  </div>
-                )}
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold">Fotos de evolução</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {ultimaFoto
-                      ? `${formatPhotoAgeLabel(ultimaFoto.created_at)} · ${fotos.length} foto${fotos.length === 1 ? "" : "s"} no total`
-                      : "Envie pelo menos 2 fotos no check-in semanal — o coach acompanha na sua ficha."}
-                  </p>
-                </div>
-              </div>
-
-              <Button className="w-full min-h-11 sm:w-auto" size="lg" onClick={openCheckin}>
-                <ClipboardList className="mr-2 h-4 w-4" />
-                {hoje?.contadores?.checkin_due ? "Fazer check-in semanal" : "Abrir check-in"}
-              </Button>
-            </CardContent>
-          </Card>
-
-          {fotos.length > 0 ? (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <TrendingUp className="h-5 w-5" />
-                  Galeria
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
-                  {fotos.map((foto) => (
-                    <Card key={foto.id} className="group relative overflow-hidden">
-                      <div className="relative aspect-square bg-muted">
-                        <img
-                          src={foto.url}
-                          alt={foto.descricao || "Foto de evolução"}
-                          className="h-full w-full object-cover"
-                        />
-                        <div className="absolute right-2 top-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                          <Button
-                            size="icon"
-                            variant="destructive"
-                            className="h-9 w-9"
-                            aria-label="Excluir foto"
-                            onClick={() => handleDeletePhoto(foto)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                      <CardContent className="p-3">
-                        {foto.descricao && (
-                          <p className="mb-1 text-sm line-clamp-2">{foto.descricao}</p>
-                        )}
-                        <p className="text-xs text-muted-foreground">
-                          {new Date(foto.created_at).toLocaleDateString("pt-BR")}
-                        </p>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center gap-4 py-12 px-6 text-center">
-                <Camera className="h-14 w-14 text-muted-foreground/80" aria-hidden />
-                <div>
-                  <p className="font-medium">Ainda sem fotos</p>
-                  <p className="mt-2 text-sm text-muted-foreground max-w-sm">
-                    As fotos são enviadas no check-in semanal (mínimo de 2). O seu coach vê na
-                    ficha e acompanha a evolução ao longo das semanas.
-                  </p>
-                </div>
-                <Button className="min-h-11" onClick={openCheckin}>
-                  <ClipboardList className="mr-2 h-4 w-4" />
-                  Ir para o check-in
-                </Button>
-              </CardContent>
-            </Card>
-          )}
+          <EvolutionTimelineExperience
+            photos={fotos}
+            onDeletePhoto={handleDeletePhoto}
+            onOpenCheckin={openCheckin}
+          />
 
           <button
             type="button"

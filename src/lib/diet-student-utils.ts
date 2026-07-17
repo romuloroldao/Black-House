@@ -9,6 +9,17 @@ export type DietItemWithFood = {
   quantidade: number;
   unidade_quantidade?: string;
   alimento_id?: string;
+  nutrientes_snapshot?: {
+    nome?: string;
+    quantidade_referencia?: number;
+    unidade_referencia?: string;
+    kcal?: number;
+    ptn?: number;
+    cho?: number;
+    lip?: number;
+    alcool?: number;
+    versao?: number;
+  } | null;
   alimentos?: {
     name?: string;
     calories?: number;
@@ -243,6 +254,20 @@ export function sortMealGroups(groups: MealGroup[]): MealGroup[] {
 export function calcularMacros(itens: DietItemWithFood[]): DietMacros {
   return itens.reduce(
     (total, item) => {
+      const snap = item.nutrientes_snapshot;
+      if (snap && snap.quantidade_referencia) {
+        const fator = macroScaleFactor(
+          item.quantidade,
+          item.unidade_quantidade,
+          snap.quantidade_referencia,
+        );
+        return {
+          totalCalorias: total.totalCalorias + (snap.kcal || 0) * fator,
+          totalProteinas: total.totalProteinas + (snap.ptn || 0) * fator,
+          totalCarboidratos: total.totalCarboidratos + (snap.cho || 0) * fator,
+          totalLipidios: total.totalLipidios + (snap.lip || 0) * fator,
+        };
+      }
       if (!item.alimentos) return total;
       const fator = macroScaleFactor(
         item.quantidade,

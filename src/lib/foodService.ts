@@ -16,6 +16,16 @@ export type Food = {
   macro_predominante?: string | null;
   equiv_livre?: boolean;
   origem_ptn?: string | null;
+  updated_at?: string | null;
+  status?: string;
+  versao_actual?: number;
+  unidade_referencia?: string;
+  fibra_por_referencia?: number | null;
+  acucar_por_referencia?: number | null;
+  sodio_por_referencia_mg?: number | null;
+  qualidade_score?: number | null;
+  flags_qualidade?: string[];
+  created_at?: string | null;
 };
 
 export type QuantityUnit = 'g' | 'ml' | 'un';
@@ -78,6 +88,16 @@ export const normalizeFood = (row: any): Food => {
     macro_predominante: row?.macro_predominante != null ? String(row.macro_predominante) : null,
     equiv_livre: row?.equiv_livre === true,
     origem_ptn: row?.origem_ptn != null ? String(row.origem_ptn) : null,
+    updated_at: row?.updated_at != null ? String(row.updated_at) : null,
+    status: row?.status != null ? String(row.status) : undefined,
+    versao_actual: row?.versao_actual != null ? Number(row.versao_actual) : undefined,
+    unidade_referencia: row?.unidade_referencia != null ? String(row.unidade_referencia) : 'g',
+    fibra_por_referencia: toNumber(row?.fibra_por_referencia, 0),
+    acucar_por_referencia: toNumber(row?.acucar_por_referencia, 0),
+    sodio_por_referencia_mg: toNumber(row?.sodio_por_referencia_mg, 0),
+    qualidade_score: row?.qualidade_score != null ? Number(row.qualidade_score) : null,
+    flags_qualidade: Array.isArray(row?.flags_qualidade) ? row.flags_qualidade : [],
+    created_at: row?.created_at != null ? String(row.created_at) : null,
   };
 };
 
@@ -131,6 +151,18 @@ export const getAllFoodsSafe = async (): Promise<ApiResult<Food[]>> => {
   return {
     success: true,
     data: data.map(normalizeFood)
+  };
+};
+
+export const searchFoodsSafe = async (q: string): Promise<ApiResult<Food[]>> => {
+  const term = String(q || '').trim();
+  if (!term) return getAllFoodsSafe();
+  const result = await apiClient.requestSafe<any[]>(API_CONTRACT.alimentos.list({ q: term }));
+  if (!result.success) return result as ApiResult<Food[]>;
+  const data = Array.isArray(result.data) ? result.data : [];
+  return {
+    success: true,
+    data: data.map(normalizeFood),
   };
 };
 

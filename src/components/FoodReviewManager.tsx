@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Edit, Trash2, AlertCircle, Check, X, Merge, Search, RefreshCw, ArrowLeft } from "lucide-react";
 import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
-import { Food, getAllFoodsSafe, getMacroGroup, kcalFromMacrosFood } from "@/lib/foodService";
+import { Food, getAllFoodsSafe, getMacroGroup, kcalFromMacrosFood, searchFoodsSafe } from "@/lib/foodService";
 
 type Alimento = Food & { created_at?: string | null };
 
@@ -40,6 +40,8 @@ export default function FoodReviewManager({ onBack }: Props) {
   const [isMergeDialogOpen, setIsMergeDialogOpen] = useState(false);
   const [mergeTarget, setMergeTarget] = useState<string>("");
   const [activeTab, setActiveTab] = useState("review");
+  const [searchResults, setSearchResults] = useState<Alimento[]>([]);
+  const [searching, setSearching] = useState(false);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -73,7 +75,9 @@ export default function FoodReviewManager({ onBack }: Props) {
     }
   };
 
-  // Normaliza o nome do alimento para comparação
+  const getFoodDisplayName = (alimento: Alimento): string =>
+    String(alimento.name || (alimento as { nome?: string }).nome || "").trim();
+
   const normalizarNome = (nome: string | null | undefined): string => {
     return String(nome || '')
       .toLowerCase()
@@ -82,6 +86,42 @@ export default function FoodReviewManager({ onBack }: Props) {
       .replace(/\s+/g, " ")
       .trim();
   };
+
+  const matchesSearch = (alimento: Alimento, term: string): boolean => {
+    const q = normalizarNome(term);
+    if (!q) return true;
+    const name = normalizarNome(getFoodDisplayName(alimento));
+    const tipo = normalizarNome(alimento.tipo_nome || '');
+    const id = String(alimento.id || '').toLowerCase();
+    return name.includes(q) || tipo.includes(q) || id.includes(q);
+  };
+
+  useEffect(() => {
+    const term = searchTerm.trim();
+    if (!term) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setSearching(true);
+      const res = await searchFoodsSafe(term);
+      if (cancelled) return;
+      if (res.success && Array.isArray(res.data)) {
+        setSearchResults(res.data);
+      } else {
+        setSearchResults(alimentos.filter((a) => matchesSearch(a, term)));
+      }
+      setSearching(false);
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [searchTerm, alimentos]);
 
   // Extrai o nome base do alimento (remove variações como "cozido", "grelhado", etc.)
   const extrairNomeBase = (nome: string): string => {
@@ -118,7 +158,7 @@ export default function FoodReviewManager({ onBack }: Props) {
     const grupos: { [key: string]: Alimento[] } = {};
     
     for (const alimento of alimentos) {
-      const nomeBase = extrairNomeBase(alimento.name);
+      const nomeBase = extrairNomeBase(getFoodDisplayName(alimento));
       
       if (!grupos[nomeBase]) {
         grupos[nomeBase] = [];
@@ -136,29 +176,56 @@ export default function FoodReviewManager({ onBack }: Props) {
   };
 
   // Alimentos recentes (últimos 30 dias) para revisão
-  const alimentosRecentes = alimentos.filter(a => {
-    if (!a.created_at) return false;
-    const dataLimite = new Date();
-    dataLimite.setDate(dataLimite.getDate() - 30);
-    return new Date(a.created_at) >= dataLimite;
-  });
+  const alimentosRecentes = useMemo(
+    () =>
+      alimentos.filter((a) => {
+        if (!a.created_at) return false;
+        const dataLimite = new Date();
+        dataLimite.setDate(dataLimite.getDate() - 30);
+        return new Date(a.created_at) >= dataLimite;
+      }),
+    [alimentos],
+  );
 
   // Alimentos com valores suspeitos
-  const alimentosSuspeitos = alimentos.filter(a => {
-    const alc = a.alcohol ?? 0;
-    const kcalCalculada = kcalFromMacrosFood(a.protein, a.carbs, a.fat, alc);
-    const diferencaPerc = Math.abs(a.calories - kcalCalculada) / (kcalCalculada || 1) * 100;
-    return diferencaPerc > 15 || (a.carbs === 0 && a.protein === 0 && a.fat === 0 && alc === 0);
-  });
-
-  const filteredAlimentos = alimentosRecentes.filter(a =>
-    String(a.name || '').toLowerCase().includes(searchTerm.toLowerCase())
+  const alimentosSuspeitos = useMemo(
+    () =>
+      alimentos.filter((a) => {
+        const alc = a.alcohol ?? 0;
+        const kcalCalculada = kcalFromMacrosFood(a.protein, a.carbs, a.fat, alc);
+        const diferencaPerc = Math.abs(a.calories - kcalCalculada) / (kcalCalculada || 1) * 100;
+        return diferencaPerc > 15 || (a.carbs === 0 && a.protein === 0 && a.fat === 0 && alc === 0);
+      }),
+    [alimentos],
   );
+
+  const trimmedSearch = searchTerm.trim();
+
+  /** Na aba Recentes: sem busca → só últimos 30 dias; com busca → resultados do servidor */
+  const filteredAlimentos = useMemo(() => {
+    if (!trimmedSearch) return alimentosRecentes;
+    return searchResults;
+  }, [alimentosRecentes, trimmedSearch, searchResults]);
+
+  const filteredSuspeitos = useMemo(
+    () => alimentosSuspeitos.filter((a) => matchesSearch(a, trimmedSearch)),
+    [alimentosSuspeitos, trimmedSearch],
+  );
+
+  const filteredDuplicateGroups = useMemo(() => {
+    if (!trimmedSearch) return duplicateGroups;
+    const q = normalizarNome(trimmedSearch);
+    return duplicateGroups.filter(
+      (g) =>
+        normalizarNome(g.baseNome).includes(q) ||
+        g.alimentos.some((a) => matchesSearch(a, trimmedSearch)),
+    );
+  }, [duplicateGroups, trimmedSearch]);
 
   const handleEdit = (alimento: Alimento) => {
     setEditingFood(alimento);
     setFormData({
-      name: alimento.name,
+      name: getFoodDisplayName(alimento),
       portion: alimento.portion.toString(),
       calories: alimento.calories.toString(),
       carbs: alimento.carbs.toString(),
@@ -349,34 +416,64 @@ export default function FoodReviewManager({ onBack }: Props) {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          <TabsTrigger value="review">Revisar Recentes</TabsTrigger>
-          <TabsTrigger value="suspicious">
-            Valores Suspeitos
-            {alimentosSuspeitos.length > 0 && (
-              <Badge variant="destructive" className="ml-2">{alimentosSuspeitos.length}</Badge>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <TabsList>
+            <TabsTrigger value="review">Revisar Recentes</TabsTrigger>
+            <TabsTrigger value="suspicious">
+              Valores Suspeitos
+              {alimentosSuspeitos.length > 0 && (
+                <Badge variant="destructive" className="ml-2">{alimentosSuspeitos.length}</Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="duplicates">
+              Duplicados
+              {duplicateGroups.length > 0 && (
+                <Badge variant="secondary" className="ml-2">{duplicateGroups.length}</Badge>
+              )}
+            </TabsTrigger>
+          </TabsList>
+
+          <div className="relative w-full sm:max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Buscar por nome, categoria ou ID..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+        </div>
+
+        {trimmedSearch && (
+          <p className="text-xs text-muted-foreground">
+            {searching
+              ? "Buscando no catálogo..."
+              : activeTab === "review"
+                ? "Busca em todo o catálogo"
+                : `Filtrando ${activeTab === "suspicious" ? "valores suspeitos" : "duplicados"}`}
+            {!searching && (
+              <>
+                {" · "}
+                {activeTab === "review"
+                  ? filteredAlimentos.length
+                  : activeTab === "suspicious"
+                    ? filteredSuspeitos.length
+                    : filteredDuplicateGroups.length}{" "}
+                resultado(s)
+              </>
             )}
-          </TabsTrigger>
-          <TabsTrigger value="duplicates">
-            Duplicados
-            {duplicateGroups.length > 0 && (
-              <Badge variant="secondary" className="ml-2">{duplicateGroups.length}</Badge>
-            )}
-          </TabsTrigger>
-        </TabsList>
+          </p>
+        )}
 
         <TabsContent value="review" className="space-y-4">
-          <div className="flex items-center gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar alimento..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-          </div>
+          {!trimmedSearch && alimentosRecentes.length === 0 && (
+            <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                Nenhum alimento importado nos últimos 30 dias. Use a busca acima para encontrar qualquer item do catálogo.
+              </AlertDescription>
+            </Alert>
+          )}
 
           <Card>
             <ScrollArea className="h-[500px]">
@@ -393,9 +490,25 @@ export default function FoodReviewManager({ onBack }: Props) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredAlimentos.map((alimento) => (
+                  {searching ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                        <RefreshCw className="h-5 w-5 motion-safe:animate-spin inline-block mr-2" />
+                        Buscando alimentos...
+                      </TableCell>
+                    </TableRow>
+                  ) : filteredAlimentos.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                        {trimmedSearch
+                          ? "Nenhum alimento encontrado para esta busca"
+                          : "Nenhum alimento recente para revisar"}
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredAlimentos.map((alimento) => (
                     <TableRow key={alimento.id}>
-                      <TableCell className="font-medium">{alimento.name}</TableCell>
+                      <TableCell className="font-medium">{getFoodDisplayName(alimento)}</TableCell>
                       <TableCell>
                         <Badge variant="outline">{getTipoNome(alimento)}</Badge>
                       </TableCell>
@@ -414,7 +527,8 @@ export default function FoodReviewManager({ onBack }: Props) {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    ))
+                  )}
                 </TableBody>
               </Table>
             </ScrollArea>
@@ -443,7 +557,16 @@ export default function FoodReviewManager({ onBack }: Props) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {alimentosSuspeitos.map((alimento) => {
+                  {filteredSuspeitos.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                        {trimmedSearch
+                          ? "Nenhum valor suspeito encontrado para esta busca"
+                          : "Nenhum valor suspeito detectado"}
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredSuspeitos.map((alimento) => {
                     const kcalCalculada = kcalFromMacrosFood(
                       alimento.protein,
                       alimento.carbs,
@@ -454,7 +577,7 @@ export default function FoodReviewManager({ onBack }: Props) {
                     
                     return (
                       <TableRow key={alimento.id}>
-                        <TableCell className="font-medium">{alimento.name}</TableCell>
+                        <TableCell className="font-medium">{getFoodDisplayName(alimento)}</TableCell>
                         <TableCell className="text-right">{alimento.calories}</TableCell>
                         <TableCell className="text-right">{kcalCalculada.toFixed(1)}</TableCell>
                         <TableCell className="text-right">
@@ -474,7 +597,8 @@ export default function FoodReviewManager({ onBack }: Props) {
                         </TableCell>
                       </TableRow>
                     );
-                  })}
+                  })
+                  )}
                 </TableBody>
               </Table>
             </ScrollArea>
@@ -500,7 +624,7 @@ export default function FoodReviewManager({ onBack }: Props) {
           </div>
 
           <div className="space-y-4">
-            {duplicateGroups.map((grupo) => (
+            {filteredDuplicateGroups.map((grupo) => (
               <Card key={grupo.baseNome}>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg capitalize flex items-center gap-2">
@@ -530,7 +654,7 @@ export default function FoodReviewManager({ onBack }: Props) {
                               onCheckedChange={() => toggleSelectForMerge(alimento.id)}
                             />
                           </TableCell>
-                          <TableCell className="font-medium">{alimento.name}</TableCell>
+                          <TableCell className="font-medium">{getFoodDisplayName(alimento)}</TableCell>
                           <TableCell className="text-right">{alimento.calories}</TableCell>
                           <TableCell className="text-right">{alimento.carbs}g</TableCell>
                           <TableCell className="text-right">{alimento.protein}g</TableCell>
@@ -553,12 +677,22 @@ export default function FoodReviewManager({ onBack }: Props) {
               </Card>
             ))}
 
-            {duplicateGroups.length === 0 && (
+            {filteredDuplicateGroups.length === 0 && (
               <Card>
                 <CardContent className="py-8 text-center">
-                  <Check className="h-12 w-12 mx-auto text-green-500 mb-4" />
-                  <p className="text-lg font-medium">Nenhum duplicado encontrado!</p>
-                  <p className="text-muted-foreground">Sua base de alimentos está organizada.</p>
+                  {trimmedSearch ? (
+                    <>
+                      <Search className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                      <p className="text-lg font-medium">Nenhum duplicado para esta busca</p>
+                      <p className="text-muted-foreground">Tente outro termo ou limpe o filtro.</p>
+                    </>
+                  ) : duplicateGroups.length === 0 ? (
+                    <>
+                      <Check className="h-12 w-12 mx-auto text-green-500 mb-4" />
+                      <p className="text-lg font-medium">Nenhum duplicado encontrado!</p>
+                      <p className="text-muted-foreground">Sua base de alimentos está organizada.</p>
+                    </>
+                  ) : null}
                 </CardContent>
               </Card>
             )}
@@ -695,7 +829,7 @@ export default function FoodReviewManager({ onBack }: Props) {
                   const alimento = alimentos.find(a => a.id === id);
                   return alimento ? (
                     <SelectItem key={id} value={id}>
-                      {alimento.name} ({alimento.calories} kcal)
+                      {getFoodDisplayName(alimento)} ({alimento.calories} kcal)
                     </SelectItem>
                   ) : null;
                 })}

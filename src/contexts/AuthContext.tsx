@@ -35,7 +35,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [authInitialized, setAuthInitialized] = useState(false); // REACT-AUTH-BOOTSTRAP-DEADLOCK-FIX-009
-  const [role, setRole] = useState<'coach' | 'aluno' | undefined>(undefined);
+  const [role, setRole] = useState<'coach' | 'aluno' | 'admin' | undefined>(undefined);
   const [payment_status, setPaymentStatus] = useState<'CURRENT' | 'OVERDUE' | 'PENDING_AFTER_DUE_DATE' | undefined>(undefined);
 
   useEffect(() => {

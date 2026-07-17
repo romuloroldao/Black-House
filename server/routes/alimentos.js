@@ -9,6 +9,7 @@ const { validateUUIDParam } = require('../utils/uuid-validator');
 const validateRole = require('../middleware/validateRole');
 const { adaptFood } = require('../adapters/foodAdapter');
 const { normalizeOrigemPtn, auditAlimentosNutricao, kcalFromMacros, roundNutrient } = require('../utils/nutrition-alimento-utils');
+const { normalizeFoodName } = require('../utils/food-normalize');
 const {
     listarSubstituicoesIsocaloricas,
     kcalPorPorcao,
@@ -48,11 +49,23 @@ module.exports = function createAlimentosRouter(pool, authenticate, domainSchema
         return Number.isFinite(n) ? n : fallback;
     }
 
-    // GET /api/alimentos - Listar alimentos (coach e aluno)
+    // GET /api/alimentos - Listar alimentos (coach e aluno); ?q= filtra por nome, categoria ou ID
     router.get('/', authenticate, domainSchemaGuard, validateRole(foodReadRoles), async (req, res) => {
         try {
+            const rawQ = req.query.q != null ? String(req.query.q).trim() : '';
+            const params = [];
+            let whereSql = '';
+            if (rawQ) {
+                params.push(`%${rawQ}%`);
+                whereSql = ` WHERE (
+                    a.nome ILIKE $1
+                    OR COALESCE(t.nome_tipo, '') ILIKE $1
+                    OR a.id::text ILIKE $1
+                )`;
+            }
             const result = await pool.query(
-                `${FOOD_SELECT} ORDER BY a.nome ASC`
+                `${FOOD_SELECT}${whereSql} ORDER BY a.nome ASC`,
+                params,
             );
             res.json(result.rows.map(adaptFood));
         } catch (error) {
@@ -255,6 +268,7 @@ module.exports = function createAlimentosRouter(pool, authenticate, domainSchema
             const result = await pool.query(
                 `INSERT INTO public.alimentos (
                     nome,
+                    nome_normalizado,
                     origem_ptn,
                     tipo_id,
                     quantidade_referencia_g,
@@ -264,8 +278,9 @@ module.exports = function createAlimentosRouter(pool, authenticate, domainSchema
                     lip_por_referencia,
                     alcool_por_referencia,
                     info_adicional,
-                    autor
-                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                    autor,
+                    updated_at
+                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now())
                  RETURNING 
                     id,
                     nome,
@@ -282,6 +297,7 @@ module.exports = function createAlimentosRouter(pool, authenticate, domainSchema
                     created_at`,
                 [
                     nome,
+                    normalizeFoodName(nome),
                     origem_ptn,
                     tipo_id || null,
                     quantidade_referencia_g ?? 100,
@@ -347,6 +363,7 @@ module.exports = function createAlimentosRouter(pool, authenticate, domainSchema
                 const v = payload.nome ?? payload.name;
                 if (v != null && String(v).trim() !== '') {
                     m.nome = String(v).trim();
+                    m.nome_normalizado = normalizeFoodName(m.nome);
                 }
             }
             if (payload.origem_ptn !== undefined || payload.origin !== undefined) {
@@ -406,17 +423,19 @@ module.exports = function createAlimentosRouter(pool, authenticate, domainSchema
             const result = await pool.query(
                 `UPDATE public.alimentos
                  SET nome = $1,
-                     origem_ptn = $2,
-                     tipo_id = $3,
-                     quantidade_referencia_g = $4,
-                     kcal_por_referencia = $5,
-                     ptn_por_referencia = $6,
-                     cho_por_referencia = $7,
-                     lip_por_referencia = $8,
-                     alcool_por_referencia = $9,
-                     info_adicional = $10,
-                     autor = $11
-                 WHERE id = $12
+                     nome_normalizado = COALESCE($2, nome_normalizado),
+                     origem_ptn = $3,
+                     tipo_id = $4,
+                     quantidade_referencia_g = $5,
+                     kcal_por_referencia = $6,
+                     ptn_por_referencia = $7,
+                     cho_por_referencia = $8,
+                     lip_por_referencia = $9,
+                     alcool_por_referencia = $10,
+                     info_adicional = $11,
+                     autor = $12,
+                     updated_at = now()
+                 WHERE id = $13
                  RETURNING 
                     id,
                     nome,
@@ -433,6 +452,7 @@ module.exports = function createAlimentosRouter(pool, authenticate, domainSchema
                     created_at`,
                 [
                     m.nome,
+                    m.nome_normalizado || normalizeFoodName(m.nome),
                     m.origem_ptn,
                     m.tipo_id,
                     m.quantidade_referencia_g,

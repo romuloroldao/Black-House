@@ -32,7 +32,12 @@ export const API_CONTRACT = {
       `${API_BASE}/api/alunos/${encodeURIComponent(alunoId)}/portal-status`,
   },
   alimentos: {
-    list: () => `${API_BASE}/api/alimentos`,
+    list: (query?: { q?: string }) => {
+      const params = new URLSearchParams();
+      if (query?.q?.trim()) params.set('q', query.q.trim());
+      const qs = params.toString();
+      return `${API_BASE}/api/alimentos${qs ? `?${qs}` : ''}`;
+    },
     nutritionAudit: (query?: Record<string, string | number | undefined>) => {
       const q = new URLSearchParams();
       if (query?.tolerancePct != null) q.set('tolerancePct', String(query.tolerancePct));
@@ -53,6 +58,36 @@ export const API_CONTRACT = {
       const qs = q.toString();
       return `${API_BASE}/api/alimentos/${alimentoId}/substituicoes${qs ? `?${qs}` : ''}`;
     },
+  },
+  foodCatalog: {
+    list: (query?: Record<string, string | number | undefined>) => {
+      const q = new URLSearchParams();
+      if (query) {
+        for (const [k, v] of Object.entries(query)) {
+          if (v != null && v !== '') q.set(k, String(v));
+        }
+      }
+      const qs = q.toString();
+      return `${API_BASE}/api/food-catalog${qs ? `?${qs}` : ''}`;
+    },
+    byId: (id: string) => `${API_BASE}/api/food-catalog/${encodeURIComponent(id)}`,
+    usage: (id: string) => `${API_BASE}/api/food-catalog/${encodeURIComponent(id)}/usage`,
+    history: (id: string, query?: { page?: number; pageSize?: number }) => {
+      const q = new URLSearchParams();
+      if (query?.page != null) q.set('page', String(query.page));
+      if (query?.pageSize != null) q.set('pageSize', String(query.pageSize));
+      const qs = q.toString();
+      return `${API_BASE}/api/food-catalog/${encodeURIComponent(id)}/history${qs ? `?${qs}` : ''}`;
+    },
+    versions: (id: string) => `${API_BASE}/api/food-catalog/${encodeURIComponent(id)}/versions`,
+    tipos: () => `${API_BASE}/api/food-catalog/tipos`,
+    qualityReport: () => `${API_BASE}/api/food-catalog/quality-report`,
+    checkDuplicate: () => `${API_BASE}/api/food-catalog/check-duplicate`,
+    duplicates: (limit?: number) =>
+      `${API_BASE}/api/food-catalog/duplicates${limit != null ? `?limit=${limit}` : ''}`,
+    merge: (id: string) => `${API_BASE}/api/food-catalog/${encodeURIComponent(id)}/merge`,
+    create: () => `${API_BASE}/api/food-catalog`,
+    update: (id: string) => `${API_BASE}/api/food-catalog/${encodeURIComponent(id)}`,
   },
   mensagens: {
     list: () => `${API_BASE}/api/mensagens`,
@@ -256,6 +291,16 @@ const CONTRACT_PATTERNS = [
   '/api/alimentos',
   '/api/alimentos/nutrition-audit',
   '/api/alimentos/:id',
+  '/api/alimentos/:id/substituicoes',
+  '/api/food-catalog',
+  '/api/food-catalog/quality-report',
+  '/api/food-catalog/tipos',
+  '/api/food-catalog/duplicates',
+  '/api/food-catalog/:id/merge',
+  '/api/food-catalog/:id',
+  '/api/food-catalog/:id/usage',
+  '/api/food-catalog/:id/history',
+  '/api/food-catalog/:id/versions',
   '/api/dietas',
   '/api/dietas/:id',
   '/api/feedbacks-alunos',

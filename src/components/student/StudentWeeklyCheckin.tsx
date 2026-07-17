@@ -178,7 +178,7 @@ export default function StudentWeeklyCheckin({
         const publicUrl =
           uploadResult?.url ||
           apiClient.getPublicUrl("progress-photos", `${alunoId}/${fileName}`);
-        fotosPayload.push({ url: publicUrl });
+        fotosPayload.push({ url: publicUrl, descricao: draft.descricao || null });
       }
 
       const response = await apiClient.requestSafe<{ success?: boolean }>("/api/checkins", {

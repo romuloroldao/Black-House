@@ -19,6 +19,7 @@ const resolveAlunoOrFailMiddleware = require('../middleware/resolveAlunoOrFail')
 const resolveCoachOrFailMiddleware = require('../middleware/resolveCoachOrFail');
 const validateRole = require('../middleware/validateRole');
 const createAlimentosRouter = require('./alimentos');
+const createFoodCatalogRouter = require('./food-catalog');
 const createUploadsRouter = require('./uploads');
 const createEducationalContentsRouter = require('./educational-contents');
 const { deleteUserByUserRoleId } = require('../utils/deleteUserByUserRoleId');
@@ -216,6 +217,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
 
   // ROTAS: ALIMENTOS (montadas antes de rotas paramétricas)
   router.use('/alimentos', createAlimentosRouter(pool, authenticate, domainSchemaGuard));
+  router.use('/food-catalog', createFoodCatalogRouter(pool, authenticate, domainSchemaGuard));
 
   // ROTAS: UPLOADS — PostgreSQL + ficheiros em disco (sem Supabase Storage)
   router.use('/uploads', createUploadsRouter(pool, authenticate));
@@ -4200,11 +4202,21 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
 
         if (req.user.role === 'admin') {
           const r = await pool.query(
-            `SELECT f.id, f.aluno_id, a.coach_id, f.url, f.descricao, f.created_at
+            `SELECT
+               f.id,
+               f.aluno_id,
+               a.coach_id,
+               f.url,
+               f.descricao,
+               f.weekly_checkin_id,
+               f.created_at,
+               wc.created_at AS checkin_created_at,
+               wc.peso_kg
              FROM public.fotos_alunos f
              LEFT JOIN public.alunos a ON a.id = f.aluno_id
+             LEFT JOIN public.weekly_checkins wc ON wc.id = f.weekly_checkin_id
              WHERE f.aluno_id = $1
-             ORDER BY f.created_at DESC NULLS LAST`,
+             ORDER BY COALESCE(wc.created_at, f.created_at) DESC NULLS LAST, f.created_at ASC NULLS LAST`,
             [alunoId],
           );
           return res.json(r.rows);
@@ -4216,11 +4228,21 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
             return res.status(403).json({ error: 'Sem permissão para este aluno', error_code: 'FORBIDDEN' });
           }
           const r = await pool.query(
-            `SELECT f.id, f.aluno_id, a.coach_id, f.url, f.descricao, f.created_at
+            `SELECT
+               f.id,
+               f.aluno_id,
+               a.coach_id,
+               f.url,
+               f.descricao,
+               f.weekly_checkin_id,
+               f.created_at,
+               wc.created_at AS checkin_created_at,
+               wc.peso_kg
              FROM public.fotos_alunos f
              LEFT JOIN public.alunos a ON a.id = f.aluno_id
+             LEFT JOIN public.weekly_checkins wc ON wc.id = f.weekly_checkin_id
              WHERE f.aluno_id = $1
-             ORDER BY f.created_at DESC NULLS LAST`,
+             ORDER BY COALESCE(wc.created_at, f.created_at) DESC NULLS LAST, f.created_at ASC NULLS LAST`,
             [alunoId],
           );
           return res.json(r.rows);
@@ -4230,11 +4252,21 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
         }
         const r = await pool.query(
-          `SELECT f.id, f.aluno_id, a.coach_id, f.url, f.descricao, f.created_at
+          `SELECT
+             f.id,
+             f.aluno_id,
+             a.coach_id,
+             f.url,
+             f.descricao,
+             f.weekly_checkin_id,
+             f.created_at,
+             wc.created_at AS checkin_created_at,
+             wc.peso_kg
            FROM public.fotos_alunos f
            LEFT JOIN public.alunos a ON a.id = f.aluno_id
+           LEFT JOIN public.weekly_checkins wc ON wc.id = f.weekly_checkin_id
            WHERE f.aluno_id = $1
-           ORDER BY f.created_at DESC NULLS LAST`,
+           ORDER BY COALESCE(wc.created_at, f.created_at) DESC NULLS LAST, f.created_at ASC NULLS LAST`,
           [alunoId],
         );
         return res.json(r.rows);
