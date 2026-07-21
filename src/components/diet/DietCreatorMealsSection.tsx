@@ -37,7 +37,9 @@ import {
   getFoodByIdSafe,
   macroScaleFactor,
   QuantityUnit,
+  quantityUnitLabel,
 } from "@/lib/foodService";
+import FoodSubstitutionDialog from "@/components/nutrition/FoodSubstitutionDialog";
 import { normalizePlanoLetter } from "@/lib/diet-plano";
 import {
   buildMealGroups,
@@ -288,6 +290,7 @@ function MealSlotEditor({
   onAddItem,
   onRemoveItem,
   onUpdateItem,
+  onApplySubstitution,
   onDuplicateCardapio,
 }: {
   refeicao: RefeicaoEditor;
@@ -305,10 +308,21 @@ function MealSlotEditor({
     valor: unknown,
     food?: Food | null,
   ) => void;
+  onApplySubstitution: (
+    refIndex: number,
+    itemIndex: number,
+    foodId: string,
+    quantidade: number,
+    food?: Food | null,
+  ) => void;
   onDuplicateCardapio: (index: number) => void;
 }) {
+  const { toast } = useToast();
   const style = planoVisualStyle(refeicao.plano);
   const totais = calcularTotaisRefeicao(refeicao);
+  const [subItemIndex, setSubItemIndex] = useState<number | null>(null);
+
+  const subItem = subItemIndex != null ? refeicao.itens[subItemIndex] : null;
 
   return (
     <div
@@ -435,11 +449,40 @@ function MealSlotEditor({
             </div>
 
             {item.alimento ? (
-              <FoodSubstitutionsList item={item} />
+              <FoodSubstitutionsList
+                item={item}
+                onRequestSubstituir={() => setSubItemIndex(itemIndex)}
+              />
             ) : null}
           </div>
         ))}
       </div>
+
+      <FoodSubstitutionDialog
+        open={subItemIndex != null && Boolean(subItem?.alimento)}
+        onOpenChange={(open) => {
+          if (!open) setSubItemIndex(null);
+        }}
+        alimentoAtual={subItem?.alimento ?? null}
+        quantidadeAtual={subItem?.quantidade ?? 0}
+        unidadeQuantidade={subItem?.unidade_quantidade || "g"}
+        onSubstituir={(novoAlimentoId, novaQuantidade, novoAlimento) => {
+          if (subItemIndex == null) return;
+          const un = quantityUnitLabel(subItem?.unidade_quantidade || "g");
+          onApplySubstitution(
+            refeicaoIndex,
+            subItemIndex,
+            novoAlimentoId,
+            novaQuantidade,
+            novoAlimento ?? null,
+          );
+          toast({
+            title: "Alimento substituído",
+            description: `${novoAlimento?.name ?? "Substituto"} (${novaQuantidade}${un}) — mesmas kcal.`,
+          });
+          setSubItemIndex(null);
+        }}
+      />
 
       <div className="flex flex-col gap-2 sm:flex-row">
         <Button
@@ -721,6 +764,40 @@ export function DietCreatorMealsSection({
     onRefeicoesChange(next);
   };
 
+  const aplicarSubstituicao = (
+    refeicaoIndex: number,
+    itemIndex: number,
+    foodId: string,
+    quantidade: number,
+    food?: Food | null,
+  ) => {
+    const next = [...refeicoes];
+    const item = next[refeicaoIndex]?.itens[itemIndex];
+    if (!item) return;
+
+    next[refeicaoIndex].itens[itemIndex] = {
+      ...item,
+      alimento_id: foodId,
+      quantidade,
+      alimento: food ?? item.alimento,
+    };
+
+    if (!food && foodId) {
+      void getFoodByIdSafe(foodId).then((res) => {
+        if (res.success && res.data) {
+          const updated = [...refeicoes];
+          const current = updated[refeicaoIndex]?.itens[itemIndex];
+          if (current && current.alimento_id === foodId) {
+            updated[refeicaoIndex].itens[itemIndex] = { ...current, alimento: res.data };
+            onRefeicoesChange(updated);
+          }
+        }
+      });
+    }
+
+    onRefeicoesChange(next);
+  };
+
   const removerRefeicao = (refeicaoIndex: number) => {
     if (refeicoes.length <= 1) return;
     onRefeicoesChange(refeicoes.filter((_, i) => i !== refeicaoIndex));
@@ -943,6 +1020,7 @@ export function DietCreatorMealsSection({
                         onAddItem={adicionarItem}
                         onRemoveItem={removerItem}
                         onUpdateItem={atualizarItem}
+                        onApplySubstitution={aplicarSubstituicao}
                         onDuplicateCardapio={(i) => duplicarCardapio(i, true)}
                       />
                     ))}

@@ -506,15 +506,49 @@ const authenticate = async (req, res, next) => {
         }
 
         let payment_status = null;
+        let acesso_operacional = null;
+        let acesso_operacional_em = null;
+        let access_block_reason = null;
+
         if (role === 'aluno') {
             const financialStatus = await getStudentPaymentStatus(pool, { email: user.email });
             payment_status = financialStatus.payment_status;
+
+            try {
+                const { queryAlunoRowsFullForUser } = require('./utils/aluno-resolve-by-user');
+                const {
+                    normalizeAcesso,
+                    resolveEffectiveAccess,
+                } = require('./utils/aluno-platform-access');
+                const rows = await queryAlunoRowsFullForUser(pool, user.id);
+                if (rows.length === 0) {
+                    acesso_operacional = 'pending';
+                    access_block_reason = 'not_linked';
+                } else {
+                    acesso_operacional = normalizeAcesso(rows[0].acesso_operacional);
+                    acesso_operacional_em = rows[0].acesso_operacional_em ?? null;
+                    const effective = resolveEffectiveAccess({
+                        linked: true,
+                        acesso_operacional,
+                        payment_status,
+                    });
+                    access_block_reason = effective.allowed ? null : effective.reason;
+                }
+            } catch (acessoErr) {
+                logger.warn('authenticate: falha ao resolver acesso operacional', {
+                    userId: user.id,
+                    error: acessoErr?.message,
+                });
+            }
         }
 
         req.user = {
             ...user,
             role,
-            payment_status: payment_status
+            payment_status: payment_status,
+            acesso_operacional,
+            acesso_operacional_em,
+            access_block_reason,
         };
 
         next();
@@ -969,18 +1003,34 @@ app.post('/auth/login', authLimiter, async (req, res) => {
 
 // Obter usuário atual com role e payment_status
 app.get('/auth/user', authenticate, (req, res) => {
-    const { id, email, created_at, email_confirmed_at, role, payment_status } = req.user;
-    res.json({ 
-        user: { 
-            id, 
-            email, 
+    const {
+        id,
+        email,
+        created_at,
+        email_confirmed_at,
+        role,
+        payment_status,
+        acesso_operacional,
+        acesso_operacional_em,
+        access_block_reason,
+    } = req.user;
+    res.json({
+        user: {
+            id,
+            email,
             created_at,
             email_confirmed_at,
             role,
-            payment_status
+            payment_status,
+            acesso_operacional,
+            acesso_operacional_em,
+            access_block_reason,
         },
         role,
-        payment_status
+        payment_status,
+        acesso_operacional,
+        acesso_operacional_em,
+        access_block_reason,
     });
 });
 

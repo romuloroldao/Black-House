@@ -190,7 +190,12 @@ SELECT
   a.origem_ptn,
   a.info_adicional,
   'Migração inicial do catálogo',
-  a.autor::uuid,
+  -- autor é text legado; só castar UUID válido (evita falhar o backfill)
+  CASE
+    WHEN a.autor ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    THEN a.autor::uuid
+    ELSE NULL
+  END,
   COALESCE(a.created_at, now())
 FROM public.alimentos a
 WHERE NOT EXISTS (

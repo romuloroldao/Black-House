@@ -148,15 +148,44 @@ async function fetchOverdueCandidates(pool) {
 
 async function registerDispatch(pool, row, milestone, { skipOverdueUnique } = {}) {
   const channel = row.notification_channel || CHANNEL_IN_APP_AND_EMAIL;
-  const dispatchOn = new Date().toISOString().slice(0, 10);
+  // Data civil em America/Sao_Paulo (evita UTC mudar o dia perto da meia-noite)
+  const dispatchOnRow = await pool.query(
+    `SELECT (CURRENT_TIMESTAMP AT TIME ZONE $1)::date::text AS d`,
+    [DEFAULT_TZ],
+  );
+  const dispatchOn = dispatchOnRow.rows[0]?.d || new Date().toISOString().slice(0, 10);
 
-  if (milestone === 'OVERDUE_DAILY') {
+  try {
+    if (milestone === 'OVERDUE_DAILY') {
+      const r = await pool.query(
+        `INSERT INTO public.agenda_coach_reminder_dispatches (
+           agenda_evento_id, coach_id, aluno_id, reminder_cycle_id, milestone,
+           event_date, event_tipo, dispatch_on, notification_channel, email_status
+         ) VALUES ($1, $2, $3, $4, $5::public.agenda_coach_milestone, $6, $7, $8::date, $9::public.coach_notification_channel, 'pending')
+         ON CONFLICT (agenda_evento_id, milestone, dispatch_on) DO NOTHING
+         RETURNING id`,
+        [
+          row.agenda_evento_id,
+          row.coach_id,
+          row.aluno_id,
+          row.reminder_cycle_id,
+          milestone,
+          row.event_date,
+          row.event_tipo,
+          dispatchOn,
+          channel,
+        ],
+      );
+      return r.rows[0] || null;
+    }
+
     const r = await pool.query(
       `INSERT INTO public.agenda_coach_reminder_dispatches (
          agenda_evento_id, coach_id, aluno_id, reminder_cycle_id, milestone,
          event_date, event_tipo, dispatch_on, notification_channel, email_status
-       ) VALUES ($1, $2, $3, $4, $5::public.agenda_coach_milestone, $6, $7, $8, $9::public.coach_notification_channel, 'pending')
-       ON CONFLICT (agenda_evento_id, milestone, dispatch_on) DO NOTHING
+       ) VALUES ($1, $2, $3, $4, $5::public.agenda_coach_milestone, $6, $7, $8::date, $9::public.coach_notification_channel, 'pending')
+       ON CONFLICT (agenda_evento_id, reminder_cycle_id, milestone) WHERE milestone <> 'OVERDUE_DAILY'::public.agenda_coach_milestone
+       DO NOTHING
        RETURNING id`,
       [
         row.agenda_evento_id,
@@ -171,28 +200,18 @@ async function registerDispatch(pool, row, milestone, { skipOverdueUnique } = {}
       ],
     );
     return r.rows[0] || null;
+  } catch (error) {
+    // 23505 = unique_violation — tratar como já despachado (não derrubar o job)
+    if (error && error.code === '23505') {
+      logger.warn('agenda_coach_reminder.dispatch_conflict', {
+        milestone,
+        agendaEventoId: row.agenda_evento_id,
+        error: error.message,
+      });
+      return null;
+    }
+    throw error;
   }
-
-  const r = await pool.query(
-    `INSERT INTO public.agenda_coach_reminder_dispatches (
-       agenda_evento_id, coach_id, aluno_id, reminder_cycle_id, milestone,
-       event_date, event_tipo, dispatch_on, notification_channel, email_status
-     ) VALUES ($1, $2, $3, $4, $5::public.agenda_coach_milestone, $6, $7, $8, $9::public.coach_notification_channel, 'pending')
-     ON CONFLICT (agenda_evento_id, reminder_cycle_id, milestone) DO NOTHING
-     RETURNING id`,
-    [
-      row.agenda_evento_id,
-      row.coach_id,
-      row.aluno_id,
-      row.reminder_cycle_id,
-      milestone,
-      row.event_date,
-      row.event_tipo,
-      dispatchOn,
-      channel,
-    ],
-  );
-  return r.rows[0] || null;
 }
 
 async function updateDispatchEmailStatus(pool, dispatchId, status, extra = {}) {

@@ -30,6 +30,8 @@ export const API_CONTRACT = {
     adoptRegistration: () => `${API_BASE}/api/alunos/adopt-registration`,
     portalStatus: (alunoId: string) =>
       `${API_BASE}/api/alunos/${encodeURIComponent(alunoId)}/portal-status`,
+    acesso: (alunoId: string) =>
+      `${API_BASE}/api/alunos/${encodeURIComponent(alunoId)}/acesso`,
   },
   alimentos: {
     list: (query?: { q?: string }) => {
@@ -270,6 +272,7 @@ const CONTRACT_PATTERNS = [
   '/auth/logout',
   '/api/alunos/by-coach',
   '/api/alunos/:alunoId/portal-status',
+  '/api/alunos/:alunoId/acesso',
   '/api/alunos/me',
   '/api/alunos/me/profile-status',
   '/api/alunos/me/hoje',

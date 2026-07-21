@@ -22,5 +22,9 @@ export type AlunoPortalStatus = {
   email_match_candidate: EmailMatchCandidate | null;
   last_checkin_at: string | null;
   last_import_at: string | null;
+  acesso_operacional?: "pending" | "active" | "suspended" | "revoked";
+  acesso_operacional_em?: string | null;
+  acesso_operacional_por?: string | null;
+  acesso_operacional_nota?: string | null;
   hints: string[];
 };

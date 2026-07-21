@@ -13,7 +13,9 @@ async function getAlunoPortalStatus(pool, alunoId, { coachId, isAdmin }) {
     const linkCol = await getAlunoUserLinkColumn(pool);
 
     const alunoRes = await pool.query(
-        `SELECT id, nome, email, coach_id, ${linkCol} AS link_user_id FROM public.alunos WHERE id = $1`,
+        `SELECT id, nome, email, coach_id, ${linkCol} AS link_user_id,
+                acesso_operacional, acesso_operacional_em, acesso_operacional_por, acesso_operacional_nota
+         FROM public.alunos WHERE id = $1`,
         [alunoId],
     );
     if (alunoRes.rows.length === 0) {
@@ -63,6 +65,10 @@ async function getAlunoPortalStatus(pool, alunoId, { coachId, isAdmin }) {
         email_match_candidate: null,
         last_checkin_at: lastCheckinAt,
         last_import_at: lastImportAt,
+        acesso_operacional: aluno.acesso_operacional || 'pending',
+        acesso_operacional_em: aluno.acesso_operacional_em || null,
+        acesso_operacional_por: aluno.acesso_operacional_por || null,
+        acesso_operacional_nota: aluno.acesso_operacional_nota || null,
         hints,
     };
 

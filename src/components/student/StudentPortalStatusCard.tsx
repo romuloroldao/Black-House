@@ -13,12 +13,21 @@ import {
   UserX,
 } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
+import { API_CONTRACT } from "@/contracts/api-contract";
 import type { AlunoPortalStatus } from "@/types/aluno-portal-status";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import {
+  ACESSO_OPERACIONAL_LABELS,
+  acessoOperacionalActions,
+  acessoOperacionalBadgeClass,
+  normalizeAcessoOperacional,
+  type AcessoOperacional,
+} from "@/lib/aluno-acesso-operacional";
+import { useConfirm } from "@/contexts/ConfirmContext";
 
 type StudentPortalStatusCardProps = {
   alunoId: string;
@@ -30,10 +39,10 @@ const statusConfig: Record<
   AlunoPortalStatus["status"],
   { label: string; variant: "default" | "secondary" | "outline" | "destructive"; icon: typeof CheckCircle2 }
 > = {
-  active: { label: "Portal activo", variant: "default", icon: CheckCircle2 },
+  active: { label: "Credencial vinculada", variant: "default", icon: CheckCircle2 },
   pending_email: { label: "Aguarda confirmação de email", variant: "secondary", icon: Mail },
   match_available: { label: "Cadastro encontrado — pode vincular", variant: "outline", icon: Link2 },
-  no_access: { label: "Sem acesso ao portal", variant: "destructive", icon: UserX },
+  no_access: { label: "Sem credencial vinculada", variant: "destructive", icon: UserX },
 };
 
 export default function StudentPortalStatusCard({
@@ -42,9 +51,11 @@ export default function StudentPortalStatusCard({
   onLinked,
 }: StudentPortalStatusCardProps) {
   const navigate = useNavigate();
+  const { confirm } = useConfirm();
   const [status, setStatus] = useState<AlunoPortalStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [linking, setLinking] = useState(false);
+  const [updatingAcesso, setUpdatingAcesso] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -64,7 +75,7 @@ export default function StudentPortalStatusCard({
 
   const handleQuickLink = async () => {
     const candidate = status?.email_match_candidate;
-    if (!candidate?.user_id || !status?.email_confirmed_at) return;
+    if (!candidate?.user_id || !candidate.email_confirmed_at) return;
 
     setLinking(true);
     try {
@@ -88,8 +99,43 @@ export default function StudentPortalStatusCard({
     }
   };
 
+  const handleAcesso = async (next: AcessoOperacional) => {
+    const label = ACESSO_OPERACIONAL_LABELS[next];
+    const destructive = next === "revoked" || next === "suspended";
+    const ok = await confirm({
+      title: `${label}?`,
+      description: destructive
+        ? "O aluno deixará de aceder ao portal. Os dados (dietas, check-ins, histórico) NÃO serão apagados."
+        : `Confirmar alteração do acesso para «${label}».`,
+      confirmLabel: label,
+      destructive,
+    });
+    if (!ok) return;
+
+    setUpdatingAcesso(true);
+    try {
+      const result = await apiClient.requestSafe<{ message?: string }>(
+        API_CONTRACT.alunos.acesso(alunoId),
+        {
+          method: "PATCH",
+          body: JSON.stringify({ acesso_operacional: next }),
+        },
+      );
+      if (!result.success) {
+        throw new Error(result.error || "Falha ao actualizar acesso");
+      }
+      toast.success(result.data?.message || "Acesso actualizado.");
+      await load();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Erro ao actualizar acesso");
+    } finally {
+      setUpdatingAcesso(false);
+    }
+  };
+
   const cfg = status ? statusConfig[status.status] : null;
   const StatusIcon = cfg?.icon ?? ShieldAlert;
+  const acesso = normalizeAcessoOperacional(status?.acesso_operacional);
 
   return (
     <Card>
@@ -97,7 +143,7 @@ export default function StudentPortalStatusCard({
         <div>
           <CardTitle className="text-base">Estado do portal</CardTitle>
           <CardDescription className="text-xs sm:text-sm">
-            Acesso do aluno a /portal-aluno (credencial e vínculo).
+            Credencial, vínculo e acesso operacional controlado pelo coach.
           </CardDescription>
         </div>
         <Button
@@ -123,12 +169,24 @@ export default function StudentPortalStatusCard({
             <div className="flex flex-wrap items-center gap-2">
               <StatusIcon className="h-4 w-4 text-primary" />
               <Badge variant={cfg?.variant ?? "outline"}>{cfg?.label}</Badge>
+              <Badge variant="outline" className={acessoOperacionalBadgeClass(acesso)}>
+                Acesso: {ACESSO_OPERACIONAL_LABELS[acesso]}
+              </Badge>
               {status.is_technical_import_email ? (
                 <Badge variant="outline" className="student-badge-sm">
                   Email técnico (import)
                 </Badge>
               ) : null}
             </div>
+
+            {status.acesso_operacional_em ? (
+              <p className="text-xs text-muted-foreground">
+                Última alteração de acesso:{" "}
+                {format(new Date(status.acesso_operacional_em), "dd MMM yyyy HH:mm", {
+                  locale: ptBR,
+                })}
+              </p>
+            ) : null}
 
             {status.credential_email && status.status !== "no_access" ? (
               <p className="text-sm">
@@ -139,7 +197,10 @@ export default function StudentPortalStatusCard({
 
             {status.email_match_candidate && status.status === "match_available" ? (
               <p className="text-sm text-muted-foreground">
-                Cadastro: <span className="font-medium text-foreground">{status.email_match_candidate.email}</span>
+                Cadastro:{" "}
+                <span className="font-medium text-foreground">
+                  {status.email_match_candidate.email}
+                </span>
                 {status.email_match_candidate.email_confirmed_at
                   ? " · email confirmado"
                   : " · email ainda não confirmado"}
@@ -150,6 +211,9 @@ export default function StudentPortalStatusCard({
               {status.hints.map((hint) => (
                 <li key={hint}>• {hint}</li>
               ))}
+              <li>
+                • Remover o acesso (suspender/revogar) não exclui o aluno nem os dados históricos.
+              </li>
             </ul>
 
             <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
@@ -171,9 +235,28 @@ export default function StudentPortalStatusCard({
             </div>
 
             <div className="flex flex-wrap gap-2 pt-1">
+              {acessoOperacionalActions(acesso).map((action) => (
+                <Button
+                  key={action.value}
+                  type="button"
+                  size="sm"
+                  variant={
+                    action.value === "revoked" || action.value === "suspended"
+                      ? "destructive"
+                      : "default"
+                  }
+                  disabled={updatingAcesso}
+                  onClick={() => void handleAcesso(action.value)}
+                >
+                  {updatingAcesso ? (
+                    <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
+                  ) : null}
+                  {action.label}
+                </Button>
+              ))}
               {status.status === "match_available" &&
               status.email_match_candidate?.email_confirmed_at ? (
-                <Button type="button" size="sm" onClick={handleQuickLink} disabled={linking}>
+                <Button type="button" size="sm" variant="outline" onClick={handleQuickLink} disabled={linking}>
                   {linking ? (
                     <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
                   ) : (

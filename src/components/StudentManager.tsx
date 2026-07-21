@@ -60,6 +60,21 @@ import {
   Upload
 } from "lucide-react";
 import { maskCpfCnpj, maskPhone, onlyNumbers } from "@/utils/MaskFormat";
+import {
+  ACESSO_OPERACIONAL_LABELS,
+  acessoOperacionalActions,
+  acessoOperacionalBadgeClass,
+  normalizeAcessoOperacional,
+  type AcessoOperacional,
+} from "@/lib/aluno-acesso-operacional";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface Student {
   id: string;
@@ -68,7 +83,9 @@ interface Student {
   phone?: string;
   cpf_cnpj?: string;
   avatar?: string;
-  status: string;
+  status: AcessoOperacional;
+  acessoOperacionalEm?: string | null;
+  financialAccessStatus?: string | null;
   plan: string;
   goal?: string;
   joinDate: string;
@@ -230,7 +247,9 @@ const StudentManager = () => {
           phone: alunoTelefone || undefined,
           cpf_cnpj: alunoCpfCnpj || undefined,
           avatar: alunoAvatar,
-          status: 'active',
+          status: normalizeAcessoOperacional(aluno?.acesso_operacional),
+          acessoOperacionalEm: aluno?.acesso_operacional_em || null,
+          financialAccessStatus: aluno?.financial_access_status || null,
           plan: alunoPlano,
           goal: alunoObjetivo,
           joinDate,
@@ -583,11 +602,47 @@ const StudentManager = () => {
   };
 
   const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'active': return 'bg-primary text-primary-foreground';
-      case 'inactive': return 'bg-muted text-muted-foreground';
-      default: return 'bg-muted text-muted-foreground';
+    return acessoOperacionalBadgeClass(normalizeAcessoOperacional(status));
+  };
+
+  const handleChangeAcesso = async (student: Student, next: AcessoOperacional) => {
+    const label = ACESSO_OPERACIONAL_LABELS[next];
+    const destructive = next === "revoked" || next === "suspended";
+    const ok = await confirm({
+      title: `${label}?`,
+      description: destructive
+        ? `O aluno deixará de aceder ao portal. A ficha, dietas, check-ins e histórico NÃO serão apagados.`
+        : `Confirmar alteração do acesso de ${student.name} para «${label}».`,
+      confirmLabel: label,
+      cancelLabel: "Cancelar",
+      destructive,
+    });
+    if (!ok) return;
+
+    const result = await apiClient.requestSafe<{ message?: string }>(
+      API_CONTRACT.alunos.acesso(student.id),
+      {
+        method: "PATCH",
+        body: JSON.stringify({ acesso_operacional: next }),
+      },
+    );
+    if (!result.success) {
+      toast({
+        variant: "destructive",
+        title: "Não foi possível actualizar o acesso",
+        description: result.error || "Tente novamente.",
+      });
+      return;
     }
+    toast({
+      title: "Acesso actualizado",
+      description:
+        result.data?.message ||
+        (destructive
+          ? "Acesso alterado. Dados do aluno preservados."
+          : `${student.name}: ${label}.`),
+    });
+    refetchAlunos();
   };
 
   const getPaymentColor = (payment: string) => {
@@ -774,13 +829,15 @@ const StudentManager = () => {
               />
             </div>
             <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="w-full sm:w-[180px]">
-                <SelectValue placeholder="Status" />
+              <SelectTrigger className="w-full sm:w-[200px]">
+                <SelectValue placeholder="Acesso" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todos os Status</SelectItem>
-                <SelectItem value="active">Ativos</SelectItem>
-                <SelectItem value="inactive">Inativos</SelectItem>
+                <SelectItem value="all">Todos os acessos</SelectItem>
+                <SelectItem value="active">Activo</SelectItem>
+                <SelectItem value="pending">Pendente</SelectItem>
+                <SelectItem value="suspended">Suspenso</SelectItem>
+                <SelectItem value="revoked">Revogado</SelectItem>
               </SelectContent>
             </Select>
             <Select value={filterGoal} onValueChange={setFilterGoal}>
@@ -859,17 +916,48 @@ const StudentManager = () => {
                         </p>
                       </div>
                     </div>
-                    <Button variant="ghost" size="icon">
-                      <MoreVertical className="w-4 h-4" />
-                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" aria-label="Acções do aluno">
+                          <MoreVertical className="w-4 h-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-56">
+                        <DropdownMenuLabel>Acesso à plataforma</DropdownMenuLabel>
+                        {acessoOperacionalActions(normalizeAcessoOperacional(studentStatus)).map(
+                          (action) => (
+                            <DropdownMenuItem
+                              key={action.value}
+                              onClick={() =>
+                                void handleChangeAcesso(
+                                  student,
+                                  action.value,
+                                )
+                              }
+                            >
+                              {action.label}
+                            </DropdownMenuItem>
+                          ),
+                        )}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onClick={() => navigate(`/alunos/${studentId}`)}
+                        >
+                          Ver ficha
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {/* Status and Plan */}
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge className={getStatusColor(studentStatus)}>
-                      {studentStatus === "active" ? "Ativo" : "Inativo"}
+                    <Badge variant="outline" className={getStatusColor(studentStatus)}>
+                      {ACESSO_OPERACIONAL_LABELS[normalizeAcessoOperacional(studentStatus)]}
                     </Badge>
+                    {student.financialAccessStatus === "blocked" ? (
+                      <Badge variant="destructive">Financeiro bloqueado</Badge>
+                    ) : null}
                     <Badge className={getPlanColor(studentPlan)}>
                       {resolveFriendlyPlanLabel(studentPlan)}
                     </Badge>
@@ -879,6 +967,12 @@ const StudentManager = () => {
                       </Badge>
                     )}
                   </div>
+                  {student.acessoOperacionalEm ? (
+                    <p className="text-xs text-muted-foreground">
+                      Acesso actualizado em{" "}
+                      {new Date(student.acessoOperacionalEm).toLocaleString("pt-BR")}
+                    </p>
+                  ) : null}
 
                   {/* Goal and Progress */}
                   <div className="space-y-2">

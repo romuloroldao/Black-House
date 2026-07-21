@@ -1015,11 +1015,14 @@ CREATE TABLE IF NOT EXISTS public.agenda_coach_reminder_dispatches (
   email_provider text,
   email_error text,
   created_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT agenda_coach_reminder_dispatches_cycle_unique
-    UNIQUE (agenda_evento_id, reminder_cycle_id, milestone),
   CONSTRAINT agenda_coach_reminder_dispatches_overdue_daily_unique
     UNIQUE (agenda_evento_id, milestone, dispatch_on)
 );
+
+-- D-2/D-1/D0: uma vez por ciclo. OVERDUE_DAILY usa overdue_daily_unique (por dia).
+CREATE UNIQUE INDEX IF NOT EXISTS agenda_coach_reminder_dispatches_cycle_unique
+  ON public.agenda_coach_reminder_dispatches (agenda_evento_id, reminder_cycle_id, milestone)
+  WHERE milestone <> 'OVERDUE_DAILY'::public.agenda_coach_milestone;
 
 -- CRM, equipa, snooze, tipos consulta/acompanhamento (server/migrations/20260522_agenda_crm_team.sql)
 DO $$ BEGIN ALTER TYPE public.user_role ADD VALUE 'assistant'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
@@ -1215,7 +1218,18 @@ ALTER TABLE public.alunos
   ADD COLUMN IF NOT EXISTS altura_cm numeric(5, 2),
   ADD COLUMN IF NOT EXISTS profile_completed_at timestamptz,
   ADD COLUMN IF NOT EXISTS profile_grace_logins int NOT NULL DEFAULT 0,
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz,
+  ADD COLUMN IF NOT EXISTS acesso_operacional text NOT NULL DEFAULT 'pending',
+  ADD COLUMN IF NOT EXISTS acesso_operacional_em timestamptz,
+  ADD COLUMN IF NOT EXISTS acesso_operacional_por uuid REFERENCES app_auth.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS acesso_operacional_nota text;
+
+ALTER TABLE public.alunos DROP CONSTRAINT IF EXISTS alunos_acesso_operacional_check;
+ALTER TABLE public.alunos ADD CONSTRAINT alunos_acesso_operacional_check
+  CHECK (acesso_operacional IN ('pending', 'active', 'suspended', 'revoked'));
+
+CREATE INDEX IF NOT EXISTS idx_alunos_acesso_operacional
+  ON public.alunos (coach_id, acesso_operacional);
 
 ALTER TABLE public.alunos DROP CONSTRAINT IF EXISTS alunos_sexo_check;
 ALTER TABLE public.alunos ADD CONSTRAINT alunos_sexo_check

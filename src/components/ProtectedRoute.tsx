@@ -99,16 +99,40 @@ const ProtectedRoute = ({
     }
   }
 
-  // DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001: Verificar payment_status para alunos (bloquear acesso se inadimplente)
+  // DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001: Verificar acesso operacional e payment_status
   const userPaymentStatus = payment_status || user?.payment_status || 'CURRENT';
+  const acessoOperacional = String(user?.acesso_operacional || '').toLowerCase();
+  const accessBlockReason = String(user?.access_block_reason || '');
+
+  if (userRole === 'aluno') {
+    const isAccessBlockedRoute =
+      location.pathname === '/portal-aluno/access-blocked' ||
+      location.pathname === '/portal-aluno/blocked' ||
+      location.pathname === '/portal-aluno/financial' ||
+      location.pathname.startsWith('/auth');
+
+    const operacionalBlocked =
+      accessBlockReason === 'not_linked' ||
+      accessBlockReason === 'access_pending' ||
+      accessBlockReason === 'access_suspended' ||
+      accessBlockReason === 'access_revoked' ||
+      (acessoOperacional &&
+        acessoOperacional !== 'active' &&
+        ['pending', 'suspended', 'revoked'].includes(acessoOperacional));
+
+    if (operacionalBlocked && !isAccessBlockedRoute) {
+      return <Navigate to="/portal-aluno/access-blocked" replace />;
+    }
+  }
+
   if (checkPayment && userRole === 'aluno') {
     const isOverdue = userPaymentStatus === 'OVERDUE' || userPaymentStatus === 'PENDING_AFTER_DUE_DATE';
     const isAllowedRoute = location.pathname === '/portal-aluno/blocked' || 
                           location.pathname === '/portal-aluno/financial' ||
+                          location.pathname === '/portal-aluno/access-blocked' ||
                           location.pathname.startsWith('/auth');
     
     if (isOverdue && !isAllowedRoute) {
-      // Redirecionar para tela de bloqueio
       return <Navigate to="/portal-aluno/blocked" replace />;
     }
   }

@@ -37,8 +37,9 @@ interface FoodSubstitutionDialogProps {
   alimentoAtual: Food | null;
   quantidadeAtual: number;
   unidadeQuantidade?: string;
-  alimentosDisponiveis: Food[];
-  onSubstituir: (novoAlimentoId: string, novaQuantidade: number) => void;
+  /** Fallback local se a API falhar; o dialog prefere GET /substituicoes. */
+  alimentosDisponiveis?: Food[];
+  onSubstituir: (novoAlimentoId: string, novaQuantidade: number, novoAlimento?: Food) => void;
 }
 
 export default function FoodSubstitutionDialog({
@@ -47,7 +48,7 @@ export default function FoodSubstitutionDialog({
   alimentoAtual,
   quantidadeAtual,
   unidadeQuantidade = "g",
-  alimentosDisponiveis,
+  alimentosDisponiveis = [],
   onSubstituir,
 }: FoodSubstitutionDialogProps) {
   useStudentOverlayLock(open);
@@ -139,7 +140,11 @@ export default function FoodSubstitutionDialog({
   const handleSubstituir = () => {
     const substituicao = substituicoes.find((s) => s.alimento.id === selectedSubstituicao);
     if (substituicao) {
-      onSubstituir(substituicao.alimento.id, substituicao.quantidadeEquivalente);
+      onSubstituir(
+        substituicao.alimento.id,
+        substituicao.quantidadeEquivalente,
+        substituicao.alimento,
+      );
       onOpenChange(false);
     }
   };

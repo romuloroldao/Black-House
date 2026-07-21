@@ -1,13 +1,22 @@
 import { useEffect, useState } from 'react';
+import { ArrowRightLeft } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { apiClient } from '@/lib/api-client';
 import { API_CONTRACT } from '@/contracts/api-contract';
 import type { ItemRefeicaoEditor } from '@/components/diet/DietCreatorMealsSection';
+import { canSubstitute } from '@/lib/foodEquivalence';
 
 type Substituicao = { nome: string; quantidade: number; nutriente: string };
 
-export function FoodSubstitutionsList({ item }: { item: ItemRefeicaoEditor }) {
+type FoodSubstitutionsListProps = {
+  item: ItemRefeicaoEditor;
+  /** Abre o dialog de substituição equivalente (mesmo grupo + qtd isocalórica). */
+  onRequestSubstituir?: () => void;
+};
+
+export function FoodSubstitutionsList({ item, onRequestSubstituir }: FoodSubstitutionsListProps) {
   const [subs, setSubs] = useState<Substituicao[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -50,9 +59,28 @@ export function FoodSubstitutionsList({ item }: { item: ItemRefeicaoEditor }) {
 
   if (!item.alimento) return null;
 
+  const podeSubstituir =
+    Boolean(onRequestSubstituir) &&
+    canSubstitute(item.alimento) &&
+    item.alimento.equiv_livre !== true;
+
   return (
-    <div className="border-t pt-2">
-      <p className="text-xs font-medium text-muted-foreground mb-1">Substituições equivalentes</p>
+    <div className="border-t pt-2 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium text-muted-foreground">Substituições equivalentes</p>
+        {podeSubstituir ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 shrink-0 gap-1 px-2 text-xs"
+            onClick={onRequestSubstituir}
+          >
+            <ArrowRightLeft className="h-3.5 w-3.5" />
+            Substituir
+          </Button>
+        ) : null}
+      </div>
       {loading ? (
         <Skeleton className="h-8 w-full" />
       ) : subs.length === 0 ? (

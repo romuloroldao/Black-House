@@ -17,6 +17,7 @@ import DietaPage from "./pages/DietaPage";
 import TreinoPage from "./pages/TreinoPage";
 import StudentPortal from "./pages/StudentPortal";
 import StudentBlocked from "./pages/StudentBlocked";
+import StudentAccessBlocked from "./pages/StudentAccessBlocked";
 import ReportViewPage from "./pages/ReportViewPage";
 import StudentEducationalGuidePage from "./pages/StudentEducationalGuidePage";
 
@@ -102,6 +103,14 @@ const App = () => (
                       <StudentBlocked />
                     </ProtectedRoute>
                   } 
+                />
+                <Route
+                  path="/portal-aluno/access-blocked"
+                  element={
+                    <ProtectedRoute allowedRoles={['aluno']} checkPayment={false}>
+                      <StudentAccessBlocked />
+                    </ProtectedRoute>
+                  }
                 />
                 <Route 
                   path="/portal-aluno/guia/:contentId" 

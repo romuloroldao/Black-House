@@ -45,6 +45,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
   // MIDDLEWARES DE RESOLUÇÃO DE DOMÍNIO
   // ============================================================================
   const resolveAlunoOrFail = resolveAlunoOrFailMiddleware(pool);
+  const resolveAlunoOrFailWithPayment = resolveAlunoOrFailMiddleware(pool, { checkPayment: true });
   const resolveCoachOrFail = resolveCoachOrFailMiddleware(pool);
   const requireCompleteProfile = require('../middleware/requireCompleteProfile')(pool);
 
@@ -270,7 +271,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     authenticate,
     domainSchemaGuard,
     validateRole(['aluno']),
-    resolveAlunoOrFail,
+    resolveAlunoOrFailWithPayment,
     async (req, res) => {
       try {
         const payload = await getAlunoHoje(pool, {
@@ -740,7 +741,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
   // PATCH /api/alunos/me - Atualiza dados do aluno canônico
   // DESIGN-GUARD-RAILS-ROLE-ACCESS-003: Rota apenas para alunos
   // DESIGN-LINK-ALUNO-USER-001: NÃO permite alterar user_id (vínculo deve ser via /api/alunos/link-user)
-  router.patch('/alunos/me', authenticate, domainSchemaGuard, validateRole(['aluno']), resolveAlunoOrFail, async (req, res) => {
+  router.patch('/alunos/me', authenticate, domainSchemaGuard, validateRole(['aluno']), resolveAlunoOrFailWithPayment, async (req, res) => {
     try {
       const aluno = req.aluno;
 
@@ -780,11 +781,14 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
                  cp.nome_completo AS coach_nome,
                  sps.is_complete AS profile_is_complete,
                  sps.completion_pct AS profile_completion_pct,
-                 sps.missing_fields AS profile_missing_fields
+                 sps.missing_fields AS profile_missing_fields,
+                 sas.access_status AS financial_access_status,
+                 sas.payment_status AS financial_payment_status
           FROM public.alunos a
           LEFT JOIN app_auth.users coach_u ON coach_u.id = a.coach_id
           LEFT JOIN public.coach_profiles cp ON cp.user_id = a.coach_id
-          LEFT JOIN public.student_profile_state sps ON sps.aluno_id = a.id`;
+          LEFT JOIN public.student_profile_state sps ON sps.aluno_id = a.id
+          LEFT JOIN public.student_access_state sas ON sas.aluno_id = a.id`;
 
       if (req.user.role === 'admin') {
         result = await pool.query(
@@ -836,6 +840,90 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
         return res.json(result);
       } catch (error) {
         return res.status(500).json({ error: error.message || 'Erro ao obter estado do portal' });
+      }
+    },
+  );
+
+  // PATCH /api/alunos/:alunoId/acesso — conceder / suspender / revogar / reactivar
+  router.patch(
+    '/alunos/:alunoId/acesso',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    validateUUIDParam('alunoId'),
+    async (req, res) => {
+      try {
+        const {
+          ACESSO_VALUES,
+          normalizeAcesso,
+          canTransition,
+        } = require('../utils/aluno-platform-access');
+
+        const alunoId = String(req.params.alunoId || '').trim();
+        const nextAcesso = normalizeAcesso(req.body?.acesso_operacional);
+        const notaRaw = req.body?.nota != null ? String(req.body.nota).trim() : null;
+        const nota = notaRaw ? notaRaw.slice(0, 500) : null;
+
+        if (!ACESSO_VALUES.includes(String(req.body?.acesso_operacional || '').toLowerCase())) {
+          return res.status(400).json({
+            error: 'acesso_operacional inválido',
+            error_code: 'INVALID_ACESSO',
+            allowed: ACESSO_VALUES,
+          });
+        }
+
+        const alunoRes = await pool.query(
+          `SELECT id, coach_id, acesso_operacional FROM public.alunos WHERE id = $1`,
+          [alunoId],
+        );
+        if (alunoRes.rows.length === 0) {
+          return res.status(404).json({ error: 'Aluno não encontrado', error_code: 'NOT_FOUND' });
+        }
+
+        const aluno = alunoRes.rows[0];
+        if (req.user.role === 'coach' && String(aluno.coach_id) !== String(req.user.id)) {
+          return res.status(403).json({
+            error: 'Sem permissão para este aluno',
+            error_code: 'FORBIDDEN',
+          });
+        }
+
+        const current = normalizeAcesso(aluno.acesso_operacional);
+        if (!canTransition(current, nextAcesso)) {
+          return res.status(400).json({
+            error: `Transição inválida: ${current} → ${nextAcesso}`,
+            error_code: 'INVALID_TRANSITION',
+            from: current,
+            to: nextAcesso,
+          });
+        }
+
+        const upd = await pool.query(
+          `UPDATE public.alunos SET
+             acesso_operacional = $1,
+             acesso_operacional_em = now(),
+             acesso_operacional_por = $2,
+             acesso_operacional_nota = COALESCE($3, acesso_operacional_nota),
+             updated_at = now()
+           WHERE id = $4
+           RETURNING *`,
+          [nextAcesso, req.user.id, nota, alunoId],
+        );
+
+        const row = alunoRowWithCanonicalUserId(upd.rows[0]);
+        return res.json({
+          ...row,
+          previous_acesso_operacional: current,
+          message:
+            nextAcesso === 'revoked' || nextAcesso === 'suspended'
+              ? 'Acesso actualizado. O aluno e os dados históricos foram preservados.'
+              : 'Acesso actualizado.',
+        });
+      } catch (error) {
+        return res.status(500).json({
+          error: error.message || 'Erro ao actualizar acesso',
+          error_code: 'ACESSO_UPDATE_ERROR',
+        });
       }
     },
   );
@@ -4154,7 +4242,10 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
       const userData = {
         ...userResult.rows[0],
         role: userRole,
-        payment_status: req.user.payment_status || 'CURRENT'
+        payment_status: req.user.payment_status || 'CURRENT',
+        acesso_operacional: req.user.acesso_operacional ?? null,
+        acesso_operacional_em: req.user.acesso_operacional_em ?? null,
+        access_block_reason: req.user.access_block_reason ?? null,
       };
 
       // Se for aluno, buscar dados do aluno também
@@ -4163,11 +4254,25 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
         try {
           const aluno = await fetchAlunoByUserId(pool, userId);
           userData.aluno = aluno;
+          userData.aluno_linked = true;
+          if (aluno?.acesso_operacional) {
+            userData.acesso_operacional = aluno.acesso_operacional;
+            userData.acesso_operacional_em = aluno.acesso_operacional_em ?? null;
+          }
+          const { resolveEffectiveAccess } = require('../utils/aluno-platform-access');
+          const effective = resolveEffectiveAccess({
+            linked: true,
+            acesso_operacional: userData.acesso_operacional || 'pending',
+            payment_status: userData.payment_status,
+          });
+          userData.access_block_reason = effective.allowed ? null : effective.reason;
+          userData.access_allowed = effective.allowed;
         } catch (error) {
           if (error.code === 'ALUNO_NOT_LINKED') {
-            // Aluno não vinculado - retornar erro explícito
             userData.aluno = null;
             userData.aluno_linked = false;
+            userData.access_block_reason = 'not_linked';
+            userData.access_allowed = false;
           } else {
             throw error;
           }

@@ -2,6 +2,7 @@
 
 const cron = require('node-cron');
 const logger = require('../utils/logger');
+const { sleep } = require('../utils/send-transactional-email');
 const { MILESTONES } = require('../services/agenda-coach-reminder-copy');
 const {
   fetchMilestoneCandidates,
@@ -10,6 +11,9 @@ const {
   updateDispatchEmailStatus,
   MAX_OVERDUE_EMAILS_PER_COACH_PER_DAY,
 } = require('../services/agenda-coach-reminder.service');
+
+/** Pausa entre envios com e-mail para não estourar smtpd_client_connection_rate_limit. */
+const EMAIL_SEND_GAP_MS = 400;
 
 class AgendaCoachRemindersJob {
   constructor(pool, notificationService) {
@@ -42,6 +46,12 @@ class AgendaCoachRemindersJob {
     let skipped = 0;
     const overdueEmailCount = new Map();
 
+    const afterEmailSend = async (emailStatus) => {
+      if (emailStatus === 'sent') {
+        await sleep(EMAIL_SEND_GAP_MS);
+      }
+    };
+
     for (const m of MILESTONES) {
       const rows = await fetchMilestoneCandidates(this.pool, m.key, m.daysBefore);
       logger.logJob('AgendaCoachRemindersJob', 'running', {
@@ -72,6 +82,7 @@ class AgendaCoachRemindersJob {
             provider: result.emailProvider,
             error: result.emailError,
           });
+          await afterEmailSend(result.emailStatus);
           sent++;
         } catch (error) {
           await updateDispatchEmailStatus(this.pool, dispatch.id, 'failed', {
@@ -89,12 +100,13 @@ class AgendaCoachRemindersJob {
     const overdueRows = await fetchOverdueCandidates(this.pool);
     for (const row of overdueRows) {
       const coachCount = overdueEmailCount.get(row.coach_id) || 0;
-      const dispatch = await registerDispatch(this.pool, row, 'OVERDUE_DAILY');
-      if (!dispatch) {
-        skipped++;
-        continue;
-      }
+      let dispatch = null;
       try {
+        dispatch = await registerDispatch(this.pool, row, 'OVERDUE_DAILY');
+        if (!dispatch) {
+          skipped++;
+          continue;
+        }
         const skipEmailForCap = coachCount >= MAX_OVERDUE_EMAILS_PER_COACH_PER_DAY;
         const result = await this.notificationService.notifyAgendaCoachReminder({
           agendaEventoId: row.agenda_evento_id,
@@ -116,9 +128,17 @@ class AgendaCoachRemindersJob {
           provider: result.emailProvider,
           error: result.emailError,
         });
+        await afterEmailSend(result.emailStatus);
         sent++;
       } catch (error) {
-        await updateDispatchEmailStatus(this.pool, dispatch.id, 'failed', {
+        if (dispatch?.id) {
+          await updateDispatchEmailStatus(this.pool, dispatch.id, 'failed', {
+            error: error.message,
+          });
+        }
+        logger.logJob('AgendaCoachRemindersJob', 'error', {
+          agendaEventoId: row.agenda_evento_id,
+          milestone: 'OVERDUE_DAILY',
           error: error.message,
         });
       }

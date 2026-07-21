@@ -927,7 +927,7 @@ class NotificationService {
                 timestamp: new Date().toISOString(),
             };
 
-            if (this.ws) {
+            if (this.ws && typeof this.ws.emitToUser === 'function') {
                 this.ws.emitToUser(userId, 'notification', payload);
                 if (type === 'checkin_respondido') {
                     this.ws.emitToUser(userId, 'checkin:respondido', payload);
