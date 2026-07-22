@@ -2047,6 +2047,11 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
             ativo !== false,
           ]
         );
+        try {
+          await recalculateStudentAccess(pool, aluno_id);
+        } catch (recalcErr) {
+          console.warn('financial_exception.create.recalc_failed', recalcErr.message);
+        }
         return res.status(201).json(ins.rows[0]);
       } catch (error) {
         console.error('Erro ao criar financial_exception:', error);
@@ -2103,6 +2108,11 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           `UPDATE public.financial_exceptions SET ${setClause}, updated_at = now() WHERE id = $${keys.length + 1} RETURNING *`,
           [...vals, id]
         );
+        try {
+          await recalculateStudentAccess(pool, r.rows[0].aluno_id);
+        } catch (recalcErr) {
+          console.warn('financial_exception.patch.recalc_failed', recalcErr.message);
+        }
         return res.json(r.rows[0]);
       } catch (error) {
         console.error('Erro ao atualizar financial_exception:', error);
@@ -2120,14 +2130,23 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     async (req, res) => {
       try {
         const { id } = req.params;
-        const cur = await pool.query('SELECT coach_id FROM public.financial_exceptions WHERE id = $1', [id]);
+        const cur = await pool.query(
+          'SELECT coach_id, aluno_id FROM public.financial_exceptions WHERE id = $1',
+          [id],
+        );
         if (cur.rows.length === 0) {
           return res.status(404).json({ error: 'Exceção não encontrada', error_code: 'NOT_FOUND' });
         }
         if (req.user.role === 'coach' && String(cur.rows[0].coach_id) !== String(req.user.id)) {
           return res.status(403).json({ error: 'Acesso negado', error_code: 'FORBIDDEN' });
         }
+        const alunoId = cur.rows[0].aluno_id;
         await pool.query('DELETE FROM public.financial_exceptions WHERE id = $1', [id]);
+        try {
+          await recalculateStudentAccess(pool, alunoId);
+        } catch (recalcErr) {
+          console.warn('financial_exception.delete.recalc_failed', recalcErr.message);
+        }
         return res.json({ ok: true });
       } catch (error) {
         console.error('Erro ao apagar financial_exception:', error);

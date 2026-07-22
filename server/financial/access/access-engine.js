@@ -1,4 +1,9 @@
-const { getStudentPaymentStatus } = require('../../utils/financial-status');
+const {
+  getStudentPaymentStatus,
+  computePaymentStatusFromPayments,
+  NON_BLOCKING_EXCEPTION_TYPES,
+  getActiveFinancialException,
+} = require('../../utils/financial-status');
 const { logFinancialAudit } = require('../audit/audit-logger');
 const { getAuthUserIdForAluno } = require('../../utils/aluno-auth-user');
 const logger = require('../../utils/logger');
@@ -25,6 +30,9 @@ async function getCoachFinancialPolicy(pool, coachId) {
   };
 }
 
+/**
+ * Recalcula e persiste student_access_state a partir de asaas_payments (não da cache).
+ */
 async function recalculateStudentAccess(pool, alunoId, { notificationService = null } = {}) {
   const alunoResult = await pool.query(
     'SELECT id, coach_id, email, nome FROM public.alunos WHERE id = $1 LIMIT 1',
@@ -34,24 +42,31 @@ async function recalculateStudentAccess(pool, alunoId, { notificationService = n
   if (!aluno) return null;
 
   const policy = await getCoachFinancialPolicy(pool, aluno.coach_id);
-  const financial = await getStudentPaymentStatus(pool, { alunoId });
 
-  let paymentStatus = financial.payment_status;
+  // Excepção financeira não-bloqueante → sempre CURRENT / granted
+  const activeException = await getActiveFinancialException(pool, alunoId);
+  if (activeException && NON_BLOCKING_EXCEPTION_TYPES.has(activeException.tipo)) {
+    return persistAccessState(pool, {
+      aluno,
+      prevRow: await loadPrevState(pool, alunoId),
+      accessStatus: 'granted',
+      paymentStatus: 'CURRENT',
+      inGracePeriod: false,
+      graceDaysRemaining: null,
+      notificationService,
+    });
+  }
+
+  // Fonte de verdade: cobranças locais (não a cache)
+  const fresh = await computePaymentStatusFromPayments(pool, alunoId);
+  let paymentStatus = fresh.payment_status;
   let accessStatus = 'granted';
   let inGracePeriod = false;
   let graceDaysRemaining = null;
 
   if (policy.auto_block_enabled) {
     if (paymentStatus === 'OVERDUE' || paymentStatus === 'PENDING_AFTER_DUE_DATE') {
-      const overdueResult = await pool.query(
-        `SELECT MIN(due_date) AS oldest_due
-         FROM public.asaas_payments
-         WHERE aluno_id = $1
-           AND deleted_at IS NULL
-           AND (status = 'OVERDUE' OR (status = 'PENDING' AND due_date < CURRENT_DATE))`,
-        [alunoId],
-      );
-      const oldestDue = overdueResult.rows[0]?.oldest_due;
+      const oldestDue = fresh.oldest_due;
       if (oldestDue) {
         const daysOverdue = Math.floor(
           (Date.now() - new Date(oldestDue).getTime()) / (1000 * 60 * 60 * 24),
@@ -64,16 +79,51 @@ async function recalculateStudentAccess(pool, alunoId, { notificationService = n
         } else {
           accessStatus = 'blocked';
         }
+      } else {
+        // Sem data de vencimento válida → não manter OVERDUE fantasma
+        paymentStatus = 'CURRENT';
+        accessStatus = 'granted';
       }
+    } else {
+      paymentStatus = 'CURRENT';
+      accessStatus = 'granted';
     }
+  } else {
+    // auto-block desligado: nunca bloquear, mas payment_status reflecte a realidade
+    accessStatus = 'granted';
   }
 
+  return persistAccessState(pool, {
+    aluno,
+    prevRow: await loadPrevState(pool, alunoId),
+    accessStatus,
+    paymentStatus,
+    inGracePeriod,
+    graceDaysRemaining,
+    notificationService,
+  });
+}
+
+async function loadPrevState(pool, alunoId) {
   const prev = await pool.query(
     'SELECT * FROM public.student_access_state WHERE aluno_id = $1 LIMIT 1',
     [alunoId],
   );
-  const prevRow = prev.rows[0];
+  return prev.rows[0] || null;
+}
 
+async function persistAccessState(
+  pool,
+  {
+    aluno,
+    prevRow,
+    accessStatus,
+    paymentStatus,
+    inGracePeriod,
+    graceDaysRemaining,
+    notificationService,
+  },
+) {
   const result = await pool.query(
     `INSERT INTO public.student_access_state
       (aluno_id, coach_id, access_status, payment_status, in_grace_period,
@@ -94,7 +144,7 @@ async function recalculateStudentAccess(pool, alunoId, { notificationService = n
        last_calculated_at = NOW()
      RETURNING *`,
     [
-      alunoId,
+      aluno.id,
       aluno.coach_id,
       accessStatus,
       paymentStatus,
@@ -110,7 +160,7 @@ async function recalculateStudentAccess(pool, alunoId, { notificationService = n
   if (prevRow?.access_status !== state.access_status) {
     await logFinancialAudit(pool, {
       coachId: aluno.coach_id,
-      alunoId,
+      alunoId: aluno.id,
       entityType: 'access',
       action: state.access_status === 'blocked' ? 'access_blocked' : 'access_unblocked',
       beforeState: prevRow,
@@ -120,7 +170,7 @@ async function recalculateStudentAccess(pool, alunoId, { notificationService = n
 
   if (notificationService) {
     try {
-      const authUserId = await getAuthUserIdForAluno(pool, alunoId);
+      const authUserId = await getAuthUserIdForAluno(pool, aluno.id);
       if (authUserId) {
         notificationService.ws?.emitToUser(authUserId, 'payment_status_changed', {
           payment_status: paymentStatus,
@@ -130,14 +180,37 @@ async function recalculateStudentAccess(pool, alunoId, { notificationService = n
         });
       }
     } catch (err) {
-      logger.warn('financial.access.ws_notify_failed', { alunoId, error: err.message });
+      logger.warn('financial.access.ws_notify_failed', { alunoId: aluno.id, error: err.message });
     }
   }
 
   return state;
 }
 
+/**
+ * Recalcula acesso de todos os alunos com linha em student_access_state
+ * ou com cobranças Asaas.
+ */
+async function recalculateAllStudentAccess(pool, { notificationService = null } = {}) {
+  const r = await pool.query(
+    `SELECT DISTINCT aluno_id FROM (
+       SELECT aluno_id FROM public.student_access_state
+       UNION
+       SELECT aluno_id FROM public.asaas_payments WHERE aluno_id IS NOT NULL AND deleted_at IS NULL
+     ) x`,
+  );
+  let n = 0;
+  for (const row of r.rows) {
+    await recalculateStudentAccess(pool, row.aluno_id, { notificationService });
+    n += 1;
+  }
+  return n;
+}
+
 module.exports = {
   getCoachFinancialPolicy,
   recalculateStudentAccess,
+  recalculateAllStudentAccess,
+  // re-export útil para testes
+  getStudentPaymentStatus,
 };
