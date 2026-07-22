@@ -1,3 +1,5 @@
+const { describe, test } = require('node:test');
+const assert = require('node:assert/strict');
 const { calcTmbKcal, calcAgeFromBirthDate } = require('../services/body-metrics.service');
 
 describe('body-metrics.service', () => {
@@ -8,7 +10,7 @@ describe('body-metrics.service', () => {
       alturaCm: 178,
       idadeAnos: 32,
     });
-    expect(tmb).toBe(1869);
+    assert.equal(tmb, 1869);
   });
 
   test('calcTmbKcal feminino', () => {
@@ -18,12 +20,13 @@ describe('body-metrics.service', () => {
       alturaCm: 165,
       idadeAnos: 28,
     });
-    expect(tmb).toBe(1443);
+    // Harris-Benedict: 655.1 + 9.563*65 + 1.85*165 - 4.676*28 ≈ 1451
+    assert.equal(tmb, 1451);
   });
 
   test('calcAgeFromBirthDate', () => {
     const age = calcAgeFromBirthDate('1990-06-15');
-    expect(age).toBeGreaterThanOrEqual(35);
-    expect(age).toBeLessThanOrEqual(36);
+    assert.ok(age >= 35);
+    assert.ok(age <= 36);
   });
 });

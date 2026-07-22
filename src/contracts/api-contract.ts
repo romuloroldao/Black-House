@@ -183,7 +183,27 @@ export const API_CONTRACT = {
     avatar: () => `${API_BASE}/api/uploads/avatar`,
     avatarForUser: (userId: string) => `${API_BASE}/api/uploads/avatar/${userId}`,
     progressPhoto: () => `${API_BASE}/api/uploads/progress-photo`,
+    mealPhoto: () => `${API_BASE}/api/uploads/meal-photo`,
     educationalPdf: () => `${API_BASE}/api/uploads/educational-pdf`,
+  },
+  refeicoesRegistradas: {
+    list: (params?: { limit?: number; offset?: number }) => {
+      const q = new URLSearchParams();
+      if (params?.limit != null) q.set("limit", String(params.limit));
+      if (params?.offset != null) q.set("offset", String(params.offset));
+      const qs = q.toString();
+      return `${API_BASE}/api/refeicoes-registradas${qs ? `?${qs}` : ""}`;
+    },
+    byId: (id: string) => `${API_BASE}/api/refeicoes-registradas/${encodeURIComponent(id)}`,
+    analyze: () => `${API_BASE}/api/refeicoes-registradas/analyze`,
+    create: () => `${API_BASE}/api/refeicoes-registradas`,
+    byAluno: (alunoId: string, params?: { limit?: number; offset?: number }) => {
+      const q = new URLSearchParams();
+      if (params?.limit != null) q.set("limit", String(params.limit));
+      if (params?.offset != null) q.set("offset", String(params.offset));
+      const qs = q.toString();
+      return `${API_BASE}/api/alunos/${encodeURIComponent(alunoId)}/refeicoes-registradas${qs ? `?${qs}` : ""}`;
+    },
   },
   import: {
     parsePdf: () => `${API_BASE}/api/import/parse-pdf`,
@@ -340,7 +360,13 @@ const CONTRACT_PATTERNS = [
   '/api/uploads/avatar',
   '/api/uploads/avatar/:userId',
   '/api/uploads/progress-photo',
+  '/api/uploads/meal-photo',
   '/api/uploads/storage/progress-photos/:alunoId/:filename',
+  '/api/uploads/storage/meal-photos/:alunoId/:filename',
+  '/api/refeicoes-registradas',
+  '/api/refeicoes-registradas/analyze',
+  '/api/refeicoes-registradas/:id',
+  '/api/alunos/:alunoId/refeicoes-registradas',
   '/api/videos',
   '/api/videos/:id',
   '/api/educational-contents',

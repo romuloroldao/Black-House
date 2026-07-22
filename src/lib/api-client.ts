@@ -611,7 +611,9 @@ class ApiClient {
                 // AUTH-HARDENING-001: Tratamento especial para 503 (Service Unavailable)
                 // Quando schema inválido, o backend retorna 503 com detalhes
                 if (response.status === 503 && error.reason === 'SCHEMA_INVALID') {
-                    const schemaError = new Error(error.message || 'Sistema em manutenção');
+                    const schemaError = new Error(
+                        typeof error.message === 'string' ? error.message : 'Sistema em manutenção',
+                    );
                     (schemaError as any).status = 503;
                     (schemaError as any).reason = error.reason;
                     (schemaError as any).error_code = error.error_code;
@@ -828,6 +830,26 @@ class ApiClient {
                 }
                 const result = await response.json();
                 return { url: result.url as string, path: (result.path as string) || path };
+            }
+
+            if (bucket === 'meal-photos') {
+                const formData = new FormData();
+                formData.append('file', file);
+                const token = this.getToken();
+                const response = await fetch(API_CONTRACT.uploads.mealPhoto(), {
+                    method: 'POST',
+                    headers: token ? { Authorization: `Bearer ${token}` } : {},
+                    body: formData,
+                });
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({ error: 'Erro no upload' }));
+                    const uploadError = new Error(error.error || 'Erro no upload da foto da refeição');
+                    (uploadError as any).errorType = ErrorType.BACKEND;
+                    (uploadError as any).status = response.status;
+                    throw uploadError;
+                }
+                const result = await response.json();
+                return { url: (result.url as string) || null, path: (result.path as string) || path };
             }
             
             // Para outros buckets, manter compatibilidade temporária
@@ -1114,8 +1136,11 @@ class ApiClient {
                 offset: query.offset ?? 0,
             }),
         );
-        if (!result.success || !result.data) {
+        if (result.success === false) {
             return { success: false, error: result.error ?? 'Erro ao carregar feedbacks' };
+        }
+        if (!result.data) {
+            return { success: false, error: 'Erro ao carregar feedbacks' };
         }
         if (Array.isArray(result.data)) {
             return {
@@ -1166,6 +1191,62 @@ class ApiClient {
             method: 'PATCH',
             body: JSON.stringify({}),
         });
+    }
+
+    async analyzeMealPhoto(file: File): Promise<ApiResult<any>> {
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            const token = this.getToken();
+            const response = await fetch(API_CONTRACT.refeicoesRegistradas.analyze(), {
+                method: 'POST',
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+                body: formData,
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                return {
+                    success: false,
+                    error: data.error || 'Erro ao analisar refeição',
+                    status: response.status,
+                };
+            }
+            return { success: true, data };
+        } catch (e: any) {
+            return {
+                success: false,
+                error: e?.message || 'Erro de rede ao analisar refeição',
+            };
+        }
+    }
+
+    async saveRefeicaoRegistradaSafe(body: Record<string, unknown>): Promise<ApiResult<any>> {
+        return this.safeRequest(API_CONTRACT.refeicoesRegistradas.create(), {
+            method: 'POST',
+            body: JSON.stringify(body),
+        });
+    }
+
+    async listRefeicoesRegistradasSafe(params?: {
+        limit?: number;
+        offset?: number;
+    }): Promise<ApiResult<any[]>> {
+        return this.safeRequest(API_CONTRACT.refeicoesRegistradas.list(params));
+    }
+
+    async listRefeicoesRegistradasByAlunoSafe(
+        alunoId: string,
+        params?: { limit?: number; offset?: number },
+    ): Promise<ApiResult<any[]>> {
+        return this.safeRequest(API_CONTRACT.refeicoesRegistradas.byAluno(alunoId, params));
+    }
+
+    /** URL autenticada para imagem de refeição (path relativo da API). */
+    mealPhotoAuthenticatedUrl(imagemPath: string | null | undefined): string | null {
+        if (!imagemPath) return null;
+        if (imagemPath.startsWith('http')) return imagemPath;
+        const base = API_URL.replace(/\/$/, '');
+        return `${base}${imagemPath.startsWith('/') ? '' : '/'}${imagemPath}`;
     }
     
     // ============================================================================

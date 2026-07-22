@@ -112,6 +112,12 @@ class OpenAIProvider {
             }
         }
     }
+
+    async extractStructuredDataFromImage() {
+        const err = new Error('OpenAI provider neste projecto não tem vision configurado (VISION_UNSUPPORTED)');
+        err.code = 'VISION_UNSUPPORTED';
+        throw err;
+    }
 }
 
 module.exports = OpenAIProvider;

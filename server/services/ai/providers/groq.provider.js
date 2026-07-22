@@ -130,6 +130,12 @@ class GroqProvider {
             }
         }
     }
+
+    async extractStructuredDataFromImage() {
+        const err = new Error('Groq não suporta análise de imagens (VISION_UNSUPPORTED)');
+        err.code = 'VISION_UNSUPPORTED';
+        throw err;
+    }
 }
 
 module.exports = GroqProvider;

@@ -21,6 +21,7 @@ import BodyMetricsCard from "./coach/BodyMetricsCard";
 import WeightTimelineChart from "./coach/WeightTimelineChart";
 import type { BodyMetricsResponse } from "@/types/profile-completeness";
 import StudentFinancialManagement from "./student/StudentFinancialManagement";
+import RefeicoesRegistradasList from "@/components/student/meal-photo/RefeicoesRegistradasList";
 import { DietReturnDateFields } from "@/components/DietReturnDateFields";
 import {
   DietRotationFields,
@@ -1083,6 +1084,18 @@ export default function StudentDetails() {
                 </div>
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Refeições livres (foto)</CardTitle>
+            <CardDescription>
+              Estimativas registadas pelo aluno — valores aproximados, não clinicamente precisos.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {id ? <RefeicoesRegistradasList alunoId={id} readonly /> : null}
           </CardContent>
         </Card>
         </TabsContent>

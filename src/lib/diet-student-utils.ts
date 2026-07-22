@@ -26,7 +26,7 @@ export type DietItemWithFood = {
     protein?: number;
     carbs?: number;
     fat?: number;
-    portion?: string;
+    portion?: number | string;
   } | null;
 };
 

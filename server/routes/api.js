@@ -22,6 +22,7 @@ const createAlimentosRouter = require('./alimentos');
 const createFoodCatalogRouter = require('./food-catalog');
 const createUploadsRouter = require('./uploads');
 const createEducationalContentsRouter = require('./educational-contents');
+const createRefeicoesRegistradasRouter = require('./refeicoes-registradas');
 const { deleteUserByUserRoleId } = require('../utils/deleteUserByUserRoleId');
 const AsaasService = require('../services/asaas.service');
 const { encryptCoachAsaasApiKey, decryptCoachAsaasApiKey } = require('../utils/asaas-coach-secret-crypto');
@@ -225,6 +226,9 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
 
   // ROTAS: CONTEÚDOS EDUCATIVOS
   router.use('/educational-contents', createEducationalContentsRouter(pool, authenticate, domainSchemaGuard));
+
+  // ROTAS: REFEIÇÕES REGISTADAS (diário alimentar / foto)
+  router.use('/refeicoes-registradas', createRefeicoesRegistradasRouter(pool, authenticate, domainSchemaGuard));
 
   // ============================================================================
   // ROTAS: ALUNOS
@@ -960,6 +964,38 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
       } catch (error) {
         console.error('Erro em GET body-metrics:', error);
         return res.status(500).json({ error: error.message || 'Erro ao carregar dados corporais' });
+      }
+    },
+  );
+
+  // GET /api/alunos/:alunoId/refeicoes-registradas — histórico alimentar (coach)
+  router.get(
+    '/alunos/:alunoId/refeicoes-registradas',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'assistant']),
+    validateUUIDParam('alunoId'),
+    async (req, res) => {
+      try {
+        const alunoId = req.params.alunoId;
+        const {
+          resolveCoachScope: resolveScope,
+          assertCoachCanAccessAluno: assertAccess,
+        } = require('../services/coach-team.service');
+        const scope = await resolveScope(pool, req.user.id, req.user.role);
+        const ok = await assertAccess(pool, scope, alunoId);
+        if (!ok) {
+          return res.status(403).json({ error: 'Sem permissão para este aluno', error_code: 'FORBIDDEN' });
+        }
+        const mealService = require('../services/refeicoes-registradas.service');
+        const rows = await mealService.listForAluno(pool, alunoId, {
+          limit: req.query.limit,
+          offset: req.query.offset,
+        });
+        return res.json(rows);
+      } catch (error) {
+        console.error('Erro em GET /api/alunos/:alunoId/refeicoes-registradas:', error);
+        return res.status(500).json({ error: error.message });
       }
     },
   );

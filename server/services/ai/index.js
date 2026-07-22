@@ -47,6 +47,22 @@ class AIProviderManager {
         // Providers inicializados (primário e fallback)
         this.fallbackProvider = null;
         this.fallbackProviderName = null;
+
+        // Provider dedicado a vision (fotos) — independente do texto
+        this.visionProvider = null;
+        this.visionProviderName = null;
+        this.visionConfig = {
+            provider: process.env.AI_VISION_PROVIDER || 'gemini',
+            apiKey:
+                process.env.AI_VISION_API_KEY ||
+                process.env.GEMINI_API_KEY ||
+                process.env.AI_API_KEY_FALLBACK ||
+                (String(process.env.AI_PROVIDER || '').toLowerCase() === 'gemini'
+                    ? process.env.AI_API_KEY
+                    : null) ||
+                null,
+            model: process.env.AI_VISION_MODEL || null,
+        };
     }
 
     /**
@@ -297,8 +313,109 @@ class AIProviderManager {
                 available: this.isFallbackAvailable(),
                 provider: this.fallbackProviderName || null,
                 model: this.fallbackConfig.model || null
-            }
+            },
+            vision: {
+                available: this.isVisionAvailable(),
+                provider: this.visionProviderName || null,
+                model: this.visionConfig.model || null,
+            },
         };
+    }
+
+    /**
+     * Inicializa provider de visão (Gemini por defeito) para análise de imagens.
+     */
+    initializeVisionProvider() {
+        const name = String(this.visionConfig.provider || 'gemini').toLowerCase();
+        if (name !== 'gemini') {
+            logger.warn('AI Vision: apenas gemini é suportado actualmente', { provider: name });
+            return false;
+        }
+        if (!this.visionConfig.apiKey) {
+            // Reutilizar provider primário/fallback se já for Gemini
+            if (this.providerName === 'gemini' && this.provider) {
+                this.visionProvider = this.provider;
+                this.visionProviderName = 'gemini';
+                this.visionConfig.model = this.config.model;
+                logger.info('AI Vision: a reutilizar provider Gemini primário');
+                return true;
+            }
+            if (this.fallbackProviderName === 'gemini' && this.fallbackProvider) {
+                this.visionProvider = this.fallbackProvider;
+                this.visionProviderName = 'gemini';
+                this.visionConfig.model = this.fallbackConfig.model;
+                logger.info('AI Vision: a reutilizar provider Gemini de fallback');
+                return true;
+            }
+            logger.warn('AI Vision: Gemini não configurado (AI_VISION_API_KEY / GEMINI_API_KEY)');
+            return false;
+        }
+        try {
+            if (!this.visionConfig.model) {
+                this.visionConfig.model = 'gemini-2.5-pro';
+            }
+            const GeminiProvider = require('./providers/gemini.provider');
+            this.visionProvider = new GeminiProvider(this.visionConfig.apiKey, this.visionConfig.model);
+            this.visionProvider.initialize();
+            this.visionProviderName = 'gemini';
+            logger.info('AI Vision Provider inicializado', {
+                provider: 'gemini',
+                model: this.visionConfig.model,
+            });
+            return true;
+        } catch (error) {
+            logger.warn('AI Vision: falha ao inicializar', { error: error.message });
+            this.visionProvider = null;
+            this.visionProviderName = null;
+            return false;
+        }
+    }
+
+    isVisionAvailable() {
+        if (this.visionProvider && typeof this.visionProvider.extractStructuredDataFromImage === 'function') {
+            return true;
+        }
+        if (
+            this.providerName === 'gemini' &&
+            this.provider &&
+            typeof this.provider.extractStructuredDataFromImage === 'function'
+        ) {
+            return true;
+        }
+        if (
+            this.fallbackProviderName === 'gemini' &&
+            this.fallbackProvider &&
+            typeof this.fallbackProvider.extractStructuredDataFromImage === 'function'
+        ) {
+            return true;
+        }
+        return false;
+    }
+
+    _resolveVisionProvider() {
+        if (this.visionProvider) return this.visionProvider;
+        if (this.providerName === 'gemini' && this.provider) return this.provider;
+        if (this.fallbackProviderName === 'gemini' && this.fallbackProvider) return this.fallbackProvider;
+        return null;
+    }
+
+    /**
+     * Análise estruturada de imagem (meal photo / vision).
+     */
+    async extractStructuredDataFromImage(imageBuffer, mimeType, systemPrompt, userPrompt, options = {}) {
+        const provider = this._resolveVisionProvider();
+        if (!provider || typeof provider.extractStructuredDataFromImage !== 'function') {
+            throw new Error(
+                'IA de visão não está disponível. Configure AI_VISION_PROVIDER=gemini e GEMINI_API_KEY.',
+            );
+        }
+        return provider.extractStructuredDataFromImage(
+            imageBuffer,
+            mimeType,
+            systemPrompt,
+            userPrompt,
+            options,
+        );
     }
 }
 
@@ -309,18 +426,21 @@ const aiProviderManager = new AIProviderManager();
 // Nota: Se falhar, provider fica desabilitado mas não bloqueia servidor
 try {
     const initialized = aiProviderManager.initialize();
-    if (!initialized) {
-        // Provider não configurado - comportamento esperado
-    } else {
-        // Se provider primário inicializou, tentar inicializar fallback
+    if (initialized) {
         try {
             aiProviderManager.initializeFallback();
         } catch (fallbackError) {
-            // Fallback falhar não é crítico - apenas logar
             logger.warn('AI Fallback: Falha ao inicializar provider de fallback (não crítico)', {
                 error: fallbackError.message
             });
         }
+    }
+    try {
+        aiProviderManager.initializeVisionProvider();
+    } catch (visionError) {
+        logger.warn('AI Vision: Falha ao inicializar (não crítico)', {
+            error: visionError.message,
+        });
     }
 } catch (error) {
     // Se falhar na inicialização, logar mas não crashar

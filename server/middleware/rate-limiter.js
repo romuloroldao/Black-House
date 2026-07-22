@@ -83,11 +83,28 @@ const resetPasswordSubmitLimiter = rateLimit({
     skip: (req) => process.env.NODE_ENV === 'development'
 });
 
+// Análise de foto de refeição (custo de IA) — por utilizador autenticado
+const mealPhotoAnalyzeLimiter = rateLimit({
+    windowMs: parseInt(process.env.RATE_LIMIT_MEAL_PHOTO_WINDOW_MS) || 60 * 60 * 1000,
+    max: parseInt(process.env.RATE_LIMIT_MEAL_PHOTO_MAX) || 10,
+    message: {
+        error: 'Limite de análises de refeição atingido. Tente novamente mais tarde.',
+        error_code: 'MEAL_PHOTO_RATE_LIMIT',
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => {
+        return req.user?.id || req.ip || req.connection?.remoteAddress || 'anon';
+    },
+    skip: (req) => process.env.NODE_ENV === 'development',
+});
+
 module.exports = {
     authLimiter,
     apiLimiter,
     webhookLimiter,
     uploadLimiter,
     forgotPasswordLimiter,
-    resetPasswordSubmitLimiter
+    resetPasswordSubmitLimiter,
+    mealPhotoAnalyzeLimiter,
 };

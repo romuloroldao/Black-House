@@ -26,6 +26,8 @@ const PATCH_FILES = [
     '20260623_financial_sync_architecture.sql',
     '20260623_student_body_metrics.sql',
     '20260623_smart_reminders.sql',
+    '20260721_aluno_acesso_operacional.sql',
+    '20260721_refeicoes_registradas.sql',
 ];
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations');

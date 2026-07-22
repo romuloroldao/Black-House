@@ -230,6 +230,103 @@ module.exports = function(pool, authenticate) {
         }
     });
 
+    // POST /api/uploads/meal-photo — foto de refeição (aluno)
+    router.post('/meal-photo', authenticate, (req, res, next) => {
+        uploadProgress.single('file')(req, res, (multerErr) => {
+            if (!multerErr) return next();
+            if (multerErr.code === 'LIMIT_FILE_SIZE') {
+                return res.status(400).json({
+                    error: 'A foto é grande demais (máx. 12 MB). Tente outra imagem.',
+                    error_code: 'IMAGE_TOO_LARGE',
+                });
+            }
+            return res.status(400).json({
+                error: multerErr.message || 'Erro no upload da foto',
+                error_code: 'UPLOAD_FAILED',
+            });
+        });
+    }, async (req, res) => {
+        try {
+            if (!req.file || !req.file.buffer) {
+                return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+            }
+            if (req.user?.role !== 'aluno' && req.user?.role !== 'admin') {
+                return res.status(403).json({ error: 'Apenas alunos podem enviar foto de refeição', error_code: 'FORBIDDEN' });
+            }
+            const rows = await queryAlunoRowsFullForUser(pool, req.user.id);
+            if (!rows.length) {
+                return res.status(403).json({ error: 'Aluno não vinculado', error_code: 'ALUNO_NOT_LINKED' });
+            }
+            const alunoId = rows[0].id;
+            const normalized = await normalizeUploadImage(req.file.buffer, {
+                maxSide: 1600,
+                maxBytes: 3 * 1024 * 1024,
+                quality: 78,
+            });
+            const destName = `${Date.now()}${normalized.ext}`;
+            const destDir = path.join(__dirname, '..', 'storage', 'meal-photos', String(alunoId));
+            fs.mkdirSync(destDir, { recursive: true });
+            fs.writeFileSync(path.join(destDir, destName), normalized.buffer);
+
+            const relPath = `/api/uploads/storage/meal-photos/${alunoId}/${destName}`;
+            return res.status(201).json({
+                success: true,
+                path: relPath,
+                url: null,
+            });
+        } catch (error) {
+            console.error('Erro no upload meal-photo:', error);
+            if (error.message === 'IMAGE_TOO_LARGE' || error.message === 'EMPTY_IMAGE') {
+                return res.status(400).json({ error: imageNormalizeErrorMessage(error) });
+            }
+            return res.status(500).json({ error: imageNormalizeErrorMessage(error) });
+        }
+    });
+
+    // GET meal-photos — autenticado + ownership (aluno dono ou coach da carteira)
+    router.get('/storage/meal-photos/:alunoId/:filename', authenticate, async (req, res) => {
+        try {
+            res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+            const { alunoId, filename } = req.params;
+            if (!isValidUUID(alunoId)) {
+                return res.status(400).json({ error: 'Parâmetros inválidos' });
+            }
+            const safeName = path.basename(filename);
+            if (!safeName) {
+                return res.status(400).json({ error: 'Parâmetros inválidos' });
+            }
+
+            const role = req.user?.role;
+            if (role === 'aluno') {
+                const rows = await queryAlunoRowsFullForUser(pool, req.user.id);
+                if (!rows.length || String(rows[0].id) !== String(alunoId)) {
+                    return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+                }
+            } else if (role === 'coach' || role === 'assistant' || role === 'admin') {
+                const { resolveCoachScope, assertCoachCanAccessAluno } = require('../services/coach-team.service');
+                const scope = await resolveCoachScope(pool, req.user.id, role);
+                const ok = await assertCoachCanAccessAluno(pool, scope, alunoId);
+                if (!ok) {
+                    return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+                }
+            } else {
+                return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+            }
+
+            const dir = path.resolve(__dirname, '..', 'storage', 'meal-photos', alunoId);
+            const filePath = path.resolve(dir, safeName);
+            if (!filePath.startsWith(dir)) {
+                return res.status(400).json({ error: 'Parâmetros inválidos' });
+            }
+            if (!fs.existsSync(filePath)) {
+                return res.status(404).json({ error: 'Arquivo não encontrado' });
+            }
+            return res.sendFile(filePath);
+        } catch (error) {
+            return res.status(500).json({ error: error.message });
+        }
+    });
+
     const uploadEducationalPdf = multer({
         storage: multer.memoryStorage(),
         limits: { fileSize: 25 * 1024 * 1024 },

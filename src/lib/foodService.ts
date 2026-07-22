@@ -52,7 +52,7 @@ export function kcalFromMacrosFood(
 export function macroScaleFactor(
   quantidade: number,
   unidade: string | undefined,
-  portion: number,
+  portion: number | string | undefined,
 ): number {
   const q = Number(quantidade) || 0;
   const p = Number(portion) > 0 ? Number(portion) : 100;

@@ -4,9 +4,10 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Utensils, Pill } from "lucide-react";
+import { Utensils, Pill, Camera } from "lucide-react";
 import FoodSubstitutionDialog from "@/components/nutrition/FoodSubstitutionDialog";
 import { Food, getAllFoodsSafe } from "@/lib/foodService";
 import {
@@ -30,6 +31,8 @@ import MealDetailSheet from "@/components/student/diet/MealDetailSheet";
 import PremiumEmptyState from "@/components/student/PremiumEmptyState";
 import DietRotationBanner from "@/components/student/diet/DietRotationBanner";
 import StudentRefeicaoLivreCard from "@/components/student/StudentRefeicaoLivreCard";
+import MealPhotoLogSheet from "@/components/student/meal-photo/MealPhotoLogSheet";
+import RefeicoesRegistradasList from "@/components/student/meal-photo/RefeicoesRegistradasList";
 import type { EducationalContent } from "@/lib/educational-content";
 import {
   getRotationForDate,
@@ -50,6 +53,8 @@ const StudentDietView = () => {
   const mealDayRef = useRef(mealCheckDateKey());
   const [detailMeal, setDetailMeal] = useState<MealGroup | null>(null);
   const [refeicaoLivreContent, setRefeicaoLivreContent] = useState<EducationalContent | null>(null);
+  const [mealPhotoOpen, setMealPhotoOpen] = useState(false);
+  const [mealHistoryKey, setMealHistoryKey] = useState(0);
 
   /** Reinicia o checklist quando muda o dia (dieta diária). */
   useEffect(() => {
@@ -250,7 +255,7 @@ const StudentDietView = () => {
           ...item,
           alimento_id: novoAlimentoId,
           quantidade: novaQuantidade,
-          alimentos: novoAlimento ?? null,
+          alimentos: novoAlimento ?? item.alimentos,
         };
       }
       return item;
@@ -295,13 +300,44 @@ const StudentDietView = () => {
 
       {rotationToday && <DietRotationBanner info={rotationToday} />}
 
+      <Card className="shadow-card border-primary/20">
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+          <div>
+            <h2 className="text-base font-semibold sm:text-lg">Refeição livre por foto</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Estimativa aproximada de calorias e macros. Revise as porções antes de salvar.
+            </p>
+          </div>
+          <Button
+            className="h-11 w-full shrink-0 sm:w-auto"
+            onClick={() => setMealPhotoOpen(true)}
+          >
+            <Camera className="mr-2 h-4 w-4" />
+            Fotografar minha refeição
+          </Button>
+        </CardContent>
+      </Card>
+
       {dieta.refeicao_livre_ativa ? (
         <StudentRefeicaoLivreCard
           observacao={dieta.refeicao_livre_observacao}
           contentId={dieta.refeicao_livre_content_id}
           contentTitle={refeicaoLivreContent?.title}
+          onPhotograph={() => setMealPhotoOpen(true)}
         />
       ) : null}
+
+      <div className="space-y-2">
+        <h2 className="text-base font-semibold">Histórico de refeições livres</h2>
+        <RefeicoesRegistradasList refreshKey={mealHistoryKey} />
+      </div>
+
+      <MealPhotoLogSheet
+        open={mealPhotoOpen}
+        onOpenChange={setMealPhotoOpen}
+        highlight={!!dieta.refeicao_livre_ativa}
+        onSaved={() => setMealHistoryKey((k) => k + 1)}
+      />
 
       {showPlanoTabs && (
         <Tabs

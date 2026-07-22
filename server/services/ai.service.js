@@ -196,6 +196,28 @@ CHECKLIST ANTES DE RETORNAR:
         return this.providerManager.isAvailable();
     }
 
+    isVisionAvailable() {
+        return this.providerManager.isVisionAvailable();
+    }
+
+    /**
+     * Análise de foto de refeição (vision → JSON).
+     */
+    async analyzeMealPhoto(imageBuffer, mimeType, systemPrompt, userPrompt) {
+        if (!this.isVisionAvailable()) {
+            throw new Error(
+                'IA de visão não está disponível. Configure Gemini (AI_VISION_PROVIDER / GEMINI_API_KEY).',
+            );
+        }
+        return this.providerManager.extractStructuredDataFromImage(
+            imageBuffer,
+            mimeType,
+            systemPrompt,
+            userPrompt,
+            { timeoutMs: 55000 },
+        );
+    }
+
     /**
      * Retorna informações sobre o provider atual
      * @returns {Object}
