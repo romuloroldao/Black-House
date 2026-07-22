@@ -30,6 +30,26 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { formatDateBR } from "@/lib/date-format";
+import { safeGetItem, safeSetItem } from "@/lib/safe-storage";
+
+const SUGGESTIONS_DISMISS_KEY = "agenda.suggestions.dismissed";
+
+function loadDismissedSuggestionIds(coachId: string | undefined): Set<string> {
+  if (!coachId) return new Set();
+  try {
+    const raw = safeGetItem(`${SUGGESTIONS_DISMISS_KEY}.${coachId}`);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function persistDismissedSuggestionIds(coachId: string | undefined, ids: Set<string>) {
+  if (!coachId) return;
+  safeSetItem(`${SUGGESTIONS_DISMISS_KEY}.${coachId}`, JSON.stringify([...ids]));
+}
 
 interface Evento {
   id: string;
@@ -112,6 +132,9 @@ const AgendaManager = () => {
       dias_sem_checkin: number;
     }>
   >([]);
+  const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   const [formData, setFormData] = useState({
     titulo: "",
@@ -126,6 +149,7 @@ const AgendaManager = () => {
 
   useEffect(() => {
     if (user) {
+      setDismissedSuggestionIds(loadDismissedSuggestionIds(user.id));
       carregarDados();
     }
   }, [user]);
@@ -190,27 +214,48 @@ const AgendaManager = () => {
     }
   };
 
-  const handleCriarFromSuggestion = async (s: (typeof suggestions)[0]) => {
+  const handleAgendarFromSuggestion = (s: (typeof suggestions)[0]) => {
     const d = new Date();
     d.setDate(d.getDate() + 7);
-    const data = format(d, "yyyy-MM-dd");
-    const res = await apiClient.requestSafe("/api/agenda-eventos", {
-      method: "POST",
-      body: JSON.stringify({
-        titulo: `Acompanhamento — ${s.aluno_nome}`,
-        tipo: s.tipo_sugerido || "acompanhamento",
-        data_evento: data,
-        aluno_id: s.aluno_id,
-        status: "pendente",
-        prioridade: s.dias_sem_checkin >= 21 ? "alta" : "normal",
-      }),
+    setEventoSelecionado(null);
+    setFormData({
+      titulo: `Acompanhamento — ${s.aluno_nome}`,
+      descricao: s.mensagem,
+      data_evento: format(d, "yyyy-MM-dd"),
+      hora_evento: "",
+      tipo: s.tipo_sugerido || "acompanhamento",
+      status: "pendente",
+      prioridade: s.dias_sem_checkin >= 21 ? "alta" : "normal",
+      aluno_id: s.aluno_id,
     });
-    if (res.success) {
-      toast({ title: "Retorno agendado", description: `Evento criado para ${formatDateBR(d)}.` });
-      void Promise.all([carregarEventos(), carregarResumo()]);
+    setIsDialogOpen(true);
+  };
+
+  const handleDismissSuggestion = (alunoId: string) => {
+    setDismissedSuggestionIds((prev) => {
+      const next = new Set(prev);
+      next.add(alunoId);
+      persistDismissedSuggestionIds(user?.id, next);
+      return next;
+    });
+    toast({ title: "Sugestão dispensada", description: "Ela deixa de aparecer nesta lista." });
+  };
+
+  const aplicarFiltroJanela = (janela: "atrasados" | "hoje" | "amanha" | "proximos7") => {
+    setFiltroJanela(janela);
+    setFiltroStatus("pendente");
+    // Sem dia no calendário a lista mostra todos os eventos da janela (exceto "hoje")
+    if (janela === "hoje") {
+      setDate(new Date());
     } else {
-      toast({ title: "Erro", description: res.error, variant: "destructive" });
+      setDate(undefined);
     }
+    requestAnimationFrame(() => {
+      document.getElementById("agenda-eventos-lista")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
   };
 
   const carregarEventos = async () => {
@@ -452,27 +497,41 @@ const AgendaManager = () => {
     const matchTipo = filtroTipo === "todos" || evento.tipo === filtroTipo;
     const matchStatus = filtroStatus === "todos" || evento.status === filtroStatus;
     const janela = computeJanela(evento.data_evento, evento.status);
+    const limiar7 = format(new Date(Date.now() + 7 * 86400000), "yyyy-MM-dd");
+    const dataKey = normalizeDateKey(evento.data_evento);
     const matchJanela =
       filtroJanela === "todos" ||
       (filtroJanela === "atrasados" && janela === "atrasado") ||
       (filtroJanela === "hoje" && janela === "hoje") ||
       (filtroJanela === "amanha" && janela === "amanha") ||
       (filtroJanela === "proximos7" &&
-        janela !== "atrasado" &&
         evento.status === "pendente" &&
-        normalizeDateKey(evento.data_evento) != null &&
-        normalizeDateKey(evento.data_evento)! <=
-          format(new Date(Date.now() + 7 * 86400000), "yyyy-MM-dd"));
+        dataKey != null &&
+        dataKey >= format(new Date(), "yyyy-MM-dd") &&
+        dataKey <= limiar7);
 
+    // Com janela operacional activa (exceto "hoje"), não restringe ao dia do calendário
     let matchData = true;
-    if (date) {
+    if (date && (filtroJanela === "todos" || filtroJanela === "hoje")) {
       const dataSelecionada = format(date, "yyyy-MM-dd");
-      const dataEvento = normalizeDateKey(evento.data_evento);
-      matchData = dataEvento === dataSelecionada;
+      matchData = dataKey === dataSelecionada;
     }
 
     return matchTipo && matchStatus && matchJanela && matchData;
   });
+
+  const visibleSuggestions = suggestions.filter((s) => !dismissedSuggestionIds.has(s.aluno_id));
+
+  const janelaTitulo =
+    filtroJanela === "atrasados"
+      ? "Atrasados"
+      : filtroJanela === "hoje"
+        ? "Hoje"
+        : filtroJanela === "amanha"
+          ? "Amanhã"
+          : filtroJanela === "proximos7"
+            ? "Próximos 7 dias"
+            : null;
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -512,7 +571,7 @@ const AgendaManager = () => {
         </Button>
       </div>
 
-      {suggestions.length > 0 && (
+      {visibleSuggestions.length > 0 && (
         <Card className="border-primary/30 bg-primary/5">
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center gap-2">
@@ -521,15 +580,27 @@ const AgendaManager = () => {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {suggestions.slice(0, 5).map((s) => (
+            {visibleSuggestions.slice(0, 5).map((s) => (
               <div
                 key={s.aluno_id}
                 className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 bg-background/80 p-3"
               >
-                <p className="text-sm">{s.mensagem}</p>
-                <Button size="sm" variant="secondary" onClick={() => handleCriarFromSuggestion(s)}>
-                  Agendar retorno
-                </Button>
+                <p className="text-sm flex-1 min-w-[12rem]">{s.mensagem}</p>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => handleAgendarFromSuggestion(s)}>
+                    Agendar retorno
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-muted-foreground"
+                    title="Dispensar sugestão"
+                    onClick={() => handleDismissSuggestion(s.aluno_id)}
+                  >
+                    <XCircle className="w-4 h-4 mr-1" />
+                    Dispensar
+                  </Button>
+                </div>
               </div>
             ))}
           </CardContent>
@@ -539,52 +610,91 @@ const AgendaManager = () => {
       {summary && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Card
-            className="cursor-pointer border-destructive/40 hover:border-destructive/70 transition-colors"
-            onClick={() => {
-              setFiltroJanela("atrasados");
-              setFiltroStatus("pendente");
+            role="button"
+            tabIndex={0}
+            aria-pressed={filtroJanela === "atrasados"}
+            className={cn(
+              "cursor-pointer border-destructive/40 hover:border-destructive/70 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive",
+              filtroJanela === "atrasados" && "ring-2 ring-destructive/60",
+            )}
+            onClick={() => aplicarFiltroJanela("atrasados")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                aplicarFiltroJanela("atrasados");
+              }
             }}
           >
             <CardContent className="p-4">
               <p className="text-xs text-muted-foreground">Atrasados</p>
               <p className="text-2xl font-bold text-destructive">{summary.atrasados}</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Ver lista</p>
             </CardContent>
           </Card>
           <Card
-            className="cursor-pointer hover:border-primary/50 transition-colors"
-            onClick={() => {
-              setFiltroJanela("hoje");
-              setFiltroStatus("pendente");
-              setDate(new Date());
+            role="button"
+            tabIndex={0}
+            aria-pressed={filtroJanela === "hoje"}
+            className={cn(
+              "cursor-pointer hover:border-primary/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+              filtroJanela === "hoje" && "ring-2 ring-primary/60",
+            )}
+            onClick={() => aplicarFiltroJanela("hoje")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                aplicarFiltroJanela("hoje");
+              }
             }}
           >
             <CardContent className="p-4">
               <p className="text-xs text-muted-foreground">Hoje</p>
               <p className="text-2xl font-bold">{summary.pendentes_hoje}</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Ver lista</p>
             </CardContent>
           </Card>
           <Card
-            className="cursor-pointer hover:border-primary/50 transition-colors"
-            onClick={() => {
-              setFiltroJanela("amanha");
-              setFiltroStatus("pendente");
+            role="button"
+            tabIndex={0}
+            aria-pressed={filtroJanela === "amanha"}
+            className={cn(
+              "cursor-pointer hover:border-primary/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+              filtroJanela === "amanha" && "ring-2 ring-primary/60",
+            )}
+            onClick={() => aplicarFiltroJanela("amanha")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                aplicarFiltroJanela("amanha");
+              }
             }}
           >
             <CardContent className="p-4">
               <p className="text-xs text-muted-foreground">Amanhã</p>
               <p className="text-2xl font-bold">{summary.pendentes_amanha}</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Ver lista</p>
             </CardContent>
           </Card>
           <Card
-            className="cursor-pointer hover:border-primary/50 transition-colors"
-            onClick={() => {
-              setFiltroJanela("proximos7");
-              setFiltroStatus("pendente");
+            role="button"
+            tabIndex={0}
+            aria-pressed={filtroJanela === "proximos7"}
+            className={cn(
+              "cursor-pointer hover:border-primary/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+              filtroJanela === "proximos7" && "ring-2 ring-primary/60",
+            )}
+            onClick={() => aplicarFiltroJanela("proximos7")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                aplicarFiltroJanela("proximos7");
+              }
             }}
           >
             <CardContent className="p-4">
               <p className="text-xs text-muted-foreground">Próximos 7 dias</p>
               <p className="text-2xl font-bold">{summary.proximos_7_dias}</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Ver lista</p>
             </CardContent>
           </Card>
         </div>
@@ -603,7 +713,11 @@ const AgendaManager = () => {
             <Calendar
               mode="single"
               selected={date}
-              onSelect={setDate}
+              onSelect={(selected) => {
+                setDate(selected);
+                // Escolher um dia no calendário volta à vista por data
+                if (selected) setFiltroJanela("todos");
+              }}
               className={cn("rounded-md border pointer-events-auto")}
               locale={ptBR}
             />
@@ -629,7 +743,16 @@ const AgendaManager = () => {
 
               <div className="space-y-2">
                 <Label>Janela</Label>
-                <Select value={filtroJanela} onValueChange={setFiltroJanela}>
+                <Select
+                  value={filtroJanela}
+                  onValueChange={(value) => {
+                    if (value === "todos") {
+                      setFiltroJanela("todos");
+                      return;
+                    }
+                    aplicarFiltroJanela(value as "atrasados" | "hoje" | "amanha" | "proximos7");
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -662,15 +785,33 @@ const AgendaManager = () => {
         </Card>
 
         {/* Lista de Eventos */}
-        <Card className="lg:col-span-2">
+        <Card className="lg:col-span-2" id="agenda-eventos-lista">
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <CardTitle>
-                Eventos {date && `- ${formatDateBR(date)}`}
+                {janelaTitulo
+                  ? `Eventos — ${janelaTitulo}`
+                  : date
+                    ? `Eventos - ${formatDateBR(date)}`
+                    : "Eventos"}
               </CardTitle>
-              <Badge variant="secondary">
-                {eventosFiltrados.length} {eventosFiltrados.length === 1 ? 'evento' : 'eventos'}
-              </Badge>
+              <div className="flex items-center gap-2">
+                {filtroJanela !== "todos" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setFiltroJanela("todos");
+                      setDate(new Date());
+                    }}
+                  >
+                    Limpar filtro
+                  </Button>
+                )}
+                <Badge variant="secondary">
+                  {eventosFiltrados.length} {eventosFiltrados.length === 1 ? "evento" : "eventos"}
+                </Badge>
+              </div>
             </div>
           </CardHeader>
           <CardContent>
@@ -678,14 +819,20 @@ const AgendaManager = () => {
               {eventosFiltrados.length === 0 ? (
                 <div className="text-center py-12">
                   <CalendarIcon className="w-12 h-12 mx-auto text-muted-foreground mb-3 opacity-50" />
-                  <p className="text-muted-foreground">Nenhum evento para esta data</p>
+                  <p className="text-muted-foreground">
+                    {janelaTitulo
+                      ? `Nenhum evento ${janelaTitulo.toLowerCase()}`
+                      : "Nenhum evento para esta data"}
+                  </p>
                   <Button onClick={handleNovoEvento} variant="outline" className="mt-4">
                     Criar Primeiro Evento
                   </Button>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {eventosFiltrados.map((evento) => (
+                  {eventosFiltrados.map((evento) => {
+                    const dataKey = normalizeDateKey(evento.data_evento);
+                    return (
                     <Card key={evento.id} className="overflow-hidden">
                       <div className={`h-1 ${getTipoColor(evento.tipo)}`} />
                       <CardContent className="p-4">
@@ -710,6 +857,13 @@ const AgendaManager = () => {
                             )}
 
                             <div className="flex flex-wrap gap-2 text-sm">
+                              {(filtroJanela !== "todos" || !date) && dataKey && (
+                                <Badge variant="outline" className="gap-1">
+                                  <CalendarIcon className="w-3 h-3" />
+                                  {formatDateBR(dataKey)}
+                                </Badge>
+                              )}
+
                               {evento.hora_evento && (
                                 <Badge variant="outline" className="gap-1">
                                   <Clock className="w-3 h-3" />
@@ -780,7 +934,8 @@ const AgendaManager = () => {
                         </div>
                       </CardContent>
                     </Card>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </ScrollArea>

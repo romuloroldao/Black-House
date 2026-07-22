@@ -9,7 +9,8 @@ e2e/
 ├── playwright.config.ts      # Config (baseURL, projetos mobile/desktop)
 ├── .env.example              # Credenciais de teste (copiar para .env)
 ├── helpers/
-│   └── auth.ts               # Login via API + seed do JWT no localStorage
+│   ├── auth.ts               # Login via API + seed do JWT no localStorage
+│   └── messaging.ts          # Seed conversas, mensagens, avisos e notificações
 ├── pages/
 │   ├── auth.page.ts
 │   ├── student-portal.page.ts
@@ -20,9 +21,11 @@ e2e/
     ├── student/
     │   ├── portal-navigation.spec.ts
     │   ├── checkin.spec.ts
-    │   └── diet-scroll.spec.ts
+    │   ├── diet-scroll.spec.ts
+    │   └── messaging-notifications.spec.ts
     └── coach/
-        └── dashboard.spec.ts
+        ├── dashboard.spec.ts
+        └── messaging-notifications.spec.ts
 ```
 
 ## Pré-requisitos
@@ -53,6 +56,9 @@ npm run test:e2e:student
 # Só painel coach (desktop)
 npm run test:e2e:coach
 
+# Mensageria + notificações (coach + aluno)
+npm run test:e2e:messaging
+
 # UI interativa
 npm run test:e2e:ui
 
@@ -68,6 +74,8 @@ npm run test:e2e:report
 | `student-mobile` | `portal-navigation.spec.ts` | Login → Hoje → Dieta → Treino → Coach (bottom nav) |
 | `student-mobile` | `checkin.spec.ts` | Aba check-in semanal (formulário ou já enviado) |
 | `student-mobile` | `diet-scroll.spec.ts` | Scroll na Dieta sem bottom nav tapar conteúdo |
+| `student-mobile` | `messaging-notifications.spec.ts` | Chat, avisos, sininho, redirects legacy |
 | `coach-desktop` | `dashboard.spec.ts` | Dashboard → Alunos → Nutrição |
+| `coach-desktop` | `messaging-notifications.spec.ts` | Mensagens, aviso em massa, sininho, round-trip coach↔aluno |
 
 Sem credenciais em `e2e/.env`, os testes são **ignorados** (skipped), não falham.

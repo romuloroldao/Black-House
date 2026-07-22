@@ -190,10 +190,20 @@ const NotificationsPopover = ({ onNavigate }: NotificationsPopoverProps) => {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="icon" className="relative">
-          <Bell className="w-4 h-4" />
+        <Button
+          variant="outline"
+          size="icon"
+          className="relative"
+          aria-label="Notificações"
+          data-testid="notifications-trigger"
+        >
+          <Bell className="w-4 h-4" aria-hidden="true" />
           {unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 w-5 h-5 bg-destructive rounded-full text-xs flex items-center justify-center text-destructive-foreground font-medium">
+            <span
+              aria-hidden="true"
+              className="absolute -top-1 -right-1 w-5 h-5 bg-destructive rounded-full text-xs flex items-center justify-center text-destructive-foreground font-medium"
+              data-testid="notifications-unread-count"
+            >
               {unreadCount > 9 ? '9+' : unreadCount}
             </span>
           )}

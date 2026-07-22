@@ -128,6 +128,92 @@ class GeminiProvider {
             }
         }
     }
+
+    /**
+     * Extrai JSON estruturado a partir de uma imagem (vision).
+     * @param {Buffer} imageBuffer
+     * @param {string} mimeType
+     * @param {string} systemPrompt
+     * @param {string} userPrompt
+     * @param {{ timeoutMs?: number }} [options]
+     */
+    async extractStructuredDataFromImage(
+        imageBuffer,
+        mimeType = 'image/jpeg',
+        systemPrompt,
+        userPrompt,
+        options = {},
+    ) {
+        if (!this.client) {
+            this.initialize();
+        }
+        if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) {
+            throw new Error('imageBuffer inválido');
+        }
+
+        const timeoutMs = options.timeoutMs || 55000;
+        const model = this.client.getGenerativeModel({
+            model: this.model,
+            generationConfig: {
+                temperature: 0.2,
+                maxOutputTokens: 8192,
+                responseMimeType: 'application/json',
+            },
+        });
+
+        const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+        const parts = [
+            { text: fullPrompt },
+            {
+                inlineData: {
+                    mimeType: mimeType || 'image/jpeg',
+                    data: imageBuffer.toString('base64'),
+                },
+            },
+        ];
+
+        const generatePromise = (async () => {
+            const result = await model.generateContent(parts);
+            const response = await result.response;
+            return response.text();
+        })();
+
+        let timeoutId;
+        const timeoutPromise = new Promise((_, reject) => {
+            timeoutId = setTimeout(() => {
+                const err = new Error('Timeout na análise de imagem (Gemini)');
+                err.code = 'AI_TIMEOUT';
+                reject(err);
+            }, timeoutMs);
+        });
+
+        let content;
+        try {
+            content = await Promise.race([generatePromise, timeoutPromise]);
+        } finally {
+            if (timeoutId) clearTimeout(timeoutId);
+        }
+
+        let parsedData;
+        try {
+            parsedData = JSON.parse(content);
+        } catch (parseError) {
+            const jsonMatch = content.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                parsedData = JSON.parse(jsonMatch[0]);
+            } else {
+                throw new Error(
+                    `Resposta da IA (vision) sem JSON válido. Conteúdo: ${String(content).substring(0, 400)}`,
+                );
+            }
+        }
+
+        logger.info('Dados extraídos pela IA vision (Gemini)', {
+            model: this.model,
+            dataKeys: Object.keys(parsedData || {}),
+        });
+        return parsedData;
+    }
 }
 
 module.exports = GeminiProvider;

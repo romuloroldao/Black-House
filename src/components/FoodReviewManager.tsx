@@ -267,14 +267,19 @@ export default function FoodReviewManager({ onBack }: Props) {
     if (!(await confirmDelete(confirm, "Este alimento será removido do catálogo."))) return;
     
     try {
-      // DESIGN-SUPABASE-PURGE-GLOBAL-003: Usar rota semântica ao invés de from()
-      await apiClient.request(`/api/alimentos/${id}`, { method: 'DELETE' });
-      
-      toast.success("Alimento excluído!");
+      const result = (await apiClient.request(`/api/alimentos/${id}`, {
+        method: "DELETE",
+      })) as { soft_deleted?: boolean; message?: string };
+
+      if (result?.soft_deleted) {
+        toast.success(result.message || "Alimento arquivado e removido do catálogo.");
+      } else {
+        toast.success(result?.message || "Alimento excluído!");
+      }
       carregarDados();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro ao excluir:", error);
-      toast.error("Erro ao excluir alimento");
+      toast.error(error?.message || "Erro ao excluir alimento");
     }
   };
 

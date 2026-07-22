@@ -38,7 +38,13 @@ export class StudentPortalPage {
   }
 
   async openTab(tab: StudentTab): Promise<void> {
-    await this.page.getByRole('button', { name: TAB_LABELS[tab], exact: true }).click();
+    const nav = this.page.getByRole('navigation', { name: 'Navegação principal' });
+    if (tab === 'coach') {
+      // Com badge o nome acessível vira "Coach, N mensagens novas"
+      await nav.getByRole('button', { name: /^Coach/ }).click();
+    } else {
+      await nav.getByRole('button', { name: TAB_LABELS[tab], exact: true }).click();
+    }
     await this.page.waitForURL(new RegExp(`tab=${tab}`));
   }
 
@@ -63,7 +69,63 @@ export class StudentPortalPage {
   }
 
   async expectCoachHubView(): Promise<void> {
-    await this.page.getByRole('heading', { name: 'Coach', level: 1 }).waitFor({ state: 'visible' });
+    await this.page.getByRole('heading', { name: 'Coach', exact: true, level: 1 }).waitFor({
+      state: 'visible',
+    });
+  }
+
+  async openCoachHub(view: 'chat' | 'avisos' = 'chat'): Promise<void> {
+    await this.page.goto(`/portal-aluno/dashboard?tab=coach&coachView=${view}`);
+    await this.page.waitForURL(/tab=coach/);
+    await this.dismissOnboardingIfVisible();
+    await this.expectCoachHubView();
+    if (view === 'avisos') {
+      await this.expectAvisosView();
+    } else {
+      await this.expectChatView();
+    }
+  }
+
+  async openCoachSubTab(view: 'chat' | 'avisos'): Promise<void> {
+    const label = view === 'chat' ? /^Chat$/ : /^Avisos/;
+    await this.page.getByRole('tab', { name: label }).click();
+    await this.page.waitForURL(new RegExp(`coachView=${view}`));
+  }
+
+  async expectChatView(): Promise<void> {
+    await this.page.getByRole('heading', { name: 'Conversa com seu coach' }).waitFor({
+      state: 'visible',
+    });
+  }
+
+  async expectAvisosView(): Promise<void> {
+    await this.page.getByRole('heading', { name: 'Mensagens dos coaches', level: 1 }).waitFor({
+      state: 'visible',
+    });
+  }
+
+  async sendChatMessage(text: string): Promise<void> {
+    const input = this.page.getByPlaceholder('Digite sua mensagem...');
+    await input.waitFor({ state: 'visible' });
+    await input.fill(text);
+    const sendBtn = this.page.getByRole('button', { name: 'Enviar mensagem' });
+    if ((await sendBtn.count()) > 0 && (await sendBtn.isEnabled())) {
+      await sendBtn.click();
+    } else {
+      await input.press('Enter');
+    }
+    await this.page.getByText(text, { exact: true }).waitFor({ state: 'visible', timeout: 20_000 });
+  }
+
+  async openNotifications(): Promise<void> {
+    // No mobile o sininho é o último botão do landmark banner
+    const bell = this.page.getByRole('banner').getByRole('button').last();
+    await bell.waitFor({ state: 'visible', timeout: 15_000 });
+    await bell.click();
+    await this.page.locator('h3', { hasText: 'Notificações' }).waitFor({
+      state: 'visible',
+      timeout: 15_000,
+    });
   }
 
   async openCheckinTab(): Promise<void> {

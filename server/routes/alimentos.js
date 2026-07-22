@@ -54,14 +54,23 @@ module.exports = function createAlimentosRouter(pool, authenticate, domainSchema
         try {
             const rawQ = req.query.q != null ? String(req.query.q).trim() : '';
             const params = [];
-            let whereSql = '';
+            let whereSql = ` WHERE COALESCE(a.status, 'active') NOT IN ('deprecated', 'merged')`;
             if (rawQ) {
                 params.push(`%${rawQ}%`);
-                whereSql = ` WHERE (
+                whereSql += ` AND (
                     a.nome ILIKE $1
                     OR COALESCE(t.nome_tipo, '') ILIKE $1
                     OR a.id::text ILIKE $1
                 )`;
+            }
+            if (req.query.include_deprecated === '1' || req.query.include_deprecated === 'true') {
+                whereSql = rawQ
+                    ? ` WHERE (
+                    a.nome ILIKE $1
+                    OR COALESCE(t.nome_tipo, '') ILIKE $1
+                    OR a.id::text ILIKE $1
+                )`
+                    : '';
             }
             const result = await pool.query(
                 `${FOOD_SELECT}${whereSql} ORDER BY a.nome ASC`,
@@ -119,7 +128,7 @@ module.exports = function createAlimentosRouter(pool, authenticate, domainSchema
             try {
                 const result = await pool.query(
                     `SELECT t.id, t.nome_tipo, t.macro_predominante, t.equiv_livre, t.ordem_exibicao,
-                            COUNT(a.id)::int AS total_alimentos
+                            COUNT(a.id) FILTER (WHERE COALESCE(a.status, 'active') NOT IN ('deprecated', 'merged'))::int AS total_alimentos
                      FROM public.tipos_alimentos t
                      LEFT JOIN public.alimentos a ON a.tipo_id = t.id
                      GROUP BY t.id, t.nome_tipo, t.macro_predominante, t.equiv_livre, t.ordem_exibicao
@@ -161,7 +170,9 @@ module.exports = function createAlimentosRouter(pool, authenticate, domainSchema
                 }
 
                 const grupoRes = await pool.query(
-                    `${FOOD_SELECT} WHERE a.tipo_id = $1 AND a.id <> $2 ORDER BY a.nome ASC`,
+                    `${FOOD_SELECT} WHERE a.tipo_id = $1 AND a.id <> $2
+                       AND COALESCE(a.status, 'active') NOT IN ('deprecated', 'merged')
+                     ORDER BY a.nome ASC`,
                     [foodRef.tipo_id, req.params.id]
                 );
 
@@ -481,20 +492,92 @@ module.exports = function createAlimentosRouter(pool, authenticate, domainSchema
     });
 
     // DELETE /api/alimentos/:id - Remover alimento (coach)
+    // Se estiver em uso em dietas → soft-delete (status=deprecated) para não quebrar FK.
     router.delete('/:id', authenticate, domainSchemaGuard, validateRole(foodWriteRoles), validateUUIDParam('id'), async (req, res) => {
         try {
+            const alimentoId = req.params.id;
+
+            const exists = await pool.query(
+                `SELECT id, nome, COALESCE(status, 'active') AS status
+                 FROM public.alimentos WHERE id = $1`,
+                [alimentoId],
+            );
+            if (exists.rows.length === 0) {
+                return res.status(404).json({ error: 'Alimento não encontrado' });
+            }
+            if (exists.rows[0].status === 'deprecated' || exists.rows[0].status === 'merged') {
+                return res.status(200).json({
+                    soft_deleted: true,
+                    already_archived: true,
+                    id: alimentoId,
+                    message: 'Alimento já estava arquivado no catálogo.',
+                });
+            }
+
+            const usage = await pool.query(
+                `SELECT COUNT(*)::int AS total
+                 FROM public.itens_dieta
+                 WHERE alimento_id = $1`,
+                [alimentoId],
+            );
+            const dietItemCount = usage.rows[0]?.total || 0;
+
+            if (dietItemCount > 0) {
+                await pool.query(
+                    `UPDATE public.alimentos
+                     SET status = 'deprecated', updated_at = now()
+                     WHERE id = $1`,
+                    [alimentoId],
+                );
+                return res.status(200).json({
+                    soft_deleted: true,
+                    id: alimentoId,
+                    diet_items: dietItemCount,
+                    message:
+                        `Alimento arquivado: ainda está em ${dietItemCount} item(ns) de dieta. ` +
+                        'Foi removido do catálogo, mas mantido para não quebrar dietas existentes.',
+                });
+            }
+
             const result = await pool.query(
                 'DELETE FROM public.alimentos WHERE id = $1 RETURNING id',
-                [req.params.id]
+                [alimentoId],
             );
 
             if (result.rows.length === 0) {
                 return res.status(404).json({ error: 'Alimento não encontrado' });
             }
 
-            res.status(204).send();
+            return res.status(200).json({
+                soft_deleted: false,
+                id: alimentoId,
+                message: 'Alimento excluído permanentemente.',
+            });
         } catch (error) {
-            res.status(500).json({ error: error.message });
+            if (error && error.code === '23503') {
+                try {
+                    await pool.query(
+                        `UPDATE public.alimentos
+                         SET status = 'deprecated', updated_at = now()
+                         WHERE id = $1`,
+                        [req.params.id],
+                    );
+                    return res.status(200).json({
+                        soft_deleted: true,
+                        id: req.params.id,
+                        message:
+                            'Alimento arquivado porque ainda está referenciado noutros registos. ' +
+                            'Foi removido do catálogo.',
+                    });
+                } catch (softErr) {
+                    return res.status(409).json({
+                        error: 'Não é possível excluir este alimento porque está em uso.',
+                        error_code: 'FOOD_IN_USE',
+                        detail: softErr.message,
+                    });
+                }
+            }
+            return res.status(500).json({ error: error.message });
         }
     });
 

@@ -445,10 +445,18 @@ Batata doce,100,86,20,1.6,0.1`;
     if (!(await confirmDelete(confirm, "Este alimento será removido do catálogo."))) return;
 
     try {
-      // DESIGN-SUPABASE-PURGE-GLOBAL-003: Usar rota semântica ao invés de from()
-      await apiClient.request(`/api/alimentos/${id}`, { method: 'DELETE' });
+      const result = (await apiClient.request(`/api/alimentos/${id}`, {
+        method: "DELETE",
+      })) as { soft_deleted?: boolean; message?: string; diet_items?: number };
 
-      toast.success("Alimento excluído com sucesso!");
+      if (result?.soft_deleted) {
+        toast.success(
+          result.message ||
+            "Alimento arquivado (está em dietas existentes) e saiu do catálogo.",
+        );
+      } else {
+        toast.success(result?.message || "Alimento excluído com sucesso!");
+      }
       carregarDados();
     } catch (error: any) {
       console.error("Erro ao excluir alimento:", error);

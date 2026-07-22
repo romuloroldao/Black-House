@@ -491,13 +491,19 @@ const MessageManager = () => {
                     placeholder="Digite sua mensagem..."
                     value={novaMensagem}
                     onChange={(e) => setNovaMensagem(e.target.value)}
-                    onKeyPress={(e) => e.key === "Enter" && enviarMensagem()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        void enviarMensagem();
+                      }
+                    }}
                     disabled={enviando}
                   />
                   <Button
                     onClick={enviarMensagem}
                     disabled={enviando || !novaMensagem.trim()}
                     size="icon"
+                    aria-label="Enviar mensagem"
                   >
                     <Send className="w-4 h-4" />
                   </Button>
