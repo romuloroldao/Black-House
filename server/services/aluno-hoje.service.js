@@ -109,7 +109,7 @@ function buildPendencias({ checkinDue, unreadChat, unreadAvisos }) {
       id: 'checkin-weekly',
       title: 'Check-in semanal',
       description:
-        'Registe peso, envie pelo menos 2 fotos e complete o questionário semanal.',
+        'Ainda não enviou esta semana. Abra o check-in e conclua peso, fotos e questionário.',
       tab: 'checkin',
       priority: 'high',
     });

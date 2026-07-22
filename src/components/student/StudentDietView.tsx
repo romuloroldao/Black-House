@@ -300,37 +300,36 @@ const StudentDietView = () => {
 
       {rotationToday && <DietRotationBanner info={rotationToday} />}
 
-      <Card className="shadow-card border-primary/20">
-        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-          <div>
-            <h2 className="text-base font-semibold sm:text-lg">Refeição livre por foto</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Estimativa aproximada de calorias e macros. Revise as porções antes de salvar.
-            </p>
-          </div>
-          <Button
-            className="h-11 w-full shrink-0 sm:w-auto"
-            onClick={() => setMealPhotoOpen(true)}
-          >
-            <Camera className="mr-2 h-4 w-4" />
-            Fotografar minha refeição
-          </Button>
-        </CardContent>
-      </Card>
-
+      {/* Um bloco: regras + um CTA de foto + histórico (sem cartões/CTAs duplicados). */}
       {dieta.refeicao_livre_ativa ? (
         <StudentRefeicaoLivreCard
           observacao={dieta.refeicao_livre_observacao}
           contentId={dieta.refeicao_livre_content_id}
           contentTitle={refeicaoLivreContent?.title}
           onPhotograph={() => setMealPhotoOpen(true)}
+          history={<RefeicoesRegistradasList refreshKey={mealHistoryKey} />}
         />
-      ) : null}
-
-      <div className="space-y-2">
-        <h2 className="text-base font-semibold">Histórico de refeições livres</h2>
-        <RefeicoesRegistradasList refreshKey={mealHistoryKey} />
-      </div>
+      ) : (
+        <div className="space-y-3 rounded-xl border border-border/60 p-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-medium">Registo por foto</p>
+              <p className="text-xs text-muted-foreground">
+                Estimativa aproximada — útil para refeições fora do plano.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              className="h-10 w-full shrink-0 sm:w-auto"
+              onClick={() => setMealPhotoOpen(true)}
+            >
+              <Camera className="mr-2 h-4 w-4" aria-hidden />
+              Fotografar
+            </Button>
+          </div>
+          <RefeicoesRegistradasList refreshKey={mealHistoryKey} />
+        </div>
+      )}
 
       <MealPhotoLogSheet
         open={mealPhotoOpen}

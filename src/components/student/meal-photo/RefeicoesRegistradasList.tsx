@@ -50,10 +50,10 @@ export default function RefeicoesRegistradasList({
 
   if (!items.length) {
     return (
-      <p className="py-2 text-sm text-muted-foreground">
+      <p className="py-1 text-sm text-muted-foreground">
         {readonly
           ? "Ainda não há refeições registadas por foto."
-          : "Ainda não registou refeições por foto."}
+          : "Ainda sem registos. Fotografe o prato quando usar a refeição livre."}
       </p>
     );
   }

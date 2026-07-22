@@ -20,6 +20,7 @@ import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import { countIncomingUnread, isIncomingUnreadMessage } from "@/lib/message-read";
 
 interface Message {
   id: string;
@@ -95,8 +96,7 @@ const MessagesPopover = ({ unreadCount, onCountChange }: MessagesPopoverProps) =
       filtered = filtered.slice(0, 20);
 
       setMessages(filtered);
-      const unread = filtered.filter(m => !m.lida).length;
-      onCountChange(unread);
+      onCountChange(countIncomingUnread(mensagens, user.id));
     } catch (error) {
       console.error("Erro ao carregar mensagens:", error);
       setMessages([]);
@@ -133,16 +133,15 @@ const MessagesPopover = ({ unreadCount, onCountChange }: MessagesPopoverProps) =
       const mensagensData = await apiClient.request('/api/mensagens');
       const mensagens = Array.isArray(mensagensData) ? mensagensData : [];
       
-      // Filtrar mensagens não lidas do destinatário
-      const mensagensNaoLidas = mensagens.filter(
-        (m: any) => m.destinatario_id === user.id && !m.lida
+      // Filtrar mensagens não lidas recebidas (schema sem destinatario_id)
+      const mensagensNaoLidas = mensagens.filter((m: any) =>
+        isIncomingUnreadMessage(m, user.id),
       );
 
-      // Marcar cada uma como lida
-      for (const msg of mensagensNaoLidas) {
-        await apiClient.request(`/api/mensagens/${msg.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ lida: true }),
+      if (mensagensNaoLidas.length > 0) {
+        await apiClient.request("/api/mensagens/mark-read", {
+          method: "POST",
+          body: JSON.stringify({}),
         });
       }
 

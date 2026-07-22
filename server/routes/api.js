@@ -5691,6 +5691,87 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     }
   });
 
+  // POST /api/mensagens/mark-read — marca como lidas as mensagens recebidas (não as próprias).
+  // Schema real não tem destinatario_id: critério = remetente_id <> utilizador actual.
+  router.post(
+    '/mensagens/mark-read',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['aluno', 'coach', 'admin']),
+    requireAlunoWhenStudent(),
+    async (req, res) => {
+      try {
+        const userId = req.user.id;
+        const conversaIdBody =
+          req.body?.conversa_id || req.body?.conversaId || req.query?.conversaId || null;
+
+        if (req.user.role === 'aluno') {
+          const aluno = req.aluno;
+          if (!aluno) {
+            return res.status(403).json({ error: 'Aluno não vinculado', error_code: 'ALUNO_NOT_LINKED' });
+          }
+          const conversaResult = await pool.query(
+            'SELECT id FROM public.conversas WHERE aluno_id = $1 LIMIT 1',
+            [aluno.id],
+          );
+          if (conversaResult.rows.length === 0) {
+            return res.json({ updated: 0 });
+          }
+          const conversaId = conversaIdBody || conversaResult.rows[0].id;
+          if (String(conversaId) !== String(conversaResult.rows[0].id)) {
+            return res.status(403).json({ error: 'Conversa não autorizada', error_code: 'FORBIDDEN' });
+          }
+          const upd = await pool.query(
+            `UPDATE public.mensagens
+             SET lida = true
+             WHERE conversa_id = $1
+               AND lida = false
+               AND remetente_id <> $2
+             RETURNING id`,
+            [conversaId, userId],
+          );
+          return res.json({ updated: upd.rowCount || 0 });
+        }
+
+        // Coach/admin: exige conversa_id e ownership (exceto admin)
+        if (!conversaIdBody || !isValidUUID(String(conversaIdBody))) {
+          return res.status(400).json({
+            error: 'conversa_id é obrigatório',
+            error_code: 'CONVERSA_ID_REQUIRED',
+          });
+        }
+        if (req.user.role !== 'admin') {
+          const own = await pool.query(
+            'SELECT id FROM public.conversas WHERE id = $1 AND coach_id = $2 LIMIT 1',
+            [conversaIdBody, userId],
+          );
+          if (own.rows.length === 0) {
+            return res.status(403).json({ error: 'Conversa não autorizada', error_code: 'FORBIDDEN' });
+          }
+        }
+        const upd = await pool.query(
+          `UPDATE public.mensagens
+           SET lida = true
+           WHERE conversa_id = $1
+             AND lida = false
+             AND remetente_id <> $2
+           RETURNING id`,
+          [conversaIdBody, userId],
+        );
+        return res.json({ updated: upd.rowCount || 0 });
+      } catch (error) {
+        if (error.code === 'ALUNO_NOT_LINKED') {
+          return res.status(403).json({ error: 'Aluno não vinculado', error_code: 'ALUNO_NOT_LINKED' });
+        }
+        console.error('Erro ao marcar mensagens como lidas:', error);
+        return res.status(500).json({
+          error: error.message || 'Erro ao marcar mensagens como lidas',
+          error_code: 'MESSAGES_MARK_READ_ERROR',
+        });
+      }
+    },
+  );
+
   // PATCH /api/mensagens/:id — aluno, coach ou admin marca como lida mensagem recebida
   router.patch('/mensagens/:id', authenticate, domainSchemaGuard, validateRole(['aluno', 'coach', 'admin']), requireAlunoWhenStudent(), validateUUIDParam('id'), async (req, res) => {
     try {

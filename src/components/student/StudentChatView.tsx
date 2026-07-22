@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Send, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { isIncomingUnreadMessage } from "@/lib/message-read";
 
 const StudentChatView = () => {
   const { user } = useAuth();
@@ -87,15 +88,17 @@ const StudentChatView = () => {
     setMensagens(mensagensData);
     setTimeout(scrollToBottom, 100);
 
-    const mensagensNaoLidas = mensagensData.filter(
-      (msg: any) => msg.destinatario_id === user.id && !msg.lida,
-    );
-
-    for (const msg of mensagensNaoLidas) {
-      await apiClient.requestSafe(`/api/mensagens/${msg.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ lida: true }),
+    const hasUnread = mensagensData.some((msg: any) => isIncomingUnreadMessage(msg, user.id));
+    if (hasUnread) {
+      await apiClient.requestSafe("/api/mensagens/mark-read", {
+        method: "POST",
+        body: JSON.stringify({ conversa_id: id }),
       });
+      setMensagens((prev) =>
+        prev.map((msg) =>
+          isIncomingUnreadMessage(msg, user.id) ? { ...msg, lida: true } : msg,
+        ),
+      );
     }
   };
 

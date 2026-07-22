@@ -133,7 +133,8 @@ export function buildPendingTasks(input: {
     tasks.push({
       id: "checkin-weekly",
       title: "Check-in semanal",
-      description: "Envie seu check-in desta semana para o coach acompanhar seu progresso.",
+      description:
+        "Ainda não enviou esta semana — abra e conclua o check-in (peso, fotos e questionário).",
       tab: "checkin",
       priority: "high",
     });

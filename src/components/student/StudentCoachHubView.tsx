@@ -7,6 +7,7 @@ import StudentChatView from "@/components/student/StudentChatView";
 import StudentMessagesView from "@/components/student/StudentMessagesView";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
+import { countIncomingUnread } from "@/lib/message-read";
 
 type CoachHubView = "chat" | "avisos";
 
@@ -34,9 +35,7 @@ const StudentCoachHubView = () => {
       mensagensResult.success && Array.isArray(mensagensResult.data)
         ? mensagensResult.data
         : [];
-    setUnreadChat(
-      mensagens.filter((m) => m.destinatario_id === user.id && !m.lida).length,
-    );
+    setUnreadChat(countIncomingUnread(mensagens, user.id));
 
     const alunoResult = await apiClient.getMeSafe();
     const aluno = alunoResult.success ? alunoResult.data : null;
@@ -77,20 +76,10 @@ const StudentCoachHubView = () => {
   const markChatAsRead = async () => {
     if (!user || user.role !== "aluno") return;
 
-    const mensagensResult = await apiClient.requestSafe<any[]>("/api/mensagens");
-    const mensagens =
-      mensagensResult.success && Array.isArray(mensagensResult.data)
-        ? mensagensResult.data
-        : [];
-    const naoLidas = mensagens.filter(
-      (m) => m.destinatario_id === user.id && !m.lida,
-    );
-    for (const msg of naoLidas) {
-      await apiClient.requestSafe(`/api/mensagens/${msg.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ lida: true }),
-      });
-    }
+    await apiClient.requestSafe("/api/mensagens/mark-read", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
     setUnreadChat(0);
   };
 

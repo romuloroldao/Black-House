@@ -28,6 +28,7 @@ import logoWhite from "@/assets/logo-white.svg";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
+import { countIncomingUnread } from "@/lib/message-read";
 import {
   Collapsible,
   CollapsibleContent,
@@ -209,11 +210,7 @@ const StudentSidebar = ({
     const mensagensResult = await apiClient.requestSafe<any[]>('/api/mensagens');
     const mensagens = mensagensResult.success && Array.isArray(mensagensResult.data) ? mensagensResult.data : [];
     
-    const mensagensNaoLidas = mensagens.filter(
-      (m: any) => m.destinatario_id === user.id && !m.lida
-    );
-
-    const newCount = mensagensNaoLidas.length;
+    const newCount = countIncomingUnread(mensagens, user.id);
     
     if (newCount > previousUnreadRef.current && previousUnreadRef.current > 0) {
       setAnimateBadge(true);

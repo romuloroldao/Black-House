@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import StudentOnboardingDialog, {
   isStudentOnboardingDone,
 } from "@/components/student/StudentOnboardingDialog";
@@ -114,6 +114,17 @@ const StudentPortal = () => {
     setSearchParams({ tab, ...extra });
     setMobileNavOpen(false);
   };
+
+  // Ao regressar à home, refrescar pendências (ex.: após abrir chat e marcar lidas).
+  const prevTabRef = useRef(activeTab);
+  useEffect(() => {
+    const prev = prevTabRef.current;
+    prevTabRef.current = activeTab;
+    if (prev === activeTab) return;
+    if (activeTab === "hoje" || activeTab === "dashboard") {
+      void hojeState.refetch();
+    }
+  }, [activeTab, hojeState.refetch]);
 
   useStudentPortalRealtime({ onNavigate: handleTabChange });
 
