@@ -158,6 +158,32 @@ CREATE TABLE IF NOT EXISTS public.atribuicao_exercicios_removidos (
     FOREIGN KEY (aluno_treino_id) REFERENCES public.alunos_treinos(id) ON DELETE CASCADE
 );
 
+-- Programação semanal: sessões que referenciam alunos_treinos (reutilizáveis).
+-- dia_semana ISO 1=Seg…7=Dom. MVP: 1 sessão/dia (UNIQUE aluno+dia). Sem unique em aluno_treino_id.
+CREATE TABLE IF NOT EXISTS public.aluno_treino_agenda (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  aluno_id uuid NOT NULL,
+  dia_semana smallint NOT NULL,
+  aluno_treino_id uuid NOT NULL,
+  ordem smallint NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT aluno_treino_agenda_pkey PRIMARY KEY (id),
+  CONSTRAINT aluno_treino_agenda_aluno_id_fkey
+    FOREIGN KEY (aluno_id) REFERENCES public.alunos(id) ON DELETE CASCADE,
+  CONSTRAINT aluno_treino_agenda_aluno_treino_id_fkey
+    FOREIGN KEY (aluno_treino_id) REFERENCES public.alunos_treinos(id) ON DELETE CASCADE,
+  CONSTRAINT aluno_treino_agenda_dia_semana_check
+    CHECK (dia_semana BETWEEN 1 AND 7),
+  CONSTRAINT aluno_treino_agenda_aluno_dia_unique
+    UNIQUE (aluno_id, dia_semana)
+);
+
+CREATE INDEX IF NOT EXISTS idx_aluno_treino_agenda_aluno_id
+  ON public.aluno_treino_agenda (aluno_id);
+CREATE INDEX IF NOT EXISTS idx_aluno_treino_agenda_aluno_treino_id
+  ON public.aluno_treino_agenda (aluno_treino_id);
+
 CREATE TABLE IF NOT EXISTS public.asaas_config (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   coach_id uuid NOT NULL UNIQUE,

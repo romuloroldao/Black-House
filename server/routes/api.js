@@ -270,6 +270,8 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
 
   // GET /api/alunos/me/hoje — resumo agregado (treino, dieta, pendências, retorno)
   const { getAlunoHoje } = require('../services/aluno-hoje.service');
+  const agendaService = require('../services/aluno-treino-agenda.service');
+
   router.get(
     '/alunos/me/hoje',
     authenticate,
@@ -288,6 +290,88 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
         return res.status(500).json({
           error: error.message || 'Erro ao carregar resumo do dia',
           error_code: 'ALUNO_HOJE_ERROR',
+        });
+      }
+    },
+  );
+
+  // GET /api/alunos/me/treino-agenda — programação semanal do aluno autenticado
+  router.get(
+    '/alunos/me/treino-agenda',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['aluno']),
+    resolveAlunoOrFail,
+    async (req, res) => {
+      try {
+        const data = await agendaService.listAgenda(pool, req.aluno.id);
+        return res.json(data);
+      } catch (error) {
+        console.error('GET /alunos/me/treino-agenda', error);
+        return res.status(500).json({
+          error: error.message || 'Erro ao carregar agenda',
+          error_code: 'TREINO_AGENDA_ERROR',
+        });
+      }
+    },
+  );
+
+  // GET /api/alunos/:alunoId/treino-agenda — coach vê / edita agenda do aluno
+  router.get(
+    '/alunos/:alunoId/treino-agenda',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'assistant']),
+    attachCoachScope,
+    validateUUIDParam('alunoId'),
+    async (req, res) => {
+      try {
+        const alunoId = req.params.alunoId;
+        if (req.user.role !== 'admin') {
+          const ok = await assertCoachCanAccessAluno(pool, req.coachScope, alunoId);
+          if (!ok) {
+            return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+          }
+        }
+        const data = await agendaService.listAgenda(pool, alunoId);
+        return res.json(data);
+      } catch (error) {
+        console.error('GET /alunos/:alunoId/treino-agenda', error);
+        return res.status(500).json({
+          error: error.message || 'Erro ao carregar agenda',
+          error_code: 'TREINO_AGENDA_ERROR',
+        });
+      }
+    },
+  );
+
+  // PUT /api/alunos/:alunoId/treino-agenda — substitui a semana (sessões reutilizáveis)
+  router.put(
+    '/alunos/:alunoId/treino-agenda',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    attachCoachScope,
+    validateUUIDParam('alunoId'),
+    async (req, res) => {
+      try {
+        const alunoId = req.params.alunoId;
+        if (req.user.role !== 'admin') {
+          const ok = await assertCoachCanAccessAluno(pool, req.coachScope, alunoId);
+          if (!ok) {
+            return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+          }
+        }
+        const data = await agendaService.replaceAgenda(pool, alunoId, req.body || {});
+        return res.json(data);
+      } catch (error) {
+        const status = error.statusCode || 500;
+        if (status >= 500) {
+          console.error('PUT /alunos/:alunoId/treino-agenda', error);
+        }
+        return res.status(status).json({
+          error: error.message || 'Erro ao guardar agenda',
+          error_code: error.error_code || 'TREINO_AGENDA_SAVE_ERROR',
         });
       }
     },

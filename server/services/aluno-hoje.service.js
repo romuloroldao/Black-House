@@ -101,6 +101,7 @@ function computeCheckinStreak(checkins) {
 }
 
 const { getRotationForDate } = require('../utils/diet-rotation');
+const { isoDayOfWeek } = require('./aluno-treino-agenda.service');
 
 function buildPendencias({ checkinDue, unreadChat, unreadAvisos }) {
   const tasks = [];
@@ -168,9 +169,12 @@ async function enrichPlanoNome(pool, aluno) {
 async function getAlunoHoje(pool, { aluno, userId }) {
   const alunoId = aluno.id;
   const hojeIso = new Date().toISOString().slice(0, 10);
+  const diaHoje = isoDayOfWeek(new Date());
 
   const [
-    alunoTreinoRes,
+    agendaHojeRes,
+    agendaCountRes,
+    alunoTreinoFallbackRes,
     dietaRes,
     checkinsRes,
     checkinsStreakRes,
@@ -180,6 +184,25 @@ async function getAlunoHoje(pool, { aluno, userId }) {
     eventosRes,
     fotosRes,
   ] = await Promise.all([
+    pool.query(
+      `SELECT at.*, t.nome AS treino_nome, t.descricao AS treino_descricao,
+              t.categoria AS treino_categoria, t.dificuldade AS treino_dificuldade,
+              t.duracao AS treino_duracao,
+              a.dia_semana AS agenda_dia_semana
+       FROM public.aluno_treino_agenda a
+       INNER JOIN public.alunos_treinos at ON at.id = a.aluno_treino_id
+       INNER JOIN public.treinos t ON t.id = at.treino_id
+       WHERE a.aluno_id = $1
+         AND a.dia_semana = $2
+         AND COALESCE(at.ativo, true) = true
+       ORDER BY a.ordem ASC
+       LIMIT 1`,
+      [alunoId, diaHoje],
+    ),
+    pool.query(
+      `SELECT COUNT(*)::int AS total FROM public.aluno_treino_agenda WHERE aluno_id = $1`,
+      [alunoId],
+    ),
     pool.query(
       `SELECT at.*, t.nome AS treino_nome, t.descricao AS treino_descricao,
               t.categoria AS treino_categoria, t.dificuldade AS treino_dificuldade,
@@ -249,8 +272,13 @@ async function getAlunoHoje(pool, { aluno, userId }) {
     ),
   ]);
 
-  const alunoTreinoRow = alunoTreinoRes.rows[0] || null;
+  const fromAgenda = agendaHojeRes.rows[0] || null;
+  const hasAgenda = (agendaCountRes.rows[0]?.total ?? 0) > 0;
+  // Com agenda: dia vazio = descanso (não cair no "último treino atribuído").
+  const alunoTreinoRow = fromAgenda
+    || (!hasAgenda ? alunoTreinoFallbackRes.rows[0] || null : null);
   const dieta = dietaRes.rows[0] || null;
+  const treinoFromAgenda = Boolean(fromAgenda);
 
   let treino = null;
   if (alunoTreinoRow) {
@@ -271,6 +299,17 @@ async function getAlunoHoje(pool, { aluno, userId }) {
         dificuldade: alunoTreinoRow.treino_dificuldade,
         duracao: alunoTreinoRow.treino_duracao,
       },
+      from_agenda: treinoFromAgenda,
+      agenda_dia_semana: treinoFromAgenda ? diaHoje : null,
+      descanso_hoje: false,
+    };
+  } else if (hasAgenda) {
+    treino = {
+      vinculo: null,
+      detalhe: null,
+      from_agenda: true,
+      agenda_dia_semana: diaHoje,
+      descanso_hoje: true,
     };
   }
 

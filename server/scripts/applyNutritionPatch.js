@@ -28,6 +28,7 @@ const PATCH_FILES = [
     '20260623_smart_reminders.sql',
     '20260721_aluno_acesso_operacional.sql',
     '20260721_refeicoes_registradas.sql',
+    '20260723_aluno_treino_agenda.sql',
 ];
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations');

@@ -49,9 +49,21 @@ const TodayPlanCards = ({
                   ~{treino.detalhe.duracao} min
                 </p>
               )}
+              {treino.from_agenda ? (
+                <Badge variant="secondary" className="text-xs font-normal">
+                  Programado na agenda
+                </Badge>
+              ) : null}
               <Button type="button" className="w-full gap-2" onClick={onOpenTreino}>
                 Ver treino
                 <ChevronRight className="h-4 w-4" />
+              </Button>
+            </>
+          ) : treino?.descanso_hoje ? (
+            <>
+              <p className="text-sm text-muted-foreground">Descanso hoje — sem sessão na agenda.</p>
+              <Button type="button" variant="outline" className="w-full" onClick={onOpenTreino}>
+                Ver agenda
               </Button>
             </>
           ) : (

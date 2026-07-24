@@ -23,6 +23,9 @@ export const API_CONTRACT = {
     bodyMetrics: (alunoId: string) =>
       `${API_BASE}/api/alunos/${encodeURIComponent(alunoId)}/body-metrics`,
     hoje: () => `${API_BASE}/api/alunos/me/hoje`,
+    treinoAgendaMe: () => `${API_BASE}/api/alunos/me/treino-agenda`,
+    treinoAgenda: (alunoId: string) =>
+      `${API_BASE}/api/alunos/${encodeURIComponent(alunoId)}/treino-agenda`,
     notificationPreferences: () => `${API_BASE}/api/alunos/me/notification-preferences`,
     list: () => `${API_BASE}/api/alunos`,
     linkUser: () => `${API_BASE}/api/alunos/link-user`,
@@ -296,6 +299,8 @@ const CONTRACT_PATTERNS = [
   '/api/alunos/me',
   '/api/alunos/me/profile-status',
   '/api/alunos/me/hoje',
+  '/api/alunos/me/treino-agenda',
+  '/api/alunos/:alunoId/treino-agenda',
   '/api/alunos/:alunoId/body-metrics',
   '/api/alunos/me/notification-preferences',
   '/api/alunos/link-user',

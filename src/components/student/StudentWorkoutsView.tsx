@@ -14,18 +14,47 @@ import { exportWorkoutToPdf } from "@/utils/workoutPdfExport";
 import StudentWorkoutSessionView from "@/components/student/StudentWorkoutSessionView";
 import PremiumEmptyState from "@/components/student/PremiumEmptyState";
 import { readSessionProgress } from "@/lib/workout-session-utils";
+import {
+  DIAS_SEMANA_LABELS,
+  DIAS_SEMANA_ORDEM,
+  type DiaSemanaIso,
+  type TreinoAgendaSession,
+} from "@/lib/treino-agenda-types";
+
+function isoDayToday(): DiaSemanaIso {
+  const d = new Date().getDay();
+  return (d === 0 ? 7 : d) as DiaSemanaIso;
+}
 
 const StudentWorkoutsView = () => {
   const { user } = useAuth();
   const { toast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const [treinos, setTreinos] = useState<any[]>([]);
+  const [agendaSessions, setAgendaSessions] = useState<TreinoAgendaSession[]>([]);
+  const [hasAgenda, setHasAgenda] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sessionTreino, setSessionTreino] = useState<any | null>(null);
   const [expandedWorkouts, setExpandedWorkouts] = useState<Set<string>>(new Set());
   const [studentName, setStudentName] = useState<string>("");
 
-  const treinoPrincipal = treinos[0] ?? null;
+  const diaHoje = isoDayToday();
+
+  const treinoPrincipal = useMemo(() => {
+    if (!treinos.length) return null;
+    const slotHoje = agendaSessions.find((s) => Number(s.dia_semana) === diaHoje);
+    if (slotHoje) {
+      return (
+        treinos.find((t) => t.alunoTreinoId === slotHoje.aluno_treino_id) ||
+        treinos.find((t) => t.id === slotHoje.treino_id) ||
+        null
+      );
+    }
+    if (hasAgenda) return null; // descanso programado
+    return treinos[0] ?? null;
+  }, [treinos, agendaSessions, diaHoje, hasAgenda]);
+
+  const descansoHoje = hasAgenda && !treinoPrincipal;
   const sessionProgress = treinoPrincipal ? readSessionProgress(treinoPrincipal.id) : null;
 
   const handleExportPdf = async (treino: any) => {
@@ -72,11 +101,22 @@ const StudentWorkoutsView = () => {
     if (aluno) {
       setStudentName(aluno.nome || user?.email || "");
 
-      const alunosTreinosResult = await apiClient.requestSafe<any[]>("/api/alunos-treinos");
+      const [alunosTreinosResult, agendaResult] = await Promise.all([
+        apiClient.requestSafe<any[]>("/api/alunos-treinos"),
+        apiClient.getTreinoAgendaSafe(),
+      ]);
+
       const alunosTreinos =
         alunosTreinosResult.success && Array.isArray(alunosTreinosResult.data)
           ? alunosTreinosResult.data
           : [];
+
+      const sessions =
+        agendaResult.success && agendaResult.data?.sessions
+          ? agendaResult.data.sessions
+          : [];
+      setAgendaSessions(sessions);
+      setHasAgenda(sessions.length > 0);
 
       const alunosTreinosFiltrados = alunosTreinos
         .filter((at: any) => at.aluno_id === aluno.id && at.ativo === true)
@@ -107,20 +147,21 @@ const StudentWorkoutsView = () => {
       }
     } else {
       setTreinos([]);
+      setAgendaSessions([]);
+      setHasAgenda(false);
     }
     setLoading(false);
   };
 
   useEffect(() => {
     if (loading || searchParams.get("session") !== "1") return;
-    const principal = treinos[0];
-    if (principal?.exercicios?.length) {
-      setSessionTreino(principal);
+    if (treinoPrincipal?.exercicios?.length) {
+      setSessionTreino(treinoPrincipal);
       const next = new URLSearchParams(searchParams);
       next.delete("session");
       setSearchParams(next, { replace: true });
     }
-  }, [loading, treinos, searchParams, setSearchParams]);
+  }, [loading, treinoPrincipal, searchParams, setSearchParams]);
 
   const exercicioCount = useMemo(() => {
     const ex = treinoPrincipal?.exercicios;
@@ -179,6 +220,57 @@ const StudentWorkoutsView = () => {
         </p>
       </div>
 
+      {hasAgenda ? (
+        <Card className="shadow-card">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Esta semana</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Sessões programadas pelo seu coach
+            </p>
+          </CardHeader>
+          <CardContent>
+            <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+              {DIAS_SEMANA_ORDEM.map((dia) => {
+                const slot = agendaSessions.find((s) => Number(s.dia_semana) === dia);
+                const nome =
+                  slot?.treino_nome ||
+                  treinos.find((t) => t.alunoTreinoId === slot?.aluno_treino_id)?.nome;
+                const isToday = dia === diaHoje;
+                return (
+                  <li
+                    key={dia}
+                    className={
+                      isToday
+                        ? "rounded-lg border border-primary/40 bg-primary/10 p-2"
+                        : "rounded-lg border border-border/60 bg-muted/20 p-2"
+                    }
+                  >
+                    <p className="text-[10px] font-semibold uppercase text-muted-foreground">
+                      {DIAS_SEMANA_LABELS[dia]}
+                      {isToday ? " · hoje" : ""}
+                    </p>
+                    <p className="mt-1 text-sm font-medium leading-snug">
+                      {slot ? nome || "Treino" : "Descanso"}
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {descansoHoje ? (
+        <Card className="border-border/60 shadow-card">
+          <CardContent className="py-5 text-center">
+            <p className="font-medium">Descanso hoje</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Não há sessão programada para este dia na sua agenda semanal.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
+
       {treinoPrincipal && (
         <Card className="border-primary/30 bg-gradient-to-br from-primary/10 to-transparent shadow-card">
           <CardHeader className="pb-2">
@@ -189,7 +281,7 @@ const StudentWorkoutsView = () => {
                 </p>
                 <CardTitle className="text-xl">{treinoPrincipal.nome}</CardTitle>
               </div>
-              <Badge variant="premium">Ativo</Badge>
+              <Badge variant="premium">{hasAgenda ? "Na agenda" : "Ativo"}</Badge>
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -236,6 +328,10 @@ const StudentWorkoutsView = () => {
           const diasRestantes = dataExpiracao
             ? Math.ceil((dataExpiracao.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24))
             : null;
+          const isHoje =
+            treinoPrincipal &&
+            (treino.alunoTreinoId === treinoPrincipal.alunoTreinoId ||
+              treino.id === treinoPrincipal.id);
 
           return (
             <Card key={idx} className="shadow-card border-primary/20">
@@ -246,7 +342,7 @@ const StudentWorkoutsView = () => {
                     <p className="mt-1 text-sm text-muted-foreground">{treino.descricao}</p>
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-2">
-                    {idx === 0 && <Badge variant="outline">Principal</Badge>}
+                    {isHoje && <Badge variant="outline">Hoje</Badge>}
                     {diasRestantes !== null && (
                       <Badge
                         variant={diasRestantes <= 7 ? "destructive" : "secondary"}

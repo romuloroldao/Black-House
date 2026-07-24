@@ -22,6 +22,7 @@ import WeightTimelineChart from "./coach/WeightTimelineChart";
 import type { BodyMetricsResponse } from "@/types/profile-completeness";
 import StudentFinancialManagement from "./student/StudentFinancialManagement";
 import RefeicoesRegistradasList from "@/components/student/meal-photo/RefeicoesRegistradasList";
+import WeeklyWorkoutAgendaEditor from "@/components/student/treino-agenda/WeeklyWorkoutAgendaEditor";
 import { DietReturnDateFields } from "@/components/DietReturnDateFields";
 import {
   DietRotationFields,
@@ -895,6 +896,17 @@ export default function StudentDetails() {
             )}
           </CardContent>
         </Card>
+
+        <WeeklyWorkoutAgendaEditor
+          alunoId={id!}
+          treinos={treinos.map((t) => ({
+            alunoTreinoId: t.alunoTreinoId,
+            id: t.id,
+            nome: t.nome,
+            categoria: t.categoria,
+            dificuldade: t.dificuldade,
+          }))}
+        />
         </TabsContent>
 
         {/* TAB: Nutrição */}

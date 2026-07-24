@@ -26,7 +26,7 @@ export type AlunoHojeTreino = {
     ativo?: boolean;
     data_retorno?: string | null;
     data_inicio?: string | null;
-  };
+  } | null;
   detalhe: {
     id: string;
     nome?: string | null;
@@ -34,7 +34,12 @@ export type AlunoHojeTreino = {
     categoria?: string | null;
     dificuldade?: string | null;
     duracao?: number | null;
-  };
+  } | null;
+  /** True quando a resolução veio da programação semanal */
+  from_agenda?: boolean;
+  agenda_dia_semana?: number | null;
+  /** True quando há agenda e o dia de hoje está vazio (descanso) */
+  descanso_hoje?: boolean;
 };
 
 export type AlunoHojeFotosEvolucao = {

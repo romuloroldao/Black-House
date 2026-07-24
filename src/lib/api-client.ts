@@ -19,6 +19,7 @@ export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/alunos/me',
     '/api/alunos/me/profile-status',
     '/api/alunos/me/hoje',
+    '/api/alunos/me/treino-agenda',
     '/api/alunos/me/notification-preferences',
     '/api/alunos/link-user',
     '/api/alunos/unlinked-registrations',
@@ -189,6 +190,14 @@ function mapLegacyApiToRestV1(endpoint: string): LegacyMapResult {
     let match: RegExpMatchArray | null = normalized.match(/^\/api\/alunos\/([^/]+)\/portal-status$/);
     if (match) {
         return { endpoint: `/api/alunos/${match[1]}/portal-status`, unwrapFirstRow: false };
+    }
+
+    match = normalized.match(/^\/api\/alunos\/([^/]+)\/treino-agenda$/);
+    if (match) {
+        return { endpoint: `/api/alunos/${match[1]}/treino-agenda`, unwrapFirstRow: false };
+    }
+    if (normalized === '/api/alunos/me/treino-agenda') {
+        return { endpoint, unwrapFirstRow: false };
     }
 
     match = normalized.match(/^\/api\/alunos\/([^/]+)$/) ?? null;
@@ -1018,6 +1027,27 @@ class ApiClient {
             return apiSuccess(null);
         }
         return this.safeRequest<AlunoHojeResponse>(API_CONTRACT.alunos.hoje());
+    }
+
+    async getTreinoAgendaSafe(alunoId?: string): Promise<ApiResult<import('@/lib/treino-agenda-types').TreinoAgendaResponse | null>> {
+        if (alunoId) {
+            return this.safeRequest(API_CONTRACT.alunos.treinoAgenda(alunoId));
+        }
+        const identity = assertDataContextReady('getTreinoAgendaSafe()');
+        if (!identity) {
+            return apiSuccess(null);
+        }
+        return this.safeRequest(API_CONTRACT.alunos.treinoAgendaMe());
+    }
+
+    async putTreinoAgendaSafe(
+        alunoId: string,
+        sessions: Array<{ dia_semana: number; aluno_treino_id: string; ordem?: number }>,
+    ): Promise<ApiResult<import('@/lib/treino-agenda-types').TreinoAgendaResponse>> {
+        return this.safeRequest(API_CONTRACT.alunos.treinoAgenda(alunoId), {
+            method: 'PUT',
+            body: JSON.stringify({ sessions }),
+        });
     }
 
     // REACT-API-RESILIENCE-FIX-008: Versão resiliente de getProfile
