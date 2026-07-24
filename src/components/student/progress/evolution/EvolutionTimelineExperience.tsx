@@ -319,11 +319,14 @@ function CompareWeeksDialog({
           <DialogDescription className="text-xs sm:text-sm">{tEvolution('compareDescription')}</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          <CompareEvolutionWorkspace
-            items={items}
-            initialCurrent={initialCurrent}
-            initialBaseline={initialBaseline}
-          />
+          {open ? (
+            <CompareEvolutionWorkspace
+              key={`${initialCurrent?.id || 'c'}-${initialBaseline?.id || 'b'}-${open}`}
+              items={items}
+              initialCurrent={initialCurrent}
+              initialBaseline={initialBaseline}
+            />
+          ) : null}
         </div>
       </DialogContent>
     </Dialog>
@@ -416,12 +419,19 @@ export default function EvolutionTimelineExperience({
   const [compareBaseline, setCompareBaseline] = useState<EvolutionTimelineItem | null>(null);
   const [photoSelection, setPhotoSelection] = useState<PhotoSelection>(null);
 
-  const current = items[0] ?? null;
-  const first = items[items.length - 1] ?? null;
+  const newest = items[0] ?? null;
+  const oldest = items[items.length - 1] ?? null;
 
-  const openCompare = (item: EvolutionTimelineItem, baseline = first) => {
-    setCompareCurrent(item);
-    setCompareBaseline(baseline);
+  /**
+   * Por defeito: mais antiga à esquerda (Antes) e mais recente à direita (Depois).
+   * O utilizador pode trocar semanas depois do primeiro impacto visual.
+   */
+  const openCompare = (
+    afterItem?: EvolutionTimelineItem | null,
+    baseline?: EvolutionTimelineItem | null,
+  ) => {
+    setCompareCurrent(afterItem ?? newest);
+    setCompareBaseline(baseline ?? oldest);
     setCompareOpen(true);
   };
 
@@ -448,12 +458,12 @@ export default function EvolutionTimelineExperience({
   return (
     <div className={cn('space-y-6', className)}>
       <EvolutionSummaryBar items={items} />
-      {current ? (
+      {newest ? (
         <CurrentCheckinHero
-          item={current}
-          firstItem={first}
+          item={newest}
+          firstItem={oldest}
           readonly={readonly}
-          onCompare={openCompare}
+          onCompare={(item, baseline) => openCompare(item, baseline ?? oldest)}
           onOpenPhoto={setPhotoSelection}
           onDeletePhoto={onDeletePhoto}
         />
@@ -461,7 +471,7 @@ export default function EvolutionTimelineExperience({
       <CheckinTimeline
         items={items}
         readonly={readonly}
-        onCompare={(item) => openCompare(item)}
+        onCompare={(item) => openCompare(item, oldest)}
         onOpenPhoto={setPhotoSelection}
         onDeletePhoto={onDeletePhoto}
       />

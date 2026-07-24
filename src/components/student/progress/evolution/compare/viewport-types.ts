@@ -9,13 +9,13 @@ export type CompareMode = 'sideBySide' | 'split' | 'flash';
 
 export type RegionPreset = 'fullBody' | 'torso' | 'abdomen' | 'back' | 'legs';
 
-export const MIN_SCALE = 1;
+export const MIN_SCALE = 0.5;
 export const MAX_SCALE = 4;
 export const SCALE_STEP = 0.15;
 
-/** Heurística de enquadramento útil (corpo tipicamente no terço superior-central). */
+/** Enquadramento inicial neutro — o utilizador alinha com pan/zoom. */
 export function heuristicUsefulCenter(): ViewportState {
-  return { scale: 1.08, x: 0, y: -4 };
+  return { scale: 1, x: 0, y: 0 };
 }
 
 /**

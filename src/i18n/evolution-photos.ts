@@ -25,7 +25,7 @@ const dictionaries = {
     noPhotosDescription:
       'As fotos enviadas no check-in semanal aparecem aqui em ordem cronológica para mostrar sua transformação.',
     compareTitle: 'Comparar evolução',
-    compareDescription: 'Alinhe o corpo com zoom e pan para perceber a transformação com precisão.',
+    compareDescription: 'Escolha a semana de Antes e a de Depois, depois o ângulo das fotos.',
     before: 'Antes',
     after: 'Depois',
     firstCheckin: 'Primeiro check-in',
@@ -40,13 +40,16 @@ const dictionaries = {
     uploadedToday: 'Hoje',
     uploadedYesterday: 'Ontem',
     daysAgo: 'há {days} dias',
-    emptySlot: 'Sem foto',
+    emptySlot: 'Sem foto neste ângulo',
+    emptySlotHint:
+      'Mude a semana de Antes ou Depois, ou escolha outro ângulo acima — os controlos continuam disponíveis.',
     selectedWeek: 'Semana seleccionada',
     zoomControls: 'Controlos de zoom',
     zoomIn: 'Aumentar zoom',
     zoomOut: 'Diminuir zoom',
-    panHint: 'Arraste com um dedo para alinhar. Pinça com dois dedos para zoom.',
-    syncImages: 'Sincronizar imagens',
+    panHint:
+      'Arraste a foto para alinhar. Zoom é por lado (±, pinça ou scroll). A máscara só se move pelo slider ou pela linha.',
+    syncImages: 'Mover juntos',
     showGuides: 'Mostrar guias',
     hideGuides: 'Ocultar guias',
     resetView: 'Repor vista',
@@ -54,7 +57,7 @@ const dictionaries = {
     exitFullscreen: 'Sair da tela cheia',
     compareModes: 'Modos de comparação',
     modeSideBySide: 'Lado a lado',
-    modeSplit: 'Slider',
+    modeSplit: 'Deslizante',
     modeFlash: 'Alternar',
     splitSlider: 'Barra de comparação Antes/Depois',
     regionPresets: 'Região do corpo',
@@ -67,6 +70,9 @@ const dictionaries = {
     spaceHint: 'Segure Espaço para alternar Antes ↔ Depois rapidamente.',
     holdToSwap: 'Manter pressionado: ver Depois',
     chooseWeeks: 'Escolher semanas e ângulo',
+    chooseWeeksHint:
+      'Por defeito: foto mais antiga à esquerda e mais recente à direita. Pode mudar as semanas quando quiser.',
+    swapSides: 'Trocar lados',
     metricsPanel: 'Indicadores',
     bfUnavailable: 'BF, medidas e massa magra aparecerão aqui quando disponíveis no check-in.',
     guideHead: 'cabeça',
@@ -100,7 +106,7 @@ const dictionaries = {
     noPhotosDescription:
       'Photos sent in your weekly check-in will appear here chronologically to show your transformation.',
     compareTitle: 'Compare progress',
-    compareDescription: 'Align the body with zoom and pan to see the transformation accurately.',
+    compareDescription: 'Pick the Before and After weeks, then the photo angle.',
     before: 'Before',
     after: 'After',
     firstCheckin: 'First check-in',
@@ -115,13 +121,15 @@ const dictionaries = {
     uploadedToday: 'Today',
     uploadedYesterday: 'Yesterday',
     daysAgo: '{days} days ago',
-    emptySlot: 'No photo',
+    emptySlot: 'No photo for this angle',
+    emptySlotHint:
+      'Change the Before or After week, or pick another angle above — the controls stay available.',
     selectedWeek: 'Selected week',
     zoomControls: 'Zoom controls',
     zoomIn: 'Zoom in',
     zoomOut: 'Zoom out',
     panHint: 'Drag with one finger to align. Pinch with two fingers to zoom.',
-    syncImages: 'Sync images',
+    syncImages: 'Aligned zoom',
     showGuides: 'Show guides',
     hideGuides: 'Hide guides',
     resetView: 'Reset view',
@@ -142,6 +150,8 @@ const dictionaries = {
     spaceHint: 'Hold Space to quickly toggle Before ↔ After.',
     holdToSwap: 'Hold to see After',
     chooseWeeks: 'Choose weeks and angle',
+    chooseWeeksHint: 'Pick the Before and After weeks. The same angle applies to both sides.',
+    swapSides: 'Swap sides',
     metricsPanel: 'Metrics',
     bfUnavailable: 'BF, measurements and lean mass will appear here when available in check-in.',
     guideHead: 'head',
@@ -175,7 +185,7 @@ const dictionaries = {
     noPhotosDescription:
       'Las fotos enviadas en el check-in semanal aparecerán aquí cronológicamente para mostrar tu transformación.',
     compareTitle: 'Comparar evolución',
-    compareDescription: 'Alinea el cuerpo con zoom y pan para percibir la transformación con precisión.',
+    compareDescription: 'Elige la semana de Antes y la de Después, luego el ángulo de las fotos.',
     before: 'Antes',
     after: 'Después',
     firstCheckin: 'Primer check-in',
@@ -190,13 +200,15 @@ const dictionaries = {
     uploadedToday: 'Hoy',
     uploadedYesterday: 'Ayer',
     daysAgo: 'hace {days} días',
-    emptySlot: 'Sin foto',
+    emptySlot: 'Sin foto en este ángulo',
+    emptySlotHint:
+      'Cambia la semana de Antes o Después, o elige otro ángulo arriba — los controles siguen disponibles.',
     selectedWeek: 'Semana seleccionada',
     zoomControls: 'Controles de zoom',
     zoomIn: 'Acercar',
     zoomOut: 'Alejar',
     panHint: 'Arrastra con un dedo para alinear. Pellizca con dos dedos para zoom.',
-    syncImages: 'Sincronizar imágenes',
+    syncImages: 'Zoom alineado',
     showGuides: 'Mostrar guías',
     hideGuides: 'Ocultar guías',
     resetView: 'Restablecer vista',
@@ -217,6 +229,8 @@ const dictionaries = {
     spaceHint: 'Mantén Espacio para alternar Antes ↔ Después rápidamente.',
     holdToSwap: 'Mantén pulsado: ver Después',
     chooseWeeks: 'Elegir semanas y ángulo',
+    chooseWeeksHint: 'Elige la semana de Antes y la de Después. El mismo ángulo se aplica a ambos lados.',
+    swapSides: 'Intercambiar lados',
     metricsPanel: 'Indicadores',
     bfUnavailable: 'BF, medidas y masa magra aparecerán aquí cuando estén disponibles en el check-in.',
     guideHead: 'cabeza',
@@ -230,23 +244,17 @@ const dictionaries = {
 
 export type EvolutionTextKey = keyof typeof dictionaries['pt-BR'];
 
+/** Evolução/comparativo: sempre português (produto BR). */
 export function getEvolutionLocale(): EvolutionLocale {
-  if (typeof window === 'undefined') return 'pt-BR';
-  const raw =
-    window.localStorage.getItem('blackhouse.locale') ||
-    window.localStorage.getItem('locale') ||
-    window.navigator.language;
-  if (raw?.toLowerCase().startsWith('en')) return 'en';
-  if (raw?.toLowerCase().startsWith('es')) return 'es';
   return 'pt-BR';
 }
 
 export function tEvolution(
   key: EvolutionTextKey,
   params?: Record<string, string | number>,
-  locale: EvolutionLocale = getEvolutionLocale(),
+  _locale: EvolutionLocale = getEvolutionLocale(),
 ): string {
-  const template = dictionaries[locale]?.[key] || dictionaries['pt-BR'][key] || key;
+  const template = dictionaries['pt-BR'][key] || key;
   if (!params) return template;
   return Object.entries(params).reduce(
     (text, [paramKey, value]) => text.replaceAll(`{${paramKey}}`, String(value)),

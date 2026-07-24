@@ -36,7 +36,8 @@ export function useSyncedViewports() {
   const initial = heuristicUsefulCenter();
   const [before, setBefore] = useState<ViewportState>(initial);
   const [after, setAfter] = useState<ViewportState>(initial);
-  const [synced, setSynced] = useState(true);
+  // Por defeito independente: cada lado alinha-se sozinho (alto impacto visual).
+  const [synced, setSynced] = useState(false);
   const beforeRef = useRef(before);
   const afterRef = useRef(after);
   beforeRef.current = before;
@@ -47,37 +48,22 @@ export function useSyncedViewports() {
     setAfter(next);
   }, []);
 
-  const zoom = useCallback(
-    (side: Side, delta: number) => {
-      if (synced) {
-        const base = side === 'before' ? beforeRef.current : afterRef.current;
-        setBoth(applyZoom(base, base.scale + delta));
-        return;
-      }
-      if (side === 'before') {
-        setBefore((s) => applyZoom(s, s.scale + delta));
-      } else {
-        setAfter((s) => applyZoom(s, s.scale + delta));
-      }
-    },
-    [setBoth, synced],
-  );
+  /** Zoom é sempre por lado — sync só afecta pan. */
+  const zoom = useCallback((side: Side, delta: number) => {
+    if (side === 'before') {
+      setBefore((s) => applyZoom(s, s.scale + delta));
+    } else {
+      setAfter((s) => applyZoom(s, s.scale + delta));
+    }
+  }, []);
 
-  const zoomTo = useCallback(
-    (side: Side, scale: number) => {
-      if (synced) {
-        const base = side === 'before' ? beforeRef.current : afterRef.current;
-        setBoth(applyZoom(base, scale));
-        return;
-      }
-      if (side === 'before') {
-        setBefore((s) => applyZoom(s, scale));
-      } else {
-        setAfter((s) => applyZoom(s, scale));
-      }
-    },
-    [setBoth, synced],
-  );
+  const zoomTo = useCallback((side: Side, scale: number) => {
+    if (side === 'before') {
+      setBefore((s) => applyZoom(s, scale));
+    } else {
+      setAfter((s) => applyZoom(s, scale));
+    }
+  }, []);
 
   const pan = useCallback(
     (side: Side, dxPct: number, dyPct: number) => {
