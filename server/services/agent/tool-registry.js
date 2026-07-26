@@ -5,10 +5,17 @@
 const { readTools } = require('./tools/read-context');
 const { writeTools } = require('./tools/write-execution');
 const { actionTools, highImpactTools } = require('./tools/action-ui');
+const { webInspirationTools } = require('./tools/web-inspiration');
 const { assertToolAllowed } = require('./policy');
 const agentRepo = require('../../repositories/agent.repository');
 
-const ALL_TOOLS = [...readTools, ...writeTools, ...actionTools, ...highImpactTools];
+const ALL_TOOLS = [
+  ...readTools,
+  ...webInspirationTools,
+  ...writeTools,
+  ...actionTools,
+  ...highImpactTools,
+];
 const TOOL_MAP = new Map(ALL_TOOLS.map((t) => [t.name, t]));
 
 function listToolsForPrompt({ includeHighImpact = false } = {}) {

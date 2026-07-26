@@ -383,8 +383,15 @@ function composeMeal({ acao, items = null, prefix = '' }) {
   };
 }
 
-/** Heurística simples: receita a partir dos itens do plano (sem inventar quantidades). */
-function composeRecipe({ acao, items = null }) {
+/** Receita personalizada: plano = verdade; web = inspiração opcional. */
+function composeRecipe({
+  acao,
+  items = null,
+  synthesis = null,
+  preferences = null,
+  searched = false,
+  searchFailed = false,
+}) {
   const meal = mealLabel(acao?.description || acao?.payload?.meal_key || 'próxima refeição');
   const list = Array.isArray(items) ? items : [];
   if (!list.length) {
@@ -399,43 +406,88 @@ function composeRecipe({ acao, items = null }) {
     };
   }
 
-  const names = list.map((i) => String(i.nome || '').toLowerCase());
-  const hasMeat = names.some((n) =>
-    /patinho|frango|carne|peito|alcatra|pescado|peixe|ovo|whey|proteina/.test(n),
-  );
-  const hasCarb = names.some((n) => /arroz|batata|macarrao|pao|aveia|tapioca|feijao/.test(n));
-  const hasVeg = names.some((n) => /legume|salada|brocolis|cenoura|abobrinha|alface|tomate/.test(n));
+  const syn =
+    synthesis ||
+    (() => {
+      const names = list.map((i) => String(i.nome || '').toLowerCase());
+      const hasMeat = names.some((n) =>
+        /patinho|frango|carne|peito|alcatra|pescado|peixe|ovo|whey|proteina/.test(n),
+      );
+      const hasCarb = names.some((n) => /arroz|batata|macarrao|pao|aveia|tapioca|feijao/.test(n));
+      const hasVeg = names.some((n) =>
+        /legume|salada|brocolis|cenoura|abobrinha|alface|tomate/.test(n),
+      );
+      let dish = `Prato com os ingredientes da ${meal}`;
+      if (hasMeat && hasCarb && hasVeg) dish = 'Proteína acebolada com acompanhamento e legumes salteados';
+      else if (hasMeat && hasCarb) dish = 'Proteína grelhada com acompanhamento';
+      else if (hasMeat) dish = 'Proteína temperada ao ponto';
+      return {
+        dish,
+        technique: 'salteado',
+        steps: [
+          '1. Separa os ingredientes nas quantidades do teu plano (não aumentes as doses).',
+          hasMeat
+            ? '2. Tempere a proteína e doure em fogo médio-alto até ficar ao ponto.'
+            : '2. Prepara os alimentos principais conforme o teu hábito de cozinha.',
+          hasCarb
+            ? '3. Cozinha o acompanhamento (arroz/batata/etc.) em paralelo.'
+            : '3. Monta o prato com o que tens.',
+          hasVeg
+            ? '4. Salteia os legumes no fim para ficarem crocantes.'
+            : '4. Ajusta temperos (sal, limão, ervas) sem mudar as quantidades.',
+          '5. Monta o prato e serve.',
+        ],
+        spiceNote: null,
+        inspirations: [],
+        usedWeb: false,
+      };
+    })();
 
-  let dish = `Prato com os ingredientes da ${meal}`;
-  if (hasMeat && hasCarb && hasVeg) dish = 'Proteína acebolada com acompanhamento e legumes salteados';
-  else if (hasMeat && hasCarb) dish = 'Proteína grelhada com acompanhamento';
-  else if (hasMeat) dish = 'Proteína temperada ao ponto';
-  else if (hasCarb) dish = 'Prato de base com o teu carboidrato do plano';
-
+  const dish = syn.dish;
   const bullets = formatItemsBullets(list, 8);
-  const steps = [
-    '1. Separa os ingredientes nas quantidades do teu plano (não aumentes as doses).',
-    hasMeat
-      ? '2. Tempere a proteína e doure em fogo médio-alto até ficar ao ponto.'
-      : '2. Prepara os alimentos principais conforme o teu hábito de cozinha.',
-    hasCarb ? '3. Cozinha o acompanhamento (arroz/batata/etc.) em paralelo.' : '3. Monta o prato com o que tens.',
-    hasVeg ? '4. Salteia os legumes no fim para ficarem crocantes.' : '4. Ajusta temperos (sal, limão, ervas) sem mudar as quantidades.',
-    '5. Monta o prato e serve.',
-  ];
+  const lines = [];
 
-  const lines = [
-    `Claro! Com os ingredientes da tua ${meal}, podes fazer:`,
+  if (searched && syn.usedWeb) {
+    lines.push(
+      `Com os ingredientes da tua ${meal}, busquei ideias diferentes e adaptei uma preparação ao teu plano.`,
+    );
+  } else if (searchFailed) {
+    lines.push(
+      `Não consegui consultar referências externas agora — montei uma preparação com base no teu plano.`,
+    );
+  } else {
+    lines.push(`Claro! Com os ingredientes da tua ${meal}, podes fazer:`);
+  }
+
+  lines.push('', `🍽️ ${dish}`);
+  if (preferences?.cuisine) {
+    lines.push(`Inspiração: culinária ${preferences.cuisine}.`);
+  }
+  if (preferences?.quick) {
+    lines.push('Foco: preparo rápido.');
+  }
+  lines.push(
     '',
-    `🍽️ ${dish}`,
-    '',
-    'A preparação mantém os ingredientes do teu planeamento — só muda a forma de preparo.',
+    'As quantidades continuam a seguir o teu planeamento — só muda a técnica e a apresentação.',
     '',
     'Ingredientes (do teu plano):',
     ...bullets,
     '',
+    'Temperos auxiliares ok: sal, alho, ervas, limão, pimenta.',
+    'Evita acrescentar queijo, molhos calóricos ou óleo em excesso sem avisar — posso recalcular se quiseres.',
+    '',
     'Modo de preparo:',
-    ...steps,
-  ];
+    ...(syn.steps || []),
+  );
+  if (syn.spiceNote) {
+    lines.push('', syn.spiceNote);
+  }
+  if (syn.usedWeb) {
+    lines.push(
+      '',
+      'Essa ideia foi inspirada em técnicas culinárias de referências externas e adaptada aos teus itens — não é uma cópia de uma receita da internet.',
+    );
+  }
 
   const mealCard = cardFromProximaAcao(acao, { items: list });
   if (mealCard) {
@@ -449,9 +501,34 @@ function composeRecipe({ acao, items = null }) {
     };
   }
 
+  const cards = [mealCard].filter(Boolean);
+  if (syn.usedWeb && syn.inspirations?.length) {
+    cards.push({
+      id: 'recipe-refs',
+      type: 'references',
+      title: 'Referências (inspiração)',
+      body: syn.inspirations
+        .slice(0, 3)
+        .map((r, i) => `${i + 1}. ${r.title || 'Fonte'}`)
+        .join('\n'),
+      items: syn.inspirations.slice(0, 3).map((r) => ({
+        name: r.title || 'Fonte',
+        quantity: r.url || null,
+      })),
+      primary_action: null,
+      secondary_action: null,
+    });
+  }
+
   return {
     assistantText: lines.join('\n'),
-    cards: [mealCard].filter(Boolean),
+    cards,
+    meta: {
+      searched: Boolean(searched),
+      used_web: Boolean(syn.usedWeb),
+      search_failed: Boolean(searchFailed),
+      dish,
+    },
   };
 }
 

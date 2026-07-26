@@ -65,9 +65,9 @@ function classifyFastPath(text) {
   if (/como\s+estou|aderenc|streak|progresso|ritmo|falt(ei|ou)|miss/.test(t)) {
     return { intent: 'behavioral', mode: 'behavioral' };
   }
-  // Transformação: receita a partir do plano
+  // Transformação: receita a partir do plano (+ opcional pesquisa web)
   if (
-    /receita|modo\s+de\s+preparo|como\s+(preparar|fazer|cozinhar)|preparar\s+(com|a\s+)?(os\s+)?ingredient/.test(
+    /receita|modo\s+de\s+preparo|como\s+(preparar|fazer|cozinhar)|preparar\s+(com|a\s+)?(os\s+)?ingredient|inspirad[oa]\s+na\s+culinaria/.test(
       t,
     )
   ) {
@@ -548,6 +548,11 @@ async function runFastPath(ctx, mode, context, options = {}) {
   }
 
   if (mode === 'create_recipe') {
+    const recipeInspiration = require('./recipe-inspiration.service');
+    const userText = String(options.userText || '');
+    const preferences = recipeInspiration.parseRecipePreferences(userText);
+    const wantWeb = recipeInspiration.shouldSearchWebForRecipe(userText);
+
     const result = await dispatchTool(ctx, {
       name: 'get_next_action',
       args: { prefer: 'meal' },
@@ -555,7 +560,90 @@ async function runFastPath(ctx, mode, context, options = {}) {
     toolResults.push({ name: 'get_next_action', result });
     const acao = result?.data || context.proxima_acao;
     const items = await fetchMealItems(ctx, acao, toolResults);
-    const composed = composer.composeRecipe({ acao, items });
+
+    let synthesis = null;
+    let searched = false;
+    let searchFailed = false;
+
+    if (wantWeb && items?.length) {
+      searched = true;
+      if (ctx.runId) {
+        await agentRepo.insertDecision(ctx.pool, {
+          run_id: ctx.runId,
+          kind: 'web_search_decision',
+          reason: 'recipe_inspiration_needed',
+          payload: {
+            preferences,
+            ingredient_count: items.length,
+          },
+        });
+      }
+      const searchResult = await dispatchTool(ctx, {
+        name: 'search_recipe_inspiration',
+        args: {
+          ingredients: items.map((i) => String(i.nome || '')).filter(Boolean),
+          preferences_text: userText.slice(0, 400),
+          cuisine: preferences.cuisine || undefined,
+          max_results: 6,
+        },
+      });
+      toolResults.push({ name: 'search_recipe_inspiration', result: searchResult });
+
+      const ranked = searchResult?.ok ? searchResult.data?.results || [] : [];
+      if (!searchResult?.ok || searchResult.data?.error || !ranked.length) {
+        searchFailed = true;
+        synthesis = recipeInspiration.synthesizeLocal({ items, preferences });
+        if (ctx.runId) {
+          await agentRepo.insertDecision(ctx.pool, {
+            run_id: ctx.runId,
+            kind: 'web_search_fallback',
+            reason: searchResult?.data?.error || searchResult?.error || 'no_results',
+            payload: { provider: searchResult?.data?.provider || null },
+          });
+        }
+      } else {
+        synthesis = recipeInspiration.synthesizeFromInspiration({
+          items,
+          preferences,
+          ranked,
+        });
+        if (ctx.runId) {
+          await agentRepo.insertDecision(ctx.pool, {
+            run_id: ctx.runId,
+            kind: 'web_search_selected',
+            reason: 'ranked_inspiration',
+            payload: {
+              provider: searchResult.data?.provider,
+              query: searchResult.data?.query,
+              latency_ms: searchResult.data?.latency_ms,
+              top: (synthesis.inspirations || []).slice(0, 3).map((r) => ({
+                title: r.title,
+                score: r.score,
+              })),
+            },
+          });
+        }
+      }
+    } else {
+      if (ctx.runId) {
+        await agentRepo.insertDecision(ctx.pool, {
+          run_id: ctx.runId,
+          kind: 'web_search_decision',
+          reason: wantWeb ? 'no_meal_items' : 'web_not_needed',
+          payload: { preferences, want_web: wantWeb },
+        });
+      }
+      synthesis = recipeInspiration.synthesizeLocal({ items, preferences });
+    }
+
+    const composed = composer.composeRecipe({
+      acao,
+      items,
+      synthesis,
+      preferences,
+      searched,
+      searchFailed,
+    });
     return {
       intent: 'create_recipe',
       assistantText: composed.assistantText,
@@ -705,6 +793,7 @@ async function handleStudentMessage(pool, {
     plan = await runFastPath(ctx, fast.mode, context, {
       day: fast.day,
       peso_kg: fast.peso_kg,
+      userText: intentRaw,
     });
   } else {
     const llm = await tryLlmPlan(intentRaw, context);

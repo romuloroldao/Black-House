@@ -30,7 +30,7 @@ export function chipsForProximaAcao(acao: ProximaAcaoLike): AgentChip[] {
     prioritized.push(
       { label: "Próxima refeição", text: "Qual minha próxima refeição?" },
       { label: "Concluí", text: "Concluí." },
-      { label: "Receita", text: "Me dê uma receita com os ingredientes da minha próxima refeição." },
+      { label: "Receita", text: "Me dê uma receita diferente e gostosa com os ingredientes da minha próxima refeição." },
       { label: "Restaurante", text: "Estou num restaurante." },
     );
   } else if (type === "today_workout") {
