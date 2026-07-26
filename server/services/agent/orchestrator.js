@@ -65,6 +65,22 @@ function classifyFastPath(text) {
   if (/como\s+estou|aderenc|streak|progresso|ritmo|falt(ei|ou)|miss/.test(t)) {
     return { intent: 'behavioral', mode: 'behavioral' };
   }
+  // Transformação: receita a partir do plano
+  if (
+    /receita|modo\s+de\s+preparo|como\s+(preparar|fazer|cozinhar)|preparar\s+(com|a\s+)?(os\s+)?ingredient/.test(
+      t,
+    )
+  ) {
+    return { intent: 'create_recipe', mode: 'create_recipe' };
+  }
+  // Reorganizar o dia (além de "atrasado" simples)
+  if (
+    /reorganiz|nao\s+consegui\s+(fazer|comer|treinar)|pulei\s+(a\s+)?(refeicao|almoco|jantar)|o\s+que\s+ainda\s+(preciso|falta)/.test(
+      t,
+    )
+  ) {
+    return { intent: 'reorganize_day', mode: 'reorganize_day' };
+  }
   if (/conclui|concluir|feito|done|marquei|terminei\s+a\s+refeicao/.test(t)) {
     return { intent: 'complete', mode: 'complete' };
   }
@@ -80,7 +96,7 @@ function classifyFastPath(text) {
   }
   // "próximo treino" / "quando treino" → olhar agenda à frente (não só hoje)
   if (
-    /proxim[oa].{0,20}treino|treino.{0,12}proxim|quando\s+(e\s+que\s+)?(eu\s+)?trein|qual\s+(e\s+)?(o\s+)?meu\s+proxim/.test(
+    /proxim[oa].{0,20}treino|treino.{0,12}proxim|quando\s+(e\s+que\s+)?(eu\s+)?trein|qual\s+(e\s+)?(o\s+)?meu\s+proxim[oa]?\s+treino/.test(
       t,
     )
   ) {
@@ -90,7 +106,9 @@ function classifyFastPath(text) {
     const day = parseRelativeDay(t);
     return { intent: 'workout_day', mode: 'workout_day', day };
   }
-  if (/refeicao|comer|almoco|jantar|cafe|o\s+que\s+(eu\s+)?como/.test(t)) {
+  if (
+    /refeicao|comer|almoco|jantar|cafe|o\s+que\s+(eu\s+)?como|proxim[oa].{0,20}refeicao/.test(t)
+  ) {
     return { intent: 'next_meal', mode: 'next_meal' };
   }
   if (/o\s+que\s+(faco|fazer)|proxima\s+acao|agora\??$|hoje\??$/.test(t)) {
@@ -99,8 +117,25 @@ function classifyFastPath(text) {
   return null;
 }
 
-function cardFromAction(acao) {
-  return composer.cardFromProximaAcao(acao);
+function cardFromAction(acao, opts) {
+  return composer.cardFromProximaAcao(acao, opts);
+}
+
+async function fetchMealItems(ctx, acao, toolResults) {
+  if (!acao || acao.type !== 'next_meal') return null;
+  const dietaId = acao.payload?.dieta_id;
+  const mealKey = acao.payload?.meal_key;
+  if (!dietaId || !mealKey) return null;
+  const detail = await dispatchTool(ctx, {
+    name: 'get_meal_detail',
+    args: {
+      dieta_id: dietaId,
+      meal_key: mealKey,
+      plano: acao.payload?.plano || 'A',
+    },
+  });
+  toolResults.push({ name: 'get_meal_detail', result: detail });
+  return detail?.ok ? detail.data?.itens || [] : [];
 }
 
 async function runFastPath(ctx, mode, context, options = {}) {
@@ -164,26 +199,48 @@ async function runFastPath(ctx, mode, context, options = {}) {
       rules.filter((r) => r.trigger === 'substitution'),
       { max: 2 },
     );
-    assistantText =
-      'Para trocar um alimento, abre a refeição na dieta e usa «Substitutos». A troca vale só para hoje e mantém as kcal.';
-    if (hint) {
-      assistantText += `\n\nOrientação do teu coach:\n${hint}`;
-    }
-    cards = [
-      {
-        id: 'open-diet-sub',
-        title: 'Abrir dieta',
-        body: 'Escolhe o item e vê opções isocalóricas',
-        primary_action: { type: 'open_ui', name: 'open_ui', args: { target: 'dieta' } },
-        secondary_action: null,
-      },
-    ];
-    const open = await dispatchTool(ctx, {
-      name: 'open_ui',
-      args: { target: 'dieta' },
+    const nextMeal = await dispatchTool(ctx, {
+      name: 'get_next_action',
+      args: { prefer: 'meal' },
     });
-    toolResults.push({ name: 'open_ui', result: open });
-    return { intent: 'substitution', assistantText, cards, toolResults, usedLlm: false };
+    toolResults.push({ name: 'get_next_action', result: nextMeal });
+    const acao = nextMeal?.data;
+    const items = await fetchMealItems(ctx, acao, toolResults);
+    const meal = composer.mealLabel(acao?.description || acao?.payload?.meal_key);
+    const bullets = composer.formatItemsBullets(items, 6);
+    const lines = [
+      acao?.type === 'next_meal'
+        ? `Para a tua ${meal}, podes trocar um alimento por um equivalente isocalórico.`
+        : 'Podes trocar um alimento por um equivalente isocalórico na dieta.',
+      '',
+      'A troca vale só para hoje e mantém as kcal aproximadas do plano.',
+    ];
+    if (bullets.length) {
+      lines.push('', 'Itens da refeição actual:', ...bullets);
+    }
+    if (hint) lines.push('', `Orientação do teu coach:\n${hint}`);
+    lines.push('', 'Escolhe o item na dieta e usa «Substitutos» para ver as opções.');
+
+    return {
+      intent: 'substitution',
+      assistantText: lines.join('\n'),
+      cards: [
+        cardFromAction(acao, { items }),
+        {
+          id: 'open-diet-sub',
+          title: 'Ver substituições',
+          body: 'Abrir dieta e escolher o item',
+          primary_action: {
+            type: 'open_ui',
+            name: 'open_ui',
+            args: { target: 'dieta', meal_key: acao?.payload?.meal_key },
+          },
+          secondary_action: null,
+        },
+      ].filter(Boolean),
+      toolResults,
+      usedLlm: false,
+    };
   }
 
   if (mode === 'behavioral') {
@@ -195,10 +252,12 @@ async function runFastPath(ctx, mode, context, options = {}) {
     const insight = result?.data;
     const next = await dispatchTool(ctx, { name: 'get_next_action', args: {} });
     toolResults.push({ name: 'get_next_action', result: next });
+    const items = await fetchMealItems(ctx, next?.data, toolResults);
     const composed = composer.composeBehavioral({
       insightText: insight?.text,
       proximaAcao: next?.data,
       checkinDue: Boolean(next?.data?.type === 'checkin' || context.proxima_acao?.payload?.checkin_due),
+      items,
     });
     return {
       intent: 'behavioral',
@@ -243,26 +302,21 @@ async function runFastPath(ctx, mode, context, options = {}) {
   }
 
   if (mode === 'open_progress') {
-    assistantText = 'Aqui podes ver fotos e métricas da tua evolução.';
-    cards = [
-      {
-        id: 'open-progress',
-        title: 'Evolução',
-        body: 'Fotos e métricas',
-        primary_action: { type: 'open_ui', name: 'open_ui', args: { target: 'progress' } },
-        secondary_action: {
-          type: 'open_ui',
-          name: 'open_ui',
-          args: { target: 'progress_photos' },
-        },
-      },
-    ];
-    const open = await dispatchTool(ctx, {
-      name: 'open_ui',
-      args: { target: 'progress' },
+    const insight = await dispatchTool(ctx, {
+      name: 'get_behavioral_insight',
+      args: { days: 42 },
     });
-    toolResults.push({ name: 'open_ui', result: open });
-    return { intent: 'progress', assistantText, cards, toolResults, usedLlm: false };
+    toolResults.push({ name: 'get_behavioral_insight', result: insight });
+    const composed = composer.composeProgressPreview({
+      insightText: insight?.data?.text || null,
+    });
+    return {
+      intent: 'progress',
+      assistantText: composed.assistantText,
+      cards: composed.cards,
+      toolResults,
+      usedLlm: false,
+    };
   }
 
   if (mode === 'open_reports') {
@@ -493,10 +547,45 @@ async function runFastPath(ctx, mode, context, options = {}) {
     };
   }
 
+  if (mode === 'create_recipe') {
+    const result = await dispatchTool(ctx, {
+      name: 'get_next_action',
+      args: { prefer: 'meal' },
+    });
+    toolResults.push({ name: 'get_next_action', result });
+    const acao = result?.data || context.proxima_acao;
+    const items = await fetchMealItems(ctx, acao, toolResults);
+    const composed = composer.composeRecipe({ acao, items });
+    return {
+      intent: 'create_recipe',
+      assistantText: composed.assistantText,
+      cards: composed.cards,
+      toolResults,
+      usedLlm: false,
+    };
+  }
+
+  if (mode === 'reorganize_day') {
+    const result = await dispatchTool(ctx, { name: 'get_next_action', args: {} });
+    toolResults.push({ name: 'get_next_action', result });
+    const acao = result?.data || context.proxima_acao;
+    const items = await fetchMealItems(ctx, acao, toolResults);
+    const composed = composer.composeReorganizeDay({ acao, items });
+    return {
+      intent: 'reorganize_day',
+      assistantText: composed.assistantText,
+      cards: composed.cards,
+      toolResults,
+      usedLlm: false,
+    };
+  }
+
   if (mode === 'next_meal') {
     const result = await dispatchTool(ctx, { name: 'get_next_action', args: { prefer: 'meal' } });
     toolResults.push({ name: 'get_next_action', result });
-    const composed = composer.composeMeal({ acao: result?.data || context.proxima_acao });
+    const acao = result?.data || context.proxima_acao;
+    const items = await fetchMealItems(ctx, acao, toolResults);
+    const composed = composer.composeMeal({ acao, items });
     return {
       intent: 'next_meal',
       assistantText: composed.assistantText,
@@ -510,7 +599,8 @@ async function runFastPath(ctx, mode, context, options = {}) {
   const result = await dispatchTool(ctx, { name: 'get_next_action', args: {} });
   toolResults.push({ name: 'get_next_action', result });
   const acao = result?.data || context.proxima_acao;
-  const composed = composer.composeNextAction({ acao, tone });
+  const items = await fetchMealItems(ctx, acao, toolResults);
+  const composed = composer.composeNextAction({ acao, tone, items });
   intent =
     mode === 'late'
       ? 'late'

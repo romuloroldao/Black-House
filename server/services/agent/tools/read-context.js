@@ -291,33 +291,52 @@ const readTools = [
       if (!dietaId) return ok({ dieta_id: null, meal_key: mealKey, itens: [] });
 
       const itensRes = await ctx.pool.query(
-        `SELECT id, refeicao, quantidade, unidade_quantidade, alimento_id
-         FROM public.itens_dieta
-         WHERE dieta_id = $1
-         ORDER BY refeicao ASC
+        `SELECT i.id, i.refeicao, i.quantidade, i.unidade_quantidade, i.alimento_id,
+                a.nome AS alimento_nome
+         FROM public.itens_dieta i
+         LEFT JOIN public.alimentos a ON a.id = i.alimento_id
+         WHERE i.dieta_id = $1
+         ORDER BY i.refeicao ASC, a.nome ASC NULLS LAST
          LIMIT 200`,
         [dietaId],
       );
-      const itens = mealKey
-        ? itensRes.rows.filter((r) =>
-            String(r.refeicao || '')
-              .toLowerCase()
-              .normalize('NFD')
-              .replace(/\p{M}/gu, '')
-              .includes(String(mealKey).toLowerCase()),
-          )
-        : itensRes.rows.slice(0, 20);
+
+      const normalize = (s) =>
+        String(s || '')
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/\p{M}/gu, '')
+          .replace(/\s*\(substituto\)\s*$/i, '')
+          .trim();
+
+      const keyNorm = mealKey ? normalize(mealKey) : '';
+      let itens = itensRes.rows;
+      if (keyNorm) {
+        const matched = itensRes.rows.filter((r) => {
+          const ref = normalize(r.refeicao);
+          return ref === keyNorm || ref.includes(keyNorm) || keyNorm.includes(ref);
+        });
+        if (matched.length) itens = matched;
+      } else {
+        itens = itensRes.rows.slice(0, 20);
+      }
+
+      const preview = itens.slice(0, 12).map((i) => ({
+        id: i.id,
+        refeicao: i.refeicao,
+        nome: i.alimento_nome || 'Alimento',
+        quantidade: i.quantidade != null ? Number(i.quantidade) : null,
+        unidade: i.unidade_quantidade || 'g',
+        alimento_id: i.alimento_id,
+      }));
 
       return ok({
         dieta_id: dietaId,
         meal_key: mealKey,
         plano,
-        itens: itens.map((i) => ({
-          id: i.id,
-          refeicao: i.refeicao,
-          quantidade: i.quantidade,
-          unidade: i.unidade_quantidade,
-        })),
+        itens: preview,
+        itens_total: itens.length,
+        truncated: itens.length > preview.length,
       });
     },
   },

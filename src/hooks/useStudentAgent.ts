@@ -9,10 +9,17 @@ export type AgentCardAction = {
   args?: Record<string, unknown>;
 };
 
+export type AgentCardItem = {
+  name: string;
+  quantity?: string | null;
+};
+
 export type AgentActionCardModel = {
   id?: string;
+  type?: string;
   title?: string;
   body?: string;
+  items?: AgentCardItem[];
   primary_action?: AgentCardAction | null;
   secondary_action?: AgentCardAction | null;
 };
