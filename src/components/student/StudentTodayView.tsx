@@ -27,7 +27,10 @@ import TodayPhotoCard from "@/components/student/today/TodayPhotoCard";
 import StudentCoachCheckinFeedback from "@/components/student/StudentCoachCheckinFeedback";
 import AgentComposer from "@/components/student/agent/AgentComposer";
 import AgentThread from "@/components/student/agent/AgentThread";
-import NextActionHero, { type ProximaAcao } from "@/components/student/agent/NextActionHero";
+import NextActionHero, {
+  askPromptForAcao,
+  type ProximaAcao,
+} from "@/components/student/agent/NextActionHero";
 import TodayContextStrip from "@/components/student/agent/TodayContextStrip";
 import WeightLogDialog from "@/components/student/agent/WeightLogDialog";
 import { chipsForProximaAcao } from "@/components/student/agent/agent-chips";
@@ -149,8 +152,9 @@ const StudentTodayView = ({
 
   const chips = useMemo(() => chipsForProximaAcao(proxima), [proxima]);
 
-  const handleNextPrimary = () => {
+  const handleOpenDetails = () => {
     const type = proxima?.type;
+    trackAgentEvent("agent_first_touch", { via: "next_details", type });
     if (type === "next_meal" || type === "open_diet") {
       openTab("diet");
       return;
@@ -163,15 +167,21 @@ const StudentTodayView = ({
       openTab("checkin");
       return;
     }
-    void agent.send("O que faço agora?");
+    onExplorePlatform?.();
+  };
+
+  const handleAskAgent = () => {
+    const prompt = askPromptForAcao(proxima?.type);
+    trackAgentEvent("agent_first_touch", { via: "next_primary", type: proxima?.type });
+    void agent.send(prompt);
   };
 
   if (!isReady) {
     return (
       <div className="min-w-0 space-y-4">
+        <Skeleton className="h-12 w-full" />
         <Skeleton className="h-28 w-full" />
-        <Skeleton className="h-20 w-full" />
-        <Skeleton className="h-40 w-full" />
+        <Skeleton className="h-64 w-full" />
       </div>
     );
   }
@@ -228,8 +238,9 @@ const StudentTodayView = ({
 
   return (
     <div className="min-w-0 space-y-4 pb-4">
-      {/* —— TOPO: cards visíveis (navegação tradicional permanece descoberta) —— */}
+      {/* —— First viewport: saudação + próxima ação + agente —— */}
       <TodayHeroCard
+        compact
         loading={loading}
         aluno={data?.aluno as { nome?: string; email?: string; objetivo?: string }}
         pendenciasCount={data?.contadores?.pendencias_total ?? pendingTasks.length}
@@ -241,26 +252,72 @@ const StudentTodayView = ({
 
       <ReturnCountdownBanner loading={loading} countdown={returnCountdown} />
 
-      <TodayPlanCards
-        loading={loading}
-        treino={data?.treino ?? null}
-        dieta={
-          data?.dieta as {
-            nome?: string | null;
-            objetivo?: string | null;
-            data_retorno?: string | null;
-          } | null
-        }
-        dietaRotacao={data?.dieta_rotacao ?? null}
-        onOpenTreino={() => openTab("workouts", { session: "1" })}
-        onOpenDieta={() => openTab("diet")}
+      <NextActionHero
+        loading={loading || proximaLoading}
+        acao={proxima}
+        onAskAgent={handleAskAgent}
+        onOpenDetails={handleOpenDetails}
       />
 
+      <section
+        className={cn(
+          "flex min-h-[min(58dvh,34rem)] flex-col gap-3 rounded-2xl border border-border/60",
+          "bg-card/50 p-3 shadow-sm sm:p-4",
+        )}
+        aria-label="Conversa com o agente"
+      >
+        <div className="shrink-0">
+          <p className="text-sm font-semibold text-foreground">Seu agente</p>
+          <p className="text-xs text-muted-foreground">
+            Resposta no chat · detalhes só se você quiser
+          </p>
+        </div>
+
+        <div className="min-h-0 flex-1">
+          <AgentThread
+            thread={agent.thread}
+            status={agent.status}
+            error={agent.error}
+            chips={chips}
+            onSend={(t) => {
+              trackAgentEvent("agent_first_touch", { via: "chip_or_thread" });
+              void agent.send(t);
+            }}
+            onCardAction={(a) => void agent.runCardAction(a)}
+          />
+        </div>
+
+        <div
+          className={cn(
+            "sticky z-10 -mx-1 shrink-0 px-1 pt-2",
+            "bottom-[calc(var(--student-bottom-nav-total,5rem)+0.25rem)] md:bottom-0",
+            "bg-gradient-to-t from-background via-background/95 to-transparent pb-1",
+          )}
+        >
+          <AgentComposer
+            status={agent.status}
+            onSend={(t) => {
+              trackAgentEvent("agent_first_touch", { via: "composer" });
+              void agent.send(t);
+            }}
+            autoFocus={false}
+            placeholder="O que você precisa agora?"
+          />
+        </div>
+      </section>
+
+      {/* —— Abaixo da dobra: contexto e navegação tradicional —— */}
       <TodayContextStrip
         loading={loading}
         data={data}
-        onOpenDiet={() => openTab("diet")}
-        onOpenWorkout={() => openTab("workouts", { session: "1" })}
+        onOpenDiet={() => {
+          trackAgentEvent("agent_first_touch", { via: "strip_diet" });
+          openTab("diet");
+        }}
+        onOpenWorkout={() => {
+          trackAgentEvent("agent_first_touch", { via: "strip_workout" });
+          openTab("workouts", { session: "1" });
+        }}
         onOpenPending={() => openTab("checkin")}
       />
 
@@ -279,54 +336,12 @@ const StudentTodayView = ({
         />
       </div>
 
-      <NextActionHero
-        loading={loading || proximaLoading}
-        acao={proxima}
-        onPrimary={handleNextPrimary}
-        onAskAgent={() => void agent.send("O que faço agora?")}
-      />
-
-      {/* —— CHAT: maior parte da interface —— */}
-      <section
-        className={cn(
-          "flex min-h-[min(62dvh,42rem)] flex-col gap-3 rounded-2xl border border-border/60 bg-card/40 p-3 sm:p-4",
-        )}
-        aria-label="Conversa com o agente"
-      >
-        <div className="shrink-0">
-          <p className="text-sm font-semibold text-foreground">O teu agente</p>
-          <p className="text-xs text-muted-foreground">Contexto do plano ligado em tempo real</p>
-        </div>
-
-        <div className="min-h-0 flex-1">
-          <AgentThread
-            thread={agent.thread}
-            status={agent.status}
-            error={agent.error}
-            chips={chips}
-            onSend={(t) => void agent.send(t)}
-            onCardAction={(a) => void agent.runCardAction(a)}
-          />
-        </div>
-
-        <div
-          className={cn(
-            "sticky bottom-0 z-10 -mx-1 shrink-0 px-1 pt-2",
-            "bg-gradient-to-t from-background via-background/95 to-transparent pb-1",
-          )}
-        >
-          <AgentComposer
-            status={agent.status}
-            onSend={(t) => void agent.send(t)}
-            autoFocus={false}
-            placeholder="Digite ou pergunta o que fazer agora…"
-          />
-        </div>
-      </section>
-
       <BehavioralInsightCard loading={loading} insight={data?.behavioral_insight} />
       <StudentCoachCheckinFeedback compact limit={1} showHistoryAction className="shadow-sm" />
-      <PendingTasksList loading={loading} tasks={pendingTasks} onNavigate={navigateToTab} />
+
+      {pendingTasks.length > 0 && (
+        <PendingTasksList loading={loading} tasks={pendingTasks} onNavigate={navigateToTab} />
+      )}
 
       {!loading && proximos.length > 0 && (
         <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
@@ -360,7 +375,7 @@ const StudentTodayView = ({
           }}
         >
           <LayoutGrid className="h-4 w-4" aria-hidden />
-          Explorar plataforma
+          Navegar pela plataforma
         </Button>
       </div>
 

@@ -41,6 +41,7 @@ const AgentComposer = ({
       className={cn(
         "flex items-center gap-2 rounded-2xl border border-border/70 bg-background/95 p-2 shadow-sm",
         "backdrop-blur supports-[backdrop-filter]:bg-background/90",
+        "ring-offset-background focus-within:ring-2 focus-within:ring-ring/40",
         className,
       )}
       onSubmit={(e) => {
@@ -62,11 +63,15 @@ const AgentComposer = ({
       <Button
         type="submit"
         size="icon"
-        className="h-11 w-11 shrink-0"
+        className="h-11 w-11 shrink-0 motion-safe:active:scale-[0.96] motion-safe:transition-transform motion-safe:duration-100"
         disabled={sending || !draft.trim()}
         aria-label="Enviar"
       >
-        {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+        {sending ? (
+          <Loader2 className="h-4 w-4 motion-safe:animate-spin" aria-hidden />
+        ) : (
+          <Send className="h-4 w-4" aria-hidden />
+        )}
       </Button>
     </form>
   );

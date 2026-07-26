@@ -21,7 +21,9 @@ export type ProximaAcao = {
 type NextActionHeroProps = {
   loading?: boolean;
   acao: ProximaAcao | null;
-  onPrimary: () => void;
+  /** Abre a tela especializada (secundário — answer-first) */
+  onOpenDetails: () => void;
+  /** Pergunta ao agente com prompt contextual (primário) */
   onAskAgent: () => void;
   className?: string;
 };
@@ -33,19 +35,38 @@ function iconFor(type?: string) {
   return Sparkles;
 }
 
-function primaryLabel(type?: string): string {
-  if (type === "today_workout") return "Começar treino";
+/** CTA primário: responde no chat */
+function askLabel(type?: string): string {
+  if (type === "today_workout") return "Ver treino no chat";
+  if (type === "checkin") return "Perguntar sobre o check-in";
+  if (type === "next_meal") return "Ver refeição no chat";
+  if (type === "open_diet") return "Ver dieta no chat";
+  if (type === "idle") return "O que faço agora?";
+  return "Perguntar ao agente";
+}
+
+/** CTA secundário: UI especializada */
+function detailsLabel(type?: string): string {
+  if (type === "today_workout") return "Abrir sessão";
   if (type === "checkin") return "Abrir check-in";
-  if (type === "next_meal") return "Ver refeição";
+  if (type === "next_meal") return "Ver detalhes";
   if (type === "open_diet") return "Abrir dieta";
-  if (type === "idle") return "Ver plano";
-  return "Continuar";
+  if (type === "idle") return "Explorar plano";
+  return "Ver detalhes";
+}
+
+export function askPromptForAcao(type?: string): string {
+  if (type === "today_workout") return "Qual meu treino de hoje?";
+  if (type === "checkin") return "Preciso fazer o check-in.";
+  if (type === "next_meal") return "Qual minha próxima refeição?";
+  if (type === "open_diet") return "Como está minha dieta hoje?";
+  return "O que faço agora?";
 }
 
 const NextActionHero = ({
   loading,
   acao,
-  onPrimary,
+  onOpenDetails,
   onAskAgent,
   className,
 }: NextActionHeroProps) => {
@@ -53,7 +74,7 @@ const NextActionHero = ({
     return (
       <div className={cn("space-y-2 rounded-2xl border border-border/60 p-4", className)}>
         <Skeleton className="h-4 w-24" />
-        <Skeleton className="h-7 w-56" />
+        <Skeleton className="h-6 w-56" />
         <Skeleton className="h-4 w-40" />
         <Skeleton className="h-10 w-full" />
       </div>
@@ -66,8 +87,8 @@ const NextActionHero = ({
   const body =
     acao?.description ||
     (type === "idle"
-      ? "Estás em dia. Podes perguntar qualquer coisa ao agente."
-      : "A tua próxima acção está pronta.");
+      ? "Você está em dia. Pergunte qualquer coisa ao agente."
+      : "Sua próxima ação está pronta — respondo no chat.");
 
   return (
     <section
@@ -78,25 +99,34 @@ const NextActionHero = ({
       aria-labelledby="next-action-heading"
     >
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Próxima acção
+        Próxima ação
       </p>
       <div className="mt-2 flex items-start gap-3">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
           <Icon className="h-5 w-5" aria-hidden />
         </span>
         <div className="min-w-0 flex-1">
-          <h2 id="next-action-heading" className="text-lg font-semibold tracking-tight">
+          <h2 id="next-action-heading" className="text-base font-semibold tracking-tight sm:text-lg">
             {title}
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">{body}</p>
         </div>
       </div>
-      <div className="mt-4 flex flex-wrap gap-2">
-        <Button type="button" className="min-h-11" onClick={onPrimary}>
-          {primaryLabel(type)}
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+        <Button
+          type="button"
+          className="min-h-11 w-full sm:w-auto motion-safe:active:scale-[0.98] motion-safe:transition-transform motion-safe:duration-100"
+          onClick={onAskAgent}
+        >
+          {askLabel(type)}
         </Button>
-        <Button type="button" variant="outline" className="min-h-11" onClick={onAskAgent}>
-          Perguntar ao agente
+        <Button
+          type="button"
+          variant="outline"
+          className="min-h-11 w-full sm:w-auto motion-safe:active:scale-[0.98] motion-safe:transition-transform motion-safe:duration-100"
+          onClick={onOpenDetails}
+        >
+          {detailsLabel(type)}
         </Button>
       </div>
     </section>

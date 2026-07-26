@@ -79,11 +79,11 @@ const TodayContextStrip = ({
           className="h-auto min-h-[4.25rem] flex-col items-start gap-1 px-2.5 py-2 text-left"
           onClick={item.onClick}
         >
-          <span className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            <item.icon className="h-3 w-3" aria-hidden />
+          <span className="student-caption flex items-center gap-1 font-medium uppercase tracking-wide text-muted-foreground">
+            <item.icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
             {item.label}
           </span>
-          <span className="line-clamp-2 w-full text-xs font-semibold text-foreground">
+          <span className="line-clamp-2 w-full text-xs font-semibold leading-snug text-foreground">
             {item.value}
           </span>
         </Button>
