@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Calendar, LayoutGrid } from "lucide-react";
+import { Calendar, ChevronDown, LayoutGrid } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDataContext } from "@/contexts/DataContext";
 import { useAlunoHoje } from "@/hooks/useAlunoHoje";
@@ -27,17 +28,12 @@ import TodayPhotoCard from "@/components/student/today/TodayPhotoCard";
 import StudentCoachCheckinFeedback from "@/components/student/StudentCoachCheckinFeedback";
 import AgentComposer from "@/components/student/agent/AgentComposer";
 import AgentThread from "@/components/student/agent/AgentThread";
-import NextActionHero, {
-  askPromptForAcao,
-  type ProximaAcao,
-} from "@/components/student/agent/NextActionHero";
-import TodayContextStrip from "@/components/student/agent/TodayContextStrip";
+import { askPromptForAcao, type ProximaAcao } from "@/components/student/agent/NextActionHero";
 import WeightLogDialog from "@/components/student/agent/WeightLogDialog";
 import { chipsForProximaAcao } from "@/components/student/agent/agent-chips";
 import { useStudentAgent, type AgentUiOpenTarget } from "@/hooks/useStudentAgent";
 
 type StudentTodayViewProps = {
-  /** Evita segunda chamada quando o portal já carregou /api/alunos/me/hoje */
   hojeState?: {
     data: AlunoHojeResponse | null;
     loading: boolean;
@@ -45,9 +41,16 @@ type StudentTodayViewProps = {
   };
   profileStatus?: ProfileCompletenessStatus | null;
   onOpenProfileWizard?: () => void;
-  /** Abre o drawer de navegação (mobile) / destaca explorar */
   onExplorePlatform?: () => void;
 };
+
+function nextActionLabel(acao: ProximaAcao | null): string | null {
+  if (!acao?.type || acao.type === "idle") return null;
+  const title = acao.title?.trim();
+  const desc = acao.description?.trim();
+  if (title && desc) return `${title}: ${desc}`;
+  return title || desc || null;
+}
 
 const StudentTodayView = ({
   hojeState,
@@ -63,6 +66,7 @@ const StudentTodayView = ({
   const loading = hojeState?.loading ?? internal.loading;
   const [proxima, setProxima] = useState<ProximaAcao | null>(null);
   const [proximaLoading, setProximaLoading] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const refreshHoje = () => {
     void (hojeState?.refetch ?? internal.refetch)?.();
@@ -151,37 +155,13 @@ const StudentTodayView = ({
   }, [isReady, agent.enabled]);
 
   const chips = useMemo(() => chipsForProximaAcao(proxima), [proxima]);
-
-  const handleOpenDetails = () => {
-    const type = proxima?.type;
-    trackAgentEvent("agent_first_touch", { via: "next_details", type });
-    if (type === "next_meal" || type === "open_diet") {
-      openTab("diet");
-      return;
-    }
-    if (type === "today_workout") {
-      openTab("workouts", { session: "1" });
-      return;
-    }
-    if (type === "checkin") {
-      openTab("checkin");
-      return;
-    }
-    onExplorePlatform?.();
-  };
-
-  const handleAskAgent = () => {
-    const prompt = askPromptForAcao(proxima?.type);
-    trackAgentEvent("agent_first_touch", { via: "next_primary", type: proxima?.type });
-    void agent.send(prompt);
-  };
+  const nextLabel = nextActionLabel(proxima);
 
   if (!isReady) {
     return (
-      <div className="min-w-0 space-y-4">
-        <Skeleton className="h-12 w-full" />
-        <Skeleton className="h-28 w-full" />
-        <Skeleton className="h-64 w-full" />
+      <div className="min-w-0 space-y-3">
+        <Skeleton className="h-10 w-48" />
+        <Skeleton className="h-[min(52dvh,28rem)] w-full rounded-2xl" />
       </div>
     );
   }
@@ -190,7 +170,6 @@ const StudentTodayView = ({
   const returnCountdown = mapRetornoFromApi(data?.retorno);
   const proximos = data?.proximos_eventos?.slice(0, 2) ?? [];
 
-  // Fallback clássico se flag desligada
   if (!agent.enabled) {
     return (
       <div className="min-w-0 space-y-5 pb-2">
@@ -237,8 +216,7 @@ const StudentTodayView = ({
   }
 
   return (
-    <div className="min-w-0 space-y-4 pb-4">
-      {/* —— First viewport: saudação + próxima ação + agente —— */}
+    <div className="min-w-0 space-y-3 pb-4">
       <TodayHeroCard
         compact
         loading={loading}
@@ -247,31 +225,51 @@ const StudentTodayView = ({
       />
 
       {profileStatus && !profileStatus.is_complete && onOpenProfileWizard && (
-        <ProfileCompletenessBanner status={profileStatus} onComplete={onOpenProfileWizard} />
+        <ProfileCompletenessBanner
+          compact
+          status={profileStatus}
+          onComplete={onOpenProfileWizard}
+        />
       )}
 
-      <ReturnCountdownBanner loading={loading} countdown={returnCountdown} />
-
-      <NextActionHero
-        loading={loading || proximaLoading}
-        acao={proxima}
-        onAskAgent={handleAskAgent}
-        onOpenDetails={handleOpenDetails}
-      />
+      {!loading && returnCountdown && (
+        <ReturnCountdownBanner loading={false} countdown={returnCountdown} />
+      )}
 
       <section
         className={cn(
-          "flex min-h-[min(58dvh,34rem)] flex-col gap-3 rounded-2xl border border-border/60",
-          "bg-card/50 p-3 shadow-sm sm:p-4",
+          "flex min-h-[min(62dvh,32rem)] flex-col gap-3 rounded-2xl border border-border/50",
+          "bg-background p-3 sm:p-4",
         )}
         aria-label="Conversa com o agente"
       >
-        <div className="shrink-0">
-          <p className="text-sm font-semibold text-foreground">Seu agente</p>
-          <p className="text-xs text-muted-foreground">
-            Resposta no chat · detalhes só se você quiser
-          </p>
-        </div>
+        {(proximaLoading || nextLabel) && (
+          <div className="flex min-w-0 items-center justify-between gap-2 border-b border-border/40 pb-2">
+            <p className="min-w-0 truncate text-sm text-muted-foreground">
+              {proximaLoading ? (
+                <Skeleton className="inline-block h-4 w-40" />
+              ) : (
+                <>
+                  <span className="text-foreground/80">Agora:</span> {nextLabel}
+                </>
+              )}
+            </p>
+            {!proximaLoading && nextLabel && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 shrink-0 px-2 text-xs"
+                onClick={() => {
+                  trackAgentEvent("agent_first_touch", { via: "next_inline" });
+                  void agent.send(askPromptForAcao(proxima?.type));
+                }}
+              >
+                Perguntar
+              </Button>
+            )}
+          </div>
+        )}
 
         <div className="min-h-0 flex-1">
           <AgentThread
@@ -284,14 +282,15 @@ const StudentTodayView = ({
               void agent.send(t);
             }}
             onCardAction={(a) => void agent.runCardAction(a)}
+            emptyHint="Respondo com o seu plano — digite ou use um atalho."
           />
         </div>
 
         <div
           className={cn(
-            "sticky z-10 -mx-1 shrink-0 px-1 pt-2",
+            "sticky z-10 -mx-1 shrink-0 px-1 pt-1",
             "bottom-[calc(var(--student-bottom-nav-total,5rem)+0.25rem)] md:bottom-0",
-            "bg-gradient-to-t from-background via-background/95 to-transparent pb-1",
+            "bg-gradient-to-t from-background via-background to-transparent pb-0.5",
           )}
         >
           <AgentComposer
@@ -306,78 +305,81 @@ const StudentTodayView = ({
         </div>
       </section>
 
-      {/* —— Abaixo da dobra: contexto e navegação tradicional —— */}
-      <TodayContextStrip
-        loading={loading}
-        data={data}
-        onOpenDiet={() => {
-          trackAgentEvent("agent_first_touch", { via: "strip_diet" });
-          openTab("diet");
+      <Collapsible open={moreOpen} onOpenChange={setMoreOpen}>
+        <CollapsibleTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-10 w-full justify-between px-2 text-sm text-muted-foreground hover:text-foreground"
+          >
+            Mais do dia
+            <ChevronDown
+              className={cn(
+                "h-4 w-4 transition-transform duration-200",
+                moreOpen && "rotate-180",
+              )}
+              aria-hidden
+            />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="space-y-3 pt-1 data-[state=closed]:animate-none">
+          <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+            <CheckinStreakCard
+              loading={loading}
+              streak={data?.checkin_streak ?? null}
+              checkinDue={data?.contadores?.checkin_due}
+              onOpenCheckin={() => openTab("checkin")}
+            />
+            <TodayPhotoCard
+              loading={loading}
+              fotos={data?.fotos_evolucao}
+              onTirarFoto={() => openTab("checkin")}
+              onVerGaleria={() => openTab("progress", { section: "photos" })}
+            />
+          </div>
+
+          <BehavioralInsightCard loading={loading} insight={data?.behavioral_insight} />
+          <StudentCoachCheckinFeedback compact limit={1} showHistoryAction className="shadow-sm" />
+
+          {pendingTasks.length > 0 && (
+            <PendingTasksList loading={loading} tasks={pendingTasks} onNavigate={navigateToTab} />
+          )}
+
+          {!loading && proximos.length > 0 && (
+            <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+              <p className="mb-2 flex items-center gap-2 text-sm font-medium">
+                <Calendar className="h-4 w-4 text-primary" aria-hidden />
+                Próximo na agenda
+              </p>
+              <ul className="space-y-2">
+                {proximos.map((ev) => (
+                  <li key={ev.id} className="text-sm">
+                    <span className="font-medium text-foreground">{ev.titulo || "Evento"}</span>
+                    <span className="text-muted-foreground">
+                      {" "}
+                      · {new Date(ev.data_evento).toLocaleDateString("pt-BR")}
+                      {ev.hora_evento ? ` às ${ev.hora_evento}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
+
+      <Button
+        type="button"
+        variant="ghost"
+        className="h-10 w-full gap-2 text-sm text-muted-foreground"
+        onClick={() => {
+          trackAgentEvent("nav_traditional_open", { via: "explore" });
+          onExplorePlatform?.();
         }}
-        onOpenWorkout={() => {
-          trackAgentEvent("agent_first_touch", { via: "strip_workout" });
-          openTab("workouts", { session: "1" });
-        }}
-        onOpenPending={() => openTab("checkin")}
-      />
-
-      <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-        <CheckinStreakCard
-          loading={loading}
-          streak={data?.checkin_streak ?? null}
-          checkinDue={data?.contadores?.checkin_due}
-          onOpenCheckin={() => openTab("checkin")}
-        />
-        <TodayPhotoCard
-          loading={loading}
-          fotos={data?.fotos_evolucao}
-          onTirarFoto={() => openTab("checkin")}
-          onVerGaleria={() => openTab("progress", { section: "photos" })}
-        />
-      </div>
-
-      <BehavioralInsightCard loading={loading} insight={data?.behavioral_insight} />
-      <StudentCoachCheckinFeedback compact limit={1} showHistoryAction className="shadow-sm" />
-
-      {pendingTasks.length > 0 && (
-        <PendingTasksList loading={loading} tasks={pendingTasks} onNavigate={navigateToTab} />
-      )}
-
-      {!loading && proximos.length > 0 && (
-        <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
-          <p className="mb-2 flex items-center gap-2 text-sm font-medium">
-            <Calendar className="h-4 w-4 text-primary" />
-            Próximo na agenda
-          </p>
-          <ul className="space-y-2">
-            {proximos.map((ev) => (
-              <li key={ev.id} className="text-sm">
-                <span className="font-medium text-foreground">{ev.titulo || "Evento"}</span>
-                <span className="text-muted-foreground">
-                  {" "}
-                  · {new Date(ev.data_evento).toLocaleDateString("pt-BR")}
-                  {ev.hora_evento ? ` às ${ev.hora_evento}` : ""}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          className="min-h-11 gap-2"
-          onClick={() => {
-            trackAgentEvent("nav_traditional_open", { via: "explore" });
-            onExplorePlatform?.();
-          }}
-        >
-          <LayoutGrid className="h-4 w-4" aria-hidden />
-          Navegar pela plataforma
-        </Button>
-      </div>
+      >
+        <LayoutGrid className="h-4 w-4" aria-hidden />
+        Navegar pela plataforma
+      </Button>
 
       <WeightLogDialog
         open={agent.weightDialogOpen}

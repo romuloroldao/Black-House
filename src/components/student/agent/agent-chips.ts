@@ -19,7 +19,7 @@ export type ProximaAcaoLike = {
   type?: string | null;
 } | null;
 
-const MAX_VISIBLE_CHIPS = 4;
+const MAX_VISIBLE_CHIPS = 3;
 
 /** Prioriza chips conforme a próxima ação do dia (máx. 4 — Hick’s Law) */
 export function chipsForProximaAcao(acao: ProximaAcaoLike): AgentChip[] {

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Loader2, MessageCircle } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import AgentActionCard from "@/components/student/agent/AgentActionCard";
@@ -47,14 +47,14 @@ const AgentThread = ({
   return (
     <div className={cn("flex h-full min-h-0 flex-col gap-3", className)}>
       <div className="flex shrink-0 flex-wrap gap-2" role="group" aria-label="Atalhos do agente">
-        {chips.slice(0, 4).map((chip, idx) => (
+        {chips.slice(0, 3).map((chip) => (
           <Button
             key={chip.label}
             type="button"
             size="sm"
-            variant={isEmpty && idx === 0 ? "default" : "secondary"}
+            variant="secondary"
             className={cn(
-              "min-h-9 rounded-full text-xs",
+              "min-h-9 rounded-full text-xs font-normal",
               "motion-safe:active:scale-[0.98] motion-safe:transition-transform motion-safe:duration-100",
             )}
             disabled={sending}
@@ -72,13 +72,7 @@ const AgentThread = ({
         aria-busy={sending}
       >
         {isEmpty && (
-          <div className="flex flex-col items-start gap-2 rounded-xl border border-dashed border-border/70 bg-muted/20 px-3 py-4">
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary">
-              <MessageCircle className="h-4 w-4" aria-hidden />
-            </span>
-            <p className="text-sm font-medium text-foreground">O que você precisa agora?</p>
-            <p className="text-sm text-muted-foreground">{emptyHint}</p>
-          </div>
+          <p className="px-0.5 text-sm text-muted-foreground">{emptyHint}</p>
         )}
 
         {thread.map((item) => (
@@ -95,7 +89,7 @@ const AgentThread = ({
                 "rounded-2xl px-3 py-2 text-sm whitespace-pre-line",
                 item.role === "user"
                   ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-foreground",
+                  : "bg-muted/80 text-foreground",
               )}
             >
               {item.content}
