@@ -40,6 +40,17 @@
 
 - Aluno com histórico/ficha importada **vs** aluno novo; credencial, vínculo automático por email e vínculo manual pelo coach: ver [`arquivo/2026-03-30-cenarios-cadastro-aluno.md`](arquivo/2026-03-30-cenarios-cadastro-aluno.md).
 
+## Agentic OS (portal aluno)
+
+Documentação de investigação e specs:
+
+- Auditoria: [`arquivo/2026-07-26-auditoria-agentic-os.md`](arquivo/2026-07-26-auditoria-agentic-os.md)
+- PRD complementar: [`arquivo/2026-07-26-prd-blackhouse-agentic-os.md`](arquivo/2026-07-26-prd-blackhouse-agentic-os.md)
+- Specs: Phase 1a–6 (`docs/arquivo/`, prefixo `2026-07-26-spec-phase-*`)
+- PRD as-built de recursos: [`arquivo/2026-07-25-prd-blackhouse-recursos.md`](arquivo/2026-07-25-prd-blackhouse-recursos.md)
+
+**Estado de implementação (2026-07-26):** Phase 1a–6 no código (Daily Agent + Guided Workout + substituições + insight + `coach_rules`). **Agent-First Portal:** tab `hoje` como Agent Home (composer inline, próxima acção, FAB retorno); ver [`arquivo/2026-07-26-agent-first-portal.md`](arquivo/2026-07-26-agent-first-portal.md). **Respostas orgânicas:** compositor + `get_next_workout` / agenda; ver [`arquivo/2026-07-26-agent-organic-responses.md`](arquivo/2026-07-26-agent-organic-responses.md). Flag: `VITE_AGENT_DAILY_ENABLED` (default ligado). Próximo: Phase 7 (Coach Agent HITL).
+
 ---
 
 **Como trabalhar sem confundir:** [`REGRAS-PARA-NAO-CONFUNDIR.md`](REGRAS-PARA-NAO-CONFUNDIR.md)

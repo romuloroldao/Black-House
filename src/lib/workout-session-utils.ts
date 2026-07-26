@@ -1,3 +1,5 @@
+import { apiClient } from "@/lib/api-client";
+
 export type WorkoutExercise = {
   nome?: string;
   series?: number | string;
@@ -13,9 +15,10 @@ export type WorkoutSessionProgress = {
   date: string;
   completedIndexes: number[];
   updatedAt: string;
+  sessaoId?: string;
 };
 
-/** Registo de carga usada num exercício (histórico local). */
+/** Registo de carga usada num exercício (histórico local / servidor). */
 export type ExerciseLoadLog = {
   exerciseIndex: number;
   exerciseName: string;
@@ -47,6 +50,28 @@ export function parseRestSeconds(descanso: unknown): number {
   return 90;
 }
 
+/** Extrai número de séries prescritas (ex.: "3", "3x10", "4-5"). Default 3. */
+export function parsePrescribedSets(series: unknown): number {
+  if (series == null || series === "") return 3;
+  if (typeof series === "number" && Number.isFinite(series)) {
+    return Math.min(20, Math.max(1, Math.round(series)));
+  }
+  const s = String(series).trim();
+  const range = s.match(/(\d+)\s*[-–]\s*(\d+)/);
+  if (range) {
+    return Math.min(20, Math.max(1, parseInt(range[1], 10)));
+  }
+  const n = s.match(/(\d+)/);
+  if (n) return Math.min(20, Math.max(1, parseInt(n[1], 10)));
+  return 3;
+}
+
+/** Extrai repetições alvo sugeridas (número ou texto curto). */
+export function parsePrescribedRepsHint(repeticoes: unknown): string {
+  if (repeticoes == null || repeticoes === "") return "";
+  return String(repeticoes).trim();
+}
+
 export function sessionStorageKey(treinoId: string): string {
   const date = new Date().toISOString().slice(0, 10);
   return `bh-workout-session:${treinoId}:${date}`;
@@ -62,13 +87,18 @@ export function readSessionProgress(treinoId: string): WorkoutSessionProgress | 
   }
 }
 
-export function writeSessionProgress(treinoId: string, completedIndexes: number[]): void {
+export function writeSessionProgress(
+  treinoId: string,
+  completedIndexes: number[],
+  sessaoId?: string,
+): void {
   try {
     const payload: WorkoutSessionProgress = {
       treinoId,
       date: new Date().toISOString().slice(0, 10),
       completedIndexes,
       updatedAt: new Date().toISOString(),
+      sessaoId,
     };
     localStorage.setItem(sessionStorageKey(treinoId), JSON.stringify(payload));
   } catch {
@@ -162,4 +192,64 @@ export function upsertTodayLoadHistory(
   };
 
   writeLoadHistory(treinoId, [todaySession, ...historyWithoutToday]);
+}
+
+/** Garante sessão no servidor; devolve sessaoId (ou null se falhar — UI continua com local). */
+export async function ensureServerWorkoutSession(
+  treinoId: string,
+  alunoTreinoId?: string,
+): Promise<string | null> {
+  const local = readSessionProgress(treinoId);
+  if (local?.sessaoId) return local.sessaoId;
+
+  const res = await apiClient.startTreinoSessaoSafe({
+    treino_id: treinoId,
+    aluno_treino_id: alunoTreinoId,
+    origem: "ui",
+  });
+  if (!res.success || !res.data?.id) return null;
+
+  const sessaoId = String(res.data.id);
+  const indexes = Array.isArray(res.data.completed_indexes)
+    ? res.data.completed_indexes
+    : local?.completedIndexes ?? [];
+  writeSessionProgress(treinoId, indexes, sessaoId);
+  return sessaoId;
+}
+
+export async function syncWorkoutSerieToServer(opts: {
+  sessaoId: string;
+  exerciseIndex: number;
+  exerciseName: string;
+  setIndex?: number;
+  carga: string;
+  repeticoes?: number | null;
+  rpe?: number | null;
+  dor?: number | null;
+  completedIndexes: number[];
+  finished?: boolean;
+}): Promise<void> {
+  await apiClient.putTreinoSerieSafe(opts.sessaoId, {
+    exercise_index: opts.exerciseIndex,
+    exercise_name: opts.exerciseName,
+    set_index: opts.setIndex ?? 1,
+    carga: opts.carga,
+    repeticoes: opts.repeticoes ?? null,
+    rpe: opts.rpe ?? null,
+    dor: opts.dor ?? null,
+    concluido: true,
+    origem: "ui",
+  });
+  await apiClient.patchTreinoSessaoSafe(opts.sessaoId, {
+    completed_indexes: opts.completedIndexes,
+    status: opts.finished ? "completed" : "in_progress",
+  });
+}
+
+export async function hydrateLoadHistoryFromServer(treinoId: string): Promise<WorkoutLoadHistorySession[]> {
+  const res = await apiClient.getTreinoCargasSafe(treinoId);
+  if (!res.success || !res.data?.sessions) return readLoadHistory(treinoId);
+  const sessions = res.data.sessions as WorkoutLoadHistorySession[];
+  if (sessions.length > 0) writeLoadHistory(treinoId, sessions);
+  return sessions.length > 0 ? sessions : readLoadHistory(treinoId);
 }

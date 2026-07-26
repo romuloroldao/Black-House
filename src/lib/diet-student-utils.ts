@@ -341,12 +341,38 @@ export function writeMealDone(dietaId: string, mealKey: string, plano: DietPlano
   }
 }
 
+/** Aplica estado vindo do servidor ao cache local (dual-read). */
+export function hydrateMealDoneFromServer(
+  dietaId: string,
+  items: Array<{ meal_key: string; plano: string; concluido?: boolean }>,
+  dateKey: string = mealCheckDateKey(),
+): Set<string> {
+  const keys = new Set<string>();
+  for (const item of items) {
+    if (!item?.meal_key) continue;
+    const plano = (item.plano || "A") as DietPlano;
+    if (item.concluido === false) continue;
+    keys.add(`${item.meal_key}::${plano}`);
+    try {
+      const k = mealCheckStorageKey(dietaId, item.meal_key, plano, dateKey);
+      localStorage.setItem(k, "1");
+    } catch {
+      /* ignore */
+    }
+  }
+  return keys;
+}
+
 export function countCompletedMeals(
   dietaId: string,
   groups: MealGroup[],
   plano: DietPlano,
+  serverDoneKeys?: Set<string>,
 ): number {
-  return groups.filter((g) => readMealDone(dietaId, g.key, plano)).length;
+  return groups.filter((g) => {
+    if (serverDoneKeys?.has(`${g.key}::${plano}`)) return true;
+    return readMealDone(dietaId, g.key, plano);
+  }).length;
 }
 
 export type ImportRefeicaoMacros = {

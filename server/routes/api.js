@@ -230,6 +230,27 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
   // ROTAS: REFEIÇÕES REGISTADAS (diário alimentar / foto)
   router.use('/refeicoes-registradas', createRefeicoesRegistradasRouter(pool, authenticate, domainSchemaGuard));
 
+  // ROTAS: EXECUÇÃO DIÁRIA (Phase 1a — portal aluno)
+  const createExecucaoDiariaRouter = require('./execucao-diaria');
+  router.use(
+    '/alunos/me',
+    createExecucaoDiariaRouter(pool, authenticate, domainSchemaGuard, resolveAlunoOrFailWithPayment),
+  );
+
+  // ROTAS: AGENT FOUNDATION (Phase 1b — portal aluno)
+  const createAgentRouter = require('./agent');
+  router.use(
+    '/agent',
+    createAgentRouter(pool, authenticate, domainSchemaGuard, resolveAlunoOrFailWithPayment),
+  );
+
+  // ROTAS: COACH KNOWLEDGE (Phase 6)
+  const createCoachRulesRouter = require('./coach-rules');
+  router.use(
+    '/coach/rules',
+    createCoachRulesRouter(pool, authenticate, domainSchemaGuard, resolveCoachOrFail),
+  );
+
   // ============================================================================
   // ROTAS: ALUNOS
   // ============================================================================

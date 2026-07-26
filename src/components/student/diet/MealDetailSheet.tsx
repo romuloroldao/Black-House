@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Replace } from "lucide-react";
 import {
   Sheet,
@@ -170,6 +171,12 @@ const MealDetailSheet = ({
   onSubstituir,
 }: MealDetailSheetProps) => {
   useStudentOverlayLock(open);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    listRef.current?.scrollTo(0, 0);
+  }, [open, group?.key, mealName]);
 
   const planosNoGrupo = group?.planosPresentes ?? [];
   const showAllCardapios = Boolean(
@@ -201,14 +208,17 @@ const MealDetailSheet = ({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
-        className="flex max-h-[min(88dvh,920px)] flex-col gap-0 overflow-hidden rounded-t-2xl p-0"
+        className="flex h-[min(88dvh,920px)] max-h-[min(88dvh,920px)] flex-col gap-0 overflow-hidden rounded-t-2xl p-0"
       >
         <SheetHeader className="shrink-0 border-b border-border/60 px-6 pb-4 pr-14 pt-6 text-left">
           <SheetTitle>{mealName}</SheetTitle>
           <SheetDescription>{description}</SheetDescription>
         </SheetHeader>
 
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-y-contain px-6 py-4 pb-overlay-safe [-webkit-overflow-scrolling:touch]">
+        <div
+          ref={listRef}
+          className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-y-contain touch-pan-y px-6 py-4 pb-overlay-safe [-webkit-overflow-scrolling:touch]"
+        >
           {showAllCardapios && group ? (
             planosNoGrupo.map((cardapio) => (
               <CardapioBlock

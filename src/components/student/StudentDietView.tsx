@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -21,6 +22,7 @@ import {
   mealCheckDateKey,
   readMealDone,
   writeMealDone,
+  hydrateMealDoneFromServer,
   type DietItemWithFood,
   type DietPlano,
   type MealGroup,
@@ -43,6 +45,7 @@ import { STUDENT_REALTIME_EVENT, type StudentRealtimeDetail } from "@/hooks/useS
 
 const StudentDietView = () => {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [dieta, setDieta] = useState<any>(null);
   const [itensDieta, setItensDieta] = useState<DietItemWithFood[]>([]);
@@ -50,11 +53,22 @@ const StudentDietView = () => {
   const [todosAlimentos, setTodosAlimentos] = useState<Food[]>([]);
   const [planoAtivo, setPlanoAtivo] = useState<DietPlano>("A");
   const [checkTick, setCheckTick] = useState(0);
+  const [serverDoneKeys, setServerDoneKeys] = useState<Set<string>>(() => new Set());
   const mealDayRef = useRef(mealCheckDateKey());
   const [detailMeal, setDetailMeal] = useState<MealGroup | null>(null);
   const [refeicaoLivreContent, setRefeicaoLivreContent] = useState<EducationalContent | null>(null);
   const [mealPhotoOpen, setMealPhotoOpen] = useState(false);
   const [mealHistoryKey, setMealHistoryKey] = useState(0);
+
+  /** Deep-link do Daily Agent: ?meal_photo=1 */
+  useEffect(() => {
+    if (searchParams.get("meal_photo") === "1") {
+      setMealPhotoOpen(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete("meal_photo");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   /** Reinicia o checklist quando muda o dia (dieta diária). */
   useEffect(() => {
@@ -138,13 +152,53 @@ const StudentDietView = () => {
     const farmacosArray = farmacosRes.success && Array.isArray(farmacosRes.data) ? farmacosRes.data : [];
 
     const alimentosMap = new Map(alimentosData.map((a: Food) => [a.id, a]));
-    const itensComAlimentos = itensArray.map((item: any) => ({
+    let itensComAlimentos = itensArray.map((item: any) => ({
       ...item,
       alimentos: alimentosMap.get(item.alimento_id) || null,
     }));
 
+    // Phase 4: aplicar overrides de substituição do dia (sem mutar o plano do coach)
+    const substRes = await apiClient.getRefeicaoSubstituicoesSafe({
+      date: mealCheckDateKey(),
+      dieta_id: dietaData.id,
+    });
+    if (substRes.success && Array.isArray(substRes.data?.items)) {
+      const byItem = new Map(
+        substRes.data.items.map((s: any) => [String(s.item_dieta_id), s]),
+      );
+      itensComAlimentos = itensComAlimentos.map((item: any) => {
+        const sub = byItem.get(String(item.id));
+        if (!sub) return item;
+        const food = alimentosMap.get(sub.alimento_substituto_id) || null;
+        return {
+          ...item,
+          alimento_id: sub.alimento_substituto_id,
+          quantidade: Number(sub.quantidade_substituto),
+          unidade_quantidade: sub.unidade_substituto || item.unidade_quantidade,
+          alimentos: food,
+          _substituicao: {
+            id: sub.id,
+            alimento_original_id: sub.alimento_original_id,
+            quantidade_original: sub.quantidade_original,
+          },
+        };
+      });
+    }
+
     setItensDieta(itensComAlimentos);
     setFarmacos(farmacosArray);
+
+    // Phase 1a: carregar conclusões do servidor (fallback localStorage)
+    const conclusoesRes = await apiClient.getRefeicaoConclusoesSafe(mealCheckDateKey());
+    if (conclusoesRes.success && conclusoesRes.data?.items) {
+      const keys = hydrateMealDoneFromServer(
+        dietaData.id,
+        conclusoesRes.data.items,
+        conclusoesRes.data.data_ref || mealCheckDateKey(),
+      );
+      setServerDoneKeys(keys);
+    }
+
     setLoading(false);
   }, []);
 
@@ -219,22 +273,57 @@ const StudentDietView = () => {
   const completedCount = useMemo(() => {
     if (!dieta?.id) return 0;
     void checkTick;
-    return countCompletedMeals(dieta.id, visibleGroups, planoAtivo);
-  }, [dieta?.id, visibleGroups, planoAtivo, checkTick]);
+    return countCompletedMeals(dieta.id, visibleGroups, planoAtivo, serverDoneKeys);
+  }, [dieta?.id, visibleGroups, planoAtivo, checkTick, serverDoneKeys]);
 
   const progressPct =
     visibleGroups.length > 0 ? Math.round((completedCount / visibleGroups.length) * 100) : 0;
 
   const firstPendingIdx = useMemo(() => {
     if (!dieta?.id) return 0;
-    return visibleGroups.findIndex((g) => !readMealDone(dieta.id, g.key, planoAtivo));
-  }, [dieta?.id, visibleGroups, planoAtivo, checkTick]);
+    return visibleGroups.findIndex((g) => {
+      if (serverDoneKeys.has(`${g.key}::${planoAtivo}`)) return false;
+      return !readMealDone(dieta.id, g.key, planoAtivo);
+    });
+  }, [dieta?.id, visibleGroups, planoAtivo, checkTick, serverDoneKeys]);
 
   const toggleMealDone = (group: MealGroup) => {
     if (!dieta?.id) return;
-    const current = readMealDone(dieta.id, group.key, planoAtivo);
-    writeMealDone(dieta.id, group.key, planoAtivo, !current);
+    const key = `${group.key}::${planoAtivo}`;
+    const current =
+      serverDoneKeys.has(key) || readMealDone(dieta.id, group.key, planoAtivo);
+    const next = !current;
+    writeMealDone(dieta.id, group.key, planoAtivo, next);
+    setServerDoneKeys((prev) => {
+      const copy = new Set(prev);
+      if (next) copy.add(key);
+      else copy.delete(key);
+      return copy;
+    });
     setCheckTick((t) => t + 1);
+
+    void apiClient
+      .putRefeicaoConclusaoSafe({
+        dieta_id: dieta.id,
+        meal_key: group.key,
+        plano: planoAtivo,
+        concluido: next,
+        data_ref: mealCheckDateKey(),
+        origem: "ui",
+      })
+      .then((res) => {
+        if (!res.success) {
+          // reverte cache optimista em falha
+          writeMealDone(dieta.id, group.key, planoAtivo, current);
+          setServerDoneKeys((prev) => {
+            const copy = new Set(prev);
+            if (current) copy.add(key);
+            else copy.delete(key);
+            return copy;
+          });
+          setCheckTick((t) => t + 1);
+        }
+      });
   };
 
   const handleVerSubstitutos = (item: DietItemWithFood) => {
@@ -248,19 +337,46 @@ const StudentDietView = () => {
   };
 
   const handleSubstituir = async (novoAlimentoId: string, novaQuantidade: number) => {
+    const itemId = substitutionDialog.itemId;
+    const itemOriginal = itensDieta.find((i) => i.id === itemId);
     const novosItens = itensDieta.map((item) => {
-      if (item.id === substitutionDialog.itemId) {
+      if (item.id === itemId) {
         const novoAlimento = todosAlimentos.find((a) => a.id === novoAlimentoId);
         return {
           ...item,
           alimento_id: novoAlimentoId,
           quantidade: novaQuantidade,
           alimentos: novoAlimento ?? item.alimentos,
+          _substituicao: {
+            alimento_original_id:
+              (item as any)._substituicao?.alimento_original_id || itemOriginal?.alimento_id,
+            quantidade_original:
+              (item as any)._substituicao?.quantidade_original ?? itemOriginal?.quantidade,
+          },
         };
       }
       return item;
     });
     setItensDieta(novosItens);
+
+    if (dieta?.id && itemId) {
+      const res = await apiClient.putRefeicaoSubstituicaoSafe({
+        dieta_id: dieta.id,
+        item_dieta_id: itemId,
+        alimento_substituto_id: novoAlimentoId,
+        quantidade_substituto: novaQuantidade,
+        unidade_substituto: substitutionDialog.unidadeQuantidade || "g",
+        quantidade_original: substitutionDialog.quantidadeAtual,
+        unidade_original: substitutionDialog.unidadeQuantidade || "g",
+        plano: planoAtivo,
+        data_ref: mealCheckDateKey(),
+        origem: "ui",
+      });
+      if (!res.success) {
+        // reverte UI em falha
+        void loadDietData();
+      }
+    }
   };
 
   if (loading) {
@@ -391,7 +507,10 @@ const StudentDietView = () => {
               group={group}
               plano={planoAtivo}
               dietHasMultiplosCardapios={hasMultiplosCardapios}
-              done={readMealDone(dieta.id, group.key, planoAtivo)}
+              done={
+                serverDoneKeys.has(`${group.key}::${planoAtivo}`) ||
+                readMealDone(dieta.id, group.key, planoAtivo)
+              }
               isLast={idx === visibleGroups.length - 1}
               isCurrent={idx === firstPendingIdx}
               onToggleDone={() => toggleMealDone(group)}

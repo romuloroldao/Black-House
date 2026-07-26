@@ -22,12 +22,17 @@ import { cn } from "@/lib/utils";
 import {
   formatTimer,
   parseRestSeconds,
+  parsePrescribedSets,
+  parsePrescribedRepsHint,
   readSessionProgress,
   writeSessionProgress,
   clearSessionProgress,
   readLoadHistory,
   getLastLoadForExercise,
   upsertTodayLoadHistory,
+  ensureServerWorkoutSession,
+  syncWorkoutSerieToServer,
+  hydrateLoadHistoryFromServer,
   type WorkoutExercise,
 } from "@/lib/workout-session-utils";
 
@@ -36,12 +41,20 @@ type TreinoSession = {
   nome?: string;
   descricao?: string;
   exercicios?: WorkoutExercise[];
+  alunoTreinoId?: string;
 };
 
 type StudentWorkoutSessionViewProps = {
   treino: TreinoSession;
   onExit: () => void;
 };
+
+function parseOptionalNumber(raw: string): number | null {
+  const t = raw.trim().replace(",", ".");
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
 
 const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionViewProps) => {
   const exercicios = useMemo(
@@ -59,90 +72,175 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
   const [completed, setCompleted] = useState<Set<number>>(
     () => new Set(saved?.completedIndexes ?? []),
   );
+  const [currentSet, setCurrentSet] = useState(1);
   const [finished, setFinished] = useState(false);
   const [restSecondsLeft, setRestSecondsLeft] = useState<number | null>(null);
   const [restPaused, setRestPaused] = useState(false);
   const [restTotal, setRestTotal] = useState(0);
+  /** Após descanso de série (não de exercício), não avançar exercício. */
+  const [restMode, setRestMode] = useState<"set" | "exercise" | null>(null);
   const [cargaInput, setCargaInput] = useState("");
+  const [repsInput, setRepsInput] = useState("");
+  const [rpeInput, setRpeInput] = useState("");
+  const [dorInput, setDorInput] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [sessaoId, setSessaoId] = useState<string | null>(saved?.sessaoId ?? null);
+  const [loadHistory, setLoadHistory] = useState<ReturnType<typeof readLoadHistory>>(() =>
+    readLoadHistory(treino.id),
+  );
+  const [logging, setLogging] = useState(false);
 
   const todayKey = useMemo(() => new Date().toISOString().slice(0, 10), []);
-  const loadHistory = useMemo(() => readLoadHistory(treino.id), [treino.id, finished]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const id = await ensureServerWorkoutSession(treino.id, treino.alunoTreinoId);
+      if (!cancelled && id) setSessaoId(id);
+      const history = await hydrateLoadHistoryFromServer(treino.id);
+      if (!cancelled) setLoadHistory(history);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [treino.id, treino.alunoTreinoId]);
 
   const current = exercicios[currentIndex];
+  const prescribedSets = parsePrescribedSets(current?.series);
+  const repsHint = parsePrescribedRepsHint(current?.repeticoes);
+
   const ultimaCarga = useMemo(() => {
     if (!current?.nome) return null;
     return getLastLoadForExercise(treino.id, currentIndex, current.nome, todayKey);
-  }, [treino.id, currentIndex, current?.nome, todayKey]);
+  }, [treino.id, currentIndex, current?.nome, todayKey, loadHistory]);
 
   useEffect(() => {
     const todaySession = loadHistory.find((s) => s.date === todayKey);
     const savedLoad = todaySession?.exercises.find((e) => e.exerciseIndex === currentIndex);
-    setCargaInput(savedLoad?.pesoUsado ?? "");
-  }, [currentIndex, loadHistory, todayKey]);
+    setCargaInput(savedLoad?.pesoUsado ?? (current?.peso != null ? String(current.peso) : ""));
+    setRepsInput("");
+    setRpeInput("");
+    setDorInput("");
+    if (!completed.has(currentIndex)) {
+      setCurrentSet(1);
+    }
+  }, [currentIndex, loadHistory, todayKey, current?.peso, completed]);
+
   const progressPct = total > 0 ? Math.round((completed.size / total) * 100) : 0;
+  const setProgressLabel = `Série ${Math.min(currentSet, prescribedSets)} de ${prescribedSets}`;
 
   const persist = useCallback(
-    (next: Set<number>) => {
-      writeSessionProgress(treino.id, [...next]);
+    (next: Set<number>, sid?: string | null) => {
+      writeSessionProgress(treino.id, [...next], sid ?? sessaoId ?? undefined);
     },
-    [treino.id],
+    [treino.id, sessaoId],
   );
 
   useEffect(() => {
     if (restSecondsLeft == null || restPaused) return;
     if (restSecondsLeft <= 0) {
       setRestSecondsLeft(null);
-      setCurrentIndex((i) => {
-        if (i < total - 1) return i + 1;
-        return i;
-      });
+      const mode = restMode;
+      setRestMode(null);
+      if (mode === "exercise") {
+        setCurrentIndex((i) => (i < total - 1 ? i + 1 : i));
+      }
+      // mode === "set": permanece no mesmo exercício, currentSet já incrementado
       return;
     }
     const t = window.setInterval(() => {
       setRestSecondsLeft((s) => (s == null || s <= 1 ? 0 : s - 1));
     }, 1000);
     return () => window.clearInterval(t);
-  }, [restSecondsLeft, restPaused, total]);
+  }, [restSecondsLeft, restPaused, total, restMode]);
 
-  const startRest = () => {
+  const startRest = (mode: "set" | "exercise") => {
     const sec = parseRestSeconds(current?.descanso);
+    setRestMode(mode);
     setRestTotal(sec);
     setRestSecondsLeft(sec);
     setRestPaused(false);
   };
 
-  const skipRest = () => setRestSecondsLeft(null);
-
-  const markDoneAndAdvance = () => {
-    upsertTodayLoadHistory(
-      treino.id,
-      treino.nome,
-      currentIndex,
-      current?.nome ?? `Exercício ${currentIndex + 1}`,
-      cargaInput,
-    );
-
-    const next = new Set(completed);
-    next.add(currentIndex);
-    setCompleted(next);
-    persist(next);
-
-    if (currentIndex >= total - 1) {
-      setFinished(true);
-      setRestSecondsLeft(null);
-      return;
+  const skipRest = () => {
+    const mode = restMode;
+    setRestSecondsLeft(null);
+    setRestMode(null);
+    if (mode === "exercise") {
+      setCurrentIndex((i) => (i < total - 1 ? i + 1 : i));
     }
-    startRest();
+  };
+
+  const logSetAndAdvance = async () => {
+    if (logging) return;
+    setLogging(true);
+    try {
+      const setIndex = currentSet;
+      const reps = parseOptionalNumber(repsInput);
+      const rpe = parseOptionalNumber(rpeInput);
+      const dor = parseOptionalNumber(dorInput);
+
+      upsertTodayLoadHistory(
+        treino.id,
+        treino.nome,
+        currentIndex,
+        current?.nome ?? `Exercício ${currentIndex + 1}`,
+        cargaInput,
+      );
+      setLoadHistory(readLoadHistory(treino.id));
+
+      const isLastSet = setIndex >= prescribedSets;
+      const isLastExercise = currentIndex >= total - 1;
+      let nextCompleted = completed;
+      let finishedSession = false;
+
+      if (isLastSet) {
+        nextCompleted = new Set(completed);
+        nextCompleted.add(currentIndex);
+        setCompleted(nextCompleted);
+        persist(nextCompleted);
+        finishedSession = isLastExercise;
+        if (finishedSession) {
+          setFinished(true);
+          setRestSecondsLeft(null);
+          setRestMode(null);
+        } else {
+          startRest("exercise");
+        }
+      } else {
+        setCurrentSet(setIndex + 1);
+        startRest("set");
+      }
+
+      const sid = sessaoId;
+      if (sid) {
+        await syncWorkoutSerieToServer({
+          sessaoId: sid,
+          exerciseIndex: currentIndex,
+          exerciseName: current?.nome ?? `Exercício ${currentIndex + 1}`,
+          setIndex,
+          carga: cargaInput,
+          repeticoes: reps,
+          rpe,
+          dor,
+          completedIndexes: [...nextCompleted],
+          finished: finishedSession,
+        });
+      }
+    } finally {
+      setLogging(false);
+    }
   };
 
   const goPrev = () => {
     setRestSecondsLeft(null);
+    setRestMode(null);
     setCurrentIndex((i) => Math.max(0, i - 1));
   };
 
   const goNext = () => {
     setRestSecondsLeft(null);
+    setRestMode(null);
     setCurrentIndex((i) => Math.min(total - 1, i + 1));
   };
 
@@ -170,7 +268,7 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
         <div>
           <h2 className="text-2xl font-bold">Sessão concluída!</h2>
           <p className="mt-2 text-muted-foreground">
-            {completed.size} de {total} exercícios marcados em {treino.nome}
+            {completed.size} de {total} exercícios em {treino.nome}
           </p>
         </div>
         {todayLoads.length > 0 && (
@@ -198,6 +296,7 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
               clearSessionProgress(treino.id);
               setCompleted(new Set());
               setCurrentIndex(0);
+              setCurrentSet(1);
               setFinished(false);
             }}
           >
@@ -208,6 +307,13 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
     );
   }
 
+  const ctaLabel =
+    currentSet < prescribedSets
+      ? `Registar série ${currentSet}`
+      : currentIndex < total - 1
+        ? "Última série · próximo exercício"
+        : "Última série · finalizar";
+
   return (
     <div className="fixed inset-0 z-[200] flex flex-col bg-background">
       <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
@@ -217,7 +323,7 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">{treino.nome}</p>
           <p className="text-xs text-muted-foreground">
-            Exercício {currentIndex + 1} de {total}
+            Exercício {currentIndex + 1}/{total} · {setProgressLabel}
           </p>
         </div>
         <div className="flex items-center gap-1">
@@ -267,7 +373,9 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
       <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4">
         {restSecondsLeft != null && restSecondsLeft > 0 && (
           <div className="mb-4 rounded-xl border border-primary/30 bg-primary/10 p-4 text-center">
-            <p className="text-sm font-medium text-muted-foreground">Descanso</p>
+            <p className="text-sm font-medium text-muted-foreground">
+              {restMode === "set" ? "Descanso entre séries" : "Descanso · próximo exercício"}
+            </p>
             <p className="mt-1 text-4xl font-bold tabular-nums text-primary">
               {formatTimer(restSecondsLeft)}
             </p>
@@ -300,23 +408,26 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
               : "border-border bg-card",
           )}
         >
-          <p className="text-xs font-medium uppercase tracking-wide text-primary">
-            Agora
-          </p>
+          <p className="text-xs font-medium uppercase tracking-wide text-primary">Agora</p>
           <h2 className="mt-1 text-2xl font-bold leading-tight">{current?.nome || "Exercício"}</h2>
           {current?.observacoes && (
             <p className="mt-2 text-sm text-muted-foreground">{current.observacoes}</p>
           )}
 
-          <div className="mt-6 grid grid-cols-2 gap-3">
+          <div className="mt-4 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-3 py-2 text-center">
+            <p className="text-xs text-muted-foreground">Série actual</p>
+            <p className="text-lg font-bold text-primary">{setProgressLabel}</p>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-3">
             <div className="rounded-lg bg-muted/50 p-3 text-center">
               <Target className="mx-auto mb-1 h-5 w-5 text-primary" />
-              <p className="text-xs text-muted-foreground">Séries</p>
-              <p className="text-xl font-bold">{current?.series ?? "—"}</p>
+              <p className="text-xs text-muted-foreground">Séries (plano)</p>
+              <p className="text-xl font-bold">{current?.series ?? prescribedSets}</p>
             </div>
             <div className="rounded-lg bg-muted/50 p-3 text-center">
               <Dumbbell className="mx-auto mb-1 h-5 w-5 text-primary" />
-              <p className="text-xs text-muted-foreground">Repetições</p>
+              <p className="text-xs text-muted-foreground">Reps (plano)</p>
               <p className="text-xl font-bold">{current?.repeticoes ?? "—"}</p>
             </div>
             {current?.peso != null && current.peso !== "" && (
@@ -334,24 +445,66 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
             </div>
           </div>
 
-          <div className="mt-6 space-y-2">
-            <Label htmlFor="carga-usada" className="text-sm">
-              Carga usada hoje
-            </Label>
-            <Input
-              id="carga-usada"
-              value={cargaInput}
-              onChange={(e) => setCargaInput(e.target.value)}
-              placeholder="ex: 40 kg, 2x20 kg"
-              className="text-base"
-              inputMode="text"
-              autoComplete="off"
-            />
-            {ultimaCarga && (
-              <p className="text-xs text-muted-foreground">
-                Última vez: <span className="font-medium text-foreground">{ultimaCarga}</span>
-              </p>
-            )}
+          <div className="mt-6 space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="carga-usada" className="text-sm">
+                Carga usada
+              </Label>
+              <Input
+                id="carga-usada"
+                value={cargaInput}
+                onChange={(e) => setCargaInput(e.target.value)}
+                placeholder="ex: 40 kg"
+                className="text-base"
+                autoComplete="off"
+              />
+              {ultimaCarga && (
+                <p className="text-xs text-muted-foreground">
+                  Última vez: <span className="font-medium text-foreground">{ultimaCarga}</span>
+                </p>
+              )}
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="space-y-1">
+                <Label htmlFor="reps-usada" className="text-xs">
+                  Reps
+                </Label>
+                <Input
+                  id="reps-usada"
+                  value={repsInput}
+                  onChange={(e) => setRepsInput(e.target.value)}
+                  placeholder={repsHint || "10"}
+                  inputMode="decimal"
+                  className="text-base"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="rpe-usada" className="text-xs">
+                  RPE
+                </Label>
+                <Input
+                  id="rpe-usada"
+                  value={rpeInput}
+                  onChange={(e) => setRpeInput(e.target.value)}
+                  placeholder="0–10"
+                  inputMode="decimal"
+                  className="text-base"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="dor-usada" className="text-xs">
+                  Dor
+                </Label>
+                <Input
+                  id="dor-usada"
+                  value={dorInput}
+                  onChange={(e) => setDorInput(e.target.value)}
+                  placeholder="0–10"
+                  inputMode="decimal"
+                  className="text-base"
+                />
+              </div>
+            </div>
           </div>
 
           {current?.video_url && (
@@ -368,25 +521,19 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
         </div>
       </main>
 
-      <footer
-        className="shrink-0 border-t border-border p-4 pb-safe-bottom"
-      >
+      <footer className="shrink-0 border-t border-border p-4 pb-safe-bottom">
         <div className="mx-auto flex max-w-lg flex-col gap-2">
           <Button
             type="button"
             className="h-12 w-full text-base font-semibold"
-            onClick={markDoneAndAdvance}
+            disabled={logging || (restSecondsLeft != null && restSecondsLeft > 0)}
+            onClick={() => void logSetAndAdvance()}
           >
             <Check className="mr-2 h-5 w-5" />
-            {currentIndex < total - 1 ? "Concluir e próximo" : "Finalizar treino"}
+            {ctaLabel}
           </Button>
           <div className="grid grid-cols-2 gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={currentIndex === 0}
-              onClick={goPrev}
-            >
+            <Button type="button" variant="outline" disabled={currentIndex === 0} onClick={goPrev}>
               <ChevronLeft className="mr-1 h-4 w-4" />
               Anterior
             </Button>
@@ -400,8 +547,8 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
               <ChevronRight className="ml-1 h-4 w-4" />
             </Button>
           </div>
-          {!completed.has(currentIndex) && (
-            <Button type="button" variant="ghost" size="sm" onClick={startRest}>
+          {!(restSecondsLeft != null && restSecondsLeft > 0) && (
+            <Button type="button" variant="ghost" size="sm" onClick={() => startRest("set")}>
               Só iniciar descanso
             </Button>
           )}

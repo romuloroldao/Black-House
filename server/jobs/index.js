@@ -11,6 +11,7 @@ const FinancialReconciliationJob = require('./financial-reconciliation.job');
 const FinancialWebhookHealthJob = require('./financial-webhook-health.job');
 const ProfileCompletenessRemindersJob = require('./profile-completeness-reminders.job');
 const SmartRemindersJob = require('./smart-reminders.job');
+const DailyAdherenceJob = require('./daily-adherence.job');
 
 class JobsRunner {
     constructor(pool, notificationService, financialSync = null) {
@@ -74,6 +75,10 @@ class JobsRunner {
         const smartReminders = new SmartRemindersJob(this.pool, this.notificationService);
         smartReminders.start();
         this.jobs.push(smartReminders);
+
+        const dailyAdherence = new DailyAdherenceJob(this.pool);
+        dailyAdherence.start();
+        this.jobs.push(dailyAdherence);
 
         console.log(`[JobsRunner] ${this.jobs.length} jobs iniciados com sucesso`);
     }

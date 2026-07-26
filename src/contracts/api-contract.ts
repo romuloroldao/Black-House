@@ -27,6 +27,37 @@ export const API_CONTRACT = {
     treinoAgenda: (alunoId: string) =>
       `${API_BASE}/api/alunos/${encodeURIComponent(alunoId)}/treino-agenda`,
     notificationPreferences: () => `${API_BASE}/api/alunos/me/notification-preferences`,
+    refeicaoConclusoes: (date?: string) => {
+      const qs = date ? `?date=${encodeURIComponent(date)}` : '';
+      return `${API_BASE}/api/alunos/me/refeicao-conclusoes${qs}`;
+    },
+    refeicaoSubstituicoes: (query?: { date?: string; dieta_id?: string }) => {
+      const params = new URLSearchParams();
+      if (query?.date) params.set('date', query.date);
+      if (query?.dieta_id) params.set('dieta_id', query.dieta_id);
+      const qs = params.toString();
+      return `${API_BASE}/api/alunos/me/refeicao-substituicoes${qs ? `?${qs}` : ''}`;
+    },
+    treinoSessoes: (query?: { date?: string; treino_id?: string }) => {
+      const params = new URLSearchParams();
+      if (query?.date) params.set('date', query.date);
+      if (query?.treino_id) params.set('treino_id', query.treino_id);
+      const qs = params.toString();
+      return `${API_BASE}/api/alunos/me/treino-sessoes${qs ? `?${qs}` : ''}`;
+    },
+    treinoSessaoById: (id: string) =>
+      `${API_BASE}/api/alunos/me/treino-sessoes/${encodeURIComponent(id)}`,
+    treinoSessaoSeries: (id: string) =>
+      `${API_BASE}/api/alunos/me/treino-sessoes/${encodeURIComponent(id)}/series`,
+    treinoCargas: (treinoId: string) =>
+      `${API_BASE}/api/alunos/me/treino-cargas?treino_id=${encodeURIComponent(treinoId)}`,
+    proximaAcao: (mealKeys?: string[]) => {
+      const qs =
+        mealKeys && mealKeys.length > 0
+          ? `?meal_keys=${encodeURIComponent(mealKeys.join(','))}`
+          : '';
+      return `${API_BASE}/api/alunos/me/proxima-acao${qs}`;
+    },
     list: () => `${API_BASE}/api/alunos`,
     linkUser: () => `${API_BASE}/api/alunos/link-user`,
     unlinkedRegistrations: () => `${API_BASE}/api/alunos/unlinked-registrations`,
@@ -258,6 +289,8 @@ export const API_CONTRACT = {
   },
   coach: {
     notificationPreferences: () => `${API_BASE}/api/coach/me/notification-preferences`,
+    rules: () => `${API_BASE}/api/coach/rules`,
+    ruleById: (id: string) => `${API_BASE}/api/coach/rules/${encodeURIComponent(id)}`,
     teamMembers: () => `${API_BASE}/api/coach/team/members`,
     teamMemberById: (id: string) => `${API_BASE}/api/coach/team/members/${id}`,
   },
@@ -270,6 +303,17 @@ export const API_CONTRACT = {
   relatorios: {
     list: () => `${API_BASE}/api/relatorios`,
     byId: (id: string) => `${API_BASE}/api/relatorios/${id}`,
+  },
+  /** Phase 1b — Agent Foundation (portal aluno) */
+  agent: {
+    sessions: () => `${API_BASE}/api/agent/sessions`,
+    currentSession: () => `${API_BASE}/api/agent/sessions/current`,
+    messages: (sessionId: string) =>
+      `${API_BASE}/api/agent/sessions/${encodeURIComponent(sessionId)}/messages`,
+    run: (runId: string) => `${API_BASE}/api/agent/runs/${encodeURIComponent(runId)}`,
+    decideApproval: (id: string) =>
+      `${API_BASE}/api/agent/approvals/${encodeURIComponent(id)}/decide`,
+    tools: () => `${API_BASE}/api/agent/tools`,
   },
   relatorioFeedbacks: {
     list: (relatorioId: string) =>
@@ -300,6 +344,19 @@ const CONTRACT_PATTERNS = [
   '/api/alunos/me/profile-status',
   '/api/alunos/me/hoje',
   '/api/alunos/me/treino-agenda',
+  '/api/alunos/me/refeicao-conclusoes',
+  '/api/alunos/me/refeicao-substituicoes',
+  '/api/alunos/me/treino-sessoes',
+  '/api/alunos/me/treino-sessoes/:id',
+  '/api/alunos/me/treino-sessoes/:id/series',
+  '/api/alunos/me/treino-cargas',
+  '/api/alunos/me/proxima-acao',
+  '/api/agent/sessions',
+  '/api/agent/sessions/current',
+  '/api/agent/sessions/:id/messages',
+  '/api/agent/runs/:id',
+  '/api/agent/approvals/:id/decide',
+  '/api/agent/tools',
   '/api/alunos/:alunoId/treino-agenda',
   '/api/alunos/:alunoId/body-metrics',
   '/api/alunos/me/notification-preferences',
@@ -403,6 +460,8 @@ const CONTRACT_PATTERNS = [
   '/api/agenda-eventos/:id/snooze',
   '/api/agenda-eventos/:id',
   '/api/coach/me/notification-preferences',
+  '/api/coach/rules',
+  '/api/coach/rules/:id',
   '/api/coach/team/members',
   '/api/coach/team/members/:id',
   '/api/eventos',

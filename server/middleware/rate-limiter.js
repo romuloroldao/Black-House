@@ -99,6 +99,22 @@ const mealPhotoAnalyzeLimiter = rateLimit({
     skip: (req) => process.env.NODE_ENV === 'development',
 });
 
+// Intent do agente (aluno) — por utilizador autenticado
+const agentIntentLimiter = rateLimit({
+    windowMs: parseInt(process.env.RATE_LIMIT_AGENT_WINDOW_MS) || 60 * 60 * 1000,
+    max: parseInt(process.env.RATE_LIMIT_AGENT_MAX) || 30,
+    message: {
+        error: 'Limite de pedidos ao assistente atingido. Usa os atalhos do Hoje ou tenta mais tarde.',
+        error_code: 'AGENT_RATE_LIMIT',
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => {
+        return req.user?.id || req.ip || req.connection?.remoteAddress || 'anon';
+    },
+    skip: (req) => process.env.NODE_ENV === 'development',
+});
+
 module.exports = {
     authLimiter,
     apiLimiter,
@@ -107,4 +123,5 @@ module.exports = {
     forgotPasswordLimiter,
     resetPasswordSubmitLimiter,
     mealPhotoAnalyzeLimiter,
+    agentIntentLimiter,
 };

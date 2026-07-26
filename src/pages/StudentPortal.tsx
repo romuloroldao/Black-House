@@ -27,6 +27,8 @@ import { Button } from "@/components/ui/button";
 import logoWhite from "@/assets/logo-white.svg";
 import { cn } from "@/lib/utils";
 import { apiClient } from "@/lib/api-client";
+import AgentReturnFab from "@/components/student/agent/AgentReturnFab";
+import { trackAgentEvent } from "@/lib/agent-analytics";
 
 // RBAC-01: StudentPortal usa payment_status do contexto (via ProtectedRoute)
 // A tela de bloqueio é rota separada (/portal-aluno/blocked)
@@ -113,6 +115,9 @@ const StudentPortal = () => {
     setActiveTab(tab);
     setSearchParams({ tab, ...extra });
     setMobileNavOpen(false);
+    if (tab !== "hoje" && tab !== "dashboard") {
+      trackAgentEvent("nav_traditional_open", { tab });
+    }
   };
 
   // Ao regressar à home, refrescar pendências (ex.: após abrir chat e marcar lidas).
@@ -147,6 +152,7 @@ const StudentPortal = () => {
               hojeState={hojeState}
               profileStatus={profileStatus}
               onOpenProfileWizard={() => setProfileWizardOpen(true)}
+              onExplorePlatform={() => setMobileNavOpen(true)}
             />
           );
         case "diet":
@@ -178,7 +184,7 @@ const StudentPortal = () => {
             />
           );
         default:
-          return <StudentTodayView />;
+          return <StudentTodayView onExplorePlatform={() => setMobileNavOpen(true)} />;
       }
     } catch (error) {
       // DESIGN-ROOT-RENDER-UNBLOCK-001: Fallback seguro em caso de erro
@@ -239,7 +245,7 @@ const StudentPortal = () => {
             tabIndex={-1}
             aria-live="polite"
             className={cn(
-              "min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch]",
+              "min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain touch-pan-y [-webkit-overflow-scrolling:touch]",
               "px-4 pt-4 md:px-6 md:pt-6 lg:px-8 lg:pt-8",
               showMobileBottomNav ? "max-md:pb-student-main md:pb-6" : "max-md:pb-student-main-compact md:pb-6",
             )}
@@ -266,6 +272,10 @@ const StudentPortal = () => {
               coachBadge={coachUnreadTotal}
             />
           ) : null}
+          <AgentReturnFab
+            activeTab={activeTab}
+            onReturn={() => handleTabChange("hoje")}
+          />
         </div>
       </div>
     );

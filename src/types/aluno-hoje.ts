@@ -65,6 +65,28 @@ export type AlunoHojeDietaRotacao = {
   cycle_length: number;
 };
 
+export type AlunoHojeExecucaoRefeicao = {
+  meal_key: string;
+  plano: string;
+  concluido?: boolean;
+  concluido_em?: string | null;
+  dieta_id?: string;
+};
+
+export type AlunoHojeExecucaoTreino = {
+  id: string;
+  status: "in_progress" | "completed" | "abandoned" | string;
+  completed_indexes: number[];
+  series_count: number;
+  started_at?: string | null;
+  completed_at?: string | null;
+};
+
+export type AlunoHojeExecucao = {
+  refeicoes_concluidas: AlunoHojeExecucaoRefeicao[];
+  treino_sessao: AlunoHojeExecucaoTreino | null;
+};
+
 export type AlunoHojeResponse = {
   aluno: Record<string, unknown>;
   treino: AlunoHojeTreino | null;
@@ -88,5 +110,27 @@ export type AlunoHojeResponse = {
     checkin_due: boolean;
     pendencias_total: number;
   };
+  /** Phase 1a — execução diária server-side */
+  execucao?: AlunoHojeExecucao;
+  /** Phase 5 — insight comportamental */
+  behavioral_insight?: AlunoHojeBehavioralInsight | null;
   gerado_em: string;
+};
+
+export type AlunoHojeBehavioralInsight = {
+  available?: boolean;
+  window_days?: number;
+  as_of?: string;
+  streak_days?: number;
+  miss_days_recent?: number;
+  rates?: {
+    meal_pct?: number | null;
+    workout_pct?: number | null;
+    meal_days?: number;
+    meal_expected?: number;
+    workout_done?: number;
+    workout_expected?: number;
+  };
+  tone?: "positive" | "nudge" | "neutral" | string;
+  text?: string | null;
 };

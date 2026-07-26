@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -37,6 +36,7 @@ const StudentWorkoutsView = () => {
   const [sessionTreino, setSessionTreino] = useState<any | null>(null);
   const [expandedWorkouts, setExpandedWorkouts] = useState<Set<string>>(new Set());
   const [studentName, setStudentName] = useState<string>("");
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const diaHoje = isoDayToday();
 
@@ -200,11 +200,17 @@ const StudentWorkoutsView = () => {
     );
   }
 
-  const toggleWorkout = (treinoId: string) => {
+  const toggleWorkout = (treinoId: string, cardEl?: HTMLElement | null) => {
     setExpandedWorkouts((prev) => {
       const newSet = new Set(prev);
-      if (newSet.has(treinoId)) newSet.delete(treinoId);
-      else newSet.add(treinoId);
+      const willOpen = !newSet.has(treinoId);
+      if (willOpen) newSet.add(treinoId);
+      else newSet.delete(treinoId);
+      if (willOpen && cardEl) {
+        requestAnimationFrame(() => {
+          cardEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        });
+      }
       return newSet;
     });
   };
@@ -334,7 +340,13 @@ const StudentWorkoutsView = () => {
               treino.id === treinoPrincipal.id);
 
           return (
-            <Card key={idx} className="shadow-card border-primary/20">
+            <Card
+              key={idx}
+              ref={(el) => {
+                cardRefs.current[treino.id] = el;
+              }}
+              className="shadow-card border-primary/20"
+            >
               <CardHeader>
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
@@ -395,40 +407,48 @@ const StudentWorkoutsView = () => {
 
                 <Separator />
 
-                <Collapsible open={isExpanded} onOpenChange={() => toggleWorkout(treino.id)}>
-                  <CollapsibleTrigger asChild>
-                    <Button variant="outline" className="w-full justify-between">
-                      <span>
-                        Ver exercícios {exercicios.length > 0 && `(${exercicios.length})`}
-                      </span>
-                      <ChevronDown
-                        className={`h-4 w-4 transition-transform ${isExpanded ? "rotate-180" : ""}`}
-                      />
-                    </Button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="mt-4 space-y-3">
-                    {exercicios.length === 0 ? (
-                      <p className="py-6 text-center text-sm text-muted-foreground">
-                        Nenhum exercício cadastrado
-                      </p>
-                    ) : (
-                      exercicios.map((exercicio: any, exIdx: number) => (
-                        <div
-                          key={exIdx}
-                          className="rounded-lg border border-border/60 p-3"
-                        >
-                          <p className="font-medium">
-                            #{exIdx + 1} {exercicio.nome}
-                          </p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {exercicio.series}×{exercicio.repeticoes}
-                            {exercicio.peso ? ` · ${exercicio.peso}` : ""}
-                          </p>
-                        </div>
-                      ))
-                    )}
-                  </CollapsibleContent>
-                </Collapsible>
+                <div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full justify-between"
+                    aria-expanded={isExpanded}
+                    onClick={() =>
+                      toggleWorkout(treino.id, cardRefs.current[treino.id])
+                    }
+                  >
+                    <span>
+                      Ver exercícios {exercicios.length > 0 && `(${exercicios.length})`}
+                    </span>
+                    <ChevronDown
+                      className={`h-4 w-4 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                    />
+                  </Button>
+                  {isExpanded ? (
+                    <div className="mt-4 space-y-3">
+                      {exercicios.length === 0 ? (
+                        <p className="py-6 text-center text-sm text-muted-foreground">
+                          Nenhum exercício cadastrado
+                        </p>
+                      ) : (
+                        exercicios.map((exercicio: any, exIdx: number) => (
+                          <div
+                            key={exIdx}
+                            className="rounded-lg border border-border/60 p-3"
+                          >
+                            <p className="font-medium">
+                              #{exIdx + 1} {exercicio.nome}
+                            </p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {exercicio.series}×{exercicio.repeticoes}
+                              {exercicio.peso ? ` · ${exercicio.peso}` : ""}
+                            </p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  ) : null}
+                </div>
               </CardContent>
             </Card>
           );

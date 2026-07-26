@@ -351,12 +351,20 @@ All colors MUST be HSL.
 /*
  * Portal aluno mobile — esconder bottom nav enquanto sheet/dialog está aberto.
  * Evita sobreposição mesmo se z-index falhar em algum browser.
+ * Também trava o scroll do <main> (não é o body) para o gesto não “roubar”
+ * o scroll interno do sheet no Android.
  */
 @media (max-width: 767px) {
   body:has([data-state="open"][role="dialog"]) .student-bottom-nav,
   body:has([data-state="open"][role="alertdialog"]) .student-bottom-nav,
   body.student-overlay-open .student-bottom-nav {
     display: none !important;
+  }
+
+  body:has([data-state="open"][role="dialog"]) #student-main-content,
+  body:has([data-state="open"][role="alertdialog"]) #student-main-content,
+  body.student-overlay-open #student-main-content {
+    overflow: hidden !important;
   }
 }
 

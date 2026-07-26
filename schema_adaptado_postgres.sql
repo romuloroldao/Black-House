@@ -1617,3 +1617,241 @@ CREATE TABLE IF NOT EXISTS public.refeicao_registrada_itens (
 
 CREATE INDEX IF NOT EXISTS idx_refeicao_registrada_itens_refeicao
   ON public.refeicao_registrada_itens (refeicao_id, ordem);
+-- ============================================================================
+-- Phase 1a: execução diária (refeições do plano + sessões de treino)
+-- ============================================================================
+
+DO $$ BEGIN
+  ALTER TYPE public.task_domain ADD VALUE IF NOT EXISTS 'meal_daily';
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+  WHEN others THEN NULL;
+END $$;
+
+CREATE TABLE IF NOT EXISTS public.refeicao_conclusoes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  aluno_id uuid NOT NULL REFERENCES public.alunos(id) ON DELETE CASCADE,
+  dieta_id uuid NOT NULL REFERENCES public.dietas(id) ON DELETE CASCADE,
+  data_ref date NOT NULL,
+  meal_key text NOT NULL,
+  plano text NOT NULL DEFAULT 'A',
+  concluido boolean NOT NULL DEFAULT true,
+  concluido_em timestamptz,
+  origem text NOT NULL DEFAULT 'ui'
+    CHECK (origem IN ('ui', 'agent', 'import')),
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT refeicao_conclusoes_unique
+    UNIQUE (aluno_id, dieta_id, data_ref, meal_key, plano),
+  CONSTRAINT refeicao_conclusoes_plano_check
+    CHECK (plano = 'UNICO' OR plano ~ '^[A-Z]$')
+);
+
+CREATE INDEX IF NOT EXISTS idx_refeicao_conclusoes_aluno_data
+  ON public.refeicao_conclusoes (aluno_id, data_ref DESC);
+
+CREATE TABLE IF NOT EXISTS public.treino_sessoes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  aluno_id uuid NOT NULL REFERENCES public.alunos(id) ON DELETE CASCADE,
+  aluno_treino_id uuid REFERENCES public.alunos_treinos(id) ON DELETE SET NULL,
+  treino_id uuid NOT NULL REFERENCES public.treinos(id) ON DELETE CASCADE,
+  data_ref date NOT NULL,
+  status text NOT NULL DEFAULT 'in_progress'
+    CHECK (status IN ('in_progress', 'completed', 'abandoned')),
+  started_at timestamptz NOT NULL DEFAULT now(),
+  completed_at timestamptz,
+  origem text NOT NULL DEFAULT 'ui'
+    CHECK (origem IN ('ui', 'agent')),
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT treino_sessoes_aluno_treino_dia_unique
+    UNIQUE (aluno_id, treino_id, data_ref)
+);
+
+CREATE INDEX IF NOT EXISTS idx_treino_sessoes_aluno_data
+  ON public.treino_sessoes (aluno_id, data_ref DESC);
+
+CREATE TABLE IF NOT EXISTS public.treino_serie_logs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  sessao_id uuid NOT NULL
+    REFERENCES public.treino_sessoes(id) ON DELETE CASCADE,
+  aluno_id uuid NOT NULL REFERENCES public.alunos(id) ON DELETE CASCADE,
+  exercise_index int NOT NULL CHECK (exercise_index >= 0),
+  exercise_name text NOT NULL,
+  set_index int NOT NULL DEFAULT 1 CHECK (set_index >= 1),
+  carga text,
+  repeticoes numeric(8,2),
+  rpe numeric(4,1) CHECK (rpe IS NULL OR (rpe >= 0 AND rpe <= 10)),
+  dor numeric(4,1) CHECK (dor IS NULL OR (dor >= 0 AND dor <= 10)),
+  concluido boolean NOT NULL DEFAULT true,
+  registrado_em timestamptz NOT NULL DEFAULT now(),
+  origem text NOT NULL DEFAULT 'ui'
+    CHECK (origem IN ('ui', 'agent')),
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  CONSTRAINT treino_serie_logs_unique
+    UNIQUE (sessao_id, exercise_index, set_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_treino_serie_logs_aluno
+  ON public.treino_serie_logs (aluno_id, registrado_em DESC);
+CREATE INDEX IF NOT EXISTS idx_treino_serie_logs_sessao
+  ON public.treino_serie_logs (sessao_id, exercise_index, set_index);
+
+-- ============================================================================
+-- Phase 1b: Agent Foundation
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.agent_sessions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  aluno_id uuid NOT NULL REFERENCES public.alunos(id) ON DELETE CASCADE,
+  coach_id uuid REFERENCES app_auth.users(id),
+  user_id uuid NOT NULL REFERENCES app_auth.users(id),
+  channel text NOT NULL DEFAULT 'student_hoje'
+    CHECK (channel IN ('student_hoje', 'api', 'coach_panel')),
+  status text NOT NULL DEFAULT 'open'
+    CHECK (status IN ('open', 'closed')),
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  closed_at timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_aluno
+  ON public.agent_sessions (aluno_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.agent_messages (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id uuid NOT NULL REFERENCES public.agent_sessions(id) ON DELETE CASCADE,
+  role text NOT NULL CHECK (role IN ('user', 'assistant', 'system', 'tool')),
+  content text,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  run_id uuid,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_messages_session
+  ON public.agent_messages (session_id, created_at ASC);
+
+CREATE TABLE IF NOT EXISTS public.agent_runs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id uuid NOT NULL REFERENCES public.agent_sessions(id) ON DELETE CASCADE,
+  aluno_id uuid NOT NULL REFERENCES public.alunos(id) ON DELETE CASCADE,
+  status text NOT NULL DEFAULT 'running'
+    CHECK (status IN ('running', 'succeeded', 'failed', 'cancelled')),
+  intent_raw text,
+  intent_classified text,
+  provider text,
+  model text,
+  tokens_in int,
+  tokens_out int,
+  cost_estimate_usd numeric(12,6),
+  latency_ms int,
+  error_code text,
+  error_message text,
+  autonomy_max int NOT NULL DEFAULT 2,
+  context_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  finished_at timestamptz
+);
+
+CREATE TABLE IF NOT EXISTS public.agent_tool_calls (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id uuid NOT NULL REFERENCES public.agent_runs(id) ON DELETE CASCADE,
+  tool_name text NOT NULL,
+  autonomy_level int NOT NULL,
+  args jsonb NOT NULL DEFAULT '{}'::jsonb,
+  result jsonb,
+  ok boolean NOT NULL DEFAULT false,
+  error_message text,
+  latency_ms int,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.agent_decisions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id uuid NOT NULL REFERENCES public.agent_runs(id) ON DELETE CASCADE,
+  kind text NOT NULL,
+  reason text,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.agent_approvals (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id uuid REFERENCES public.agent_runs(id) ON DELETE SET NULL,
+  session_id uuid NOT NULL REFERENCES public.agent_sessions(id) ON DELETE CASCADE,
+  action_type text NOT NULL,
+  status text NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'approved', 'rejected', 'expired')),
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  decided_by uuid REFERENCES app_auth.users(id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  decided_at timestamptz
+);
+
+-- ============================================================================
+-- Phase 4: substituições diárias do aluno (não mutam o plano do coach)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.refeicao_substituicoes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  aluno_id uuid NOT NULL REFERENCES public.alunos(id) ON DELETE CASCADE,
+  dieta_id uuid NOT NULL REFERENCES public.dietas(id) ON DELETE CASCADE,
+  item_dieta_id uuid NOT NULL REFERENCES public.itens_dieta(id) ON DELETE CASCADE,
+  data_ref date NOT NULL,
+  plano text NOT NULL DEFAULT 'A',
+  alimento_original_id uuid NOT NULL REFERENCES public.alimentos(id),
+  alimento_substituto_id uuid NOT NULL REFERENCES public.alimentos(id),
+  quantidade_original numeric(12,3),
+  quantidade_substituto numeric(12,3) NOT NULL,
+  unidade_original text,
+  unidade_substituto text NOT NULL DEFAULT 'g',
+  origem text NOT NULL DEFAULT 'ui'
+    CHECK (origem IN ('ui', 'agent')),
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT refeicao_substituicoes_unique
+    UNIQUE (aluno_id, item_dieta_id, data_ref, plano),
+  CONSTRAINT refeicao_substituicoes_plano_check
+    CHECK (plano = 'UNICO' OR plano ~ '^[A-Z]$')
+);
+
+CREATE INDEX IF NOT EXISTS idx_refeicao_substituicoes_aluno_data
+  ON public.refeicao_substituicoes (aluno_id, data_ref DESC);
+
+CREATE INDEX IF NOT EXISTS idx_refeicao_substituicoes_dieta_data
+  ON public.refeicao_substituicoes (dieta_id, data_ref DESC);
+
+-- ============================================================================
+-- Phase 6: Coach Knowledge — regras operacionais tipadas
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.coach_rules (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  coach_id uuid NOT NULL REFERENCES app_auth.users(id) ON DELETE CASCADE,
+  domain text NOT NULL
+    CHECK (domain IN (
+      'general', 'nutrition', 'training', 'checkin', 'communication', 'free_meal'
+    )),
+  trigger text NOT NULL DEFAULT 'always'
+    CHECK (trigger IN (
+      'always', 'restaurant', 'substitution', 'workout', 'late', 'complete', 'checkin'
+    )),
+  priority smallint NOT NULL DEFAULT 100,
+  title text NOT NULL,
+  body text NOT NULL,
+  active boolean NOT NULL DEFAULT true,
+  source text NOT NULL DEFAULT 'manual'
+    CHECK (source IN ('manual', 'seed_refeicao_livre', 'import')),
+  source_ref uuid,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT coach_rules_title_len CHECK (char_length(title) BETWEEN 1 AND 120),
+  CONSTRAINT coach_rules_body_len CHECK (char_length(body) BETWEEN 1 AND 500)
+);
+
+CREATE INDEX IF NOT EXISTS idx_coach_rules_coach_active
+  ON public.coach_rules (coach_id, active, priority ASC, created_at ASC);

@@ -110,9 +110,9 @@ function buildPendencias({ checkinDue, unreadChat, unreadAvisos }) {
       id: 'checkin-weekly',
       title: 'Check-in semanal',
       description:
-        'Ainda não enviou esta semana. Abra o check-in e conclua peso, fotos e questionário.',
+        'Ainda não enviou esta semana. Pode fazer quando quiser — não bloqueia dieta nem treino.',
       tab: 'checkin',
-      priority: 'high',
+      priority: 'normal',
     });
   }
   if (unreadChat > 0) {
@@ -217,7 +217,8 @@ async function getAlunoHoje(pool, { aluno, userId }) {
     pool.query(
       `SELECT id, aluno_id, nome, objetivo, data_retorno, ativa, created_at,
               rotacao_ativa, rotacao_dias_plano_a, rotacao_dias_plano_b,
-              rotacao_plano_inicial, rotacao_data_inicio, rotacao_sequencia
+              rotacao_plano_inicial, rotacao_data_inicio, rotacao_sequencia,
+              refeicao_livre_ativa, refeicao_livre_observacao, refeicao_livre_content_id
        FROM public.dietas
        WHERE aluno_id = $1
        ORDER BY (CASE WHEN COALESCE(ativa, true) THEN 0 ELSE 1 END), created_at DESC NULLS LAST
@@ -344,6 +345,63 @@ async function getAlunoHoje(pool, { aluno, userId }) {
 
   const dieta_rotacao = dieta ? getRotationForDate(dieta) : null;
 
+  // Phase 1a: execução diária (conclusões + sessão de treino)
+  let execucao = {
+    refeicoes_concluidas: [],
+    treino_sessao: null,
+  };
+  try {
+    const conclusoesRes = await pool.query(
+      `SELECT meal_key, plano, concluido, concluido_em, dieta_id
+       FROM public.refeicao_conclusoes
+       WHERE aluno_id = $1 AND data_ref = $2::date AND concluido = true
+       ORDER BY meal_key ASC`,
+      [alunoId, hojeIso],
+    );
+    execucao.refeicoes_concluidas = conclusoesRes.rows;
+
+    const treinoIdHoje = treino?.detalhe?.id || null;
+    if (treinoIdHoje) {
+      const sessaoRes = await pool.query(
+        `SELECT id, status, metadata, started_at, completed_at, treino_id
+         FROM public.treino_sessoes
+         WHERE aluno_id = $1 AND treino_id = $2 AND data_ref = $3::date
+         LIMIT 1`,
+        [alunoId, treinoIdHoje, hojeIso],
+      );
+      const sessao = sessaoRes.rows[0] || null;
+      if (sessao) {
+        const seriesRes = await pool.query(
+          `SELECT COUNT(*)::int AS total FROM public.treino_serie_logs WHERE sessao_id = $1`,
+          [sessao.id],
+        );
+        execucao.treino_sessao = {
+          id: sessao.id,
+          status: sessao.status,
+          completed_indexes: Array.isArray(sessao.metadata?.completedIndexes)
+            ? sessao.metadata.completedIndexes
+            : [],
+          series_count: seriesRes.rows[0]?.total ?? 0,
+          started_at: sessao.started_at,
+          completed_at: sessao.completed_at,
+        };
+      }
+    }
+  } catch (err) {
+    // Tabela ainda não migrada: não quebrar o Hoje
+    if (err && err.code !== '42P01') {
+      console.warn('aluno-hoje execucao:', err.message);
+    }
+  }
+
+  let behavioral_insight = null;
+  try {
+    const behavioral = require('./behavioral-insight.service');
+    behavioral_insight = await behavioral.getBehavioralInsight(pool, { id: alunoId }, { days: 7 });
+  } catch (err) {
+    console.warn('aluno-hoje behavioral_insight:', err.message);
+  }
+
   return {
     aluno: alunoEnriched,
     treino,
@@ -364,6 +422,8 @@ async function getAlunoHoje(pool, { aluno, userId }) {
         unreadAvisos,
       }).length,
     },
+    execucao,
+    behavioral_insight,
     gerado_em: new Date().toISOString(),
   };
 }

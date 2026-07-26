@@ -20,6 +20,14 @@ export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/alunos/me/profile-status',
     '/api/alunos/me/hoje',
     '/api/alunos/me/treino-agenda',
+    '/api/alunos/me/refeicao-conclusoes',
+    '/api/alunos/me/refeicao-substituicoes',
+    '/api/alunos/me/treino-sessoes',
+    '/api/alunos/me/treino-cargas',
+    '/api/alunos/me/proxima-acao',
+    '/api/agent',
+    '/api/agent/sessions',
+    '/api/agent/tools',
     '/api/alunos/me/notification-preferences',
     '/api/alunos/link-user',
     '/api/alunos/unlinked-registrations',
@@ -62,6 +70,7 @@ export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/coach/team/members',
     '/api/coach/team/members/',
     '/api/coach/me/notification-preferences',
+    '/api/coach/rules',
     '/api/eventos',
     '/api/eventos/',
     '/api/eventos-participantes',
@@ -1027,6 +1036,157 @@ class ApiClient {
             return apiSuccess(null);
         }
         return this.safeRequest<AlunoHojeResponse>(API_CONTRACT.alunos.hoje());
+    }
+
+    /** GET /api/alunos/me/refeicao-conclusoes */
+    async getRefeicaoConclusoesSafe(date?: string): Promise<ApiResult<{ data_ref: string; items: any[] } | null>> {
+        const identity = assertDataContextReady('getRefeicaoConclusoesSafe()');
+        if (!identity) return apiSuccess(null);
+        return this.safeRequest(API_CONTRACT.alunos.refeicaoConclusoes(date));
+    }
+
+    /** PUT /api/alunos/me/refeicao-conclusoes */
+    async putRefeicaoConclusaoSafe(body: {
+        dieta_id: string;
+        meal_key: string;
+        plano: string;
+        concluido: boolean;
+        data_ref?: string;
+        origem?: string;
+    }): Promise<ApiResult<any>> {
+        return this.safeRequest(API_CONTRACT.alunos.refeicaoConclusoes(), {
+            method: 'PUT',
+            body: JSON.stringify(body),
+        });
+    }
+
+    /** GET /api/alunos/me/refeicao-substituicoes */
+    async getRefeicaoSubstituicoesSafe(query?: {
+        date?: string;
+        dieta_id?: string;
+    }): Promise<ApiResult<{ data_ref: string; items: any[] } | null>> {
+        const identity = assertDataContextReady('getRefeicaoSubstituicoesSafe()');
+        if (!identity) return apiSuccess(null);
+        return this.safeRequest(API_CONTRACT.alunos.refeicaoSubstituicoes(query));
+    }
+
+    /** PUT /api/alunos/me/refeicao-substituicoes */
+    async putRefeicaoSubstituicaoSafe(body: {
+        dieta_id: string;
+        item_dieta_id: string;
+        alimento_substituto_id: string;
+        quantidade_substituto?: number;
+        unidade_substituto?: string;
+        quantidade_original?: number;
+        unidade_original?: string;
+        plano?: string;
+        data_ref?: string;
+        origem?: string;
+    }): Promise<ApiResult<any>> {
+        return this.safeRequest(API_CONTRACT.alunos.refeicaoSubstituicoes(), {
+            method: 'PUT',
+            body: JSON.stringify(body),
+        });
+    }
+
+    /** DELETE /api/alunos/me/refeicao-substituicoes */
+    async deleteRefeicaoSubstituicaoSafe(body: {
+        item_dieta_id: string;
+        plano?: string;
+        data_ref?: string;
+    }): Promise<ApiResult<any>> {
+        return this.safeRequest(API_CONTRACT.alunos.refeicaoSubstituicoes(), {
+            method: 'DELETE',
+            body: JSON.stringify(body),
+        });
+    }
+
+    /** POST /api/alunos/me/treino-sessoes — iniciar/obter sessão do dia */
+    async startTreinoSessaoSafe(body: {
+        treino_id: string;
+        aluno_treino_id?: string;
+        data_ref?: string;
+        origem?: string;
+    }): Promise<ApiResult<any>> {
+        return this.safeRequest(API_CONTRACT.alunos.treinoSessoes(), {
+            method: 'POST',
+            body: JSON.stringify(body),
+        });
+    }
+
+    async getTreinoSessoesSafe(query?: {
+        date?: string;
+        treino_id?: string;
+    }): Promise<ApiResult<any>> {
+        return this.safeRequest(API_CONTRACT.alunos.treinoSessoes(query));
+    }
+
+    async patchTreinoSessaoSafe(
+        sessaoId: string,
+        body: { status?: string; completed_indexes?: number[]; metadata?: Record<string, unknown> },
+    ): Promise<ApiResult<any>> {
+        return this.safeRequest(API_CONTRACT.alunos.treinoSessaoById(sessaoId), {
+            method: 'PATCH',
+            body: JSON.stringify(body),
+        });
+    }
+
+    async putTreinoSerieSafe(
+        sessaoId: string,
+        body: {
+            exercise_index: number;
+            exercise_name: string;
+            set_index?: number;
+            carga?: string;
+            repeticoes?: number | null;
+            rpe?: number | null;
+            dor?: number | null;
+            concluido?: boolean;
+            origem?: string;
+        },
+    ): Promise<ApiResult<any>> {
+        return this.safeRequest(API_CONTRACT.alunos.treinoSessaoSeries(sessaoId), {
+            method: 'PUT',
+            body: JSON.stringify(body),
+        });
+    }
+
+    async getTreinoCargasSafe(treinoId: string): Promise<ApiResult<{ sessions: any[] } | null>> {
+        return this.safeRequest(API_CONTRACT.alunos.treinoCargas(treinoId));
+    }
+
+    async getProximaAcaoSafe(mealKeys?: string[]): Promise<ApiResult<any>> {
+        return this.safeRequest(API_CONTRACT.alunos.proximaAcao(mealKeys));
+    }
+
+    /** Phase 1b — Agent Foundation */
+    async getOrCreateAgentSessionSafe(): Promise<ApiResult<any>> {
+        return this.safeRequest(API_CONTRACT.agent.currentSession());
+    }
+
+    async postAgentMessageSafe(
+        sessionId: string,
+        content: string,
+        mealKeys?: string[],
+    ): Promise<ApiResult<any>> {
+        return this.safeRequest(API_CONTRACT.agent.messages(sessionId), {
+            method: 'POST',
+            body: JSON.stringify({ content, meal_keys: mealKeys }),
+        });
+    }
+
+    async getAgentMessagesSafe(sessionId: string): Promise<ApiResult<any>> {
+        return this.safeRequest(API_CONTRACT.agent.messages(sessionId));
+    }
+
+    async decideAgentApprovalSafe(
+        approvalId: string,
+        status: 'approved' | 'rejected',
+    ): Promise<ApiResult<any>> {
+        return this.safeRequest(API_CONTRACT.agent.decideApproval(approvalId), {
+            method: 'POST',
+            body: JSON.stringify({ status }),
+        });
     }
 
     async getTreinoAgendaSafe(alunoId?: string): Promise<ApiResult<import('@/lib/treino-agenda-types').TreinoAgendaResponse | null>> {
