@@ -252,7 +252,7 @@ const StudentPortal = () => {
             tabIndex={-1}
             aria-live="polite"
             className={cn(
-              "min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain touch-pan-y [-webkit-overflow-scrolling:touch]",
+              "flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain touch-pan-y [-webkit-overflow-scrolling:touch]",
               "px-4 pt-4 transition-[padding] duration-200 motion-reduce:transition-none",
               /* Compact: mais área útil para o agente / conteúdo */
               isCompact
@@ -261,10 +261,17 @@ const StudentPortal = () => {
               showMobileBottomNav ? "max-md:pb-student-main md:pb-6" : "max-md:pb-student-main-compact md:pb-6",
             )}
           >
-            <div className="mb-4 hidden justify-end md:flex">
+            <div className="mb-4 hidden shrink-0 justify-end md:flex">
               <NotificationsPopover onNavigate={handleTabChange} />
             </div>
-            <div key={activeTab} className="student-tab-enter min-w-0">
+            <div
+              key={activeTab}
+              className={cn(
+                "student-tab-enter min-w-0",
+                /* Hoje: preenche a altura do main para o chat expandir ao colapsar o acordeão */
+                activeTab === "hoje" && "flex min-h-0 flex-1 flex-col",
+              )}
+            >
               {content}
             </div>
           </main>

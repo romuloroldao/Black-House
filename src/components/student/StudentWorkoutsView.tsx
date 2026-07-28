@@ -440,8 +440,19 @@ const StudentWorkoutsView = () => {
                               #{exIdx + 1} {exercicio.nome}
                             </p>
                             <p className="mt-1 text-xs text-muted-foreground">
-                              {exercicio.series}×{exercicio.repeticoes}
-                              {exercicio.peso ? ` · ${exercicio.peso}` : ""}
+                              {[
+                                exercicio.series != null && exercicio.series !== ""
+                                  ? `Série ${exercicio.series}`
+                                  : null,
+                                exercicio.repeticoes != null && exercicio.repeticoes !== ""
+                                  ? `Reps ${exercicio.repeticoes}`
+                                  : null,
+                                exercicio.peso != null && exercicio.peso !== ""
+                                  ? `TEP ${exercicio.peso}`
+                                  : null,
+                              ]
+                                .filter(Boolean)
+                                .join(" / ")}
                             </p>
                           </div>
                         ))

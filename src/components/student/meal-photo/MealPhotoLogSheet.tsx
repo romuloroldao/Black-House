@@ -295,7 +295,7 @@ export default function MealPhotoLogSheet({
       <Sheet open={open} onOpenChange={handleOpenChange}>
         <SheetContent
           side="bottom"
-          className="flex max-h-[min(92dvh,920px)] flex-col gap-0 overflow-hidden rounded-t-2xl p-0 pb-overlay-safe"
+          className="flex h-[min(92dvh,920px)] max-h-[min(92dvh,920px)] flex-col gap-0 overflow-hidden rounded-t-2xl p-0 pb-overlay-safe"
         >
           <SheetHeader className="border-b px-4 py-3 text-left">
             <SheetTitle className="flex items-center gap-2 text-lg">
@@ -307,7 +307,7 @@ export default function MealPhotoLogSheet({
             </SheetDescription>
           </SheetHeader>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 [-webkit-overflow-scrolling:touch]">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain touch-pan-y px-4 py-4 [-webkit-overflow-scrolling:touch]">
             <input
               ref={galleryRef}
               type="file"

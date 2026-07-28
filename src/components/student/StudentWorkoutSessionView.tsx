@@ -114,6 +114,9 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
     return getLastLoadForExercise(treino.id, currentIndex, current.nome, todayKey);
   }, [treino.id, currentIndex, current?.nome, todayKey, loadHistory]);
 
+  /* Só ao mudar de exercício: carga/reps. NÃO resetar série aqui —
+   * `loadHistory` actualiza após cada registo e repor currentSet→1
+   * deixava o botão em «Registar série 1» durante/após o descanso. */
   useEffect(() => {
     const todaySession = loadHistory.find((s) => s.date === todayKey);
     const savedLoad = todaySession?.exercises.find((e) => e.exerciseIndex === currentIndex);
@@ -121,10 +124,11 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
     setRepsInput("");
     setRpeInput("");
     setDorInput("");
-    if (!completed.has(currentIndex)) {
-      setCurrentSet(1);
-    }
-  }, [currentIndex, loadHistory, todayKey, current?.peso, completed]);
+  }, [currentIndex, loadHistory, todayKey, current?.peso]);
+
+  useEffect(() => {
+    setCurrentSet(1);
+  }, [currentIndex]);
 
   const progressPct = total > 0 ? Math.round((completed.size / total) * 100) : 0;
   const setProgressLabel = `Série ${Math.min(currentSet, prescribedSets)} de ${prescribedSets}`;
@@ -415,7 +419,11 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
           )}
 
           <div className="mt-4 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-3 py-2 text-center">
-            <p className="text-xs text-muted-foreground">Série actual</p>
+            <p className="text-xs text-muted-foreground">
+              {restSecondsLeft != null && restSecondsLeft > 0 && restMode === "set"
+                ? "Próxima série"
+                : "Série actual"}
+            </p>
             <p className="text-lg font-bold text-primary">{setProgressLabel}</p>
           </div>
 

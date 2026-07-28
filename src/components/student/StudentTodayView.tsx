@@ -235,131 +235,137 @@ const StudentTodayView = ({
   }
 
   return (
-    <div className="min-w-0 space-y-4 pb-4">
-      <TodayHeroCard
-        compact
-        loading={loading}
-        aluno={data?.aluno as { nome?: string; email?: string; objetivo?: string }}
-        pendenciasCount={data?.contadores?.pendencias_total ?? pendingTasks.length}
-      />
-
-      {profileStatus && !profileStatus.is_complete && onOpenProfileWizard && (
-        <ProfileCompletenessBanner
+    <div
+      className={cn(
+        "flex min-w-0 flex-col gap-3",
+        /* Fechado: preenche o main (flex-1) e o chat cresce no espaço restante */
+        !maisDoDiaOpen && "min-h-0 flex-1 pb-1",
+        maisDoDiaOpen && "pb-4",
+      )}
+    >
+      <div className="shrink-0 space-y-3">
+        <TodayHeroCard
           compact
-          status={profileStatus}
-          onComplete={onOpenProfileWizard}
+          loading={loading}
+          aluno={data?.aluno as { nome?: string; email?: string; objetivo?: string }}
+          pendenciasCount={data?.contadores?.pendencias_total ?? pendingTasks.length}
         />
-      )}
 
-      {!loading && returnCountdown && (
-        <ReturnCountdownBanner loading={false} countdown={returnCountdown} />
-      )}
-
-      {/* —— TOPO: cards do dia (acordeão — pode esconder para dar espaço ao agente) —— */}
-      <Collapsible
-        open={maisDoDiaOpen}
-        onOpenChange={setMaisDoDiaOpenPersist}
-        className="rounded-xl border border-border/60 bg-card/40"
-      >
-        <CollapsibleTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            className="flex h-auto min-h-11 w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-muted/40"
-            aria-expanded={maisDoDiaOpen}
-          >
-            <span className="min-w-0">
-              <span className="block text-sm font-semibold text-foreground">Mais do dia</span>
-              <span className="block truncate text-xs text-muted-foreground">
-                {maisDoDiaOpen
-                  ? "Toque para esconder e ganhar espaço no assistente"
-                  : pendingTasks.length > 0
-                    ? `${pendingTasks.length} pendência${pendingTasks.length !== 1 ? "s" : ""} · toque para ver os cards`
-                    : "Dieta, treino, streak e fotos · toque para expandir"}
-              </span>
-            </span>
-            <ChevronDown
-              className={cn(
-                "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none",
-                maisDoDiaOpen && "rotate-180",
-              )}
-              aria-hidden
-            />
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent
-          className={cn(
-            "space-y-3 overflow-hidden border-t border-border/40 px-3 pb-3 pt-3",
-            "data-[state=closed]:hidden",
-          )}
-        >
-          <TodayContextStrip
-            loading={loading}
-            data={data}
-            onOpenDiet={() => {
-              trackAgentEvent("agent_first_touch", { via: "strip_diet" });
-              openTab("diet");
-            }}
-            onOpenWorkout={() => {
-              trackAgentEvent("agent_first_touch", { via: "strip_workout" });
-              openTab("workouts", { session: "1" });
-            }}
-            onOpenPending={() => openTab("checkin")}
+        {profileStatus && !profileStatus.is_complete && onOpenProfileWizard && (
+          <ProfileCompletenessBanner
+            compact
+            status={profileStatus}
+            onComplete={onOpenProfileWizard}
           />
+        )}
 
-          <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-            <CheckinStreakCard
+        {!loading && returnCountdown && (
+          <ReturnCountdownBanner loading={false} countdown={returnCountdown} />
+        )}
+
+        {/* —— TOPO: cards do dia (acordeão) —— */}
+        <Collapsible
+          open={maisDoDiaOpen}
+          onOpenChange={setMaisDoDiaOpenPersist}
+          className="rounded-xl border border-border/60 bg-card/40"
+        >
+          <CollapsibleTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              className="flex h-auto min-h-11 w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-muted/40"
+              aria-expanded={maisDoDiaOpen}
+            >
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-foreground">Mais do dia</span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  {maisDoDiaOpen
+                    ? "Toque para esconder e expandir o assistente"
+                    : pendingTasks.length > 0
+                      ? `${pendingTasks.length} pendência${pendingTasks.length !== 1 ? "s" : ""} · toque para ver os cards`
+                      : "Dieta, treino, streak e fotos · toque para expandir"}
+                </span>
+              </span>
+              <ChevronDown
+                className={cn(
+                  "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none",
+                  maisDoDiaOpen && "rotate-180",
+                )}
+                aria-hidden
+              />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent
+            className={cn(
+              "space-y-3 overflow-hidden border-t border-border/40 px-3 pb-3 pt-3",
+              "data-[state=closed]:hidden",
+            )}
+          >
+            <TodayContextStrip
               loading={loading}
-              streak={data?.checkin_streak ?? null}
-              checkinDue={data?.contadores?.checkin_due}
-              onOpenCheckin={() => openTab("checkin")}
+              data={data}
+              onOpenDiet={() => {
+                trackAgentEvent("agent_first_touch", { via: "strip_diet" });
+                openTab("diet");
+              }}
+              onOpenWorkout={() => {
+                trackAgentEvent("agent_first_touch", { via: "strip_workout" });
+                openTab("workouts", { session: "1" });
+              }}
+              onOpenPending={() => openTab("checkin")}
             />
-            <TodayPhotoCard
-              loading={loading}
-              fotos={data?.fotos_evolucao}
-              onTirarFoto={() => openTab("checkin")}
-              onVerGaleria={() => openTab("progress", { section: "photos" })}
-            />
-          </div>
 
-          <BehavioralInsightCard loading={loading} insight={data?.behavioral_insight} />
-          <StudentCoachCheckinFeedback compact limit={1} showHistoryAction className="shadow-sm" />
-
-          {pendingTasks.length > 0 && (
-            <PendingTasksList loading={loading} tasks={pendingTasks} onNavigate={navigateToTab} />
-          )}
-
-          {!loading && proximos.length > 0 && (
-            <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
-              <p className="mb-2 flex items-center gap-2 text-sm font-medium">
-                <Calendar className="h-4 w-4 text-primary" aria-hidden />
-                Próximo na agenda
-              </p>
-              <ul className="space-y-2">
-                {proximos.map((ev) => (
-                  <li key={ev.id} className="text-sm">
-                    <span className="font-medium text-foreground">{ev.titulo || "Evento"}</span>
-                    <span className="text-muted-foreground">
-                      {" "}
-                      · {new Date(ev.data_evento).toLocaleDateString("pt-BR")}
-                      {ev.hora_evento ? ` às ${ev.hora_evento}` : ""}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+              <CheckinStreakCard
+                loading={loading}
+                streak={data?.checkin_streak ?? null}
+                checkinDue={data?.contadores?.checkin_due}
+                onOpenCheckin={() => openTab("checkin")}
+              />
+              <TodayPhotoCard
+                loading={loading}
+                fotos={data?.fotos_evolucao}
+                onTirarFoto={() => openTab("checkin")}
+                onVerGaleria={() => openTab("progress", { section: "photos" })}
+              />
             </div>
-          )}
-        </CollapsibleContent>
-      </Collapsible>
 
-      {/* —— ABAIXO: assistente (cresce quando Mais do dia está fechado) —— */}
+            <BehavioralInsightCard loading={loading} insight={data?.behavioral_insight} />
+            <StudentCoachCheckinFeedback compact limit={1} showHistoryAction className="shadow-sm" />
+
+            {pendingTasks.length > 0 && (
+              <PendingTasksList loading={loading} tasks={pendingTasks} onNavigate={navigateToTab} />
+            )}
+
+            {!loading && proximos.length > 0 && (
+              <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+                <p className="mb-2 flex items-center gap-2 text-sm font-medium">
+                  <Calendar className="h-4 w-4 text-primary" aria-hidden />
+                  Próximo na agenda
+                </p>
+                <ul className="space-y-2">
+                  {proximos.map((ev) => (
+                    <li key={ev.id} className="text-sm">
+                      <span className="font-medium text-foreground">{ev.titulo || "Evento"}</span>
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · {new Date(ev.data_evento).toLocaleDateString("pt-BR")}
+                        {ev.hora_evento ? ` às ${ev.hora_evento}` : ""}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </CollapsibleContent>
+        </Collapsible>
+      </div>
+
+      {/* —— Assistente: flex-1 preenche o resto quando o acordeão está fechado —— */}
       <section
         className={cn(
-          "flex flex-col overflow-hidden rounded-2xl border border-border/50 bg-card",
-          "transition-[max-height] duration-200 ease-out motion-reduce:transition-none",
-          maisDoDiaOpen
-            ? "max-h-[min(48dvh,26rem)]"
-            : "max-h-[min(72dvh,38rem)]",
+          "flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border/50 bg-card",
+          maisDoDiaOpen ? "max-h-[min(48dvh,26rem)] shrink-0" : "flex-1",
         )}
         aria-label="Conversa com o agente"
       >
@@ -395,7 +401,7 @@ const StudentTodayView = ({
           )}
         </div>
 
-        <div className="min-h-0 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4">
           <AgentThread
             thread={agent.thread}
             status={agent.status}
@@ -408,7 +414,7 @@ const StudentTodayView = ({
             onCardAction={(a) => void agent.runCardAction(a)}
             emptyHint={
               maisDoDiaOpen
-                ? "Expanda ou feche «Mais do dia» acima · ou pergunte aqui"
+                ? "Feche «Mais do dia» acima para ler mais da conversa"
                 : "Mais espaço para conversar — digite ou use um atalho"
             }
           />
@@ -430,7 +436,7 @@ const StudentTodayView = ({
       <Button
         type="button"
         variant="ghost"
-        className="h-10 w-full gap-2 text-sm text-muted-foreground"
+        className="h-10 w-full shrink-0 gap-2 text-sm text-muted-foreground"
         onClick={() => {
           trackAgentEvent("nav_traditional_open", { via: "explore" });
           onExplorePlatform?.();

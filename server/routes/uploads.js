@@ -7,13 +7,13 @@
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
 const { queryAlunoRowsFullForUser } = require('../utils/aluno-resolve-by-user');
 const { isValidUUID } = require('../utils/uuid-validator');
 const {
     normalizeUploadImage,
     imageNormalizeErrorMessage,
 } = require('../utils/normalize-upload-image');
+const storage = require('../services/storage.service');
 const router = express.Router();
 
 module.exports = function(pool, authenticate) {
@@ -25,7 +25,23 @@ module.exports = function(pool, authenticate) {
         if (host) return `${proto}://${host}`.replace(/\/$/, '');
         return 'https://api.blackhouse.app.br';
     }
-    
+
+    async function sendStoredFile(res, key, opts = {}) {
+        res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+        if (opts.contentType) res.setHeader('Content-Type', opts.contentType);
+        if (opts.contentDisposition) res.setHeader('Content-Disposition', opts.contentDisposition);
+
+        const abs = storage.getAbsolutePath(key);
+        if (abs) {
+            return res.sendFile(abs);
+        }
+        const stream = await storage.openReadStream(key);
+        if (!stream) {
+            return res.status(404).json({ error: 'Arquivo não encontrado' });
+        }
+        return stream.pipe(res);
+    }
+
     const uploadAvatar = multer({
         storage: multer.memoryStorage(),
         limits: { fileSize: 12 * 1024 * 1024 },
@@ -47,13 +63,12 @@ module.exports = function(pool, authenticate) {
 
             const userId = req.user.id;
             const normalized = await normalizeUploadImage(req.file.buffer);
-            const uploadsDir = path.join(__dirname, '..', 'storage', 'avatars');
-            fs.mkdirSync(uploadsDir, { recursive: true });
             const fileName = `${userId}-${Date.now()}${normalized.ext}`;
-            fs.writeFileSync(path.join(uploadsDir, fileName), normalized.buffer);
+            const key = `avatars/${fileName}`;
+            await storage.putObject(key, normalized.buffer, normalized.mime || 'image/jpeg');
 
             // Caminho canónico (router montado em /api/uploads — ver api.js)
-            const relPath = `/api/uploads/storage/avatars/${fileName}`;
+            const relPath = storage.publicApiPath(key);
             const publicUrl = `${resolvePublicBaseUrl(req)}${relPath}`;
             
             // Atualizar avatar_url no profile
@@ -109,23 +124,13 @@ module.exports = function(pool, authenticate) {
     });
     
     // GET /storage/avatars/:filename - Servir arquivo de avatar
-    router.get('/storage/avatars/:filename', (req, res) => {
+    router.get('/storage/avatars/:filename', async (req, res) => {
         try {
-            // Evita bloqueio `NotSameOrigin` ao carregar <img> de api.* em app.*.
-            res.set('Cross-Origin-Resource-Policy', 'cross-origin');
             const safeName = path.basename(String(req.params.filename || ''));
             if (!safeName) {
                 return res.status(400).json({ error: 'Parâmetros inválidos' });
             }
-            const avatarsDir = path.resolve(__dirname, '..', 'storage', 'avatars');
-            const filePath = path.resolve(avatarsDir, safeName);
-            if (!filePath.startsWith(avatarsDir)) {
-                return res.status(400).json({ error: 'Parâmetros inválidos' });
-            }
-            if (!fs.existsSync(filePath)) {
-                return res.status(404).json({ error: 'Arquivo não encontrado' });
-            }
-            res.sendFile(filePath);
+            return await sendStoredFile(res, `avatars/${safeName}`);
         } catch (error) {
             res.status(500).json({ error: error.message });
         }
@@ -188,13 +193,11 @@ module.exports = function(pool, authenticate) {
             const alunoId = rows[0].id;
             const normalized = await normalizeUploadImage(req.file.buffer);
             const destName = `${Date.now()}${normalized.ext}`;
-            const destDir = path.join(__dirname, '..', 'storage', 'progress-photos', String(alunoId));
-            fs.mkdirSync(destDir, { recursive: true });
-            const destPath = path.join(destDir, destName);
-            fs.writeFileSync(destPath, normalized.buffer);
+            const key = `progress-photos/${alunoId}/${destName}`;
+            await storage.putObject(key, normalized.buffer, normalized.mime || 'image/jpeg');
 
             const base = resolvePublicBaseUrl(req);
-            const relPath = `/api/uploads/storage/progress-photos/${alunoId}/${destName}`;
+            const relPath = storage.publicApiPath(key);
             const publicUrl = `${base}${relPath}`;
 
             return res.status(201).json({
@@ -211,20 +214,14 @@ module.exports = function(pool, authenticate) {
         }
     });
 
-    router.get('/storage/progress-photos/:alunoId/:filename', (req, res) => {
+    router.get('/storage/progress-photos/:alunoId/:filename', async (req, res) => {
         try {
-            // Evita bloqueio `NotSameOrigin` ao carregar <img> de api.* em app.*.
-            res.set('Cross-Origin-Resource-Policy', 'cross-origin');
             const { alunoId, filename } = req.params;
             if (!isValidUUID(alunoId)) {
                 return res.status(400).json({ error: 'Parâmetros inválidos' });
             }
             const safeName = path.basename(filename);
-            const filePath = path.join(__dirname, '..', 'storage', 'progress-photos', alunoId, safeName);
-            if (!fs.existsSync(filePath)) {
-                return res.status(404).json({ error: 'Arquivo não encontrado' });
-            }
-            return res.sendFile(filePath);
+            return await sendStoredFile(res, `progress-photos/${alunoId}/${safeName}`);
         } catch (error) {
             return res.status(500).json({ error: error.message });
         }
@@ -264,11 +261,10 @@ module.exports = function(pool, authenticate) {
                 quality: 78,
             });
             const destName = `${Date.now()}${normalized.ext}`;
-            const destDir = path.join(__dirname, '..', 'storage', 'meal-photos', String(alunoId));
-            fs.mkdirSync(destDir, { recursive: true });
-            fs.writeFileSync(path.join(destDir, destName), normalized.buffer);
+            const key = `meal-photos/${alunoId}/${destName}`;
+            await storage.putObject(key, normalized.buffer, normalized.mime || 'image/jpeg');
 
-            const relPath = `/api/uploads/storage/meal-photos/${alunoId}/${destName}`;
+            const relPath = storage.publicApiPath(key);
             return res.status(201).json({
                 success: true,
                 path: relPath,
@@ -313,15 +309,7 @@ module.exports = function(pool, authenticate) {
                 return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
             }
 
-            const dir = path.resolve(__dirname, '..', 'storage', 'meal-photos', alunoId);
-            const filePath = path.resolve(dir, safeName);
-            if (!filePath.startsWith(dir)) {
-                return res.status(400).json({ error: 'Parâmetros inválidos' });
-            }
-            if (!fs.existsSync(filePath)) {
-                return res.status(404).json({ error: 'Arquivo não encontrado' });
-            }
-            return res.sendFile(filePath);
+            return await sendStoredFile(res, `meal-photos/${alunoId}/${safeName}`);
         } catch (error) {
             return res.status(500).json({ error: error.message });
         }
@@ -356,12 +344,11 @@ module.exports = function(pool, authenticate) {
                 .replace(/[^a-zA-Z0-9._-]/g, '_')
                 .slice(0, 120) || 'documento.pdf';
             const destName = `${Date.now()}-${safeBase.endsWith('.pdf') ? safeBase : `${safeBase}.pdf`}`;
-            const destDir = path.join(__dirname, '..', 'storage', 'educational-contents', String(coachId));
-            fs.mkdirSync(destDir, { recursive: true });
-            fs.writeFileSync(path.join(destDir, destName), req.file.buffer);
+            const key = `educational-contents/${coachId}/${destName}`;
+            await storage.putObject(key, req.file.buffer, 'application/pdf');
 
             const base = resolvePublicBaseUrl(req);
-            const relPath = `/api/uploads/storage/educational-contents/${coachId}/${destName}`;
+            const relPath = storage.publicApiPath(key);
             const publicUrl = `${base}${relPath}`;
 
             return res.status(201).json({
@@ -375,9 +362,8 @@ module.exports = function(pool, authenticate) {
         }
     });
 
-    router.get('/storage/educational-contents/:coachId/:filename', authenticate, (req, res) => {
+    router.get('/storage/educational-contents/:coachId/:filename', authenticate, async (req, res) => {
         try {
-            res.set('Cross-Origin-Resource-Policy', 'cross-origin');
             const { coachId, filename } = req.params;
             if (!isValidUUID(coachId)) {
                 return res.status(400).json({ error: 'Parâmetros inválidos' });
@@ -396,17 +382,10 @@ module.exports = function(pool, authenticate) {
             }
 
             const safeName = path.basename(filename);
-            const dir = path.resolve(__dirname, '..', 'storage', 'educational-contents', coachId);
-            const filePath = path.resolve(dir, safeName);
-            if (!filePath.startsWith(dir)) {
-                return res.status(400).json({ error: 'Parâmetros inválidos' });
-            }
-            if (!fs.existsSync(filePath)) {
-                return res.status(404).json({ error: 'Arquivo não encontrado' });
-            }
-            res.setHeader('Content-Type', 'application/pdf');
-            res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
-            return res.sendFile(filePath);
+            return await sendStoredFile(res, `educational-contents/${coachId}/${safeName}`, {
+                contentType: 'application/pdf',
+                contentDisposition: `inline; filename="${safeName}"`,
+            });
         } catch (error) {
             return res.status(500).json({ error: error.message });
         }

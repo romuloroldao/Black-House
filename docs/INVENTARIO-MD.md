@@ -1,6 +1,6 @@
 # Inventário de ficheiros `.md` (projeto Black House)
 
-**Última auditoria:** 2026-05-19  
+**Última auditoria:** 2026-05-19 (índice agentic actualizado 2026-07-26)  
 **Limpeza aplicada:** os `.md` soltos da raiz foram arquivados em `docs/arquivo/legado-md-2026-05-19/`; a raiz ficou apenas com `README.md`.
 **Hábitos:** [`REGRAS-PARA-NAO-CONFUNDIR.md`](REGRAS-PARA-NAO-CONFUNDIR.md) · **Arquitetura:** [`ARQUITETURA-ATUAL.md`](ARQUITETURA-ATUAL.md)
 
@@ -31,6 +31,16 @@ Legenda: **Válido** · **Parcial** (rever trechos) · **Obsoleto** (não usar p
 | `docs/INVENTARIO-MD.md` | **Válido** | Este ficheiro |
 | `README.md` | **Válido** | Entrada mínima com links para `docs/` |
 | `docs/arquivo/*.md` | **Arquivo** | Notas com data (equivalência, nutrição, cadastro aluno) |
+| `docs/arquivo/2026-07-25-prd-blackhouse-recursos.md` | **Válido (as-built)** | Inventário/PRD do produto actual |
+| `docs/arquivo/2026-07-26-auditoria-agentic-os.md` | **Válido (visão)** | Auditoria transformação agentic — ainda não runtime |
+| `docs/arquivo/2026-07-26-prd-blackhouse-agentic-os.md` | **Válido (visão)** | PRD complementar Agentic OS |
+| `docs/arquivo/2026-07-26-spec-phase-1a-execucao-diaria.md` | **Válido (spec)** | Persistência execução diária |
+| `docs/arquivo/2026-07-26-spec-phase-1b-agent-foundation.md` | **Válido (spec)** | Foundation do orquestrador/tools |
+| `docs/arquivo/2026-07-26-spec-phase-2-daily-agent.md` | **Válido (spec)** | MVP Daily Agent |
+| `docs/arquivo/2026-07-26-spec-phase-3-guided-workout.md` | **Válido (spec)** | Guided Workout série a série |
+| `docs/arquivo/2026-07-26-spec-phase-4-contextual-nutrition.md` | **Válido (spec)** | Substituições diárias + restaurante→foto |
+| `docs/arquivo/2026-07-26-spec-phase-5-behavioral-intelligence.md` | **Válido (spec)** | Insight + missed meal/workout |
+| `docs/arquivo/2026-07-26-spec-phase-6-coach-knowledge.md` | **Válido (spec)** | coach_rules no Daily Agent |
 | `docs/arquivo/legado-md-2026-05-19/` | **Arquivo legado** | Antigos relatórios da raiz |
 | `server/EVENTOS_WEBSOCKET.md` | **Parcial** | Eventos Socket.io; ajustar URLs de exemplo |
 | `src/scripts/README-IMPORT-TACO.md` | **Parcial** | Import TACO; **remover** troubleshooting Supabase |
