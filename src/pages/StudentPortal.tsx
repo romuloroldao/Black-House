@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { apiClient } from "@/lib/api-client";
 import AgentReturnFab from "@/components/student/agent/AgentReturnFab";
 import { trackAgentEvent } from "@/lib/agent-analytics";
+import { useStudentNavMode } from "@/hooks/useStudentNavMode";
 
 // RBAC-01: StudentPortal usa payment_status do contexto (via ProtectedRoute)
 // A tela de bloqueio é rota separada (/portal-aluno/blocked)
@@ -36,6 +37,7 @@ import { trackAgentEvent } from "@/lib/agent-analytics";
 const StudentPortal = () => {
   const { user } = useAuth();
   const { isReady } = useDataContext();
+  const { isCompact, mode, toggle: toggleNavMode } = useStudentNavMode();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "hoje");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -210,7 +212,10 @@ const StudentPortal = () => {
     }
 
     return (
-      <div className="relative flex h-dvh min-h-0 w-full min-w-0 overflow-hidden bg-background">
+      <div
+        className="relative flex h-dvh min-h-0 w-full min-w-0 overflow-hidden bg-background"
+        data-student-nav={isCompact ? "compact" : "expanded"}
+      >
         <a
           href="#student-main-content"
           className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[200] focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -222,6 +227,8 @@ const StudentPortal = () => {
           onTabChange={handleTabChange}
           mobileOpen={mobileNavOpen}
           onMobileOpenChange={setMobileNavOpen}
+          navMode={mode}
+          onToggleNavMode={toggleNavMode}
         />
         <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col max-md:pt-[calc(3.5rem+env(safe-area-inset-top,0px))]">
           <header className="flex h-14 min-h-14 shrink-0 items-center gap-2 border-b border-border bg-background px-3 max-md:fixed max-md:inset-x-0 max-md:top-0 max-md:z-[100] max-md:min-h-[calc(3.5rem+env(safe-area-inset-top,0px))] max-md:pt-[env(safe-area-inset-top,0px)] max-md:shadow-md md:static md:top-auto md:z-30 md:min-h-14 md:pt-0 md:shadow-none bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/90 md:hidden">
@@ -246,7 +253,11 @@ const StudentPortal = () => {
             aria-live="polite"
             className={cn(
               "min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain touch-pan-y [-webkit-overflow-scrolling:touch]",
-              "px-4 pt-4 md:px-6 md:pt-6 lg:px-8 lg:pt-8",
+              "px-4 pt-4 transition-[padding] duration-200 motion-reduce:transition-none",
+              /* Compact: mais área útil para o agente / conteúdo */
+              isCompact
+                ? "md:px-5 md:pt-5 lg:px-6 lg:pt-6"
+                : "md:px-6 md:pt-6 lg:px-8 lg:pt-8",
               showMobileBottomNav ? "max-md:pb-student-main md:pb-6" : "max-md:pb-student-main-compact md:pb-6",
             )}
           >

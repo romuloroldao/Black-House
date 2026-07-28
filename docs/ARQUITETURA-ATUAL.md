@@ -49,7 +49,7 @@ Documentação de investigação e specs:
 - Specs: Phase 1a–6 (`docs/arquivo/`, prefixo `2026-07-26-spec-phase-*`)
 - PRD as-built de recursos: [`arquivo/2026-07-25-prd-blackhouse-recursos.md`](arquivo/2026-07-25-prd-blackhouse-recursos.md)
 
-**Estado de implementação (2026-07-26):** Phase 1a–6 no código (Daily Agent + Guided Workout + substituições + insight + `coach_rules`). **Agent-First Portal:** tab `hoje` como Agent Home; ver [`arquivo/2026-07-26-agent-first-portal.md`](arquivo/2026-07-26-agent-first-portal.md). **Respostas progressivas:** [`arquivo/2026-07-26-agent-progressive-responses.md`](arquivo/2026-07-26-agent-progressive-responses.md). **Receitas + web inspiration:** tool `search_recipe_inspiration` (plano = verdade, web = inspiração); ver [`arquivo/2026-07-26-agent-web-recipe-inspiration.md`](arquivo/2026-07-26-agent-web-recipe-inspiration.md). Flag: `VITE_AGENT_DAILY_ENABLED`. Próximo: Phase 7 (Coach Agent HITL).
+**Estado de implementação (2026-07-28):** Phase 1a–6 + Agent-First + respostas progressivas + receitas com web. **Layout adaptativo:** sidebar aluno compacta (só ícones, default) / expandida; ver [`arquivo/2026-07-28-layout-adaptativo-nav.md`](arquivo/2026-07-28-layout-adaptativo-nav.md). Flag: `VITE_AGENT_DAILY_ENABLED`. Próximo: Phase 7 (Coach Agent HITL).
 
 ---
 
