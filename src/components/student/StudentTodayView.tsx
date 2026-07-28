@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Calendar, LayoutGrid, Sparkles } from "lucide-react";
+import { Calendar, ChevronDown, LayoutGrid, Sparkles } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDataContext } from "@/contexts/DataContext";
 import { useAlunoHoje } from "@/hooks/useAlunoHoje";
@@ -15,6 +16,7 @@ import {
 import { apiClient } from "@/lib/api-client";
 import { trackAgentEvent } from "@/lib/agent-analytics";
 import { cn } from "@/lib/utils";
+import { safeGetItem, safeSetItem } from "@/lib/safe-storage";
 import ReturnCountdownBanner from "@/components/student/ReturnCountdownBanner";
 import ProfileCompletenessBanner from "@/components/student/ProfileCompletenessBanner";
 import type { ProfileCompletenessStatus } from "@/types/profile-completeness";
@@ -32,6 +34,15 @@ import { askPromptForAcao, type ProximaAcao } from "@/components/student/agent/N
 import WeightLogDialog from "@/components/student/agent/WeightLogDialog";
 import { chipsForProximaAcao } from "@/components/student/agent/agent-chips";
 import { useStudentAgent, type AgentUiOpenTarget } from "@/hooks/useStudentAgent";
+
+const MAIS_DO_DIA_OPEN_KEY = "bh-student-mais-do-dia-open";
+
+function readMaisDoDiaOpen(): boolean {
+  const raw = safeGetItem(MAIS_DO_DIA_OPEN_KEY);
+  if (raw === "0" || raw === "false") return false;
+  if (raw === "1" || raw === "true") return true;
+  return true; // padrão: aberto (cards no topo)
+}
 
 type StudentTodayViewProps = {
   hojeState?: {
@@ -66,6 +77,15 @@ const StudentTodayView = ({
   const loading = hojeState?.loading ?? internal.loading;
   const [proxima, setProxima] = useState<ProximaAcao | null>(null);
   const [proximaLoading, setProximaLoading] = useState(false);
+  const [maisDoDiaOpen, setMaisDoDiaOpen] = useState(() =>
+    typeof window !== "undefined" ? readMaisDoDiaOpen() : true,
+  );
+
+  const setMaisDoDiaOpenPersist = (open: boolean) => {
+    setMaisDoDiaOpen(open);
+    safeSetItem(MAIS_DO_DIA_OPEN_KEY, open ? "1" : "0");
+    trackAgentEvent("mais_do_dia_toggle", { open });
+  };
 
   const refreshHoje = () => {
     void (hojeState?.refetch ?? internal.refetch)?.();
@@ -235,73 +255,111 @@ const StudentTodayView = ({
         <ReturnCountdownBanner loading={false} countdown={returnCountdown} />
       )}
 
-      {/* —— TOPO: cards do dia (visão prioritária) —— */}
-      <section className="space-y-3" aria-label="Mais do dia">
-        <h2 className="text-sm font-semibold tracking-tight text-foreground">Mais do dia</h2>
-
-        <TodayContextStrip
-          loading={loading}
-          data={data}
-          onOpenDiet={() => {
-            trackAgentEvent("agent_first_touch", { via: "strip_diet" });
-            openTab("diet");
-          }}
-          onOpenWorkout={() => {
-            trackAgentEvent("agent_first_touch", { via: "strip_workout" });
-            openTab("workouts", { session: "1" });
-          }}
-          onOpenPending={() => openTab("checkin")}
-        />
-
-        <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-          <CheckinStreakCard
+      {/* —— TOPO: cards do dia (acordeão — pode esconder para dar espaço ao agente) —— */}
+      <Collapsible
+        open={maisDoDiaOpen}
+        onOpenChange={setMaisDoDiaOpenPersist}
+        className="rounded-xl border border-border/60 bg-card/40"
+      >
+        <CollapsibleTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            className="flex h-auto min-h-11 w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-muted/40"
+            aria-expanded={maisDoDiaOpen}
+          >
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-foreground">Mais do dia</span>
+              <span className="block truncate text-xs text-muted-foreground">
+                {maisDoDiaOpen
+                  ? "Toque para esconder e ganhar espaço no assistente"
+                  : pendingTasks.length > 0
+                    ? `${pendingTasks.length} pendência${pendingTasks.length !== 1 ? "s" : ""} · toque para ver os cards`
+                    : "Dieta, treino, streak e fotos · toque para expandir"}
+              </span>
+            </span>
+            <ChevronDown
+              className={cn(
+                "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none",
+                maisDoDiaOpen && "rotate-180",
+              )}
+              aria-hidden
+            />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent
+          className={cn(
+            "space-y-3 overflow-hidden border-t border-border/40 px-3 pb-3 pt-3",
+            "data-[state=closed]:hidden",
+          )}
+        >
+          <TodayContextStrip
             loading={loading}
-            streak={data?.checkin_streak ?? null}
-            checkinDue={data?.contadores?.checkin_due}
-            onOpenCheckin={() => openTab("checkin")}
+            data={data}
+            onOpenDiet={() => {
+              trackAgentEvent("agent_first_touch", { via: "strip_diet" });
+              openTab("diet");
+            }}
+            onOpenWorkout={() => {
+              trackAgentEvent("agent_first_touch", { via: "strip_workout" });
+              openTab("workouts", { session: "1" });
+            }}
+            onOpenPending={() => openTab("checkin")}
           />
-          <TodayPhotoCard
-            loading={loading}
-            fotos={data?.fotos_evolucao}
-            onTirarFoto={() => openTab("checkin")}
-            onVerGaleria={() => openTab("progress", { section: "photos" })}
-          />
-        </div>
 
-        <BehavioralInsightCard loading={loading} insight={data?.behavioral_insight} />
-        <StudentCoachCheckinFeedback compact limit={1} showHistoryAction className="shadow-sm" />
-
-        {pendingTasks.length > 0 && (
-          <PendingTasksList loading={loading} tasks={pendingTasks} onNavigate={navigateToTab} />
-        )}
-
-        {!loading && proximos.length > 0 && (
-          <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
-            <p className="mb-2 flex items-center gap-2 text-sm font-medium">
-              <Calendar className="h-4 w-4 text-primary" aria-hidden />
-              Próximo na agenda
-            </p>
-            <ul className="space-y-2">
-              {proximos.map((ev) => (
-                <li key={ev.id} className="text-sm">
-                  <span className="font-medium text-foreground">{ev.titulo || "Evento"}</span>
-                  <span className="text-muted-foreground">
-                    {" "}
-                    · {new Date(ev.data_evento).toLocaleDateString("pt-BR")}
-                    {ev.hora_evento ? ` às ${ev.hora_evento}` : ""}
-                  </span>
-                </li>
-              ))}
-            </ul>
+          <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+            <CheckinStreakCard
+              loading={loading}
+              streak={data?.checkin_streak ?? null}
+              checkinDue={data?.contadores?.checkin_due}
+              onOpenCheckin={() => openTab("checkin")}
+            />
+            <TodayPhotoCard
+              loading={loading}
+              fotos={data?.fotos_evolucao}
+              onTirarFoto={() => openTab("checkin")}
+              onVerGaleria={() => openTab("progress", { section: "photos" })}
+            />
           </div>
-        )}
-      </section>
 
-      {/* —— ABAIXO: assistente (quando precisar) —— */}
+          <BehavioralInsightCard loading={loading} insight={data?.behavioral_insight} />
+          <StudentCoachCheckinFeedback compact limit={1} showHistoryAction className="shadow-sm" />
+
+          {pendingTasks.length > 0 && (
+            <PendingTasksList loading={loading} tasks={pendingTasks} onNavigate={navigateToTab} />
+          )}
+
+          {!loading && proximos.length > 0 && (
+            <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+              <p className="mb-2 flex items-center gap-2 text-sm font-medium">
+                <Calendar className="h-4 w-4 text-primary" aria-hidden />
+                Próximo na agenda
+              </p>
+              <ul className="space-y-2">
+                {proximos.map((ev) => (
+                  <li key={ev.id} className="text-sm">
+                    <span className="font-medium text-foreground">{ev.titulo || "Evento"}</span>
+                    <span className="text-muted-foreground">
+                      {" "}
+                      · {new Date(ev.data_evento).toLocaleDateString("pt-BR")}
+                      {ev.hora_evento ? ` às ${ev.hora_evento}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
+
+      {/* —— ABAIXO: assistente (cresce quando Mais do dia está fechado) —— */}
       <section
         className={cn(
-          "flex max-h-[min(55dvh,28rem)] flex-col overflow-hidden rounded-2xl border border-border/50",
-          "bg-card",
+          "flex flex-col overflow-hidden rounded-2xl border border-border/50 bg-card",
+          "transition-[max-height] duration-200 ease-out motion-reduce:transition-none",
+          maisDoDiaOpen
+            ? "max-h-[min(48dvh,26rem)]"
+            : "max-h-[min(72dvh,38rem)]",
         )}
         aria-label="Conversa com o agente"
       >
@@ -348,7 +406,11 @@ const StudentTodayView = ({
               void agent.send(t);
             }}
             onCardAction={(a) => void agent.runCardAction(a)}
-            emptyHint="Use os cards acima ou pergunte aqui — dieta, treino, receita…"
+            emptyHint={
+              maisDoDiaOpen
+                ? "Expanda ou feche «Mais do dia» acima · ou pergunte aqui"
+                : "Mais espaço para conversar — digite ou use um atalho"
+            }
           />
         </div>
 
