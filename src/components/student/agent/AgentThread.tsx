@@ -45,7 +45,7 @@ const AgentThread = ({
   }, [thread, sending]);
 
   return (
-    <div className={cn("flex h-full min-h-0 flex-col gap-3", className)}>
+    <div className={cn("flex flex-col gap-3", className)}>
       <div className="flex shrink-0 flex-wrap gap-2" role="group" aria-label="Atalhos do agente">
         {chips.slice(0, 3).map((chip) => (
           <Button
@@ -65,12 +65,7 @@ const AgentThread = ({
         ))}
       </div>
 
-      <div
-        className="min-h-0 flex-1 space-y-3"
-        aria-live="polite"
-        aria-relevant="additions"
-        aria-busy={sending}
-      >
+      <div className="space-y-3" aria-live="polite" aria-relevant="additions" aria-busy={sending}>
         {isEmpty && (
           <p className="px-0.5 text-sm text-muted-foreground">{emptyHint}</p>
         )}

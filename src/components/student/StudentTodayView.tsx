@@ -238,8 +238,8 @@ const StudentTodayView = ({
 
       <section
         className={cn(
-          "flex h-[min(62dvh,32rem)] flex-col overflow-hidden rounded-2xl border border-border/50",
-          "bg-background",
+          "flex max-h-[min(70dvh,36rem)] flex-col overflow-hidden rounded-2xl border border-border/50",
+          "bg-card",
         )}
         aria-label="Conversa com o agente"
       >
@@ -271,8 +271,8 @@ const StudentTodayView = ({
           </div>
         )}
 
-        {/* Só o thread faz scroll — o composer fica fixo no fundo da secção */}
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4">
+        {/* Cresce com o conteúdo; só faz scroll interno quando ultrapassa max-h */}
+        <div className="min-h-0 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4">
           <AgentThread
             thread={agent.thread}
             status={agent.status}
@@ -287,12 +287,7 @@ const StudentTodayView = ({
           />
         </div>
 
-        <div
-          className={cn(
-            "shrink-0 border-t border-border/60 bg-background px-3 py-2.5 sm:px-4",
-            "pb-[max(0.625rem,env(safe-area-inset-bottom,0px))]",
-          )}
-        >
+        <div className="shrink-0 border-t border-border/60 bg-card px-3 py-2.5 sm:px-4">
           <AgentComposer
             status={agent.status}
             onSend={(t) => {
@@ -322,8 +317,12 @@ const StudentTodayView = ({
             />
           </Button>
         </CollapsibleTrigger>
-        <CollapsibleContent className="space-y-3 pt-1 data-[state=closed]:animate-none">
-          <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+        <CollapsibleContent
+          className={cn(
+            "space-y-3 overflow-hidden pt-1",
+            "data-[state=closed]:hidden",
+          )}
+        >          <div className="grid min-w-0 gap-3 sm:grid-cols-2">
             <CheckinStreakCard
               loading={loading}
               streak={data?.checkin_streak ?? null}
