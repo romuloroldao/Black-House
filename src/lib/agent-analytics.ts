@@ -4,6 +4,8 @@ export type AgentAnalyticsEvent =
   | "agent_home_view"
   | "agent_intent_sent"
   | "agent_card_action"
+  | "agent_first_touch"
+  | "mais_do_dia_toggle"
   | "nav_traditional_open"
   | "agent_return"
   | "agent_hydrate"
