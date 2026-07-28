@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Calendar, ChevronDown, LayoutGrid } from "lucide-react";
+import { Calendar, LayoutGrid, Sparkles } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDataContext } from "@/contexts/DataContext";
 import { useAlunoHoje } from "@/hooks/useAlunoHoje";
@@ -28,6 +27,7 @@ import TodayPhotoCard from "@/components/student/today/TodayPhotoCard";
 import StudentCoachCheckinFeedback from "@/components/student/StudentCoachCheckinFeedback";
 import AgentComposer from "@/components/student/agent/AgentComposer";
 import AgentThread from "@/components/student/agent/AgentThread";
+import TodayContextStrip from "@/components/student/agent/TodayContextStrip";
 import { askPromptForAcao, type ProximaAcao } from "@/components/student/agent/NextActionHero";
 import WeightLogDialog from "@/components/student/agent/WeightLogDialog";
 import { chipsForProximaAcao } from "@/components/student/agent/agent-chips";
@@ -66,7 +66,6 @@ const StudentTodayView = ({
   const loading = hojeState?.loading ?? internal.loading;
   const [proxima, setProxima] = useState<ProximaAcao | null>(null);
   const [proximaLoading, setProximaLoading] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
 
   const refreshHoje = () => {
     void (hojeState?.refetch ?? internal.refetch)?.();
@@ -216,7 +215,7 @@ const StudentTodayView = ({
   }
 
   return (
-    <div className="min-w-0 space-y-3 pb-4">
+    <div className="min-w-0 space-y-4 pb-4">
       <TodayHeroCard
         compact
         loading={loading}
@@ -236,42 +235,108 @@ const StudentTodayView = ({
         <ReturnCountdownBanner loading={false} countdown={returnCountdown} />
       )}
 
+      {/* —— TOPO: cards do dia (visão prioritária) —— */}
+      <section className="space-y-3" aria-label="Mais do dia">
+        <h2 className="text-sm font-semibold tracking-tight text-foreground">Mais do dia</h2>
+
+        <TodayContextStrip
+          loading={loading}
+          data={data}
+          onOpenDiet={() => {
+            trackAgentEvent("agent_first_touch", { via: "strip_diet" });
+            openTab("diet");
+          }}
+          onOpenWorkout={() => {
+            trackAgentEvent("agent_first_touch", { via: "strip_workout" });
+            openTab("workouts", { session: "1" });
+          }}
+          onOpenPending={() => openTab("checkin")}
+        />
+
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+          <CheckinStreakCard
+            loading={loading}
+            streak={data?.checkin_streak ?? null}
+            checkinDue={data?.contadores?.checkin_due}
+            onOpenCheckin={() => openTab("checkin")}
+          />
+          <TodayPhotoCard
+            loading={loading}
+            fotos={data?.fotos_evolucao}
+            onTirarFoto={() => openTab("checkin")}
+            onVerGaleria={() => openTab("progress", { section: "photos" })}
+          />
+        </div>
+
+        <BehavioralInsightCard loading={loading} insight={data?.behavioral_insight} />
+        <StudentCoachCheckinFeedback compact limit={1} showHistoryAction className="shadow-sm" />
+
+        {pendingTasks.length > 0 && (
+          <PendingTasksList loading={loading} tasks={pendingTasks} onNavigate={navigateToTab} />
+        )}
+
+        {!loading && proximos.length > 0 && (
+          <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+            <p className="mb-2 flex items-center gap-2 text-sm font-medium">
+              <Calendar className="h-4 w-4 text-primary" aria-hidden />
+              Próximo na agenda
+            </p>
+            <ul className="space-y-2">
+              {proximos.map((ev) => (
+                <li key={ev.id} className="text-sm">
+                  <span className="font-medium text-foreground">{ev.titulo || "Evento"}</span>
+                  <span className="text-muted-foreground">
+                    {" "}
+                    · {new Date(ev.data_evento).toLocaleDateString("pt-BR")}
+                    {ev.hora_evento ? ` às ${ev.hora_evento}` : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
+
+      {/* —— ABAIXO: assistente (quando precisar) —— */}
       <section
         className={cn(
-          "flex max-h-[min(70dvh,36rem)] flex-col overflow-hidden rounded-2xl border border-border/50",
+          "flex max-h-[min(55dvh,28rem)] flex-col overflow-hidden rounded-2xl border border-border/50",
           "bg-card",
         )}
         aria-label="Conversa com o agente"
       >
-        {(proximaLoading || nextLabel) && (
-          <div className="flex min-w-0 shrink-0 items-center justify-between gap-2 border-b border-border/40 px-3 py-2 sm:px-4">
-            <p className="min-w-0 truncate text-sm text-muted-foreground">
+        <div className="flex min-w-0 shrink-0 items-center justify-between gap-2 border-b border-border/40 px-3 py-2.5 sm:px-4">
+          <div className="min-w-0">
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+              <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+              Assistente
+            </p>
+            <p className="truncate text-xs text-muted-foreground">
               {proximaLoading ? (
-                <Skeleton className="inline-block h-4 w-40" />
+                <Skeleton className="mt-1 inline-block h-3 w-36" />
+              ) : nextLabel ? (
+                <>Agora: {nextLabel}</>
               ) : (
-                <>
-                  <span className="text-foreground/80">Agora:</span> {nextLabel}
-                </>
+                "Pergunte quando precisar de ajuda"
               )}
             </p>
-            {!proximaLoading && nextLabel && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 shrink-0 px-2 text-xs"
-                onClick={() => {
-                  trackAgentEvent("agent_first_touch", { via: "next_inline" });
-                  void agent.send(askPromptForAcao(proxima?.type));
-                }}
-              >
-                Perguntar
-              </Button>
-            )}
           </div>
-        )}
+          {!proximaLoading && nextLabel && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 shrink-0 px-2 text-xs"
+              onClick={() => {
+                trackAgentEvent("agent_first_touch", { via: "next_inline" });
+                void agent.send(askPromptForAcao(proxima?.type));
+              }}
+            >
+              Perguntar
+            </Button>
+          )}
+        </div>
 
-        {/* Cresce com o conteúdo; só faz scroll interno quando ultrapassa max-h */}
         <div className="min-h-0 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4">
           <AgentThread
             thread={agent.thread}
@@ -283,7 +348,7 @@ const StudentTodayView = ({
               void agent.send(t);
             }}
             onCardAction={(a) => void agent.runCardAction(a)}
-            emptyHint="Respondo com o seu plano — digite ou use um atalho."
+            emptyHint="Use os cards acima ou pergunte aqui — dieta, treino, receita…"
           />
         </div>
 
@@ -299,73 +364,6 @@ const StudentTodayView = ({
           />
         </div>
       </section>
-
-      <Collapsible open={moreOpen} onOpenChange={setMoreOpen}>
-        <CollapsibleTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            className="h-10 w-full justify-between px-2 text-sm text-muted-foreground hover:text-foreground"
-          >
-            Mais do dia
-            <ChevronDown
-              className={cn(
-                "h-4 w-4 transition-transform duration-200",
-                moreOpen && "rotate-180",
-              )}
-              aria-hidden
-            />
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent
-          className={cn(
-            "space-y-3 overflow-hidden pt-1",
-            "data-[state=closed]:hidden",
-          )}
-        >          <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-            <CheckinStreakCard
-              loading={loading}
-              streak={data?.checkin_streak ?? null}
-              checkinDue={data?.contadores?.checkin_due}
-              onOpenCheckin={() => openTab("checkin")}
-            />
-            <TodayPhotoCard
-              loading={loading}
-              fotos={data?.fotos_evolucao}
-              onTirarFoto={() => openTab("checkin")}
-              onVerGaleria={() => openTab("progress", { section: "photos" })}
-            />
-          </div>
-
-          <BehavioralInsightCard loading={loading} insight={data?.behavioral_insight} />
-          <StudentCoachCheckinFeedback compact limit={1} showHistoryAction className="shadow-sm" />
-
-          {pendingTasks.length > 0 && (
-            <PendingTasksList loading={loading} tasks={pendingTasks} onNavigate={navigateToTab} />
-          )}
-
-          {!loading && proximos.length > 0 && (
-            <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
-              <p className="mb-2 flex items-center gap-2 text-sm font-medium">
-                <Calendar className="h-4 w-4 text-primary" aria-hidden />
-                Próximo na agenda
-              </p>
-              <ul className="space-y-2">
-                {proximos.map((ev) => (
-                  <li key={ev.id} className="text-sm">
-                    <span className="font-medium text-foreground">{ev.titulo || "Evento"}</span>
-                    <span className="text-muted-foreground">
-                      {" "}
-                      · {new Date(ev.data_evento).toLocaleDateString("pt-BR")}
-                      {ev.hora_evento ? ` às ${ev.hora_evento}` : ""}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </CollapsibleContent>
-      </Collapsible>
 
       <Button
         type="button"
