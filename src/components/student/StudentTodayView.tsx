@@ -238,13 +238,13 @@ const StudentTodayView = ({
 
       <section
         className={cn(
-          "flex min-h-[min(62dvh,32rem)] flex-col gap-3 rounded-2xl border border-border/50",
-          "bg-background p-3 sm:p-4",
+          "flex h-[min(62dvh,32rem)] flex-col overflow-hidden rounded-2xl border border-border/50",
+          "bg-background",
         )}
         aria-label="Conversa com o agente"
       >
         {(proximaLoading || nextLabel) && (
-          <div className="flex min-w-0 items-center justify-between gap-2 border-b border-border/40 pb-2">
+          <div className="flex min-w-0 shrink-0 items-center justify-between gap-2 border-b border-border/40 px-3 py-2 sm:px-4">
             <p className="min-w-0 truncate text-sm text-muted-foreground">
               {proximaLoading ? (
                 <Skeleton className="inline-block h-4 w-40" />
@@ -271,7 +271,8 @@ const StudentTodayView = ({
           </div>
         )}
 
-        <div className="min-h-0 flex-1">
+        {/* Só o thread faz scroll — o composer fica fixo no fundo da secção */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4">
           <AgentThread
             thread={agent.thread}
             status={agent.status}
@@ -288,9 +289,8 @@ const StudentTodayView = ({
 
         <div
           className={cn(
-            "sticky z-10 -mx-1 shrink-0 px-1 pt-1",
-            "bottom-[calc(var(--student-bottom-nav-total,5rem)+0.25rem)] md:bottom-0",
-            "bg-gradient-to-t from-background via-background to-transparent pb-0.5",
+            "shrink-0 border-t border-border/60 bg-background px-3 py-2.5 sm:px-4",
+            "pb-[max(0.625rem,env(safe-area-inset-bottom,0px))]",
           )}
         >
           <AgentComposer

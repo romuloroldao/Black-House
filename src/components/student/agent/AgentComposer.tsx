@@ -39,8 +39,7 @@ const AgentComposer = ({
   return (
     <form
       className={cn(
-        "flex items-center gap-2 rounded-2xl border border-border/70 bg-background/95 p-2 shadow-sm",
-        "backdrop-blur supports-[backdrop-filter]:bg-background/90",
+        "flex items-center gap-2 rounded-2xl border border-border bg-card p-2 shadow-sm",
         "ring-offset-background focus-within:ring-2 focus-within:ring-ring/40",
         className,
       )}
