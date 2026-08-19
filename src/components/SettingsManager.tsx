@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { User, Bell, Key, Palette, Eye, EyeOff, Camera, Loader2, Shield } from "lucide-react";
+import { User, Bell, Key, Palette, Eye, EyeOff, Camera, Loader2, Shield, BookOpen } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import UserRolesManager from "./UserRolesManager";
+import CoachRulesManager from "./coach/CoachRulesManager";
 import { API_CONTRACT } from "@/contracts/api-contract";
 import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
@@ -457,10 +458,14 @@ const SettingsManager = () => {
       </div>
 
       <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5 lg:w-[620px]">
+        <TabsList className="grid w-full grid-cols-3 sm:grid-cols-6 lg:max-w-3xl">
           <TabsTrigger value="profile" className="gap-2">
             <User className="h-4 w-4" />
             <span className="hidden sm:inline">Perfil</span>
+          </TabsTrigger>
+          <TabsTrigger value="metodo" className="gap-2">
+            <BookOpen className="h-4 w-4" />
+            <span className="hidden sm:inline">Método</span>
           </TabsTrigger>
           <TabsTrigger value="users" className="gap-2">
             <Shield className="h-4 w-4" />
@@ -482,6 +487,10 @@ const SettingsManager = () => {
 
         <TabsContent value="users">
           <UserRolesManager />
+        </TabsContent>
+
+        <TabsContent value="metodo">
+          <CoachRulesManager />
         </TabsContent>
 
         <TabsContent value="profile" className="space-y-4">

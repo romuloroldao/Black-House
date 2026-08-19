@@ -1,6 +1,6 @@
 # Arquitetura atual (referência canónica)
 
-Última revisão: documentação alinhada ao código em `main` do repositório (não à pasta `.worktrees/checkpoint`).
+Última revisão: documentação alinhada ao código em `main` do repositório (não à pasta `.worktrees/checkpoint`). Ponteiro Phase 7a: 2026-08-19.
 
 ## Visão geral
 
@@ -46,10 +46,10 @@ Documentação de investigação e specs:
 
 - Auditoria: [`arquivo/2026-07-26-auditoria-agentic-os.md`](arquivo/2026-07-26-auditoria-agentic-os.md)
 - PRD complementar: [`arquivo/2026-07-26-prd-blackhouse-agentic-os.md`](arquivo/2026-07-26-prd-blackhouse-agentic-os.md)
-- Specs: Phase 1a–6 (`docs/arquivo/`, prefixo `2026-07-26-spec-phase-*`)
+- Specs: Phase 1a–6 (`docs/arquivo/`, prefixo `2026-07-26-spec-phase-*`); Phase 7 HITL: [`arquivo/2026-08-19-spec-phase-7-coach-agent-hitl.md`](arquivo/2026-08-19-spec-phase-7-coach-agent-hitl.md)
 - PRD as-built de recursos: [`arquivo/2026-07-25-prd-blackhouse-recursos.md`](arquivo/2026-07-25-prd-blackhouse-recursos.md)
 
-**Estado de implementação (2026-07-28):** Phase 1a–6 + Agent-First + respostas progressivas + receitas com web. **Layout adaptativo:** sidebar aluno compacta (só ícones, default) / expandida; ver [`arquivo/2026-07-28-layout-adaptativo-nav.md`](arquivo/2026-07-28-layout-adaptativo-nav.md). Flag: `VITE_AGENT_DAILY_ENABLED`. Próximo: Phase 7 (Coach Agent HITL).
+**Estado de implementação (2026-08-19):** Phase 1a–6 + Agent-First + respostas progressivas + receitas com web + **Phase 7a Coach Agent HITL** (carteira 7d, método/`coach_rules`, sessão de treino no servidor, inbox determinística, rascunhos HITL). **Layout adaptativo:** sidebar aluno compacta (só ícones, default) / expandida; ver [`arquivo/2026-07-28-layout-adaptativo-nav.md`](arquivo/2026-07-28-layout-adaptativo-nav.md). Flag: `VITE_AGENT_DAILY_ENABLED`. **Fora deste ciclo (7b):** orquestrador LLM do coach.
 
 ---
 

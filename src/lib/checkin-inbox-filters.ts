@@ -7,6 +7,7 @@ export type InboxFilterId =
   | "pendentes"
   | "respondidos"
   | "prioridade"
+  | "queda_aderencia"
   | "7d"
   | "30d"
   | "all"
@@ -24,6 +25,7 @@ export const INBOX_FILTER_OPTIONS: InboxFilterOption[] = [
   { id: "pendentes", label: "Pendentes de resposta" },
   { id: "sem_texto_portal", label: "Sem texto no portal" },
   { id: "prioridade", label: "Prioridade" },
+  { id: "queda_aderencia", label: "Queda de execução 7d" },
   { id: "respondidos", label: "Respondidos" },
   { id: "7d", label: "Últimos 7 dias" },
   { id: "30d", label: "Últimos 30 dias" },
@@ -41,6 +43,7 @@ export function matchesInboxFilter(
   checkin: WeeklyCheckinRecord,
   filter: InboxFilterId,
   now: Date = new Date(),
+  extra?: { quedaAderencia?: boolean },
 ): boolean {
   const created = new Date(checkin.created_at || 0);
   if (Number.isNaN(created.getTime())) return false;
@@ -60,6 +63,8 @@ export function matchesInboxFilter(
       return isCheckinRespondido(checkin);
     case "prioridade":
       return isCheckinPrioridade(checkin);
+    case "queda_aderencia":
+      return Boolean(extra?.quedaAderencia);
     case "relato":
       return hasRelato(checkin);
     case "adesao_baixa":
@@ -74,8 +79,11 @@ export function matchesInboxFilter(
 export function countByInboxFilter(
   checkins: WeeklyCheckinRecord[],
   filter: InboxFilterId,
+  extraByCheckinId?: Map<string, { quedaAderencia?: boolean }>,
 ): number {
-  return checkins.filter((c) => matchesInboxFilter(c, filter)).length;
+  return checkins.filter((c) =>
+    matchesInboxFilter(c, filter, new Date(), extraByCheckinId?.get(c.id)),
+  ).length;
 }
 
 export function formatFilterLabel(option: InboxFilterOption, count: number): string {

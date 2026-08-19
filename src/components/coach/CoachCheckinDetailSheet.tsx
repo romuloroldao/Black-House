@@ -90,9 +90,11 @@ export default function CoachCheckinDetailSheet({
   const [aiTrends, setAiTrends] = useState<string | null>(null);
   const [aiTrendsLoading, setAiTrendsLoading] = useState(false);
   const [aiDraftLoading, setAiDraftLoading] = useState(false);
+  const [draftContext, setDraftContext] = useState<string | null>(null);
 
   useEffect(() => {
     setMarkedRespondido(false);
+    setDraftContext(null);
   }, [checkin?.id]);
 
   useEffect(() => {
@@ -185,7 +187,16 @@ export default function CoachCheckinDetailSheet({
       const result = await apiClient.weeklyCheckinAiDraftSafe(checkin.id);
       if (!result.success) throw new Error(result.error || "IA indisponível");
       if (result.data?.draft) setFeedback(result.data.draft);
-      toast({ title: "Rascunho gerado", description: "Revise e edite antes de salvar." });
+      const insight = result.data?.insight_7d?.text
+        ? `Insight 7d: ${result.data.insight_7d.text}`
+        : null;
+      const rulesCount = Array.isArray(result.data?.coach_rules) ? result.data.coach_rules.length : 0;
+      const rulesBit = rulesCount > 0 ? `${rulesCount} regra(s) do método` : null;
+      setDraftContext([insight, rulesBit].filter(Boolean).join(" · ") || null);
+      toast({
+        title: "Rascunho gerado",
+        description: "Revise, edite e salve. Nada é enviado automaticamente.",
+      });
     } catch (err: unknown) {
       toast({
         title: "Rascunho IA",
@@ -411,6 +422,11 @@ export default function CoachCheckinDetailSheet({
 
         <div className="space-y-3 border-t bg-background px-6 py-4">
           <p className="text-sm font-medium">Sua resposta ao aluno</p>
+          {draftContext && (
+            <p className="text-xs text-muted-foreground">
+              Rascunho HITL com {draftContext}. Edite antes de salvar — não há envio autónomo.
+            </p>
+          )}
           <Textarea
             placeholder="Referencie o que o aluno relatou neste check-in..."
             value={feedback}

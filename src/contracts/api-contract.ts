@@ -289,7 +289,18 @@ export const API_CONTRACT = {
   },
   coach: {
     notificationPreferences: () => `${API_BASE}/api/coach/me/notification-preferences`,
-    rules: () => `${API_BASE}/api/coach/rules`,
+    adherenceCarteira: (days?: number) => {
+      const qs = days != null ? `?days=${encodeURIComponent(String(days))}` : '?days=7';
+      return `${API_BASE}/api/coach/me/adherence-carteira${qs}`;
+    },
+    rules: (query?: { include_inactive?: boolean | string }) => {
+      const params = new URLSearchParams();
+      if (query?.include_inactive === true || query?.include_inactive === '1') {
+        params.set('include_inactive', '1');
+      }
+      const qs = params.toString();
+      return `${API_BASE}/api/coach/rules${qs ? `?${qs}` : ''}`;
+    },
     ruleById: (id: string) => `${API_BASE}/api/coach/rules/${encodeURIComponent(id)}`,
     teamMembers: () => `${API_BASE}/api/coach/team/members`,
     teamMemberById: (id: string) => `${API_BASE}/api/coach/team/members/${id}`,
@@ -460,6 +471,7 @@ const CONTRACT_PATTERNS = [
   '/api/agenda-eventos/:id/snooze',
   '/api/agenda-eventos/:id',
   '/api/coach/me/notification-preferences',
+  '/api/coach/me/adherence-carteira',
   '/api/coach/rules',
   '/api/coach/rules/:id',
   '/api/coach/team/members',

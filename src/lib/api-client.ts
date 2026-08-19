@@ -4,6 +4,7 @@ import type { AlunoHojeResponse } from '@/types/aluno-hoje';
 import type { ImportHistoryRecord } from '@/types/import-history';
 import type { AlunoPortalStatus } from '@/types/aluno-portal-status';
 import type { CheckinAiDraftResponse, CheckinAiTrendsResponse } from '@/types/checkin-ai';
+import type { AdherenceCarteiraResponse } from '@/types/adherence-carteira';
 import type {
   FeedbackAlunoRecord,
   WeeklyCheckinRecord,
@@ -70,6 +71,7 @@ export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/coach/team/members',
     '/api/coach/team/members/',
     '/api/coach/me/notification-preferences',
+    '/api/coach/me/adherence-carteira',
     '/api/coach/rules',
     '/api/eventos',
     '/api/eventos/',
@@ -1345,6 +1347,28 @@ class ApiClient {
             };
         }
         return { success: true, data: result.data };
+    }
+
+    async getAdherenceCarteiraSafe(days = 7): Promise<ApiResult<AdherenceCarteiraResponse>> {
+        return this.safeRequest(API_CONTRACT.coach.adherenceCarteira(days));
+    }
+
+    async listCoachRulesSafe(includeInactive = true): Promise<ApiResult<{ items: any[]; gerado_em?: string }>> {
+        return this.safeRequest(API_CONTRACT.coach.rules({ include_inactive: includeInactive }));
+    }
+
+    async createCoachRuleSafe(body: Record<string, unknown>): Promise<ApiResult<any>> {
+        return this.safeRequest(API_CONTRACT.coach.rules(), {
+            method: 'POST',
+            body: JSON.stringify(body),
+        });
+    }
+
+    async updateCoachRuleSafe(id: string, body: Record<string, unknown>): Promise<ApiResult<any>> {
+        return this.safeRequest(API_CONTRACT.coach.ruleById(id), {
+            method: 'PATCH',
+            body: JSON.stringify(body),
+        });
     }
 
     async weeklyCheckinAiTrendsSafe(alunoId: string): Promise<ApiResult<CheckinAiTrendsResponse>> {

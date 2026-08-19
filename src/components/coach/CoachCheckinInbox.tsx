@@ -6,7 +6,12 @@ import { API_CONTRACT } from "@/contracts/api-contract";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { getCheckinSummaryChips, hasRelato, isCheckinMarcadoSemTexto, isCheckinRespondido } from "@/lib/checkin-display";
-import { compareCheckinsForTriagem, isCheckinPrioridade } from "@/lib/checkin-highlights";
+import { isCheckinPrioridade } from "@/lib/checkin-highlights";
+import {
+  compareInboxForTriagem,
+  hasQuedaExecucao7d,
+  type InboxTriagemSignals,
+} from "@/lib/checkin-inbox-triagem";
 import {
   countByInboxFilter,
   formatFilterLabel,
@@ -35,6 +40,7 @@ type InboxItem = {
   studentId: string;
   studentName: string;
   previousCheckin: WeeklyCheckinRecord | null;
+  signals: InboxTriagemSignals;
 };
 
 export default function CoachCheckinInbox() {
@@ -50,9 +56,10 @@ export default function CoachCheckinInbox() {
   const loadInbox = useCallback(async (searchQuery?: string) => {
     setLoading(true);
     const term = searchQuery?.trim() ?? "";
-    const [checkinsResult, alunosResult] = await Promise.all([
+    const [checkinsResult, alunosResult, carteiraResult] = await Promise.all([
       apiClient.listWeeklyCheckinsSafe(term.length >= 2 ? { q: term } : undefined),
       apiClient.requestSafe<Array<{ id: string; nome?: string }>>("/api/alunos"),
+      apiClient.getAdherenceCarteiraSafe(7),
     ]);
 
     const alunosMap = new Map<string, string>();
@@ -79,6 +86,18 @@ export default function CoachCheckinInbox() {
       );
     }
 
+    const carteiraByAluno = new Map<string, InboxTriagemSignals>();
+    if (carteiraResult.success && Array.isArray(carteiraResult.data?.items)) {
+      for (const row of carteiraResult.data.items) {
+        carteiraByAluno.set(row.aluno_id, {
+          pendingCheckin: row.pending_checkin,
+          missDays: row.miss_days,
+          mealPct: row.rates?.meal_pct ?? null,
+          workoutPct: row.rates?.workout_pct ?? null,
+        });
+      }
+    }
+
     const inbox: InboxItem[] = checkins
       .slice()
       .sort(
@@ -95,6 +114,12 @@ export default function CoachCheckinInbox() {
           studentId,
           studentName: alunosMap.get(studentId) || "Aluno",
           previousCheckin,
+          signals: carteiraByAluno.get(studentId) || {
+            pendingCheckin: !isCheckinRespondido(checkin),
+            missDays: 0,
+            mealPct: null,
+            workoutPct: null,
+          },
         };
       });
 
@@ -182,23 +207,33 @@ export default function CoachCheckinInbox() {
 
   const allCheckins = useMemo(() => items.map((i) => i.checkin), [items]);
 
+  const filterExtras = useMemo(() => {
+    const map = new Map<string, { quedaAderencia?: boolean }>();
+    for (const item of items) {
+      map.set(item.checkin.id, { quedaAderencia: hasQuedaExecucao7d(item.signals) });
+    }
+    return map;
+  }, [items]);
+
   const filterCounts = useMemo(() => {
     const map = new Map<InboxFilterId, number>();
     for (const opt of INBOX_FILTER_OPTIONS) {
-      map.set(opt.id, countByInboxFilter(allCheckins, opt.id));
+      map.set(opt.id, countByInboxFilter(allCheckins, opt.id, filterExtras));
     }
     return map;
-  }, [allCheckins]);
+  }, [allCheckins, filterExtras]);
 
   const filteredItems = useMemo(() => {
     const term = search.trim().toLowerCase();
 
-    const matched = items.filter(({ checkin, studentName }) => {
+    const matched = items.filter(({ checkin, studentName, signals }) => {
       if (term && !matchesCheckinSearch(checkin, studentName, term)) return false;
-      return matchesInboxFilter(checkin, filter);
+      return matchesInboxFilter(checkin, filter, new Date(), {
+        quedaAderencia: hasQuedaExecucao7d(signals),
+      });
     });
 
-    return matched.sort((a, b) => compareCheckinsForTriagem(a.checkin, b.checkin));
+    return matched.sort((a, b) => compareInboxForTriagem(a, b));
   }, [items, search, filter]);
 
   const prioridadeCountInView = useMemo(
@@ -234,7 +269,9 @@ export default function CoachCheckinInbox() {
       ? "Nenhum check-in pendente de resposta. Ótimo trabalho!"
       : filter === "prioridade"
         ? "Nenhum check-in com estresse, adesão baixa e relato longo neste momento."
-        : filter === "respondidos"
+        : filter === "queda_aderencia"
+          ? "Nenhuma queda de execução nos últimos 7 dias (dieta <40%, treino <50% ou falhas)."
+          : filter === "respondidos"
           ? "Ainda não há check-ins marcados como respondidos neste filtro."
           : `Nenhum check-in encontrado em «${activeFilterLabel}».`;
 
@@ -328,7 +365,7 @@ export default function CoachCheckinInbox() {
           <CardHeader>
             <CardTitle>Inbox</CardTitle>
             <CardDescription>
-              Ordenado do mais recente — clique para abrir detalhes e responder
+              Ordenado por atenção 7d (pesos fixos) — clique para abrir detalhes e responder
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
@@ -364,6 +401,11 @@ export default function CoachCheckinInbox() {
                         </Badge>
                       )}
                       <CheckinPriorityBadge checkin={checkin} />
+                      {hasQuedaExecucao7d(item.signals) && (
+                        <Badge variant="secondary" className="text-xs">
+                          Queda 7d
+                        </Badge>
+                      )}
                       {responded ? (
                         <Badge variant="outline" className="text-xs">
                           Respondido
