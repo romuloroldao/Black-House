@@ -30,9 +30,10 @@ import {
   readLoadHistory,
   getLastLoadForExercise,
   upsertTodayLoadHistory,
+  hydrateLoadHistoryFromServer,
+  hydrateWorkoutSessionFromServer,
   ensureServerWorkoutSession,
   syncWorkoutSerieToServer,
-  hydrateLoadHistoryFromServer,
   type WorkoutExercise,
 } from "@/lib/workout-session-utils";
 
@@ -95,15 +96,27 @@ const StudentWorkoutSessionView = ({ treino, onExit }: StudentWorkoutSessionView
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const id = await ensureServerWorkoutSession(treino.id, treino.alunoTreinoId);
-      if (!cancelled && id) setSessaoId(id);
+      const fromServer = await hydrateWorkoutSessionFromServer(treino.id);
+      if (cancelled) return;
+      if (fromServer?.sessaoId) {
+        setSessaoId(fromServer.sessaoId);
+        setCompleted(new Set(fromServer.completedIndexes));
+        if (fromServer.completedIndexes.length) {
+          setCurrentIndex(
+            Math.min(fromServer.completedIndexes.length, Math.max(0, total - 1)),
+          );
+        }
+      } else {
+        const id = await ensureServerWorkoutSession(treino.id, treino.alunoTreinoId);
+        if (!cancelled && id) setSessaoId(id);
+      }
       const history = await hydrateLoadHistoryFromServer(treino.id);
       if (!cancelled) setLoadHistory(history);
     })();
     return () => {
       cancelled = true;
     };
-  }, [treino.id, treino.alunoTreinoId]);
+  }, [treino.id, treino.alunoTreinoId, total]);
 
   const current = exercicios[currentIndex];
   const prescribedSets = parsePrescribedSets(current?.series);

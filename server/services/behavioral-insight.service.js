@@ -40,6 +40,81 @@ async function tableExists(pool, name) {
 }
 
 /**
+ * Métricas da janela 7d (streak, misses, taxas) — pura, reutilizada pela carteira.
+ */
+function computeWindowMetrics({
+  days,
+  end,
+  hasActiveDieta,
+  mealDays,
+  workoutCompletedDays,
+  agendaDias,
+}) {
+  let mealExpectedDays = 0;
+  let mealDoneDays = 0;
+  let workoutExpectedDays = 0;
+  let workoutDoneDays = 0;
+  let missDays = 0;
+  let streak = 0;
+
+  for (let i = 0; i < days; i++) {
+    const day = addDaysIso(end, -i);
+    const wd = isoWeekday(day);
+    const mealOk = mealDays.has(day);
+    const workoutExpected = agendaDias.size > 0 ? agendaDias.has(wd) : false;
+    const workoutOk = workoutCompletedDays.has(day);
+
+    if (hasActiveDieta) {
+      mealExpectedDays += 1;
+      if (mealOk) mealDoneDays += 1;
+    }
+    if (workoutExpected) {
+      workoutExpectedDays += 1;
+      if (workoutOk) workoutDoneDays += 1;
+    }
+
+    // Misses: só dias fechados (não conta o dia corrente)
+    if (i > 0) {
+      if ((hasActiveDieta && !mealOk) || (workoutExpected && !workoutOk)) {
+        missDays += 1;
+      }
+    }
+  }
+
+  for (let i = 0; i < days; i++) {
+    const day = addDaysIso(end, -i);
+    const wd = isoWeekday(day);
+    const mealOk = mealDays.has(day);
+    const workoutExpected = agendaDias.size > 0 ? agendaDias.has(wd) : false;
+    const workoutOk = workoutCompletedDays.has(day);
+    const noExpectation = !hasActiveDieta && !workoutExpected;
+    const ok =
+      noExpectation ||
+      ((!hasActiveDieta || mealOk) && (!workoutExpected || workoutOk));
+    if (ok) streak += 1;
+    else break;
+  }
+
+  const mealRate =
+    mealExpectedDays > 0 ? Math.round((mealDoneDays / mealExpectedDays) * 100) : null;
+  const workoutRate =
+    workoutExpectedDays > 0
+      ? Math.round((workoutDoneDays / workoutExpectedDays) * 100)
+      : null;
+
+  return {
+    streak_days: streak,
+    miss_days: missDays,
+    meal_pct: mealRate,
+    workout_pct: workoutRate,
+    meal_days: mealDoneDays,
+    meal_expected: mealExpectedDays,
+    workout_done: workoutDoneDays,
+    workout_expected: workoutExpectedDays,
+  };
+}
+
+/**
  * Calcula insight comportamental para um aluno (janela default 7 dias).
  */
 async function getBehavioralInsight(pool, aluno, { days = 7, asOf } = {}) {
@@ -102,57 +177,23 @@ async function getBehavioralInsight(pool, aluno, { days = 7, asOf } = {}) {
     for (const row of r.rows) agendaDias.add(Number(row.dia_semana));
   }
 
-  let mealExpectedDays = 0;
-  let mealDoneDays = 0;
-  let workoutExpectedDays = 0;
-  let workoutDoneDays = 0;
-  let missDays = 0;
-  let streak = 0;
+  const metrics = computeWindowMetrics({
+    days,
+    end,
+    hasActiveDieta,
+    mealDays,
+    workoutCompletedDays,
+    agendaDias,
+  });
 
-  for (let i = 0; i < days; i++) {
-    const day = addDaysIso(end, -i);
-    const wd = isoWeekday(day);
-    const mealOk = mealDays.has(day);
-    const workoutExpected = agendaDias.size > 0 ? agendaDias.has(wd) : false;
-    const workoutOk = workoutCompletedDays.has(day);
-
-    if (hasActiveDieta) {
-      mealExpectedDays += 1;
-      if (mealOk) mealDoneDays += 1;
-    }
-    if (workoutExpected) {
-      workoutExpectedDays += 1;
-      if (workoutOk) workoutDoneDays += 1;
-    }
-
-    // Misses: só dias fechados (não conta o dia corrente)
-    if (i > 0) {
-      if ((hasActiveDieta && !mealOk) || (workoutExpected && !workoutOk)) {
-        missDays += 1;
-      }
-    }
-  }
-
-  for (let i = 0; i < days; i++) {
-    const day = addDaysIso(end, -i);
-    const wd = isoWeekday(day);
-    const mealOk = mealDays.has(day);
-    const workoutExpected = agendaDias.size > 0 ? agendaDias.has(wd) : false;
-    const workoutOk = workoutCompletedDays.has(day);
-    const noExpectation = !hasActiveDieta && !workoutExpected;
-    const ok =
-      noExpectation ||
-      ((!hasActiveDieta || mealOk) && (!workoutExpected || workoutOk));
-    if (ok) streak += 1;
-    else break;
-  }
-
-  const mealRate =
-    mealExpectedDays > 0 ? Math.round((mealDoneDays / mealExpectedDays) * 100) : null;
-  const workoutRate =
-    workoutExpectedDays > 0
-      ? Math.round((workoutDoneDays / workoutExpectedDays) * 100)
-      : null;
+  const mealExpectedDays = metrics.meal_expected;
+  const mealDoneDays = metrics.meal_days;
+  const workoutExpectedDays = metrics.workout_expected;
+  const workoutDoneDays = metrics.workout_done;
+  const missDays = metrics.miss_days;
+  const streak = metrics.streak_days;
+  const mealRate = metrics.meal_pct;
+  const workoutRate = metrics.workout_pct;
 
   let tone = 'neutral';
   let text = 'Continua a registar o dia — eu ajudo no próximo passo.';
@@ -323,6 +364,7 @@ module.exports = {
   todayIso,
   addDaysIso,
   isoWeekday,
+  computeWindowMetrics,
   getBehavioralInsight,
   recordDailyMisses,
   stableUuid,

@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import SearchDialog from "./SearchDialog";
+import AdherenceCarteiraCard from "./coach/AdherenceCarteiraCard";
 import { 
   Users, 
   Dumbbell, 
@@ -263,6 +264,8 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
             </Card>
           ))}
         </div>
+
+        <AdherenceCarteiraCard />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Recent Activities */}

@@ -18,6 +18,9 @@ export type WorkoutSessionProgress = {
   sessaoId?: string;
 };
 
+/** Resume local só para UI; métrica e verdade vêm do servidor. */
+export const WORKOUT_SESSION_TTL_MS = 2 * 60 * 60 * 1000;
+
 /** Registo de carga usada num exercício (histórico local / servidor). */
 export type ExerciseLoadLog = {
   exerciseIndex: number;
@@ -81,7 +84,17 @@ export function readSessionProgress(treinoId: string): WorkoutSessionProgress | 
   try {
     const raw = localStorage.getItem(sessionStorageKey(treinoId));
     if (!raw) return null;
-    return JSON.parse(raw) as WorkoutSessionProgress;
+    const parsed = JSON.parse(raw) as WorkoutSessionProgress;
+    if (!parsed?.updatedAt) {
+      localStorage.removeItem(sessionStorageKey(treinoId));
+      return null;
+    }
+    const age = Date.now() - new Date(parsed.updatedAt).getTime();
+    if (!Number.isFinite(age) || age > WORKOUT_SESSION_TTL_MS) {
+      localStorage.removeItem(sessionStorageKey(treinoId));
+      return null;
+    }
+    return parsed;
   } catch {
     return null;
   }
@@ -194,14 +207,82 @@ export function upsertTodayLoadHistory(
   writeLoadHistory(treinoId, [todaySession, ...historyWithoutToday]);
 }
 
+function mapServerSessao(
+  treinoId: string,
+  sessao: {
+    id?: string;
+    treino_id?: string;
+    data_ref?: string;
+    completed_indexes?: number[];
+  },
+): WorkoutSessionProgress | null {
+  if (!sessao?.id) return null;
+  const completedIndexes = Array.isArray(sessao.completed_indexes)
+    ? sessao.completed_indexes.filter((n) => Number.isFinite(Number(n))).map((n) => Number(n))
+    : [];
+  return {
+    treinoId: String(sessao.treino_id || treinoId),
+    date: String(sessao.data_ref || new Date().toISOString().slice(0, 10)).slice(0, 10),
+    completedIndexes,
+    updatedAt: new Date().toISOString(),
+    sessaoId: String(sessao.id),
+  };
+}
+
+/**
+ * GET-only: hidrata sessão aberta a partir de treino_sessoes / séries.
+ * Não cria sessão. localStorage fica só como resume de UI (TTL ~2h).
+ */
+export async function loadWorkoutSessionFromServer(
+  treinoId: string,
+  query?: { date?: string },
+): Promise<WorkoutSessionProgress | null> {
+  const res = await apiClient.getTreinoSessoesSafe({
+    date: query?.date,
+    treino_id: treinoId,
+  });
+  if (!res.success || !Array.isArray(res.data?.sessoes) || res.data.sessoes.length === 0) {
+    return null;
+  }
+  const sessao =
+    res.data.sessoes.find((s: { treino_id?: string }) => s.treino_id === treinoId) ||
+    res.data.sessoes[0];
+  const progress = mapServerSessao(treinoId, sessao);
+  if (!progress) return null;
+  writeSessionProgress(treinoId, progress.completedIndexes, progress.sessaoId);
+  return progress;
+}
+
+export const hydrateWorkoutSessionFromServer = loadWorkoutSessionFromServer;
+
+/** GET-only: todas as sessões do dia (listagem de treinos — sem POST). */
+export async function loadTodayWorkoutSessionsFromServer(date?: string): Promise<
+  Map<string, WorkoutSessionProgress>
+> {
+  const map = new Map<string, WorkoutSessionProgress>();
+  const res = await apiClient.getTreinoSessoesSafe(date ? { date } : undefined);
+  if (!res.success || !Array.isArray(res.data?.sessoes)) return map;
+  for (const sessao of res.data.sessoes) {
+    const treinoId = String(sessao.treino_id || "");
+    if (!treinoId) continue;
+    const progress = mapServerSessao(treinoId, sessao);
+    if (progress) {
+      map.set(treinoId, progress);
+      writeSessionProgress(treinoId, progress.completedIndexes, progress.sessaoId);
+    }
+  }
+  return map;
+}
+
 /** Garante sessão no servidor; devolve sessaoId (ou null se falhar — UI continua com local). */
 export async function ensureServerWorkoutSession(
   treinoId: string,
   alunoTreinoId?: string,
 ): Promise<string | null> {
-  const local = readSessionProgress(treinoId);
-  if (local?.sessaoId) return local.sessaoId;
+  const fromServer = await loadWorkoutSessionFromServer(treinoId);
+  if (fromServer?.sessaoId) return fromServer.sessaoId;
 
+  const local = readSessionProgress(treinoId);
   const res = await apiClient.startTreinoSessaoSafe({
     treino_id: treinoId,
     aluno_treino_id: alunoTreinoId,

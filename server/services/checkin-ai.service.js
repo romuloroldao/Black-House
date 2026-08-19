@@ -94,7 +94,7 @@ async function draftResponse(pool, scope, checkinId, hints = '') {
   }
 
   const existing = await pool.query(
-    `SELECT w.*, a.nome AS aluno_nome
+    `SELECT w.*, a.nome AS aluno_nome, a.coach_id AS aluno_coach_id
      FROM public.weekly_checkins w
      INNER JOIN public.alunos a ON a.id = w.aluno_id
      WHERE w.id = $1`,
@@ -116,14 +116,41 @@ async function draftResponse(pool, scope, checkinId, hints = '') {
     throw err;
   }
 
+  let insight7d = null;
+  try {
+    const { getBehavioralInsight } = require('./behavioral-insight.service');
+    insight7d = await getBehavioralInsight(pool, { id: row.aluno_id }, { days: 7 });
+  } catch (err) {
+    console.warn('[checkin-ai] insight 7d:', err.message);
+  }
+
+  let coachRules = [];
+  let rulesHint = null;
+  try {
+    const coachRulesService = require('./coach-rules.service');
+    coachRules = await coachRulesService.listActiveForAgent(pool, row.aluno_coach_id, {
+      triggers: ['checkin', 'always'],
+      limit: 12,
+    });
+    rulesHint = coachRulesService.formatRulesHint(coachRules, { max: 5 });
+  } catch (err) {
+    console.warn('[checkin-ai] coach_rules:', err.message);
+  }
+
   const systemPrompt =
     'És um coach humano e empático. Escreve em português (Brasil), tom profissional e acolhedor. ' +
     'Devolve JSON: { "draft": "texto da resposta em 2-4 parágrafos curtos" }. ' +
-    'Não uses markdown. Referencia dados concretos do check-in.';
+    'Não uses markdown. Referencia dados concretos do check-in. ' +
+    'Se houver insight de 7 dias ou regras do coach, incorpora-as sem as citar como "sistema". ' +
+    'Não envies a mensagem — isto é só um rascunho para o coach editar.';
 
   const userPrompt =
-    `Rascunho de feedback para ${row.aluno_nome || 'aluno'}.\n` +
+    `Rascunho de feedback para ${row.aluno_nome || 'aluno'} (HITL: o coach vai rever e gravar).\n` +
     (hints ? `Instruções do coach: ${hints}\n` : '') +
+    (insight7d?.text
+      ? `Insight de execução 7d: ${insight7d.text} (streak ${insight7d.streak_days}, falhas ${insight7d.miss_days_recent}, dieta ${insight7d.rates?.meal_pct ?? 'n/d'}%, treino ${insight7d.rates?.workout_pct ?? 'n/d'}%).\n`
+      : '') +
+    (rulesHint ? `Regras do coach (check-in/sempre):\n${rulesHint}\n` : '') +
     `Check-in:\n${JSON.stringify(pickDigest(row), null, 2)}`;
 
   const parsed = await aiService.extractStructuredData('', null, { systemPrompt, userPrompt });
@@ -135,7 +162,14 @@ async function draftResponse(pool, scope, checkinId, hints = '') {
     throw err;
   }
 
-  return { draft, checkin_id: checkinId, aluno_id: row.aluno_id };
+  return {
+    draft,
+    checkin_id: checkinId,
+    aluno_id: row.aluno_id,
+    insight_7d: insight7d,
+    coach_rules: coachRules,
+    autonomous_send: false,
+  };
 }
 
 module.exports = { trendsSummary, draftResponse };

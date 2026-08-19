@@ -2655,6 +2655,33 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
   );
 
   router.get(
+    '/coach/me/adherence-carteira',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'assistant']),
+    attachCoachScope,
+    async (req, res) => {
+      try {
+        const { getAdherenceCarteira } = require('../services/adherence-carteira.service');
+        const days = Number(req.query.days) || 7;
+        const ids = effectiveCoachIds(req.coachScope);
+        const data = await getAdherenceCarteira(pool, {
+          coachIds: ids,
+          isAdmin: Boolean(req.coachScope?.isAdmin && ids == null),
+          days,
+        });
+        return res.json(data);
+      } catch (error) {
+        console.error('GET /api/coach/me/adherence-carteira', error);
+        return res.status(500).json({
+          error: error.message || 'Erro na carteira de aderência',
+          error_code: 'ADHERENCE_CARTEIRA_ERROR',
+        });
+      }
+    },
+  );
+
+  router.get(
     '/agenda-eventos',
     authenticate,
     domainSchemaGuard,

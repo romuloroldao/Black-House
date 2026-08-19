@@ -12,7 +12,7 @@ import { Dumbbell, Clock, Target, ChevronDown, Play, Weight, FileDown } from "lu
 import { exportWorkoutToPdf } from "@/utils/workoutPdfExport";
 import StudentWorkoutSessionView from "@/components/student/StudentWorkoutSessionView";
 import PremiumEmptyState from "@/components/student/PremiumEmptyState";
-import { readSessionProgress } from "@/lib/workout-session-utils";
+import { readSessionProgress, loadTodayWorkoutSessionsFromServer, type WorkoutSessionProgress } from "@/lib/workout-session-utils";
 import {
   DIAS_SEMANA_LABELS,
   DIAS_SEMANA_ORDEM,
@@ -34,6 +34,9 @@ const StudentWorkoutsView = () => {
   const [hasAgenda, setHasAgenda] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sessionTreino, setSessionTreino] = useState<any | null>(null);
+  const [serverSessions, setServerSessions] = useState<Map<string, WorkoutSessionProgress>>(
+    new Map(),
+  );
   const [expandedWorkouts, setExpandedWorkouts] = useState<Set<string>>(new Set());
   const [studentName, setStudentName] = useState<string>("");
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -55,7 +58,9 @@ const StudentWorkoutsView = () => {
   }, [treinos, agendaSessions, diaHoje, hasAgenda]);
 
   const descansoHoje = hasAgenda && !treinoPrincipal;
-  const sessionProgress = treinoPrincipal ? readSessionProgress(treinoPrincipal.id) : null;
+  const sessionProgress = treinoPrincipal
+    ? serverSessions.get(treinoPrincipal.id) || readSessionProgress(treinoPrincipal.id)
+    : null;
 
   const handleExportPdf = async (treino: any) => {
     try {
@@ -101,10 +106,12 @@ const StudentWorkoutsView = () => {
     if (aluno) {
       setStudentName(aluno.nome || user?.email || "");
 
-      const [alunosTreinosResult, agendaResult] = await Promise.all([
+      const [alunosTreinosResult, agendaResult, sessoesMap] = await Promise.all([
         apiClient.requestSafe<any[]>("/api/alunos-treinos"),
         apiClient.getTreinoAgendaSafe(),
+        loadTodayWorkoutSessionsFromServer(),
       ]);
+      setServerSessions(sessoesMap);
 
       const alunosTreinos =
         alunosTreinosResult.success && Array.isArray(alunosTreinosResult.data)
@@ -149,6 +156,7 @@ const StudentWorkoutsView = () => {
       setTreinos([]);
       setAgendaSessions([]);
       setHasAgenda(false);
+      setServerSessions(new Map());
     }
     setLoading(false);
   };
