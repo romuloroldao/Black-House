@@ -101,7 +101,10 @@ function computeCheckinStreak(checkins) {
 }
 
 const { getRotationForDate } = require('../utils/diet-rotation');
+const { civilDateKeyInTimeZone } = require('../utils/zoned-time');
 const { isoDayOfWeek } = require('./aluno-treino-agenda.service');
+
+const APP_TIME_ZONE = 'America/Sao_Paulo';
 
 function buildPendencias({ checkinDue, unreadChat, unreadAvisos }) {
   const tasks = [];
@@ -168,7 +171,8 @@ async function enrichPlanoNome(pool, aluno) {
  */
 async function getAlunoHoje(pool, { aluno, userId }) {
   const alunoId = aluno.id;
-  const hojeIso = new Date().toISOString().slice(0, 10);
+  // Dia civil em America/Sao_Paulo — nunca toISOString().slice (UTC muda o dia à noite BRT)
+  const hojeIso = civilDateKeyInTimeZone(new Date(), APP_TIME_ZONE);
   const diaHoje = isoDayOfWeek(new Date());
 
   const [

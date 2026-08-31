@@ -99,6 +99,22 @@ const mealPhotoAnalyzeLimiter = rateLimit({
     skip: (req) => process.env.NODE_ENV === 'development',
 });
 
+// Classificação de pose em fotos de evolução (custo de IA)
+const progressPhotoPoseLimiter = rateLimit({
+    windowMs: parseInt(process.env.RATE_LIMIT_POSE_WINDOW_MS) || 60 * 60 * 1000,
+    max: parseInt(process.env.RATE_LIMIT_POSE_MAX) || 40,
+    message: {
+        error: 'Limite de classificação de ângulo atingido. Tente novamente mais tarde.',
+        error_code: 'POSE_RATE_LIMIT',
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => {
+        return req.user?.id || req.ip || req.connection?.remoteAddress || 'anon';
+    },
+    skip: (req) => process.env.NODE_ENV === 'development',
+});
+
 // Intent do agente (aluno) — por utilizador autenticado
 const agentIntentLimiter = rateLimit({
     windowMs: parseInt(process.env.RATE_LIMIT_AGENT_WINDOW_MS) || 60 * 60 * 1000,
@@ -123,5 +139,6 @@ module.exports = {
     forgotPasswordLimiter,
     resetPasswordSubmitLimiter,
     mealPhotoAnalyzeLimiter,
+    progressPhotoPoseLimiter,
     agentIntentLimiter,
 };

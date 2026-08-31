@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Camera, ImagePlus, Loader2, Trash2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,7 @@ import {
   MIN_CHECKIN_PHOTOS,
   type CheckinPhotoDraft,
 } from "@/lib/checkin-weekly-rules";
+import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
 
 type Props = {
@@ -23,6 +24,21 @@ type Props = {
   onPhotosChange: (photos: CheckinPhotoDraft[]) => void;
   disabled?: boolean;
 };
+
+function isKnownPose(value: string | undefined | null): value is CheckinPhotoPose {
+  return CHECKIN_PHOTO_POSES.includes(value as CheckinPhotoPose);
+}
+
+/** Duplicatas de frente/costas (erro crítico para comparação). */
+export function findCriticalPoseDuplicates(photos: CheckinPhotoDraft[]): CheckinPhotoPose[] {
+  const counts = new Map<CheckinPhotoPose, number>();
+  for (const p of photos) {
+    if (!p.descricao || !isKnownPose(p.descricao)) continue;
+    if (p.descricao !== "frente" && p.descricao !== "costas") continue;
+    counts.set(p.descricao, (counts.get(p.descricao) || 0) + 1);
+  }
+  return [...counts.entries()].filter(([, n]) => n > 1).map(([pose]) => pose);
+}
 
 export default function CheckinPhotosWeightStep({
   pesoKg,
@@ -35,9 +51,6 @@ export default function CheckinPhotosWeightStep({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [preparing, setPreparing] = useState(false);
 
-  const getDefaultPose = (index: number): CheckinPhotoPose | undefined =>
-    CHECKIN_PHOTO_POSES[index] ?? undefined;
-
   const getPoseLabel = (pose?: CheckinPhotoPose) => {
     if (pose === "frente") return tEvolution("front");
     if (pose === "costas") return tEvolution("back");
@@ -45,6 +58,8 @@ export default function CheckinPhotosWeightStep({
     if (pose === "lado_direito") return tEvolution("rightSide");
     return tEvolution("untaggedPhoto");
   };
+
+  const criticalDuplicates = useMemo(() => findCriticalPoseDuplicates(photos), [photos]);
 
   const addFiles = async (files: FileList | null) => {
     if (!files?.length || disabled) return;
@@ -57,14 +72,33 @@ export default function CheckinPhotosWeightStep({
           continue;
         }
         const prepared = await prepareImageForUpload(file);
+        const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        let descricao: CheckinPhotoPose | undefined;
+
+        // Classificar pela imagem (não pela ordem do upload)
+        const classified = await apiClient.classifyProgressPhotoPoseSafe({ file: prepared });
+        if (classified.success && isKnownPose(classified.data?.pose)) {
+          descricao = classified.data.pose;
+        } else if (classified.success && classified.data?.pose === "incerto") {
+          toast.message("Não identificámos o ângulo desta foto — escolha Frente/Costas manualmente.");
+        } else if (!classified.success) {
+          toast.message("Não foi possível detectar o ângulo automaticamente — escolha manualmente.");
+        }
+
         next.push({
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          id,
           file: prepared,
           previewUrl: URL.createObjectURL(prepared),
-          descricao: getDefaultPose(next.length),
+          descricao,
         });
       }
       onPhotosChange(next);
+      const dups = findCriticalPoseDuplicates(next);
+      if (dups.length) {
+        toast.warning(
+          `Há mais de uma foto de ${dups.map(getPoseLabel).join(" e ")}. Ajuste os ângulos antes de enviar.`,
+        );
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Não foi possível preparar a foto.");
     } finally {
@@ -81,18 +115,26 @@ export default function CheckinPhotosWeightStep({
   };
 
   const updatePhotoPose = (id: string, descricao: CheckinPhotoPose) => {
-    onPhotosChange(photos.map((photo) => (photo.id === id ? { ...photo, descricao } : photo)));
+    const next = photos.map((photo) => (photo.id === id ? { ...photo, descricao } : photo));
+    onPhotosChange(next);
+    const dups = findCriticalPoseDuplicates(next);
+    if (dups.length) {
+      toast.warning(
+        `Há mais de uma foto de ${dups.map(getPoseLabel).join(" e ")}. Ajuste antes de enviar.`,
+      );
+    }
   };
 
-  const photosOk = photos.length >= MIN_CHECKIN_PHOTOS;
+  const photosOk = photos.length >= MIN_CHECKIN_PHOTOS && criticalDuplicates.length === 0;
+  const untagged = photos.filter((p) => !p.descricao).length;
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Peso e fotos de evolução</CardTitle>
         <CardDescription>
-          Envie pelo menos {MIN_CHECKIN_PHOTOS} fotos desta semana e informe seu peso atual. As
-          fotos só podem ser enviadas aqui, no check-in semanal.
+          Envie pelo menos {MIN_CHECKIN_PHOTOS} fotos desta semana e informe seu peso atual. O
+          sistema tenta identificar Frente/Costas pela imagem — confirme o ângulo em cada foto.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -128,6 +170,18 @@ export default function CheckinPhotosWeightStep({
               {photos.length}/{MIN_CHECKIN_PHOTOS} mínimo
             </Badge>
           </div>
+
+          {criticalDuplicates.length > 0 && (
+            <p className="text-sm text-amber-700 dark:text-amber-400">
+              Ângulos duplicados: {criticalDuplicates.map(getPoseLabel).join(", ")}. Corrija para
+              comparar corretamente depois.
+            </p>
+          )}
+          {untagged > 0 && (
+            <p className="text-sm text-muted-foreground">
+              {untagged} foto(s) sem ângulo — escolha Frente/Costas/Lado em cada uma.
+            </p>
+          )}
 
           <input
             ref={galleryInputRef}
