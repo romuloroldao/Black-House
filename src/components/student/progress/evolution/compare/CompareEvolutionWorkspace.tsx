@@ -5,6 +5,7 @@ import {
   FlipHorizontal2,
   Link2,
   Link2Off,
+  Loader2,
   Maximize2,
   Minimize2,
   RotateCcw,
@@ -22,6 +23,7 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { tEvolution } from '@/i18n/evolution-photos';
+import { apiClient } from '@/lib/api-client';
 import {
   formatDateShort,
   formatWeight,
@@ -42,6 +44,8 @@ type Props = {
   items: EvolutionTimelineItem[];
   initialCurrent: EvolutionTimelineItem | null;
   initialBaseline: EvolutionTimelineItem | null;
+  /** Callback quando a visão grava pose em fotos legadas. */
+  onPhotoPoseUpdated?: (photoId: string, descricao: string) => void;
 };
 
 type PoseOption = {
@@ -54,24 +58,22 @@ type PoseOption = {
 
 const POSE_ORDER: EvolutionPhotoPose[] = ['front', 'back', 'leftSide', 'rightSide', 'extra'];
 
+const API_POSE_BY_NORM: Record<Exclude<EvolutionPhotoPose, 'extra'>, string> = {
+  front: 'frente',
+  back: 'costas',
+  leftSide: 'lado_esquerdo',
+  rightSide: 'lado_direito',
+};
+
 function pickPhoto(item: EvolutionTimelineItem | null, poseKey: string | null): EvolutionPhoto | null {
   if (!item?.photos.length) return null;
-  if (!poseKey) return item.photos[0] ?? null;
-
-  if (poseKey.startsWith('idx:')) {
-    const idx = Number(poseKey.slice(4));
-    if (Number.isInteger(idx) && idx >= 0 && idx < item.photos.length) {
-      return item.photos[idx];
-    }
-    return item.photos[0] ?? null;
-  }
+  if (!poseKey) return null;
 
   if (poseKey.startsWith('pose:')) {
     const pose = poseKey.slice(5) as EvolutionPhotoPose;
     const match = item.photos.find((p) => normalizePhotoPose(p.descricao) === pose);
-    if (match) return match;
-    // Sem esse ângulo neste check-in → null (UI mostra aviso, não inventa outro ângulo)
-    return null;
+    // Sem esse ângulo neste check-in → null (nunca substitui por outra pose / índice)
+    return match ?? null;
   }
 
   // Compat: valor legado = descrição raw
@@ -93,32 +95,20 @@ function buildPoseOptions(
   for (const item of [current, baseline]) {
     item?.photos.forEach((p, idx) => {
       const pose = normalizePhotoPose(p.descricao);
-      if (pose !== 'extra') {
-        if (!poseSeen.has(pose)) {
-          poseSeen.add(pose);
-          options.push({
-            value: `pose:${pose}`,
-            label: poseLabel(p.descricao, idx),
-            pose,
-          });
-        }
-        return;
-      }
-      // Fotos sem pose conhecida: opção por índice nesse check-in (valor idx:N)
-      const value = `idx:${idx}`;
-      if (!options.some((o) => o.value === value)) {
-        options.push({
-          value,
-          label: poseLabel(p.descricao, idx),
-          index: idx,
-        });
-      }
+      if (pose === 'extra') return; // sem emparelhamento por índice
+      if (poseSeen.has(pose)) return;
+      poseSeen.add(pose);
+      options.push({
+        value: `pose:${pose}`,
+        label: poseLabel(p.descricao, idx),
+        pose,
+      });
     });
   }
 
   options.sort((a, b) => {
-    const ai = a.pose ? POSE_ORDER.indexOf(a.pose) : 100 + (a.index ?? 0);
-    const bi = b.pose ? POSE_ORDER.indexOf(b.pose) : 100 + (b.index ?? 0);
+    const ai = a.pose ? POSE_ORDER.indexOf(a.pose) : 100;
+    const bi = b.pose ? POSE_ORDER.indexOf(b.pose) : 100;
     return ai - bi;
   });
 
@@ -156,7 +146,12 @@ function regionLabel(r: RegionPreset) {
  * Workspace de comparação — mobile-first.
  * Ordem: escolher semanas/ângulo → ver imagens (controlos sempre no topo).
  */
-export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseline }: Props) {
+export function CompareEvolutionWorkspace({
+  items,
+  initialCurrent,
+  initialBaseline,
+  onPhotoPoseUpdated,
+}: Props) {
   // Estado inicial só na montagem (dialog usa key ao abrir — não resetar em refetch).
   // Antes = mais antiga (esquerda); Depois = mais recente (direita).
   const [currentId, setCurrentId] = useState(
@@ -171,11 +166,63 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
   const [flashAfter, setFlashAfter] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const [poseKey, setPoseKey] = useState<string | null>(null);
+  const [classifying, setClassifying] = useState(false);
+  const [localItems, setLocalItems] = useState(items);
+
+  useEffect(() => {
+    setLocalItems(items);
+  }, [items]);
 
   const viewports = useSyncedViewports();
 
-  const current = items.find((i) => i.id === currentId) || null;
-  const baseline = items.find((i) => i.id === baselineId) || null;
+  const current = localItems.find((i) => i.id === currentId) || null;
+  const baseline = localItems.find((i) => i.id === baselineId) || null;
+
+  /** Classifica fotos sem ângulo nas semanas seleccionadas (visão) e persiste. */
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const weekA = localItems.find((i) => i.id === currentId) || null;
+      const weekB = localItems.find((i) => i.id === baselineId) || null;
+      const targets = [weekA, weekB].filter(Boolean) as EvolutionTimelineItem[];
+      const untagged = targets.flatMap((item) =>
+        item.photos.filter((p) => normalizePhotoPose(p.descricao) === 'extra'),
+      );
+      if (!untagged.length) return;
+      setClassifying(true);
+      try {
+        for (const photo of untagged.slice(0, 8)) {
+          if (cancelled) return;
+          const result = await apiClient.classifyProgressPhotoPoseSafe({
+            foto_id: photo.id,
+            url: photo.url,
+            persist: true,
+          });
+          if (!result.success) continue;
+          const pose = result.data?.pose;
+          if (!pose || pose === 'incerto') continue;
+          if (cancelled) return;
+          setLocalItems((prev) =>
+            prev.map((item) => ({
+              ...item,
+              photos: item.photos.map((p) =>
+                p.id === photo.id ? { ...p, descricao: pose } : p,
+              ),
+            })),
+          );
+          onPhotoPoseUpdated?.(photo.id, pose);
+        }
+      } finally {
+        if (!cancelled) setClassifying(false);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+    // Só quando mudam as semanas — não reentrar a cada update de pose
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId, baselineId]);
 
   const poseOptions = useMemo(() => buildPoseOptions(current, baseline), [current, baseline]);
 
@@ -186,13 +233,16 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
     }
     if (!poseKey || !poseOptions.some((o) => o.value === poseKey)) {
       const firstPose = poseOptions.find((o) => o.value.startsWith('pose:'));
-      setPoseKey(firstPose?.value || poseOptions[0].value);
+      setPoseKey(firstPose?.value || null);
     }
   }, [poseOptions, poseKey]);
 
   const beforePhoto = pickPhoto(baseline, poseKey);
   const afterPhoto = pickPhoto(current, poseKey);
-  const missingPhoto = !beforePhoto || !afterPhoto;
+  const missingPhoto = Boolean(poseKey) && (!beforePhoto || !afterPhoto);
+  const missingPoseLabel = poseKey?.startsWith('pose:')
+    ? poseLabel(API_POSE_BY_NORM[poseKey.slice(5) as Exclude<EvolutionPhotoPose, 'extra'>] || null, 0)
+    : tEvolution('pose');
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -254,7 +304,7 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
               <SelectValue placeholder={tEvolution('before')} />
             </SelectTrigger>
             <SelectContent>
-              {items.map((item) => (
+              {localItems.map((item) => (
                 <SelectItem key={`b-${item.id}`} value={item.id}>
                   {item.label} · {formatDateShort(item.date)}
                 </SelectItem>
@@ -290,7 +340,7 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
               <SelectValue placeholder={tEvolution('after')} />
             </SelectTrigger>
             <SelectContent>
-              {items.map((item) => (
+              {localItems.map((item) => (
                 <SelectItem key={`a-${item.id}`} value={item.id}>
                   {item.isCurrent ? tEvolution('currentWeek') : item.label} ·{' '}
                   {formatDateShort(item.date)}
@@ -428,12 +478,24 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
         </Button>
       </div>
 
+      {classifying ? (
+        <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" />
+          A identificar ângulos das fotos pela imagem…
+        </div>
+      ) : null}
+
       {missingPhoto ? (
         <div className="flex min-h-[40vh] flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-4 text-center">
-          <p className="text-sm font-medium text-foreground">{tEvolution('emptySlot')}</p>
-          <p className="max-w-sm text-xs text-muted-foreground">{tEvolution('emptySlotHint')}</p>
+          <p className="text-sm font-medium text-foreground">
+            Sem foto de {missingPoseLabel} numa das semanas
+          </p>
+          <p className="max-w-sm text-xs text-muted-foreground">
+            {tEvolution('emptySlotHint')} Não misturamos frente com costas — escolha outro ângulo ou
+            outra semana.
+          </p>
         </div>
-      ) : (
+      ) : beforePhoto && afterPhoto ? (
         <div
           className={cn(
             'relative flex min-h-0 flex-1 flex-col',
@@ -521,9 +583,17 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
             </div>
           ) : null}
         </div>
+      ) : (
+        <div className="flex min-h-[40vh] flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-4 text-center">
+          <p className="text-sm font-medium text-foreground">Sem ângulos identificados</p>
+          <p className="max-w-sm text-xs text-muted-foreground">
+            Estas semanas ainda não têm Frente/Costas etiquetados. Aguarde a identificação automática
+            ou peça ao aluno para reenviar o check-in com os ângulos correctos.
+          </p>
+        </div>
       )}
 
-      {!missingPhoto ? (
+      {!missingPhoto && beforePhoto && afterPhoto ? (
         <div
           className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           role="group"

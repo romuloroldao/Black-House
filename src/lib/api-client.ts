@@ -1410,6 +1410,66 @@ class ApiClient {
         }
     }
 
+    async classifyProgressPhotoPoseSafe(input: {
+        file?: File;
+        url?: string;
+        foto_id?: string;
+        persist?: boolean;
+    }): Promise<ApiResult<{ pose: string; confidence: number; reason?: string | null }>> {
+        try {
+            const token = this.getToken();
+            let response: Response;
+            if (input.file) {
+                const formData = new FormData();
+                formData.append('file', input.file);
+                if (input.foto_id) formData.append('foto_id', input.foto_id);
+                if (input.persist) formData.append('persist', '1');
+                response = await fetch(API_CONTRACT.fotosAlunos.classifyPose(), {
+                    method: 'POST',
+                    headers: token ? { Authorization: `Bearer ${token}` } : {},
+                    body: formData,
+                });
+            } else {
+                response = await fetch(API_CONTRACT.fotosAlunos.classifyPose(), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                    },
+                    body: JSON.stringify({
+                        url: input.url,
+                        foto_id: input.foto_id,
+                        persist: input.persist ? true : undefined,
+                    }),
+                });
+            }
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                return {
+                    success: false,
+                    error: data.error || 'Erro ao classificar ângulo da foto',
+                    status: response.status,
+                };
+            }
+            return { success: true, data };
+        } catch (e: any) {
+            return {
+                success: false,
+                error: e?.message || 'Erro de rede ao classificar ângulo',
+            };
+        }
+    }
+
+    async updateProgressPhotoPoseSafe(
+        fotoId: string,
+        pose: string,
+    ): Promise<ApiResult<any>> {
+        return this.safeRequest(API_CONTRACT.fotosAlunos.updatePose(fotoId), {
+            method: 'PATCH',
+            body: JSON.stringify({ pose }),
+        });
+    }
+
     async saveRefeicaoRegistradaSafe(body: Record<string, unknown>): Promise<ApiResult<any>> {
         return this.safeRequest(API_CONTRACT.refeicoesRegistradas.create(), {
             method: 'POST',

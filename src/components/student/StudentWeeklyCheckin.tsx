@@ -32,6 +32,7 @@ import {
   type CheckinPhotoDraft,
 } from "@/lib/checkin-weekly-rules";
 import CheckinPhotosWeightStep, {
+  findCriticalPoseDuplicates,
   revokeCheckinPhotoDrafts,
 } from "@/components/student/checkin/CheckinPhotosWeightStep";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -139,6 +140,17 @@ export default function StudentWeeklyCheckin({
     }
     if (photoDrafts.length < MIN_CHECKIN_PHOTOS) {
       toast.error(`Envie pelo menos ${MIN_CHECKIN_PHOTOS} fotos antes de concluir.`);
+      syncStepToUrl(0);
+      return;
+    }
+    if (photoDrafts.some((p) => !p.descricao)) {
+      toast.error("Escolha o ângulo (Frente/Costas/Lado) em todas as fotos.");
+      syncStepToUrl(0);
+      return;
+    }
+    const poseDups = findCriticalPoseDuplicates(photoDrafts);
+    if (poseDups.length) {
+      toast.error("Há fotos com o mesmo ângulo (frente ou costas). Ajuste antes de enviar.");
       syncStepToUrl(0);
       return;
     }

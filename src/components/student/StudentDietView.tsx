@@ -41,6 +41,7 @@ import {
   isRotationEnabled,
   type DietRotationConfig,
 } from "@/lib/diet-rotation";
+import { civilDateKey } from "@/lib/calendar-date";
 import { STUDENT_REALTIME_EVENT, type StudentRealtimeDetail } from "@/hooks/useStudentPortalRealtime";
 
 const StudentDietView = () => {
@@ -55,6 +56,7 @@ const StudentDietView = () => {
   const [checkTick, setCheckTick] = useState(0);
   const [serverDoneKeys, setServerDoneKeys] = useState<Set<string>>(() => new Set());
   const mealDayRef = useRef(mealCheckDateKey());
+  const [calendarDayKey, setCalendarDayKey] = useState(() => civilDateKey());
   const [detailMeal, setDetailMeal] = useState<MealGroup | null>(null);
   const [refeicaoLivreContent, setRefeicaoLivreContent] = useState<EducationalContent | null>(null);
   const [mealPhotoOpen, setMealPhotoOpen] = useState(false);
@@ -70,14 +72,16 @@ const StudentDietView = () => {
     }
   }, [searchParams, setSearchParams]);
 
-  /** Reinicia o checklist quando muda o dia (dieta diária). */
+  /** Reinicia o checklist e a rotação quando muda o dia civil. */
   useEffect(() => {
     const syncDay = () => {
       const today = mealCheckDateKey();
+      const civilToday = civilDateKey();
       if (mealDayRef.current !== today) {
         mealDayRef.current = today;
         setCheckTick((t) => t + 1);
       }
+      setCalendarDayKey((prev) => (prev === civilToday ? prev : civilToday));
     };
     syncDay();
     document.addEventListener("visibilitychange", syncDay);
@@ -240,7 +244,9 @@ const StudentDietView = () => {
 
   const rotationToday = useMemo(
     () => (rotationConfig ? getRotationForDate(rotationConfig) : null),
-    [rotationConfig],
+    // calendarDayKey força recalcular à meia-noite sem reload
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rotationConfig, calendarDayKey],
   );
 
   const rotationActive = Boolean(rotationConfig && isRotationEnabled(rotationConfig));
@@ -249,19 +255,24 @@ const StudentDietView = () => {
     [planosCardapio.length, rotationActive],
   );
 
+  /** Plano do ciclo sem refeições rotuladas no cardápio (ex.: B no ciclo, só A no PDF). */
+  const rotationMissingMeals = useMemo(() => {
+    if (!rotationToday?.plano || !rotationActive) return false;
+    return !planosCardapio.includes(rotationToday.plano);
+  }, [rotationToday?.plano, rotationActive, planosCardapio]);
+
   useEffect(() => {
     if (rotationToday?.plano) {
       setPlanoAtivo(rotationToday.plano);
     }
   }, [rotationToday?.plano]);
 
-  const visibleGroups = useMemo(
-    () =>
-      mealGroups.filter(
-        (g) => getItemsForPlano(g, planoAtivo, { dietHasMultiplosCardapios: hasMultiplosCardapios }).length > 0,
-      ),
-    [mealGroups, planoAtivo, hasMultiplosCardapios],
-  );
+  const visibleGroups = useMemo(() => {
+    if (rotationMissingMeals) return [];
+    return mealGroups.filter(
+      (g) => getItemsForPlano(g, planoAtivo, { dietHasMultiplosCardapios: hasMultiplosCardapios }).length > 0,
+    );
+  }, [mealGroups, planoAtivo, hasMultiplosCardapios, rotationMissingMeals]);
 
   const macrosPlano = useMemo(() => {
     const itens = visibleGroups.flatMap((g) =>
@@ -414,7 +425,9 @@ const StudentDietView = () => {
         )}
       </div>
 
-      {rotationToday && <DietRotationBanner info={rotationToday} />}
+      {rotationToday && (
+        <DietRotationBanner info={rotationToday} missingMeals={rotationMissingMeals} />
+      )}
 
       {/* Um bloco: regras + um CTA de foto + histórico (sem cartões/CTAs duplicados). */}
       {dieta.refeicao_livre_ativa ? (
@@ -499,7 +512,11 @@ const StudentDietView = () => {
           Refeições de hoje
         </h2>
         {visibleGroups.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nenhum item neste plano.</p>
+          <p className="text-sm text-muted-foreground">
+            {rotationMissingMeals
+              ? `Hoje é Plano ${rotationToday?.plano}, mas este cardápio não tem refeições desse plano. Avise o coach.`
+              : "Nenhum item neste plano."}
+          </p>
         ) : (
           visibleGroups.map((group, idx) => (
             <MealTimelineItem

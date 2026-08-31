@@ -86,10 +86,50 @@ function endOfWeekDeadlineInTimeZone(date, timeZone) {
   );
 }
 
+/** YYYY-MM-DD no fuso IANA (ex.: America/Sao_Paulo). */
+function civilDateKeyInTimeZone(date = new Date(), timeZone = 'America/Sao_Paulo') {
+  const d = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(d.getTime())) return '';
+  const parts = partsInTimeZone(d, timeZone);
+  return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
+}
+
+/**
+ * Âncora de calendário: string YYYY-MM-DD pura, ou instante → dia civil no fuso.
+ * Evita slice(0,10) de ISO UTC (ex.: 2026-06-11T00:29Z = 10/06 em BRT).
+ */
+function civilDateAtNoonInTimeZone(value, timeZone = 'America/Sao_Paulo') {
+  if (value == null || value === '') return null;
+  let ymd = null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) ymd = trimmed;
+    else {
+      const parsed = new Date(trimmed);
+      if (!Number.isNaN(parsed.getTime())) ymd = civilDateKeyInTimeZone(parsed, timeZone);
+    }
+  } else if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    ymd = civilDateKeyInTimeZone(value, timeZone);
+  }
+  if (!ymd) return null;
+  const d = new Date(`${ymd}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function diffCivilDays(from, to) {
+  const a = Date.UTC(from.getFullYear(), from.getMonth(), from.getDate());
+  const b = Date.UTC(to.getFullYear(), to.getMonth(), to.getDate());
+  return Math.round((b - a) / 86400000);
+}
+
 module.exports = {
   partsInTimeZone,
   startOfWeekInTimeZone,
   weekKeyInTimeZone,
   localDateTimeToUtc,
   endOfWeekDeadlineInTimeZone,
+  civilDateKeyInTimeZone,
+  civilDateAtNoonInTimeZone,
+  diffCivilDays,
 };
