@@ -23,16 +23,24 @@ if [ ! -f ".env" ] || ! grep -q "VITE_API_URL" .env; then
     echo "VITE_API_URL=https://api.blackhouse.app.br" > .env
 fi
 
+# Carregar VITE_API_URL (obrigatório para produção — sem isto o bundle aponta para localhost)
+set -a
+# shellcheck disable=SC1091
+source .env
+set +a
+export VITE_API_URL="${VITE_API_URL:-https://api.blackhouse.app.br}"
+echo "🔗 VITE_API_URL=$VITE_API_URL"
+
 # 2. Instalar dependências
 if [ ! -d "node_modules" ]; then
     echo "📦 Instalando dependências..."
     npm install
 fi
 
-# 3. Build
+# 3. Build de produção (com verificação da URL da API no bundle)
 echo ""
 echo "🔨 Fazendo build de produção..."
-npm run build
+npm run build:prod
 
 if [ ! -d "dist" ]; then
     echo "❌ Erro: Diretório dist não foi criado!"
@@ -74,10 +82,14 @@ sudo systemctl reload nginx
 echo ""
 echo "=== Deploy Concluído! ==="
 echo ""
+echo "⚠️  API (PM2) corre em /root/server — alterações de backend devem ir para lá,"
+echo "   não só para /var/www/blackhouse/server."
+echo ""
 echo "🌐 Frontend disponível em:"
-echo "   http://blackhouse.app.br (aguardar DNS propagar)"
-echo "   http://www.blackhouse.app.br"
+echo "   https://blackhouse.app.br"
+echo "   https://www.blackhouse.app.br"
 echo ""
 echo "📋 Para verificar:"
-echo "   curl -I http://blackhouse.app.br"
+echo "   curl -I https://blackhouse.app.br"
+echo "   npm run verify:production-api-url"
 echo "   sudo tail -f /var/log/nginx/blackhouse-error.log"
