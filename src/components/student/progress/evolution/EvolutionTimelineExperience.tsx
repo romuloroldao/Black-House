@@ -5,7 +5,9 @@ import {
   ChevronDown,
   Clock3,
   Eye,
+  Loader2,
   Scale,
+  Sparkles,
   Trash2,
   TrendingUp,
 } from 'lucide-react';
@@ -19,6 +21,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import {
   formatAgeLabel,
@@ -27,18 +37,27 @@ import {
   formatWeightDelta,
   getWeeksTracked,
   groupPhotosIntoCheckins,
+  normalizePhotoPose,
   poseLabel,
   type EvolutionPhoto,
   type EvolutionTimelineItem,
 } from '@/lib/evolution-timeline';
 import { tEvolution } from '@/i18n/evolution-photos';
 import { CompareEvolutionWorkspace } from './compare/CompareEvolutionWorkspace';
+import { apiClient } from '@/lib/api-client';
+import { CHECKIN_PHOTO_POSES, type CheckinPhotoPose } from '@/lib/checkin-weekly-rules';
+import { toast } from 'sonner';
 
 type Props = {
   photos: EvolutionPhoto[];
   readonly?: boolean;
   onDeletePhoto?: (photo: EvolutionPhoto) => void;
   onOpenCheckin?: () => void;
+  onPhotoPoseUpdated?: (photoId: string, descricao: string) => void;
+  /** Mostra botão de backfill Vision (coach/admin/aluno). */
+  allowPoseBackfill?: boolean;
+  /** ID do aluno — útil no coach quando as fotos já estão filtradas. */
+  alunoId?: string;
   className?: string;
 };
 
@@ -304,13 +323,17 @@ function CompareWeeksDialog({
   items,
   initialCurrent,
   initialBaseline,
+  onPhotoPoseUpdated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   items: EvolutionTimelineItem[];
   initialCurrent: EvolutionTimelineItem | null;
   initialBaseline: EvolutionTimelineItem | null;
+  onPhotoPoseUpdated?: (photoId: string, descricao: string) => void;
 }) {
+  const workspaceKey = `${initialCurrent?.id || 'c'}-${initialBaseline?.id || 'b'}`;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[100dvh] max-h-[100dvh] w-full max-w-none flex-col gap-2 overflow-hidden rounded-none border-0 p-3 sm:h-auto sm:max-h-[96vh] sm:w-[min(96vw,1200px)] sm:max-w-[1200px] sm:rounded-lg sm:border sm:p-5">
@@ -321,10 +344,11 @@ function CompareWeeksDialog({
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {open ? (
             <CompareEvolutionWorkspace
-              key={`${initialCurrent?.id || 'c'}-${initialBaseline?.id || 'b'}-${open}`}
+              key={workspaceKey}
               items={items}
               initialCurrent={initialCurrent}
               initialBaseline={initialBaseline}
+              onPhotoPoseUpdated={onPhotoPoseUpdated}
             />
           ) : null}
         </div>
@@ -336,19 +360,37 @@ function CompareWeeksDialog({
 function EvolutionPhotoLightbox({
   selection,
   onOpenChange,
+  onPhotoPoseUpdated,
 }: {
   selection: PhotoSelection;
   onOpenChange: (open: boolean) => void;
+  onPhotoPoseUpdated?: (photoId: string, descricao: string) => void;
 }) {
   const open = Boolean(selection);
   const item = selection?.item ?? null;
+  const [savingId, setSavingId] = useState<string | null>(null);
+
+  const savePose = async (photoId: string, pose: CheckinPhotoPose) => {
+    setSavingId(photoId);
+    try {
+      const result = await apiClient.updateProgressPhotoPoseSafe(photoId, pose);
+      if (!result.success) {
+        toast.error(('error' in result && result.error) || 'Não foi possível gravar o ângulo');
+        return;
+      }
+      onPhotoPoseUpdated?.(photoId, pose);
+      toast.success(tEvolution('backfillPosesDone'));
+    } finally {
+      setSavingId(null);
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{item ? `${item.label} · ${formatDateShort(item.date)}` : tEvolution('viewPhoto')}</DialogTitle>
-          <DialogDescription>{tEvolution('timelineDescription')}</DialogDescription>
+          <DialogDescription>{tEvolution('photoPoseHint')}</DialogDescription>
         </DialogHeader>
         {item ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -358,6 +400,37 @@ function EvolutionPhotoLightbox({
                   <img src={photo.url} alt={poseLabel(photo.descricao, index)} className="h-full w-full object-cover" />
                 </div>
                 <figcaption className="text-sm font-medium">{poseLabel(photo.descricao, index)}</figcaption>
+                <div className="space-y-1">
+                  <Label htmlFor={`lb-pose-${photo.id}`} className="sr-only">
+                    {tEvolution('setPose')}
+                  </Label>
+                  <Select
+                    value={
+                      CHECKIN_PHOTO_POSES.includes(String(photo.descricao || '') as CheckinPhotoPose)
+                        ? String(photo.descricao)
+                        : undefined
+                    }
+                    onValueChange={(v) => void savePose(photo.id, v as CheckinPhotoPose)}
+                    disabled={savingId === photo.id}
+                  >
+                    <SelectTrigger id={`lb-pose-${photo.id}`} className="h-10">
+                      <SelectValue placeholder={tEvolution('setPose')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CHECKIN_PHOTO_POSES.map((pose) => (
+                        <SelectItem key={pose} value={pose}>
+                          {pose === 'frente'
+                            ? tEvolution('front')
+                            : pose === 'costas'
+                              ? tEvolution('back')
+                              : pose === 'lado_esquerdo'
+                                ? tEvolution('leftSide')
+                                : tEvolution('rightSide')}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </figure>
             ))}
           </div>
@@ -411,16 +484,33 @@ export default function EvolutionTimelineExperience({
   readonly = false,
   onDeletePhoto,
   onOpenCheckin,
+  onPhotoPoseUpdated,
+  allowPoseBackfill = false,
+  alunoId,
   className,
 }: Props) {
-  const items = useMemo(() => groupPhotosIntoCheckins(photos), [photos]);
+  const [localPhotos, setLocalPhotos] = useState(photos);
+  const items = useMemo(() => groupPhotosIntoCheckins(localPhotos), [localPhotos]);
   const [compareOpen, setCompareOpen] = useState(false);
   const [compareCurrent, setCompareCurrent] = useState<EvolutionTimelineItem | null>(null);
   const [compareBaseline, setCompareBaseline] = useState<EvolutionTimelineItem | null>(null);
   const [photoSelection, setPhotoSelection] = useState<PhotoSelection>(null);
+  const [backfilling, setBackfilling] = useState(false);
+
+  useEffect(() => {
+    setLocalPhotos(photos);
+  }, [photos]);
 
   const newest = items[0] ?? null;
   const oldest = items[items.length - 1] ?? null;
+  const untaggedCount = localPhotos.filter((p) => normalizePhotoPose(p.descricao) === 'extra').length;
+
+  const handlePoseUpdated = (photoId: string, descricao: string) => {
+    setLocalPhotos((prev) =>
+      prev.map((p) => (p.id === photoId ? { ...p, descricao } : p)),
+    );
+    onPhotoPoseUpdated?.(photoId, descricao);
+  };
 
   /**
    * Por defeito: mais antiga à esquerda (Antes) e mais recente à direita (Depois).
@@ -433,6 +523,49 @@ export default function EvolutionTimelineExperience({
     setCompareCurrent(afterItem ?? newest);
     setCompareBaseline(baseline ?? oldest);
     setCompareOpen(true);
+  };
+
+  const runBackfill = async () => {
+    let resolvedAlunoId =
+      alunoId || localPhotos.find((p) => p.aluno_id)?.aluno_id || undefined;
+    if (!resolvedAlunoId) {
+      const me = await apiClient.getMeSafe();
+      resolvedAlunoId = me.success ? me.data?.id : undefined;
+    }
+    if (!resolvedAlunoId) {
+      toast.error('Não foi possível determinar o aluno para identificar ângulos.');
+      return;
+    }
+    setBackfilling(true);
+    try {
+      const result = await apiClient.backfillProgressPhotoPosesSafe({
+        aluno_id: resolvedAlunoId,
+        limit: 24,
+      });
+      if (!result.success) {
+        toast.error(('error' in result && result.error) || 'Falha ao identificar ângulos');
+        return;
+      }
+      const updated = result.data?.updated || [];
+      if (updated.length) {
+        setLocalPhotos((prev) =>
+          prev.map((p) => {
+            const hit = updated.find((u) => u.id === p.id);
+            return hit ? { ...p, descricao: hit.descricao } : p;
+          }),
+        );
+        for (const u of updated) {
+          onPhotoPoseUpdated?.(u.id, u.descricao);
+        }
+      }
+      toast.success(
+        updated.length
+          ? `${tEvolution('backfillPosesDone')}: ${updated.length}`
+          : 'Nenhuma foto nova para identificar (ou visão indisponível).',
+      );
+    } finally {
+      setBackfilling(false);
+    }
   };
 
   if (items.length === 0) {
@@ -458,6 +591,27 @@ export default function EvolutionTimelineExperience({
   return (
     <div className={cn('space-y-6', className)}>
       <EvolutionSummaryBar items={items} />
+      {allowPoseBackfill && untaggedCount > 0 ? (
+        <div className="flex flex-col gap-2 rounded-xl border bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-muted-foreground">
+            {untaggedCount} foto{untaggedCount === 1 ? '' : 's'} sem ângulo identificado.
+          </p>
+          <Button
+            type="button"
+            variant="secondary"
+            className="min-h-11 gap-2"
+            disabled={backfilling}
+            onClick={() => void runBackfill()}
+          >
+            {backfilling ? (
+              <Loader2 className="h-4 w-4 motion-safe:animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4" />
+            )}
+            {backfilling ? tEvolution('backfillPosesBusy') : tEvolution('backfillPoses')}
+          </Button>
+        </div>
+      ) : null}
       {newest ? (
         <CurrentCheckinHero
           item={newest}
@@ -481,8 +635,13 @@ export default function EvolutionTimelineExperience({
         items={items}
         initialCurrent={compareCurrent}
         initialBaseline={compareBaseline}
+        onPhotoPoseUpdated={handlePoseUpdated}
       />
-      <EvolutionPhotoLightbox selection={photoSelection} onOpenChange={(open) => !open && setPhotoSelection(null)} />
+      <EvolutionPhotoLightbox
+        selection={photoSelection}
+        onOpenChange={(open) => !open && setPhotoSelection(null)}
+        onPhotoPoseUpdated={handlePoseUpdated}
+      />
     </div>
   );
 }

@@ -23,6 +23,7 @@ const createFoodCatalogRouter = require('./food-catalog');
 const createUploadsRouter = require('./uploads');
 const createEducationalContentsRouter = require('./educational-contents');
 const createRefeicoesRegistradasRouter = require('./refeicoes-registradas');
+const createFotosAlunosPoseRouter = require('./fotos-alunos-pose');
 const { deleteUserByUserRoleId } = require('../utils/deleteUserByUserRoleId');
 const AsaasService = require('../services/asaas.service');
 const { encryptCoachAsaasApiKey, decryptCoachAsaasApiKey } = require('../utils/asaas-coach-secret-crypto');
@@ -4448,6 +4449,9 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
   // ============================================================================
   // ROTA: /api/fotos-alunos — fotos de progresso (sem /rest/v1/fotos_alunos)
   // ============================================================================
+
+  // Classificar/gravar pose (ANTES de /:id)
+  router.use(createFotosAlunosPoseRouter(pool, authenticate, domainSchemaGuard, requireAlunoWhenStudent));
 
   router.get(
     '/fotos-alunos',

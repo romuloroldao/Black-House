@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeftRight,
   Columns2,
+  Expand,
   FlipHorizontal2,
   Link2,
   Link2Off,
+  Loader2,
   Maximize2,
   Minimize2,
   RotateCcw,
@@ -14,6 +16,13 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -22,6 +31,8 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { tEvolution } from '@/i18n/evolution-photos';
+import { apiClient } from '@/lib/api-client';
+import { CHECKIN_PHOTO_POSES, type CheckinPhotoPose } from '@/lib/checkin-weekly-rules';
 import {
   formatDateShort,
   formatWeight,
@@ -42,45 +53,43 @@ type Props = {
   items: EvolutionTimelineItem[];
   initialCurrent: EvolutionTimelineItem | null;
   initialBaseline: EvolutionTimelineItem | null;
+  /** Callback quando a visão/manual grava pose em fotos. */
+  onPhotoPoseUpdated?: (photoId: string, descricao: string) => void;
 };
 
 type PoseOption = {
-  /** Valor estável no Select */
   value: string;
   label: string;
   pose?: EvolutionPhotoPose;
-  index?: number;
 };
 
 const POSE_ORDER: EvolutionPhotoPose[] = ['front', 'back', 'leftSide', 'rightSide', 'extra'];
 
-function pickPhoto(item: EvolutionTimelineItem | null, poseKey: string | null): EvolutionPhoto | null {
-  if (!item?.photos.length) return null;
-  if (!poseKey) return item.photos[0] ?? null;
+const API_POSE_BY_NORM: Record<Exclude<EvolutionPhotoPose, 'extra'>, string> = {
+  front: 'frente',
+  back: 'costas',
+  leftSide: 'lado_esquerdo',
+  rightSide: 'lado_direito',
+};
 
-  if (poseKey.startsWith('idx:')) {
-    const idx = Number(poseKey.slice(4));
-    if (Number.isInteger(idx) && idx >= 0 && idx < item.photos.length) {
-      return item.photos[idx];
-    }
-    return item.photos[0] ?? null;
-  }
+const MANUAL_MODE = 'manual';
 
+function pickPhotoByPose(
+  item: EvolutionTimelineItem | null,
+  poseKey: string | null,
+): EvolutionPhoto | null {
+  if (!item?.photos.length || !poseKey || poseKey === MANUAL_MODE) return null;
   if (poseKey.startsWith('pose:')) {
     const pose = poseKey.slice(5) as EvolutionPhotoPose;
-    const match = item.photos.find((p) => normalizePhotoPose(p.descricao) === pose);
-    if (match) return match;
-    // Sem esse ângulo neste check-in → null (UI mostra aviso, não inventa outro ângulo)
-    return null;
+    return item.photos.find((p) => normalizePhotoPose(p.descricao) === pose) ?? null;
   }
-
-  // Compat: valor legado = descrição raw
   const exact = item.photos.find((p) => (p.descricao || '') === poseKey);
   if (exact) return exact;
-  const byNorm = item.photos.find(
-    (p) => normalizePhotoPose(p.descricao) === normalizePhotoPose(poseKey),
+  return (
+    item.photos.find(
+      (p) => normalizePhotoPose(p.descricao) === normalizePhotoPose(poseKey),
+    ) ?? null
   );
-  return byNorm ?? null;
 }
 
 function buildPoseOptions(
@@ -93,36 +102,49 @@ function buildPoseOptions(
   for (const item of [current, baseline]) {
     item?.photos.forEach((p, idx) => {
       const pose = normalizePhotoPose(p.descricao);
-      if (pose !== 'extra') {
-        if (!poseSeen.has(pose)) {
-          poseSeen.add(pose);
-          options.push({
-            value: `pose:${pose}`,
-            label: poseLabel(p.descricao, idx),
-            pose,
-          });
-        }
-        return;
-      }
-      // Fotos sem pose conhecida: opção por índice nesse check-in (valor idx:N)
-      const value = `idx:${idx}`;
-      if (!options.some((o) => o.value === value)) {
-        options.push({
-          value,
-          label: poseLabel(p.descricao, idx),
-          index: idx,
-        });
-      }
+      if (pose === 'extra') return;
+      if (poseSeen.has(pose)) return;
+      poseSeen.add(pose);
+      options.push({
+        value: `pose:${pose}`,
+        label: poseLabel(p.descricao, idx),
+        pose,
+      });
     });
   }
 
   options.sort((a, b) => {
-    const ai = a.pose ? POSE_ORDER.indexOf(a.pose) : 100 + (a.index ?? 0);
-    const bi = b.pose ? POSE_ORDER.indexOf(b.pose) : 100 + (b.index ?? 0);
+    const ai = a.pose ? POSE_ORDER.indexOf(a.pose) : 100;
+    const bi = b.pose ? POSE_ORDER.indexOf(b.pose) : 100;
     return ai - bi;
   });
 
   return options;
+}
+
+/** Junta poses locais com refresh do pai sem descartar etiquetas já aplicadas. */
+function mergeTimelineItems(
+  incoming: EvolutionTimelineItem[],
+  previous: EvolutionTimelineItem[],
+): EvolutionTimelineItem[] {
+  const poseById = new Map<string, string | null | undefined>();
+  for (const item of previous) {
+    for (const photo of item.photos) {
+      poseById.set(photo.id, photo.descricao);
+    }
+  }
+  return incoming.map((item) => ({
+    ...item,
+    photos: item.photos.map((photo) => {
+      const local = poseById.get(photo.id);
+      const incomingPose = normalizePhotoPose(photo.descricao);
+      if (incomingPose !== 'extra') return photo;
+      if (local != null && normalizePhotoPose(local) !== 'extra') {
+        return { ...photo, descricao: local };
+      }
+      return photo;
+    }),
+  }));
 }
 
 function MetricChip({ label, value, tone }: { label: string; value: string; tone?: 'pos' | 'neg' }) {
@@ -152,13 +174,70 @@ function regionLabel(r: RegionPreset) {
   return tEvolution('regionLegs');
 }
 
+function poseSelectLabel(pose: CheckinPhotoPose) {
+  if (pose === 'frente') return tEvolution('front');
+  if (pose === 'costas') return tEvolution('back');
+  if (pose === 'lado_esquerdo') return tEvolution('leftSide');
+  return tEvolution('rightSide');
+}
+
+function PhotoPickerStrip({
+  item,
+  selectedId,
+  onSelect,
+  onInspect,
+  sideLabel,
+}: {
+  item: EvolutionTimelineItem | null;
+  selectedId: string | null;
+  onSelect: (photoId: string) => void;
+  onInspect: (photo: EvolutionPhoto) => void;
+  sideLabel: string;
+}) {
+  if (!item?.photos.length) return null;
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {sideLabel} · {tEvolution('pickPhoto')}
+      </p>
+      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-0.5">
+        {item.photos.map((photo, index) => {
+          const selected = photo.id === selectedId;
+          return (
+            <button
+              key={photo.id}
+              type="button"
+              className={cn(
+                'relative h-20 w-16 shrink-0 overflow-hidden rounded-lg border-2 focus:outline-none focus:ring-2 focus:ring-ring',
+                selected ? 'border-primary' : 'border-transparent opacity-80',
+              )}
+              onClick={() => onSelect(photo.id)}
+              onDoubleClick={() => onInspect(photo)}
+              aria-pressed={selected}
+              aria-label={`${tEvolution('pickPhoto')}: ${poseLabel(photo.descricao, index)}`}
+            >
+              <img src={photo.url} alt="" className="h-full w-full object-cover" />
+              <span className="absolute inset-x-0 bottom-0 bg-background/85 px-0.5 py-0.5 text-[9px] font-medium leading-tight">
+                {poseLabel(photo.descricao, index)}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Workspace de comparação — mobile-first.
- * Ordem: escolher semanas/ângulo → ver imagens (controlos sempre no topo).
+ * Fotos ficam sempre visíveis; classificação de pose corre em segundo plano.
  */
-export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseline }: Props) {
-  // Estado inicial só na montagem (dialog usa key ao abrir — não resetar em refetch).
-  // Antes = mais antiga (esquerda); Depois = mais recente (direita).
+export function CompareEvolutionWorkspace({
+  items,
+  initialCurrent,
+  initialBaseline,
+  onPhotoPoseUpdated,
+}: Props) {
   const [currentId, setCurrentId] = useState(
     initialCurrent?.id || items[0]?.id || '',
   );
@@ -170,29 +249,136 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
   const [region, setRegion] = useState<RegionPreset>('fullBody');
   const [flashAfter, setFlashAfter] = useState(false);
   const [expanded, setExpanded] = useState(true);
-  const [poseKey, setPoseKey] = useState<string | null>(null);
+  const [poseKey, setPoseKey] = useState<string | null>(MANUAL_MODE);
+  const [manualBeforeId, setManualBeforeId] = useState<string | null>(null);
+  const [manualAfterId, setManualAfterId] = useState<string | null>(null);
+  const [classifying, setClassifying] = useState(false);
+  const [localItems, setLocalItems] = useState(items);
+  const [inspectPhoto, setInspectPhoto] = useState<EvolutionPhoto | null>(null);
+  const [savingPose, setSavingPose] = useState(false);
+  const userLockedPoseRef = useRef(false);
+  const classifiedIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    setLocalItems((prev) => mergeTimelineItems(items, prev));
+  }, [items]);
 
   const viewports = useSyncedViewports();
 
-  const current = items.find((i) => i.id === currentId) || null;
-  const baseline = items.find((i) => i.id === baselineId) || null;
+  const current = localItems.find((i) => i.id === currentId) || null;
+  const baseline = localItems.find((i) => i.id === baselineId) || null;
+
+  /** Classifica fotos sem ângulo nas semanas seleccionadas — não esconde o viewport. */
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const weekA = localItems.find((i) => i.id === currentId) || null;
+      const weekB = localItems.find((i) => i.id === baselineId) || null;
+      const targets = [weekA, weekB].filter(Boolean) as EvolutionTimelineItem[];
+      const untagged = targets.flatMap((item) =>
+        item.photos.filter(
+          (p) =>
+            normalizePhotoPose(p.descricao) === 'extra' &&
+            !classifiedIdsRef.current.has(p.id),
+        ),
+      );
+      if (!untagged.length) {
+        setClassifying(false);
+        return;
+      }
+      setClassifying(true);
+      try {
+        for (const photo of untagged.slice(0, 8)) {
+          if (cancelled) break;
+          classifiedIdsRef.current.add(photo.id);
+          const result = await apiClient.classifyProgressPhotoPoseSafe({
+            foto_id: photo.id,
+            url: photo.url,
+            persist: true,
+          });
+          if (!result.success) continue;
+          const pose = result.data?.pose;
+          if (!pose || pose === 'incerto') continue;
+          if (cancelled) break;
+          setLocalItems((prev) =>
+            prev.map((item) => ({
+              ...item,
+              photos: item.photos.map((p) =>
+                p.id === photo.id ? { ...p, descricao: pose } : p,
+              ),
+            })),
+          );
+          onPhotoPoseUpdated?.(photo.id, pose);
+        }
+      } finally {
+        setClassifying(false);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+      setClassifying(false);
+    };
+    // Só quando mudam as semanas — não reentrar a cada update de pose
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId, baselineId]);
 
   const poseOptions = useMemo(() => buildPoseOptions(current, baseline), [current, baseline]);
 
   useEffect(() => {
-    if (!poseOptions.length) {
-      setPoseKey(null);
+    if (userLockedPoseRef.current) return;
+    if (poseOptions.length === 0) {
+      setPoseKey(MANUAL_MODE);
       return;
     }
-    if (!poseKey || !poseOptions.some((o) => o.value === poseKey)) {
+    if (!poseKey || poseKey === MANUAL_MODE || !poseOptions.some((o) => o.value === poseKey)) {
       const firstPose = poseOptions.find((o) => o.value.startsWith('pose:'));
-      setPoseKey(firstPose?.value || poseOptions[0].value);
+      if (firstPose) setPoseKey(firstPose.value);
     }
   }, [poseOptions, poseKey]);
 
-  const beforePhoto = pickPhoto(baseline, poseKey);
-  const afterPhoto = pickPhoto(current, poseKey);
-  const missingPhoto = !beforePhoto || !afterPhoto;
+  // Garantir fotos manuais por defeito (primeira de cada semana) para sempre haver algo a ver.
+  useEffect(() => {
+    if (baseline?.photos.length) {
+      setManualBeforeId((prev) =>
+        prev && baseline.photos.some((p) => p.id === prev) ? prev : baseline.photos[0].id,
+      );
+    } else {
+      setManualBeforeId(null);
+    }
+  }, [baseline]);
+
+  useEffect(() => {
+    if (current?.photos.length) {
+      setManualAfterId((prev) =>
+        prev && current.photos.some((p) => p.id === prev) ? prev : current.photos[0].id,
+      );
+    } else {
+      setManualAfterId(null);
+    }
+  }, [current]);
+
+  const poseMatchedBefore = pickPhotoByPose(baseline, poseKey);
+  const poseMatchedAfter = pickPhotoByPose(current, poseKey);
+  const usingManual = poseKey === MANUAL_MODE || !poseMatchedBefore || !poseMatchedAfter;
+
+  const beforePhoto = usingManual
+    ? baseline?.photos.find((p) => p.id === manualBeforeId) || baseline?.photos[0] || null
+    : poseMatchedBefore;
+  const afterPhoto = usingManual
+    ? current?.photos.find((p) => p.id === manualAfterId) || current?.photos[0] || null
+    : poseMatchedAfter;
+
+  const canCompare = Boolean(beforePhoto && afterPhoto);
+  const poseMismatchHint =
+    Boolean(poseKey && poseKey !== MANUAL_MODE) && (!poseMatchedBefore || !poseMatchedAfter);
+  const missingPoseLabel =
+    poseKey?.startsWith('pose:')
+      ? poseLabel(
+          API_POSE_BY_NORM[poseKey.slice(5) as Exclude<EvolutionPhotoPose, 'extra'>] || null,
+          0,
+        )
+      : tEvolution('pose');
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -227,6 +413,41 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
   const swapSides = () => {
     setCurrentId(baselineId);
     setBaselineId(currentId);
+    setManualBeforeId(manualAfterId);
+    setManualAfterId(manualBeforeId);
+  };
+
+  const handlePoseSelect = (value: string) => {
+    userLockedPoseRef.current = true;
+    setPoseKey(value);
+  };
+
+  const handleManualSelect = (side: 'before' | 'after', photoId: string) => {
+    userLockedPoseRef.current = true;
+    setPoseKey(MANUAL_MODE);
+    if (side === 'before') setManualBeforeId(photoId);
+    else setManualAfterId(photoId);
+  };
+
+  const saveInspectPose = async (pose: CheckinPhotoPose) => {
+    if (!inspectPhoto) return;
+    setSavingPose(true);
+    try {
+      const result = await apiClient.updateProgressPhotoPoseSafe(inspectPhoto.id, pose);
+      if (!result.success) return;
+      setLocalItems((prev) =>
+        prev.map((item) => ({
+          ...item,
+          photos: item.photos.map((p) =>
+            p.id === inspectPhoto.id ? { ...p, descricao: pose } : p,
+          ),
+        })),
+      );
+      setInspectPhoto((prev) => (prev ? { ...prev, descricao: pose } : prev));
+      onPhotoPoseUpdated?.(inspectPhoto.id, pose);
+    } finally {
+      setSavingPose(false);
+    }
   };
 
   const deltaTone =
@@ -254,7 +475,7 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
               <SelectValue placeholder={tEvolution('before')} />
             </SelectTrigger>
             <SelectContent>
-              {items.map((item) => (
+              {localItems.map((item) => (
                 <SelectItem key={`b-${item.id}`} value={item.id}>
                   {item.label} · {formatDateShort(item.date)}
                 </SelectItem>
@@ -290,7 +511,7 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
               <SelectValue placeholder={tEvolution('after')} />
             </SelectTrigger>
             <SelectContent>
-              {items.map((item) => (
+              {localItems.map((item) => (
                 <SelectItem key={`a-${item.id}`} value={item.id}>
                   {item.isCurrent ? tEvolution('currentWeek') : item.label} ·{' '}
                   {formatDateShort(item.date)}
@@ -304,15 +525,12 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
           <Label htmlFor="cmp-pose" className="text-xs font-semibold">
             {tEvolution('pose')}
           </Label>
-          <Select
-            value={poseKey || poseOptions[0]?.value || 'none'}
-            onValueChange={(v) => setPoseKey(v === 'none' ? null : v)}
-            disabled={poseOptions.length === 0}
-          >
+          <Select value={poseKey || MANUAL_MODE} onValueChange={handlePoseSelect}>
             <SelectTrigger id="cmp-pose" className="h-11">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value={MANUAL_MODE}>{tEvolution('manualMatch')}</SelectItem>
               {poseOptions.map((opt) => (
                 <SelectItem key={opt.value} value={opt.value}>
                   {opt.label}
@@ -370,7 +588,7 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
             className="h-11 min-h-11 flex-col gap-0.5 px-1 text-[10px] leading-tight sm:h-10 sm:flex-row sm:gap-1.5 sm:text-xs"
             onClick={() => setMode(id)}
             aria-pressed={mode === id}
-            disabled={missingPhoto}
+            disabled={!canCompare}
           >
             <Icon className="h-4 w-4 shrink-0" />
             <span className="truncate">{label}</span>
@@ -386,7 +604,7 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
           className="h-11 shrink-0 gap-1.5 px-3"
           onClick={() => viewports.setSynced(!viewports.synced)}
           aria-pressed={viewports.synced}
-          disabled={missingPhoto}
+          disabled={!canCompare}
         >
           {viewports.synced ? <Link2 className="h-4 w-4" /> : <Link2Off className="h-4 w-4" />}
           <span className="text-xs">{tEvolution('syncImages')}</span>
@@ -398,7 +616,7 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
           className="h-11 shrink-0 px-3 text-xs"
           onClick={() => setShowGuides((v) => !v)}
           aria-pressed={showGuides}
-          disabled={missingPhoto}
+          disabled={!canCompare}
         >
           {showGuides ? tEvolution('hideGuides') : tEvolution('showGuides')}
         </Button>
@@ -408,7 +626,7 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
           variant="outline"
           className="h-11 shrink-0 gap-1.5 px-3"
           onClick={() => viewports.reset()}
-          disabled={missingPhoto}
+          disabled={!canCompare}
         >
           <RotateCcw className="h-4 w-4" />
           <span className="text-xs">{tEvolution('resetView')}</span>
@@ -426,14 +644,57 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
             {expanded ? tEvolution('exitFullscreen') : tEvolution('fullscreen')}
           </span>
         </Button>
+        {beforePhoto ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-11 shrink-0 gap-1.5 px-3"
+            onClick={() => setInspectPhoto(beforePhoto)}
+          >
+            <Expand className="h-4 w-4" />
+            <span className="text-xs">{tEvolution('inspectPhoto')}</span>
+          </Button>
+        ) : null}
       </div>
 
-      {missingPhoto ? (
-        <div className="flex min-h-[40vh] flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-4 text-center">
-          <p className="text-sm font-medium text-foreground">{tEvolution('emptySlot')}</p>
-          <p className="max-w-sm text-xs text-muted-foreground">{tEvolution('emptySlotHint')}</p>
+      {classifying ? (
+        <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" />
+          {tEvolution('classifyingAngles')}
         </div>
-      ) : (
+      ) : null}
+
+      {poseOptions.length === 0 && !classifying ? (
+        <p className="rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground">
+          {tEvolution('noAnglesYet')}
+        </p>
+      ) : null}
+
+      {poseMismatchHint && canCompare ? (
+        <p className="rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground">
+          Sem foto de {missingPoseLabel} numa das semanas — a mostrar escolha manual. {tEvolution('emptySlotHint')}
+        </p>
+      ) : null}
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <PhotoPickerStrip
+          item={baseline}
+          selectedId={beforePhoto?.id ?? null}
+          onSelect={(id) => handleManualSelect('before', id)}
+          onInspect={setInspectPhoto}
+          sideLabel={tEvolution('before')}
+        />
+        <PhotoPickerStrip
+          item={current}
+          selectedId={afterPhoto?.id ?? null}
+          onSelect={(id) => handleManualSelect('after', id)}
+          onInspect={setInspectPhoto}
+          sideLabel={tEvolution('after')}
+        />
+      </div>
+
+      {canCompare ? (
         <div
           className={cn(
             'relative flex min-h-0 flex-1 flex-col',
@@ -470,6 +731,7 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
                 onWheelZoom={(d) => viewports.zoom('before', d)}
                 showGuides={showGuides}
                 guides={<AlignmentGuides visible={showGuides} />}
+                onInspect={() => setInspectPhoto(beforePhoto)}
                 className="min-h-[42dvh] md:min-h-0"
               />
               <ImageViewport
@@ -483,6 +745,7 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
                 onWheelZoom={(d) => viewports.zoom('after', d)}
                 showGuides={showGuides}
                 guides={<AlignmentGuides visible={showGuides} />}
+                onInspect={() => setInspectPhoto(afterPhoto)}
                 className="min-h-[42dvh] md:min-h-0"
               />
             </div>
@@ -490,6 +753,14 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
 
           {mode === 'flash' ? (
             <div className="relative flex min-h-[58dvh] flex-1 flex-col overflow-hidden rounded-xl border bg-muted">
+              <button
+                type="button"
+                className="absolute inset-0 z-[1]"
+                aria-label={tEvolution('inspectPhoto')}
+                onDoubleClick={() =>
+                  setInspectPhoto(flashAfter ? afterPhoto : beforePhoto)
+                }
+              />
               <img
                 src={flashAfter ? afterPhoto!.url : beforePhoto!.url}
                 alt={flashAfter ? tEvolution('after') : tEvolution('before')}
@@ -521,9 +792,14 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
             </div>
           ) : null}
         </div>
+      ) : (
+        <div className="flex min-h-[40vh] flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-4 text-center">
+          <p className="text-sm font-medium text-foreground">{tEvolution('noPhotosTitle')}</p>
+          <p className="max-w-sm text-xs text-muted-foreground">{tEvolution('photoPoseHint')}</p>
+        </div>
       )}
 
-      {!missingPhoto ? (
+      {canCompare ? (
         <div
           className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           role="group"
@@ -544,6 +820,53 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
           ))}
         </div>
       ) : null}
+
+      <Dialog open={Boolean(inspectPhoto)} onOpenChange={(open) => !open && setInspectPhoto(null)}>
+        <DialogContent className="max-h-[94vh] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{tEvolution('inspectPhoto')}</DialogTitle>
+            <DialogDescription>{tEvolution('photoPoseHint')}</DialogDescription>
+          </DialogHeader>
+          {inspectPhoto ? (
+            <div className="space-y-3">
+              <div className="overflow-hidden rounded-xl border bg-muted">
+                <img
+                  src={inspectPhoto.url}
+                  alt={poseLabel(inspectPhoto.descricao, 0)}
+                  className="max-h-[70vh] w-full object-contain"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="inspect-pose" className="text-xs font-semibold">
+                  {tEvolution('setPose')}
+                </Label>
+                <Select
+                  value={
+                    CHECKIN_PHOTO_POSES.includes(
+                      String(inspectPhoto.descricao || '') as CheckinPhotoPose,
+                    )
+                      ? String(inspectPhoto.descricao)
+                      : undefined
+                  }
+                  onValueChange={(v) => void saveInspectPose(v as CheckinPhotoPose)}
+                  disabled={savingPose}
+                >
+                  <SelectTrigger id="inspect-pose" className="h-11">
+                    <SelectValue placeholder={tEvolution('setPose')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CHECKIN_PHOTO_POSES.map((pose) => (
+                      <SelectItem key={pose} value={pose}>
+                        {poseSelectLabel(pose)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

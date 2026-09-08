@@ -191,6 +191,13 @@ export const API_CONTRACT = {
     create: () => `${API_BASE}/api/feedbacks-alunos`,
     byId: (id: string) => `${API_BASE}/api/feedbacks-alunos/${encodeURIComponent(id)}`,
   },
+  fotosAlunos: {
+    list: (alunoId: string) =>
+      `${API_BASE}/api/fotos-alunos?aluno_id=${encodeURIComponent(alunoId)}`,
+    classifyPose: () => `${API_BASE}/api/fotos-alunos/classify-pose`,
+    backfillPoses: () => `${API_BASE}/api/fotos-alunos/backfill-poses`,
+    updatePose: (id: string) => `${API_BASE}/api/fotos-alunos/${encodeURIComponent(id)}/pose`,
+  },
   videos: {
     list: () => `${API_BASE}/api/videos`,
     byId: (id: string) => `${API_BASE}/api/videos/${id}`,
@@ -391,7 +398,10 @@ const CONTRACT_PATTERNS = [
   '/api/feedbacks-alunos',
   '/api/feedbacks-alunos/:id',
   '/api/fotos-alunos',
+  '/api/fotos-alunos/classify-pose',
+  '/api/fotos-alunos/backfill-poses',
   '/api/fotos-alunos/:id',
+  '/api/fotos-alunos/:id/pose',
   '/api/itens-dieta',
   '/api/itens-dieta/:id',
   '/api/dieta-farmacos',

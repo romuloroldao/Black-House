@@ -11,7 +11,16 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Camera, ImageIcon, Loader2, Upload } from "lucide-react";
+import { CHECKIN_PHOTO_POSES, type CheckinPhotoPose } from "@/lib/checkin-weekly-rules";
+import { tEvolution } from "@/i18n/evolution-photos";
 
 type ProgressPhotoUploadDialogProps = {
   open: boolean;
@@ -23,20 +32,38 @@ type ProgressPhotoUploadDialogProps = {
   previewUrl: string | null;
   descricao: string;
   onDescricaoChange: (value: string) => void;
+  /** Ângulo normalizado (frente/costas/lados) — preferido à descrição livre. */
+  pose?: CheckinPhotoPose | "";
+  onPoseChange?: (value: CheckinPhotoPose | "") => void;
+  classifyingPose?: boolean;
   onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onUpload: () => void;
   onCancel: () => void;
 };
 
+function poseLabel(pose: CheckinPhotoPose) {
+  if (pose === "frente") return tEvolution("front");
+  if (pose === "costas") return tEvolution("back");
+  if (pose === "lado_esquerdo") return tEvolution("leftSide");
+  return tEvolution("rightSide");
+}
+
+/**
+ * Diálogo de upload de foto de evolução.
+ * Espera que o parent use `prepareAndClassifyProgressPhoto` no `onFileSelect`.
+ */
 const ProgressPhotoUploadDialog = ({
   open,
   onOpenChange,
   uploading,
   preparingImage,
+  classifyingPose = false,
   selectedFile,
   previewUrl,
   descricao,
   onDescricaoChange,
+  pose = "",
+  onPoseChange,
   onFileSelect,
   onUpload,
   onCancel,
@@ -46,8 +73,10 @@ const ProgressPhotoUploadDialog = ({
   const cameraBackInputRef = useRef<HTMLInputElement>(null);
   const cameraFrontInputRef = useRef<HTMLInputElement>(null);
 
+  const busy = uploading || preparingImage || classifyingPose;
+
   const handleOpenChange = (next: boolean) => {
-    if (uploading || preparingImage) return;
+    if (busy) return;
     onOpenChange(next);
     if (!next) onCancel();
   };
@@ -59,8 +88,8 @@ const ProgressPhotoUploadDialog = ({
         <DialogHeader>
           <DialogTitle>Enviar foto de evolução</DialogTitle>
           <DialogDescription>
-            No telemóvel, «Tirar foto» abre a câmera. A imagem é comprimida automaticamente antes do
-            envio. O seu coach vê na sua ficha.
+            No telemóvel, «Tirar foto» abre a câmera. A imagem é comprimida e o ângulo é
+            identificado automaticamente (pode ajustar manualmente).
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
@@ -94,7 +123,7 @@ const ProgressPhotoUploadDialog = ({
                 type="button"
                 variant="outline"
                 className="w-full min-h-11"
-                disabled={preparingImage || uploading}
+                disabled={busy}
                 onClick={() => fileInputRef.current?.click()}
               >
                 <ImageIcon className="h-4 w-4 mr-2 shrink-0" />
@@ -104,7 +133,7 @@ const ProgressPhotoUploadDialog = ({
                 type="button"
                 variant="secondary"
                 className="w-full min-h-11"
-                disabled={preparingImage || uploading}
+                disabled={busy}
                 onClick={() => cameraBackInputRef.current?.click()}
               >
                 <Camera className="h-4 w-4 mr-2 shrink-0" />
@@ -114,17 +143,17 @@ const ProgressPhotoUploadDialog = ({
                 type="button"
                 variant="secondary"
                 className="w-full min-h-11"
-                disabled={preparingImage || uploading}
+                disabled={busy}
                 onClick={() => cameraFrontInputRef.current?.click()}
               >
                 <Camera className="h-4 w-4 mr-2 shrink-0" />
                 Selfie
               </Button>
             </div>
-            {preparingImage && (
+            {(preparingImage || classifyingPose) && (
               <p className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Loader2 className="h-3 w-3 motion-safe:animate-spin" />
-                A preparar imagem…
+                {classifyingPose ? "A identificar ângulo…" : "A preparar imagem…"}
               </p>
             )}
             {previewUrl && !preparingImage && (
@@ -137,8 +166,31 @@ const ProgressPhotoUploadDialog = ({
               </div>
             )}
           </div>
+
+          {onPoseChange ? (
+            <div className="space-y-2">
+              <Label htmlFor="pose-foto">{tEvolution("pose")}</Label>
+              <Select
+                value={pose || undefined}
+                onValueChange={(v) => onPoseChange(v as CheckinPhotoPose)}
+                disabled={busy}
+              >
+                <SelectTrigger id="pose-foto" className="h-11">
+                  <SelectValue placeholder={tEvolution("setPose")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {CHECKIN_PHOTO_POSES.map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {poseLabel(p)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
+
           <div className="space-y-2">
-            <Label htmlFor="descricao-foto">Descrição (opcional)</Label>
+            <Label htmlFor="descricao-foto">Nota (opcional)</Label>
             <Textarea
               id="descricao-foto"
               placeholder="Ex.: Semana 12 — após ajuste na dieta"
@@ -152,14 +204,14 @@ const ProgressPhotoUploadDialog = ({
           <Button
             type="button"
             variant="outline"
-            disabled={uploading || preparingImage}
+            disabled={busy}
             onClick={() => handleOpenChange(false)}
           >
             Cancelar
           </Button>
           <Button
             type="button"
-            disabled={!selectedFile || uploading || preparingImage}
+            disabled={!selectedFile || busy}
             onClick={onUpload}
           >
             {uploading ? (

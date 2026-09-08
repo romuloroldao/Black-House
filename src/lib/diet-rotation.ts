@@ -1,4 +1,10 @@
 import { normalizePlanoLetter, sortPlanos, type DietPlano } from "@/lib/diet-plano";
+import {
+  APP_TIME_ZONE,
+  civilDateAtNoon,
+  civilDateKey,
+  diffCivilDays,
+} from "@/lib/calendar-date";
 
 export type { DietPlano };
 
@@ -27,26 +33,9 @@ export type DietRotationDayInfo = {
   dayIndexInCycle: number;
   /** Blocos do ciclo (para UI). */
   blocks: RotationBlock[];
+  /** True quando a data ainda é anterior a rotacao_data_inicio. */
+  beforeStart?: boolean;
 };
-
-function parseDateOnly(value: string | null | undefined): Date | null {
-  if (!value) return null;
-  const iso = String(value).slice(0, 10);
-  const d = new Date(`${iso}T12:00:00`);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function startOfCalendarDay(date: Date): Date {
-  const d = new Date(date);
-  d.setHours(12, 0, 0, 0);
-  return d;
-}
-
-function diffCalendarDays(from: Date, to: Date): number {
-  const a = startOfCalendarDay(from).getTime();
-  const b = startOfCalendarDay(to).getTime();
-  return Math.round((b - a) / 86400000);
-}
 
 function parseJsonBlocks(raw: unknown): RotationBlock[] | null {
   if (!raw) return null;
@@ -140,9 +129,28 @@ function blockAtIndex(sequence: DietPlano[], index: number) {
   };
 }
 
+/**
+ * Âncora do ciclo em dia civil America/Sao_Paulo.
+ * Preferir rotacao_data_inicio; created_at usa o dia BRT (não fatia UTC).
+ */
+export function resolveRotationAnchor(
+  config: DietRotationConfig,
+  timeZone: string = APP_TIME_ZONE,
+): Date | null {
+  if (config.rotacao_data_inicio) {
+    const fromStart = civilDateAtNoon(config.rotacao_data_inicio, timeZone);
+    if (fromStart) return fromStart;
+  }
+  if (config.created_at) {
+    return civilDateAtNoon(config.created_at, timeZone);
+  }
+  return null;
+}
+
 export function getRotationForDate(
   config: DietRotationConfig,
   date: Date = new Date(),
+  timeZone: string = APP_TIME_ZONE,
 ): DietRotationDayInfo | null {
   if (!isRotationEnabled(config)) return null;
 
@@ -150,24 +158,29 @@ export function getRotationForDate(
   const sequence = buildRotationSequence(config);
   if (sequence.length === 0) return null;
 
-  const anchor =
-    parseDateOnly(config.rotacao_data_inicio) ||
-    parseDateOnly(config.created_at) ||
-    startOfCalendarDay(date);
+  const today = civilDateAtNoon(civilDateKey(date, timeZone), timeZone);
+  if (!today) return null;
 
-  const days = diffCalendarDays(anchor, date);
-  const idx = ((days % sequence.length) + sequence.length) % sequence.length;
+  const anchor = resolveRotationAnchor(config, timeZone) || today;
+  const daysRaw = diffCivilDays(anchor, today);
+  // Antes da data de início: permanece no 1º dia do ciclo (não envelopa).
+  const beforeStart = daysRaw < 0;
+  const days = beforeStart ? 0 : daysRaw;
+  const idx = days % sequence.length;
   const block = blockAtIndex(sequence, idx);
 
   return {
     plano: block.plano,
     cycleSummary: formatRotationBlocksSummary(blocks),
-    todayLabel: `Hoje: Plano ${block.plano} (dia ${block.dayInBlock} de ${block.blockLength})`,
+    todayLabel: beforeStart
+      ? `Ciclo inicia em breve · Plano ${block.plano} (pré-início)`
+      : `Hoje: Plano ${block.plano} (dia ${block.dayInBlock} de ${block.blockLength})`,
     dayInBlock: block.dayInBlock,
     blockLength: block.blockLength,
     cycleLength: sequence.length,
     dayIndexInCycle: idx + 1,
     blocks,
+    beforeStart,
   };
 }
 

@@ -1,5 +1,12 @@
 /** Espelho de src/lib/diet-rotation.ts + diet-plano para o backend Node. */
 
+const {
+  civilDateKeyInTimeZone,
+  civilDateAtNoonInTimeZone,
+  diffCivilDays,
+} = require('./zoned-time');
+
+const APP_TIME_ZONE = 'America/Sao_Paulo';
 const PLANO_LETTER_RE = /^[A-Z]$/;
 
 function normalizePlanoLetter(raw) {
@@ -7,25 +14,6 @@ function normalizePlanoLetter(raw) {
   const s = String(raw).trim().toUpperCase();
   if (!PLANO_LETTER_RE.test(s)) return null;
   return s;
-}
-
-function parseDateOnly(value) {
-  if (!value) return null;
-  const iso = String(value).slice(0, 10);
-  const d = new Date(`${iso}T12:00:00`);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function startOfCalendarDay(date) {
-  const d = new Date(date);
-  d.setHours(12, 0, 0, 0);
-  return d;
-}
-
-function diffCalendarDays(from, to) {
-  const a = startOfCalendarDay(from).getTime();
-  const b = startOfCalendarDay(to).getTime();
-  return Math.round((b - a) / 86400000);
 }
 
 function parseJsonBlocks(raw) {
@@ -104,30 +92,47 @@ function blockAtIndex(sequence, index) {
   };
 }
 
-function getRotationForDate(config, date = new Date()) {
+function resolveRotationAnchor(config, timeZone = APP_TIME_ZONE) {
+  if (config.rotacao_data_inicio) {
+    const fromStart = civilDateAtNoonInTimeZone(config.rotacao_data_inicio, timeZone);
+    if (fromStart) return fromStart;
+  }
+  if (config.created_at) {
+    return civilDateAtNoonInTimeZone(config.created_at, timeZone);
+  }
+  return null;
+}
+
+function getRotationForDate(config, date = new Date(), timeZone = APP_TIME_ZONE) {
   if (!isRotationEnabled(config)) return null;
 
   const blocks = normalizeRotationBlocks(config);
   const sequence = buildRotationSequence(config);
   if (sequence.length === 0) return null;
 
-  const anchor =
-    parseDateOnly(config.rotacao_data_inicio) ||
-    parseDateOnly(config.created_at) ||
-    startOfCalendarDay(date);
+  const todayKey = civilDateKeyInTimeZone(date, timeZone);
+  const today = civilDateAtNoonInTimeZone(todayKey, timeZone);
+  if (!today) return null;
 
-  const days = diffCalendarDays(anchor, date);
-  const idx = ((days % sequence.length) + sequence.length) % sequence.length;
+  const anchor = resolveRotationAnchor(config, timeZone) || today;
+  const daysRaw = diffCivilDays(anchor, today);
+  const beforeStart = daysRaw < 0;
+  const days = beforeStart ? 0 : daysRaw;
+  const idx = days % sequence.length;
   const block = blockAtIndex(sequence, idx);
 
   return {
     plano: block.plano,
     cycle_summary: formatRotationBlocksSummary(blocks),
-    today_label: `Hoje: Plano ${block.plano} (dia ${block.dayInBlock} de ${block.blockLength})`,
+    today_label: beforeStart
+      ? `Ciclo inicia em breve · Plano ${block.plano} (pré-início)`
+      : `Hoje: Plano ${block.plano} (dia ${block.dayInBlock} de ${block.blockLength})`,
     day_in_block: block.dayInBlock,
     block_length: block.blockLength,
     cycle_length: sequence.length,
+    day_index_in_cycle: idx + 1,
     blocks,
+    before_start: beforeStart,
   };
 }
 
@@ -171,8 +176,10 @@ module.exports = {
   formatRotationBlocksSummary,
   isRotationEnabled,
   buildRotationSequence,
+  resolveRotationAnchor,
   getRotationForDate,
   getPlanoForToday: (config) => getRotationForDate(config)?.plano ?? null,
   inferRotationBlocksFromPlanos,
   rotationBlocksToPayload,
+  APP_TIME_ZONE,
 };
