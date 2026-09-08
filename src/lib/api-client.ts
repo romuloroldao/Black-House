@@ -1470,6 +1470,25 @@ class ApiClient {
         });
     }
 
+    async backfillProgressPhotoPosesSafe(input: {
+        aluno_id: string;
+        limit?: number;
+    }): Promise<
+        ApiResult<{
+            scanned: number;
+            updated: Array<{ id: string; descricao: string; url: string; confidence?: number }>;
+            skipped: Array<{ id: string; reason: string }>;
+        }>
+    > {
+        return this.safeRequest(API_CONTRACT.fotosAlunos.backfillPoses(), {
+            method: 'POST',
+            body: JSON.stringify({
+                aluno_id: input.aluno_id,
+                limit: input.limit,
+            }),
+        });
+    }
+
     async saveRefeicaoRegistradaSafe(body: Record<string, unknown>): Promise<ApiResult<any>> {
         return this.safeRequest(API_CONTRACT.refeicoesRegistradas.create(), {
             method: 'POST',

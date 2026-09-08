@@ -182,5 +182,100 @@ module.exports = function createFotosAlunosPoseRouter(pool, authenticate, domain
     },
   );
 
+  /**
+   * POST /fotos-alunos/backfill-poses
+   * Classifica até `limit` fotos sem descrição (coach/admin do aluno, ou o próprio aluno).
+   * body: { aluno_id, limit? }
+   */
+  router.post(
+    '/fotos-alunos/backfill-poses',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['aluno', 'coach', 'admin']),
+    requireAlunoWhenStudent(),
+    progressPhotoPoseLimiter,
+    async (req, res) => {
+      try {
+        const alunoId = String(req.body?.aluno_id || '').trim();
+        const limitRaw = Number(req.body?.limit);
+        const limit = Number.isFinite(limitRaw)
+          ? Math.min(40, Math.max(1, Math.floor(limitRaw)))
+          : 12;
+
+        if (!alunoId || !isValidUUID(alunoId)) {
+          return res.status(400).json({
+            error: 'aluno_id é obrigatório e deve ser um UUID válido',
+            error_code: 'INVALID_ALUNO_ID',
+          });
+        }
+
+        if (req.user.role === 'aluno' && req.aluno?.id !== alunoId) {
+          return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+        }
+        if (req.user.role === 'coach') {
+          const ok = await validateAlunoBelongsToCoach(pool, alunoId, req.user.id);
+          if (!ok) {
+            return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+          }
+        }
+
+        const sel = await pool.query(
+          `SELECT id, url, descricao
+           FROM public.fotos_alunos
+           WHERE aluno_id = $1
+             AND (
+               descricao IS NULL
+               OR TRIM(descricao) = ''
+               OR LOWER(REGEXP_REPLACE(TRIM(descricao), '[-_\\s]+', '_', 'g'))
+                   NOT IN ('frente', 'front', 'costas', 'back', 'tras', 'lado_esquerdo', 'left', 'left_side', 'lado_direito', 'right', 'right_side')
+             )
+           ORDER BY created_at DESC NULLS LAST
+           LIMIT $2`,
+          [alunoId, limit],
+        );
+
+        const updated = [];
+        const skipped = [];
+
+        for (const row of sel.rows) {
+          try {
+            const result = await classifyProgressPhotoPose({ url: row.url });
+            if (!result.pose || result.pose === 'incerto' || !POSES.includes(result.pose)) {
+              skipped.push({ id: row.id, reason: result.pose || 'incerto' });
+              continue;
+            }
+            const upd = await pool.query(
+              `UPDATE public.fotos_alunos SET descricao = $1 WHERE id = $2
+               RETURNING id, descricao, url`,
+              [result.pose, row.id],
+            );
+            if (upd.rows[0]) {
+              updated.push({
+                id: upd.rows[0].id,
+                descricao: upd.rows[0].descricao,
+                url: upd.rows[0].url,
+                confidence: result.confidence,
+              });
+            }
+          } catch (err) {
+            skipped.push({ id: row.id, reason: err.message || 'error' });
+          }
+        }
+
+        return res.json({
+          scanned: sel.rows.length,
+          updated,
+          skipped,
+        });
+      } catch (error) {
+        const status = error.statusCode || 500;
+        return res.status(status).json({
+          error: error.message || 'Erro ao identificar ângulos em lote',
+          error_code: error.error_code || 'POSE_BACKFILL_FAILED',
+        });
+      }
+    },
+  );
+
   return router;
 };

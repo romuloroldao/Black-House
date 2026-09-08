@@ -1114,7 +1114,17 @@ export default function StudentDetails() {
 
         {/* TAB: Progresso */}
         <TabsContent value="progress" className="space-y-6 mt-6">
-          <EvolutionTimelineExperience photos={fotos} readonly />
+          <EvolutionTimelineExperience
+            photos={fotos}
+            readonly
+            allowPoseBackfill
+            alunoId={id}
+            onPhotoPoseUpdated={(photoId, descricao) => {
+              setFotos((prev) =>
+                prev.map((f) => (f.id === photoId ? { ...f, descricao } : f)),
+              );
+            }}
+          />
 
           {/* Dashboard de Progresso do Aluno */}
           <Card>

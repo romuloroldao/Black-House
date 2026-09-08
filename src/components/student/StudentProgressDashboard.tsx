@@ -82,29 +82,44 @@ export default function StudentProgressDashboard({
 
   const coachMode = Boolean(studentId);
 
-  useEffect(() => {
-    loadCheckins();
-  }, [studentId]);
+  const loadCheckins = useCallback(async () => {
+    setLoading(true);
+    try {
+      let alunoId = studentId;
 
-  const loadCheckins = async () => {
-    let alunoId = studentId;
+      if (!alunoId) {
+        if (!user) {
+          setCheckins([]);
+          return;
+        }
+        const alunoResult = await apiClient.getMeSafe();
+        const aluno = alunoResult.success ? alunoResult.data : null;
+        if (!aluno) {
+          setCheckins([]);
+          return;
+        }
+        alunoId = aluno.id;
+      }
 
-    if (!alunoId) {
-      if (!user) return;
-      const alunoResult = await apiClient.getMeSafe();
-      const aluno = alunoResult.success ? alunoResult.data : null;
-      if (!aluno) return;
-      alunoId = aluno.id;
+      const result = await apiClient.requestSafe<any[]>('/api/weekly-checkins');
+      const data = result.success && Array.isArray(result.data) ? result.data : [];
+      const filtrados = data
+        .filter((c) => c.aluno_id === alunoId)
+        .sort(
+          (a, b) =>
+            new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime(),
+        );
+      setCheckins(filtrados);
+    } catch {
+      setCheckins([]);
+    } finally {
+      setLoading(false);
     }
+  }, [studentId, user]);
 
-    const result = await apiClient.requestSafe<any[]>('/api/weekly-checkins');
-    const data = result.success && Array.isArray(result.data) ? result.data : [];
-    const filtrados = data
-      .filter(c => c.aluno_id === alunoId)
-      .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
-    setCheckins(filtrados);
-    setLoading(false);
-  };
+  useEffect(() => {
+    void loadCheckins();
+  }, [loadCheckins]);
 
   const getFilteredCheckins = () => {
     if (periodFilter === "all") return checkins;

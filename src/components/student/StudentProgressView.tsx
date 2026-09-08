@@ -27,7 +27,6 @@ const StudentProgressView = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: hoje, loading: hojeLoading } = useAlunoHoje(Boolean(user));
   const [fotos, setFotos] = useState<FotoAluno[]>([]);
-  const [dataLoaded, setDataLoaded] = useState(false);
   const [bodyMetrics, setBodyMetrics] = useState<BodyMetricsResponse | null>(null);
   const [bodyMetricsLoading, setBodyMetricsLoading] = useState(false);
 
@@ -38,15 +37,18 @@ const StudentProgressView = () => {
   const defaultTab = useMemo(() => {
     if (sectionParam === "metrics") return "metrics";
     if (sectionParam === "photos" || focusFotos) return "photos";
-    if (!dataLoaded) return "photos";
-    return fotos.length === 0 ? "photos" : "metrics";
-  }, [sectionParam, focusFotos, dataLoaded, fotos.length]);
+    // Default estável: fotos (evita salto automático para métricas no mobile).
+    return "photos";
+  }, [sectionParam, focusFotos]);
 
   const [activeTab, setActiveTab] = useState<string>(defaultTab);
 
   useEffect(() => {
-    setActiveTab(defaultTab);
-  }, [defaultTab]);
+    // Só sincroniza quando a URL pede uma secção explícita.
+    if (sectionParam === "metrics" || sectionParam === "photos" || focusFotos) {
+      setActiveTab(defaultTab);
+    }
+  }, [defaultTab, sectionParam, focusFotos]);
 
   useEffect(() => {
     if (user) loadProgressData();
@@ -82,7 +84,12 @@ const StudentProgressView = () => {
       setBodyMetrics(null);
       setBodyMetricsLoading(false);
     }
-    setDataLoaded(true);
+  };
+
+  const handlePhotoPoseUpdated = (photoId: string, descricao: string) => {
+    setFotos((prev) =>
+      prev.map((f) => (f.id === photoId ? { ...f, descricao } : f)),
+    );
   };
 
   const handleDeletePhoto = async (foto: FotoAluno) => {
@@ -139,6 +146,8 @@ const StudentProgressView = () => {
             photos={fotos}
             onDeletePhoto={handleDeletePhoto}
             onOpenCheckin={openCheckin}
+            onPhotoPoseUpdated={handlePhotoPoseUpdated}
+            allowPoseBackfill
           />
 
           <button

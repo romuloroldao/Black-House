@@ -7,14 +7,17 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { tEvolution } from "@/i18n/evolution-photos";
-import { isAcceptableImageFile, prepareImageForUpload } from "@/lib/prepare-image-upload";
+import { isAcceptableImageFile } from "@/lib/prepare-image-upload";
+import {
+  prepareAndClassifyProgressPhoto,
+  isKnownProgressPose,
+} from "@/lib/prepare-progress-photo";
 import {
   CHECKIN_PHOTO_POSES,
   type CheckinPhotoPose,
   MIN_CHECKIN_PHOTOS,
   type CheckinPhotoDraft,
 } from "@/lib/checkin-weekly-rules";
-import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
 
 type Props = {
@@ -25,15 +28,11 @@ type Props = {
   disabled?: boolean;
 };
 
-function isKnownPose(value: string | undefined | null): value is CheckinPhotoPose {
-  return CHECKIN_PHOTO_POSES.includes(value as CheckinPhotoPose);
-}
-
 /** Duplicatas de frente/costas (erro crítico para comparação). */
 export function findCriticalPoseDuplicates(photos: CheckinPhotoDraft[]): CheckinPhotoPose[] {
   const counts = new Map<CheckinPhotoPose, number>();
   for (const p of photos) {
-    if (!p.descricao || !isKnownPose(p.descricao)) continue;
+    if (!p.descricao || !isKnownProgressPose(p.descricao)) continue;
     if (p.descricao !== "frente" && p.descricao !== "costas") continue;
     counts.set(p.descricao, (counts.get(p.descricao) || 0) + 1);
   }
@@ -71,24 +70,20 @@ export default function CheckinPhotosWeightStep({
           toast.error(`${file.name || "Arquivo"}: use apenas imagens.`);
           continue;
         }
-        const prepared = await prepareImageForUpload(file);
+        const preparedResult = await prepareAndClassifyProgressPhoto(file);
         const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-        let descricao: CheckinPhotoPose | undefined;
+        let descricao: CheckinPhotoPose | undefined = preparedResult.pose;
 
-        // Classificar pela imagem (não pela ordem do upload)
-        const classified = await apiClient.classifyProgressPhotoPoseSafe({ file: prepared });
-        if (classified.success && isKnownPose(classified.data?.pose)) {
-          descricao = classified.data.pose;
-        } else if (classified.success && classified.data?.pose === "incerto") {
+        if (preparedResult.poseIncerto) {
           toast.message("Não identificámos o ângulo desta foto — escolha Frente/Costas manualmente.");
-        } else if (!classified.success) {
+        } else if (preparedResult.classifyError) {
           toast.message("Não foi possível detectar o ângulo automaticamente — escolha manualmente.");
         }
 
         next.push({
           id,
-          file: prepared,
-          previewUrl: URL.createObjectURL(prepared),
+          file: preparedResult.file,
+          previewUrl: URL.createObjectURL(preparedResult.file),
           descricao,
         });
       }

@@ -1,5 +1,5 @@
 import { useCallback, useRef } from 'react';
-import { Minus, Plus } from 'lucide-react';
+import { Expand, Minus, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { tEvolution } from '@/i18n/evolution-photos';
@@ -16,6 +16,7 @@ type Props = {
   onWheelZoom: (delta: number) => void;
   showGuides?: boolean;
   guides?: React.ReactNode;
+  onInspect?: () => void;
   className?: string;
 };
 
@@ -33,6 +34,7 @@ export function ImageViewport({
   onWheelZoom,
   showGuides,
   guides,
+  onInspect,
   className,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -147,6 +149,18 @@ export function ImageViewport({
           >
             <Plus className="h-4 w-4" />
           </Button>
+          {onInspect ? (
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              className="h-11 w-11 touch-manipulation"
+              onClick={onInspect}
+              aria-label={tEvolution('inspectPhoto')}
+            >
+              <Expand className="h-4 w-4" />
+            </Button>
+          ) : null}
         </div>
       </div>
 
