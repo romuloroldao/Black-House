@@ -215,91 +215,106 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="grid gap-4">
+    <div className="space-y-6">
+      <form id="report-form" onSubmit={handleSubmit} className="space-y-6">
+        <div className="grid gap-4">
+          <div>
+            <Label htmlFor="titulo">Título do Relatório *</Label>
+            <Input
+              id="titulo"
+              value={formData.titulo}
+              onChange={(e) =>
+                setFormData({ ...formData, titulo: e.target.value })
+              }
+              placeholder="Ex: Relatório Mensal - Janeiro 2024"
+              required
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="aluno">Aluno *</Label>
+            <Select
+              value={formData.aluno_id}
+              onValueChange={(value) =>
+                setFormData({ ...formData, aluno_id: value })
+              }
+              required
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione um aluno" />
+              </SelectTrigger>
+              <SelectContent>
+                {alunos.map((aluno) => (
+                  <SelectItem key={aluno.id} value={aluno.id}>
+                    {aluno.nome}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <Label>Período Início *</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button type="button" variant="outline" className="w-full justify-start">
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {format(formData.periodo_inicio, "dd/MM/yyyy", { locale: ptBR })}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0">
+                  <Calendar
+                    mode="single"
+                    selected={formData.periodo_inicio}
+                    onSelect={(date) =>
+                      date && setFormData({ ...formData, periodo_inicio: date })
+                    }
+                    locale={ptBR}
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            <div>
+              <Label>Período Fim *</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button type="button" variant="outline" className="w-full justify-start">
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {format(formData.periodo_fim, "dd/MM/yyyy", { locale: ptBR })}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0">
+                  <Calendar
+                    mode="single"
+                    selected={formData.periodo_fim}
+                    onSelect={(date) =>
+                      date && setFormData({ ...formData, periodo_fim: date })
+                    }
+                    locale={ptBR}
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+          </div>
+        </div>
+
         <div>
-          <Label htmlFor="titulo">Título do Relatório *</Label>
-          <Input
-            id="titulo"
-            value={formData.titulo}
+          <Label htmlFor="observacoes">Observações e Feedback</Label>
+          <Textarea
+            id="observacoes"
+            value={formData.observacoes}
             onChange={(e) =>
-              setFormData({ ...formData, titulo: e.target.value })
+              setFormData({ ...formData, observacoes: e.target.value })
             }
-            placeholder="Ex: Relatório Mensal - Janeiro 2024"
-            required
+            placeholder="Descreva observações sobre o desempenho, evolução, pontos de atenção..."
+            rows={6}
           />
         </div>
+      </form>
 
-        <div>
-          <Label htmlFor="aluno">Aluno *</Label>
-          <Select
-            value={formData.aluno_id}
-            onValueChange={(value) =>
-              setFormData({ ...formData, aluno_id: value })
-            }
-            required
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Selecione um aluno" />
-            </SelectTrigger>
-            <SelectContent>
-              {alunos.map((aluno) => (
-                <SelectItem key={aluno.id} value={aluno.id}>
-                  {aluno.nome}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <div>
-            <Label>Período Início *</Label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className="w-full justify-start">
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {format(formData.periodo_inicio, "dd/MM/yyyy", { locale: ptBR })}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0">
-                <Calendar
-                  mode="single"
-                  selected={formData.periodo_inicio}
-                  onSelect={(date) =>
-                    date && setFormData({ ...formData, periodo_inicio: date })
-                  }
-                  locale={ptBR}
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
-
-          <div>
-            <Label>Período Fim *</Label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className="w-full justify-start">
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {format(formData.periodo_fim, "dd/MM/yyyy", { locale: ptBR })}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0">
-                <Calendar
-                  mode="single"
-                  selected={formData.periodo_fim}
-                  onSelect={(date) =>
-                    date && setFormData({ ...formData, periodo_fim: date })
-                  }
-                  locale={ptBR}
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
-        </div>
-      </div>
-
-      {/* Dashboard de Progresso */}
+      {/* Dashboard e fotos fora do form para evitar submit acidental ao analisar */}
       {formData.aluno_id && (
         <Card>
           <CardHeader>
@@ -310,19 +325,6 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
           </CardContent>
         </Card>
       )}
-
-      <div>
-        <Label htmlFor="observacoes">Observações e Feedback</Label>
-        <Textarea
-          id="observacoes"
-          value={formData.observacoes}
-          onChange={(e) =>
-            setFormData({ ...formData, observacoes: e.target.value })
-          }
-          placeholder="Descreva observações sobre o desempenho, evolução, pontos de atenção..."
-          rows={6}
-        />
-      </div>
 
       {formData.aluno_id && alunoPhotos.length > 0 && (
         <Card>
@@ -352,7 +354,7 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
                         alt={photo.descricao || "Foto do aluno"}
                         className="w-full h-32 object-cover"
                       />
-                      <div 
+                      <div
                         className="absolute top-2 right-2"
                         onClick={(e) => e.stopPropagation()}
                       >
@@ -383,11 +385,11 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
         <Button type="button" variant="outline" onClick={onCancel}>
           Cancelar
         </Button>
-        <Button type="submit" disabled={loading} variant="premium">
+        <Button type="submit" form="report-form" disabled={loading} variant="premium">
           {loading ? "Salvando..." : reportId ? "Atualizar" : "Criar Relatório"}
         </Button>
       </div>
-    </form>
+    </div>
   );
 };
 

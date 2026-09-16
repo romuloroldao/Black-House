@@ -23,10 +23,10 @@ const StudentProgressView = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (user) {
+    if (user?.id) {
       loadProgressData();
     }
-  }, [user]);
+  }, [user?.id]);
 
   const loadProgressData = async () => {
     try {
