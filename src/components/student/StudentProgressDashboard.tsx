@@ -198,7 +198,7 @@ export default function StudentProgressDashboard({ studentId }: StudentProgressD
     "6-8": 7,
   };
 
-  const horasSonoData = checkins.reverse().map((c) => ({
+  const horasSonoData = [...checkins].reverse().map((c) => ({
     semana: format(new Date(c.created_at), "dd/MM", { locale: ptBR }),
     horas: sonoMap[c.media_horas_sono] || 0,
   }));

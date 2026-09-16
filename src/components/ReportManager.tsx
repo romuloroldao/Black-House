@@ -50,14 +50,17 @@ const ReportManager = () => {
   });
 
   useEffect(() => {
-    if (user) {
+    if (user?.id) {
       loadReports();
     }
-  }, [user]);
+  }, [user?.id]);
 
   const loadReports = async () => {
     try {
-      setLoading(true);
+      // Evita flash de loading que desestabiliza o diálogo aberto
+      if (reports.length === 0) {
+        setLoading(true);
+      }
       const { data, error } = await supabase
         .from("relatorios")
         .select(`
