@@ -82,7 +82,7 @@ const TodayHeroCard = ({
       )}
     >
       <p className="text-sm text-muted-foreground capitalize">{dateLabel}</p>
-      <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">
+      <h1 className="mt-1 text-xl font-bold tracking-tight sm:text-2xl">
         {getGreeting()}, {firstName}!
       </h1>
       <p className="mt-2 text-sm text-muted-foreground">

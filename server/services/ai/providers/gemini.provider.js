@@ -172,11 +172,7 @@ class GeminiProvider {
             },
         ];
 
-        const generatePromise = (async () => {
-            const result = await model.generateContent(parts);
-            const response = await result.response;
-            return response.text();
-        })();
+        const generatePromise = this._generateWithRetries(model, parts, timeoutMs);
 
         let timeoutId;
         const timeoutPromise = new Promise((_, reject) => {
@@ -213,6 +209,36 @@ class GeminiProvider {
             dataKeys: Object.keys(parsedData || {}),
         });
         return parsedData;
+    }
+
+    /**
+     * Gera conteúdo com retry exponencial para erros transitórios (429/503).
+     */
+    async _generateWithRetries(model, parts, timeoutMs, maxAttempts = 3) {
+        const { classifyVisionError } = require('../../../utils/pose-vision-errors');
+        let lastError;
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+            try {
+                const result = await model.generateContent(parts);
+                const response = await result.response;
+                return response.text();
+            } catch (error) {
+                lastError = error;
+                const kind = classifyVisionError(error);
+                if (kind !== 'transient' || attempt >= maxAttempts) {
+                    throw error;
+                }
+                const delayMs = Math.min(30_000, 1000 * 2 ** (attempt - 1));
+                logger.warn('Gemini vision retry', {
+                    model: this.model,
+                    attempt,
+                    delayMs,
+                    error: error.message,
+                });
+                await new Promise((r) => setTimeout(r, delayMs));
+            }
+        }
+        throw lastError;
     }
 }
 

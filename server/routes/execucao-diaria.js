@@ -169,6 +169,29 @@ module.exports = function createExecucaoDiariaRouter(pool, authenticate, domainS
     },
   );
 
+  // GET /api/alunos/me/treino-evolucao — leitura semanal do Log Book
+  router.get(
+    '/treino-evolucao',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['aluno']),
+    resolveAlunoOrFailWithPayment,
+    async (req, res) => {
+      try {
+        const evolucao = require('../services/treino-evolucao.service');
+        const asOf = req.query.as_of || req.query.week || undefined;
+        const payload = await evolucao.getWeeklyEvolution(pool, req.aluno.id, {
+          asOf,
+          audience: 'aluno',
+        });
+        return res.json(payload);
+      } catch (error) {
+        console.error('GET treino-evolucao', error);
+        return sendServiceError(res, error);
+      }
+    },
+  );
+
   // GET /api/alunos/me/proxima-acao
   router.get(
     '/proxima-acao',

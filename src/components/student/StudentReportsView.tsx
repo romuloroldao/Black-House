@@ -18,6 +18,8 @@ import {
 } from "@/components/ui/dialog";
 import { useProfileCompleteness } from "@/hooks/useProfileCompleteness";
 import ProfileCompletionWizard from "@/components/student/ProfileCompletionWizard";
+import WorkoutEvolutionSection from "@/components/student/WorkoutEvolutionSection";
+import ReportContentGuard from "@/components/report/ReportContentGuard";
 
 interface Report {
   id: string;
@@ -161,7 +163,7 @@ const StudentReportsView = () => {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold mb-2">Meus Relatórios</h1>
+        <h1 className="mb-2 text-xl font-bold sm:text-2xl">Meus Relatórios</h1>
         <p className="text-muted-foreground">
           Acompanhe seu progresso através dos relatórios do seu coach
         </p>
@@ -243,11 +245,22 @@ const StudentReportsView = () => {
 
           {selectedReport && (
             <div className="space-y-6">
+            <ReportContentGuard>
               <div>
                 <p className="text-sm text-muted-foreground mb-4">
                   Período: {format(new Date(selectedReport.periodo_inicio), "dd/MM/yyyy", { locale: ptBR })} até{" "}
                   {format(new Date(selectedReport.periodo_fim), "dd/MM/yyyy", { locale: ptBR })}
                 </p>
+
+                {alunoId ? (
+                  <div className="mb-4">
+                    <WorkoutEvolutionSection
+                      alunoId={alunoId}
+                      asOf={selectedReport.periodo_fim}
+                      audience="aluno"
+                    />
+                  </div>
+                ) : null}
 
                 {selectedReport.metricas && Object.keys(selectedReport.metricas).length > 0 && (
                   <Card>
@@ -302,6 +315,7 @@ const StudentReportsView = () => {
                   </Card>
                 )}
               </div>
+            </ReportContentGuard>
 
               <Card>
                 <CardHeader>

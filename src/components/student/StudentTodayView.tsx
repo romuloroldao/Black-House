@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Calendar, ChevronDown, LayoutGrid, Sparkles } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import {
+  Calendar,
+  Camera,
+  ChevronDown,
+  Dumbbell,
+  LayoutGrid,
+  Replace,
+  Scale,
+  Sparkles,
+  Utensils,
+  type LucideIcon,
+} from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -29,19 +40,50 @@ import TodayPhotoCard from "@/components/student/today/TodayPhotoCard";
 import StudentCoachCheckinFeedback from "@/components/student/StudentCoachCheckinFeedback";
 import AgentComposer from "@/components/student/agent/AgentComposer";
 import AgentThread from "@/components/student/agent/AgentThread";
+import ColemanHeader from "@/components/student/agent/ColemanHeader";
 import TodayContextStrip from "@/components/student/agent/TodayContextStrip";
-import { askPromptForAcao, type ProximaAcao } from "@/components/student/agent/NextActionHero";
+import {
+  composeHomeOpening,
+  markColemanMet,
+  openingStorageKey,
+} from "@/components/student/agent/compose-home-opening";
+import type { ProximaAcao } from "@/components/student/agent/NextActionHero";
 import WeightLogDialog from "@/components/student/agent/WeightLogDialog";
-import { chipsForProximaAcao } from "@/components/student/agent/agent-chips";
+import { chipsForHojeContext } from "@/components/student/agent/agent-chips";
 import { useStudentAgent, type AgentUiOpenTarget } from "@/hooks/useStudentAgent";
 
+const CHIP_ICONS: Record<string, LucideIcon> = {
+  "Minha dieta": Utensils,
+  "Meu treino": Dumbbell,
+  "Próxima refeição": Utensils,
+  "Trocar alimento": Replace,
+  "Enviar foto": Camera,
+  "Registrar peso": Scale,
+  "Iniciar treino": Dumbbell,
+  "Analisar refeição": Utensils,
+  Recuperação: Sparkles,
+  "Próximo treino": Dumbbell,
+  "Falar com coach": Sparkles,
+  "O que faço agora?": Sparkles,
+  Evolução: Camera,
+  Concluí: Sparkles,
+  Restaurante: Utensils,
+  "Como estou?": Sparkles,
+};
+
 const MAIS_DO_DIA_OPEN_KEY = "bh-student-mais-do-dia-open";
+
+function isMobileViewport(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia("(max-width: 767px)").matches;
+}
 
 function readMaisDoDiaOpen(): boolean {
   const raw = safeGetItem(MAIS_DO_DIA_OPEN_KEY);
   if (raw === "0" || raw === "false") return false;
   if (raw === "1" || raw === "true") return true;
-  return true; // padrão: aberto (cards no topo)
+  // Mobile: fechado por defeito para o chat ganhar altura; desktop: aberto
+  return !isMobileViewport();
 }
 
 type StudentTodayViewProps = {
@@ -55,12 +97,19 @@ type StudentTodayViewProps = {
   onExplorePlatform?: () => void;
 };
 
-function nextActionLabel(acao: ProximaAcao | null): string | null {
-  if (!acao?.type || acao.type === "idle") return null;
-  const title = acao.title?.trim();
-  const desc = acao.description?.trim();
-  if (title && desc) return `${title}: ${desc}`;
-  return title || desc || null;
+function maisDoDiaTriggerLabel(data: AlunoHojeResponse | null, pendenciasCount: number): string {
+  const dieta =
+    data?.dieta_rotacao?.today_label ||
+    (data?.dieta as { nome?: string } | null)?.nome ||
+    "dieta";
+  const treino = data?.treino?.descanso_hoje
+    ? "descanso"
+    : data?.treino?.detalhe?.nome || "treino";
+  const pend =
+    pendenciasCount > 0
+      ? `${pendenciasCount} pendência${pendenciasCount !== 1 ? "s" : ""}`
+      : "em dia";
+  return `Hoje · ${dieta} · ${treino} · ${pend}`;
 }
 
 const StudentTodayView = ({
@@ -71,12 +120,13 @@ const StudentTodayView = ({
 }: StudentTodayViewProps) => {
   const { user } = useAuth();
   const { isReady } = useDataContext();
+  const navigate = useNavigate();
   const [, setSearchParams] = useSearchParams();
   const internal = useAlunoHoje(Boolean(isReady && user) && !hojeState);
   const data = hojeState?.data ?? internal.data;
   const loading = hojeState?.loading ?? internal.loading;
   const [proxima, setProxima] = useState<ProximaAcao | null>(null);
-  const [proximaLoading, setProximaLoading] = useState(false);
+  const [proximaReady, setProximaReady] = useState(false);
   const [maisDoDiaOpen, setMaisDoDiaOpen] = useState(() =>
     typeof window !== "undefined" ? readMaisDoDiaOpen() : true,
   );
@@ -133,6 +183,9 @@ const StudentTodayView = ({
       case "videos":
         openTab("videos");
         break;
+      case "education":
+        openTab("education");
+        break;
       case "profile":
         openTab("profile");
         break;
@@ -158,12 +211,11 @@ const StudentTodayView = ({
 
   const loadProxima = async () => {
     if (!agent.enabled) return;
-    setProximaLoading(true);
     const res = await apiClient.getProximaAcaoSafe();
     if (res.success && res.data) {
       setProxima(res.data as ProximaAcao);
     }
-    setProximaLoading(false);
+    setProximaReady(true);
   };
 
   useEffect(() => {
@@ -173,8 +225,27 @@ const StudentTodayView = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount/resume once per ready
   }, [isReady, agent.enabled]);
 
-  const chips = useMemo(() => chipsForProximaAcao(proxima), [proxima]);
-  const nextLabel = nextActionLabel(proxima);
+  useEffect(() => {
+    if (!agent.enabled || !agent.hydrated || loading || !proximaReady) return;
+    if (agent.thread.length > 0) return;
+    const text = composeHomeOpening(data, proxima);
+    agent.injectLocalOpening(text, openingStorageKey());
+    markColemanMet();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- inject once when context ready
+  }, [
+    agent.enabled,
+    agent.hydrated,
+    agent.thread.length,
+    loading,
+    proximaReady,
+    data,
+    proxima,
+  ]);
+
+  const chips = useMemo(
+    () => chipsForHojeContext({ proxima, hoje: data }),
+    [proxima, data],
+  );
 
   if (!isReady) {
     return (
@@ -224,33 +295,22 @@ const StudentTodayView = ({
               nome?: string | null;
               objetivo?: string | null;
               data_retorno?: string | null;
+              refeicao_livre_ativa?: boolean | null;
+              refeicao_livre_content_id?: string | null;
             } | null
           }
           dietaRotacao={data?.dieta_rotacao ?? null}
           onOpenTreino={() => openTab("workouts", { session: "1" })}
           onOpenDieta={() => openTab("diet")}
+          onOpenGuiaEducativo={(contentId) => navigate(`/portal-aluno/guia/${contentId}`)}
         />
       </div>
     );
   }
 
   return (
-    <div
-      className={cn(
-        "flex min-w-0 flex-col gap-3",
-        /* Fechado: preenche o main (flex-1) e o chat cresce no espaço restante */
-        !maisDoDiaOpen && "min-h-0 flex-1 pb-1",
-        maisDoDiaOpen && "pb-4",
-      )}
-    >
-      <div className="shrink-0 space-y-3">
-        <TodayHeroCard
-          compact
-          loading={loading}
-          aluno={data?.aluno as { nome?: string; email?: string; objetivo?: string }}
-          pendenciasCount={data?.contadores?.pendencias_total ?? pendingTasks.length}
-        />
-
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-1.5 pb-1">
+      <div className="shrink-0 space-y-1.5">
         {profileStatus && !profileStatus.is_complete && onOpenProfileWizard && (
           <ProfileCompletenessBanner
             compact
@@ -263,32 +323,31 @@ const StudentTodayView = ({
           <ReturnCountdownBanner loading={false} countdown={returnCountdown} />
         )}
 
-        {/* —— TOPO: cards do dia (acordeão) —— */}
+        {/* Painel opcional — fechado por defeito; chat maximizado */}
         <Collapsible
           open={maisDoDiaOpen}
           onOpenChange={setMaisDoDiaOpenPersist}
-          className="rounded-xl border border-border/60 bg-card/40"
+          className="rounded-lg border border-border/40 bg-card/20"
         >
           <CollapsibleTrigger asChild>
             <Button
               type="button"
               variant="ghost"
-              className="flex h-auto min-h-11 w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-muted/40"
+              className="flex h-8 w-full items-center justify-between gap-2 rounded-lg px-2.5 text-left hover:bg-muted/40"
               aria-expanded={maisDoDiaOpen}
+              aria-label="Mais do dia"
             >
-              <span className="min-w-0">
-                <span className="block text-sm font-semibold text-foreground">Mais do dia</span>
-                <span className="block truncate text-xs text-muted-foreground">
-                  {maisDoDiaOpen
-                    ? "Toque para esconder e expandir o assistente"
-                    : pendingTasks.length > 0
-                      ? `${pendingTasks.length} pendência${pendingTasks.length !== 1 ? "s" : ""} · toque para ver os cards`
-                      : "Dieta, treino, streak e fotos · toque para expandir"}
-                </span>
+              <span className="min-w-0 truncate text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">Mais do dia</span>
+                <span aria-hidden> · </span>
+                {maisDoDiaTriggerLabel(
+                  data,
+                  data?.contadores?.pendencias_total ?? pendingTasks.length,
+                )}
               </span>
               <ChevronDown
                 className={cn(
-                  "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none",
+                  "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none",
                   maisDoDiaOpen && "rotate-180",
                 )}
                 aria-hidden
@@ -297,8 +356,9 @@ const StudentTodayView = ({
           </CollapsibleTrigger>
           <CollapsibleContent
             className={cn(
-              "space-y-3 overflow-hidden border-t border-border/40 px-3 pb-3 pt-3",
+              "max-h-[min(36dvh,18rem)] space-y-3 overflow-y-auto overscroll-contain border-t border-border/40 px-3 pb-3 pt-3",
               "data-[state=closed]:hidden",
+              "motion-safe:data-[state=open]:animate-in motion-safe:data-[state=open]:fade-in-0 motion-safe:data-[state=open]:duration-200",
             )}
           >
             <TodayContextStrip
@@ -361,66 +421,58 @@ const StudentTodayView = ({
         </Collapsible>
       </div>
 
-      {/* —— Assistente: flex-1 preenche o resto quando o acordeão está fechado —— */}
+      {/* —— Coleman: conversa como centro —— */}
       <section
         className={cn(
-          "flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border/50 bg-card",
-          maisDoDiaOpen ? "max-h-[min(48dvh,26rem)] shrink-0" : "flex-1",
+          "flex min-h-0 flex-1 flex-col overflow-hidden bg-card",
+          "max-md:rounded-none max-md:border-0",
+          "md:rounded-2xl md:border md:border-border/50",
         )}
-        aria-label="Conversa com o agente"
+        aria-label="Conversa com o Coleman"
       >
-        <div className="flex min-w-0 shrink-0 items-center justify-between gap-2 border-b border-border/40 px-3 py-2.5 sm:px-4">
-          <div className="min-w-0">
-            <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
-              <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
-              Assistente
-            </p>
-            <p className="truncate text-xs text-muted-foreground">
-              {proximaLoading ? (
-                <Skeleton className="mt-1 inline-block h-3 w-36" />
-              ) : nextLabel ? (
-                <>Agora: {nextLabel}</>
-              ) : (
-                "Pergunte quando precisar de ajuda"
-              )}
-            </p>
-          </div>
-          {!proximaLoading && nextLabel && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 shrink-0 px-2 text-xs"
-              onClick={() => {
-                trackAgentEvent("agent_first_touch", { via: "next_inline" });
-                void agent.send(askPromptForAcao(proxima?.type));
-              }}
-            >
-              Perguntar
-            </Button>
-          )}
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4">
+        <ColemanHeader />
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2 sm:px-4">
           <AgentThread
             thread={agent.thread}
             status={agent.status}
             error={agent.error}
-            chips={chips}
-            onSend={(t) => {
-              trackAgentEvent("agent_first_touch", { via: "chip_or_thread" });
-              void agent.send(t);
-            }}
+            showChips={false}
             onCardAction={(a) => void agent.runCardAction(a)}
-            emptyHint={
-              maisDoDiaOpen
-                ? "Feche «Mais do dia» acima para ler mais da conversa"
-                : "Mais espaço para conversar — digite ou use um atalho"
-            }
+            emptyHint="O Coleman está preparando o contexto do dia…"
           />
         </div>
 
-        <div className="shrink-0 border-t border-border/60 bg-card px-3 py-2.5 sm:px-4">
+        <div className="shrink-0 space-y-1.5 border-t border-border/50 bg-card px-3 py-2 sm:px-4">
+          <div
+            className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            role="group"
+            aria-label="Sugestões do Coleman"
+          >
+            {chips.map((chip) => {
+              const Icon = CHIP_ICONS[chip.label] || Sparkles;
+              return (
+                <Button
+                  key={chip.label}
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "h-9 shrink-0 gap-1.5 rounded-full border border-border/50 px-3 text-xs font-normal text-muted-foreground",
+                    "hover:border-primary/30 hover:text-foreground",
+                    "motion-safe:active:scale-[0.98] motion-safe:transition-transform motion-safe:duration-100",
+                  )}
+                  disabled={agent.status === "sending"}
+                  onClick={() => {
+                    trackAgentEvent("agent_first_touch", { via: "chip" });
+                    void agent.send(chip.text);
+                  }}
+                >
+                  <Icon className="h-3.5 w-3.5 text-primary/80" aria-hidden />
+                  <span className="whitespace-nowrap">{chip.label}</span>
+                </Button>
+              );
+            })}
+          </div>
           <AgentComposer
             status={agent.status}
             onSend={(t) => {
@@ -428,23 +480,25 @@ const StudentTodayView = ({
               void agent.send(t);
             }}
             autoFocus={false}
-            placeholder="O que você precisa agora?"
+            placeholder="Fale com o Coleman..."
           />
         </div>
       </section>
 
-      <Button
-        type="button"
-        variant="ghost"
-        className="h-10 w-full shrink-0 gap-2 text-sm text-muted-foreground"
-        onClick={() => {
-          trackAgentEvent("nav_traditional_open", { via: "explore" });
-          onExplorePlatform?.();
-        }}
-      >
-        <LayoutGrid className="h-4 w-4" aria-hidden />
-        Navegar pela plataforma
-      </Button>
+      {/* Desktop: atalho de navegação (mobile usa Menu + bottom nav) */}
+      <div className="hidden shrink-0 md:block">
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-9 w-full gap-2 text-sm text-muted-foreground"
+          onClick={() => {
+            onExplorePlatform?.();
+          }}
+        >
+          <LayoutGrid className="h-4 w-4" aria-hidden />
+          Navegar pela plataforma
+        </Button>
+      </div>
 
       <WeightLogDialog
         open={agent.weightDialogOpen}

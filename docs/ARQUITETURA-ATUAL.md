@@ -20,6 +20,7 @@
 
 - Rotas semânticas `/api/*` e `apiClient` em `src/lib/api-client.ts`.
 - Lista de pathnames permitidos pelo cliente (alinhada ao Express): `src/contracts/api-contract.ts` (`API_CONTRACT`, `isContractEndpoint`). Não incluir rotas fantasma: o contrato deve refletir o que o servidor expõe.
+- Evolução semanal do treino (Log Book): `GET /api/alunos/me/treino-evolucao` e `GET /api/alunos/:alunoId/treino-evolucao`. Cálculo em `server/services/treino-evolucao.engine.js` (determinístico, sem IA). Semana = segunda–domingo, igual ao check-in.
 - Supabase/PostgREST foi removido do fluxo principal; existe “kill switch” em `src/lib/supabase.ts` para evitar regressão.
 
 ## Ficheiros SQL
@@ -40,16 +41,22 @@
 
 - Aluno com histórico/ficha importada **vs** aluno novo; credencial, vínculo automático por email e vínculo manual pelo coach: ver [`arquivo/2026-03-30-cenarios-cadastro-aluno.md`](arquivo/2026-03-30-cenarios-cadastro-aluno.md).
 
+## Produto (PRD)
+
+PRD unificado (arquitectura → features → UX, as-built 2026-08-18): [`arquivo/2026-08-18-prd-blackhouse-completo.md`](arquivo/2026-08-18-prd-blackhouse-completo.md).
+
+Os PRDs de Julho (recursos / agentic) ficam histórico.
+
 ## Agentic OS (portal aluno)
 
 Documentação de investigação e specs:
 
 - Auditoria: [`arquivo/2026-07-26-auditoria-agentic-os.md`](arquivo/2026-07-26-auditoria-agentic-os.md)
-- PRD complementar: [`arquivo/2026-07-26-prd-blackhouse-agentic-os.md`](arquivo/2026-07-26-prd-blackhouse-agentic-os.md)
 - Specs: Phase 1a–6 (`docs/arquivo/`, prefixo `2026-07-26-spec-phase-*`)
-- PRD as-built de recursos: [`arquivo/2026-07-25-prd-blackhouse-recursos.md`](arquivo/2026-07-25-prd-blackhouse-recursos.md)
+- Phase 7 HITL: [`arquivo/2026-08-19-spec-phase-7-coach-agent-hitl.md`](arquivo/2026-08-19-spec-phase-7-coach-agent-hitl.md)
+- Home AI-first + Coleman: [`arquivo/2026-07-31-home-ai-first.md`](arquivo/2026-07-31-home-ai-first.md), [`arquivo/2026-08-11-coleman-agente-nutricional.md`](arquivo/2026-08-11-coleman-agente-nutricional.md)
 
-**Estado de implementação (2026-07-28):** Phase 1a–6 + Agent-First + respostas progressivas + receitas com web. **Layout adaptativo:** sidebar aluno compacta (só ícones, default) / expandida; ver [`arquivo/2026-07-28-layout-adaptativo-nav.md`](arquivo/2026-07-28-layout-adaptativo-nav.md). Flag: `VITE_AGENT_DAILY_ENABLED`. Próximo: Phase 7 (Coach Agent HITL).
+**Estado de implementação (2026-08-19):** Phase 1a–6 + Agent-First + Coleman. Carteira de aderência 7d, UI `coach_rules`, sessão de treino hidratada do servidor, fila determinística do inbox, rascunhos HITL enriquecidos. Flag: `VITE_AGENT_DAILY_ENABLED`. **Não entregue:** orquestrador LLM do coach (Phase 7b).
 
 ---
 

@@ -73,7 +73,7 @@ const ReturnCountdownBanner = ({ loading, countdown }: ReturnCountdownBannerProp
         </div>
         {!countdown.overdue && absDays <= 14 && (
           <div className="hidden shrink-0 text-right sm:block">
-            <p className="text-3xl font-bold tabular-nums text-primary">{absDays}</p>
+            <p className="text-2xl font-bold tabular-nums text-primary">{absDays}</p>
             <p className="text-xs text-muted-foreground">dias</p>
           </div>
         )}

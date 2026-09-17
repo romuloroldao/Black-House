@@ -111,9 +111,10 @@ const EducationalContentManager = () => {
     <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold md:text-3xl">Conteúdos Educativos</h1>
+          <h1 className="text-xl font-bold md:text-2xl">Conteúdos Educativos</h1>
           <p className="text-muted-foreground mt-1 text-sm md:text-base">
-            Biblioteca reutilizável para Refeição Livre e futuras secções educativas.
+            Biblioteca reutilizável. Conteúdos activos ficam disponíveis na secção Educação do portal do aluno.
+            A categoria Refeição Livre também pode ser ligada à dieta.
           </p>
         </div>
         <Button onClick={openCreate} className="w-full sm:w-auto">

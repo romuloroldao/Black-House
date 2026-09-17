@@ -10,11 +10,7 @@ const validateRole = require('../middleware/validateRole');
 const { adaptFood } = require('../adapters/foodAdapter');
 const { normalizeOrigemPtn, auditAlimentosNutricao, kcalFromMacros, roundNutrient } = require('../utils/nutrition-alimento-utils');
 const { normalizeFoodName } = require('../utils/food-normalize');
-const {
-    listarSubstituicoesIsocaloricas,
-    kcalPorPorcao,
-    calcularQuantidadeEquivalente,
-} = require('../utils/food-equivalence');
+const { listSubstituicoes } = require('../services/alimento-substituicoes.service');
 
 const FOOD_SELECT = `SELECT 
                     a.id,
@@ -141,7 +137,7 @@ module.exports = function createAlimentosRouter(pool, authenticate, domainSchema
         }
     );
 
-    // GET /api/alimentos/:id/substituicoes?quantidade=100&unidade=g&limit=50
+    // GET /api/alimentos/:id/substituicoes?quantidade=100&unidade=g&limit=20&q=pao
     router.get(
         '/:id/substituicoes',
         authenticate,
@@ -150,55 +146,22 @@ module.exports = function createAlimentosRouter(pool, authenticate, domainSchema
         validateUUIDParam('id'),
         async (req, res) => {
             try {
-                const quantidade = Number(req.query.quantidade) || 100;
-                const unidade = String(req.query.unidade || 'g').toLowerCase();
-                const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
-
-                const refRes = await pool.query(`${FOOD_SELECT} WHERE a.id = $1`, [req.params.id]);
-                if (refRes.rows.length === 0) {
-                    return res.status(404).json({ error: 'Alimento não encontrado' });
-                }
-                const foodRef = refRes.rows[0];
-
-                if (Number(foodRef.kcal_por_referencia) <= 0 || foodRef.equiv_livre) {
-                    return res.json({
-                        referencia: adaptFood(foodRef),
-                        kcalReferencia: 0,
-                        substituicoes: [],
-                        mensagem: 'Este alimento pertence a um grupo livre ou sem calorias — substituição isocalórica não se aplica.',
-                    });
-                }
-
-                const grupoRes = await pool.query(
-                    `${FOOD_SELECT} WHERE a.tipo_id = $1 AND a.id <> $2
-                       AND COALESCE(a.status, 'active') NOT IN ('deprecated', 'merged')
-                     ORDER BY a.nome ASC`,
-                    [foodRef.tipo_id, req.params.id]
-                );
-
-                const substituicoes = listarSubstituicoesIsocaloricas(
-                    foodRef,
-                    quantidade,
-                    unidade,
-                    grupoRes.rows,
-                    { limit }
-                ).map((s) => ({
-                    alimento: adaptFood(s.alimento),
-                    quantidadeEquivalente: s.quantidadeEquivalente,
-                    kcalReferencia: s.kcalReferencia,
-                    kcalEquivalente: s.kcalEquivalente,
-                    formula: s.formula,
-                }));
-
-                res.json({
-                    referencia: adaptFood(foodRef),
-                    quantidadeReferencia: quantidade,
-                    unidadeReferencia: unidade,
-                    kcalReferencia: Math.round(kcalPorPorcao(foodRef, quantidade, unidade) * 10) / 10,
-                    substituicoes,
+                const result = await listSubstituicoes(pool, {
+                    alimentoId: req.params.id,
+                    quantidade: req.query.quantidade,
+                    unidade: req.query.unidade,
+                    limit: req.query.limit,
+                    q: req.query.q,
+                    log: (msg, meta) => {
+                        if (process.env.NODE_ENV !== 'production') {
+                            console.info(`[substituicoes] ${msg}`, meta || '');
+                        }
+                    },
                 });
+                res.json(result);
             } catch (error) {
-                res.status(500).json({ error: error.message });
+                const status = error.statusCode || 500;
+                res.status(status).json({ error: error.message });
             }
         }
     );

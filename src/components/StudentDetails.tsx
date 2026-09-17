@@ -35,6 +35,7 @@ import { getAlunoDisplayName } from "@/lib/aluno-display";
 import { formatDateBR } from "@/lib/date-format";
 import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import EvolutionTimelineExperience from "@/components/student/progress/evolution/EvolutionTimelineExperience";
+import LoadProgressionSection from "@/components/coach/LoadProgressionSection";
 import type { EvolutionPhoto } from "@/lib/evolution-timeline";
 
 interface Student {
@@ -533,7 +534,7 @@ export default function StudentDetails() {
         </Button>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold">{getAlunoDisplayName(student)}</h1>
+            <h1 className="text-xl font-bold sm:text-2xl">{getAlunoDisplayName(student)}</h1>
             {student.ultimo_contato_resumo && (
               <p className="text-sm text-muted-foreground mt-1">
                 Último contacto: {student.ultimo_contato_resumo}
@@ -1114,7 +1115,13 @@ export default function StudentDetails() {
 
         {/* TAB: Progresso */}
         <TabsContent value="progress" className="space-y-6 mt-6">
-          <EvolutionTimelineExperience photos={fotos} readonly />
+          {id ? <LoadProgressionSection alunoId={id} /> : null}
+          <EvolutionTimelineExperience
+            photos={fotos}
+            readonly
+            coachPoseEdit
+            onPhotosRefresh={() => id && carregarDadosAluno()}
+          />
 
           {/* Dashboard de Progresso do Aluno */}
           <Card>

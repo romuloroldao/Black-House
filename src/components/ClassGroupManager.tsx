@@ -265,7 +265,7 @@ export function ClassGroupManager() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold">Gestão de Turmas</h2>
+          <h2 className="text-xl font-bold sm:text-2xl">Gestão de Turmas</h2>
           <p className="text-muted-foreground">Organize seus alunos em turmas</p>
         </div>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

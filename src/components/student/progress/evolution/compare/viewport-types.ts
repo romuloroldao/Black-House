@@ -7,6 +7,9 @@ export type ViewportState = {
 
 export type CompareMode = 'sideBySide' | 'split' | 'flash';
 
+/** Modos de UI (hierarquia progressiva). */
+export type CompareUiMode = 'compare' | 'sideBySide' | 'align';
+
 export type RegionPreset = 'fullBody' | 'torso' | 'abdomen' | 'back' | 'legs';
 
 export const MIN_SCALE = 0.5;

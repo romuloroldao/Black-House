@@ -931,6 +931,29 @@ BEGIN
   END IF;
 END $$;
 
+-- Metadados de pose normalizada (check-in / comparativo)
+ALTER TABLE public.fotos_alunos
+  ADD COLUMN IF NOT EXISTS pose_aluno text,
+  ADD COLUMN IF NOT EXISTS pose_vision text,
+  ADD COLUMN IF NOT EXISTS pose_vision_confidence numeric(4, 3),
+  ADD COLUMN IF NOT EXISTS pose_vision_reason text,
+  ADD COLUMN IF NOT EXISTS pose_coach text,
+  ADD COLUMN IF NOT EXISTS pose_source text,
+  ADD COLUMN IF NOT EXISTS pose_efetiva text,
+  ADD COLUMN IF NOT EXISTS pose_quality jsonb,
+  ADD COLUMN IF NOT EXISTS pose_analysis_status text DEFAULT 'pending',
+  ADD COLUMN IF NOT EXISTS pose_analyzed_at timestamptz,
+  ADD COLUMN IF NOT EXISTS content_hash text,
+  ADD COLUMN IF NOT EXISTS pose_analysis_attempts integer NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS idx_fotos_alunos_pose_status
+  ON public.fotos_alunos (pose_analysis_status)
+  WHERE pose_analysis_status IN ('pending', 'failed', 'processing');
+
+CREATE INDEX IF NOT EXISTS idx_fotos_alunos_content_hash
+  ON public.fotos_alunos (content_hash)
+  WHERE content_hash IS NOT NULL;
+
 -- ============================================================================
 -- COMENTÁRIOS
 -- ============================================================================
@@ -1682,6 +1705,9 @@ CREATE TABLE IF NOT EXISTS public.treino_serie_logs (
   exercise_name text NOT NULL,
   set_index int NOT NULL DEFAULT 1 CHECK (set_index >= 1),
   carga text,
+  carga_valor numeric(10,2),
+  carga_unidade text CHECK (carga_unidade IS NULL OR carga_unidade = ANY (ARRAY['kg'::text, 'lb'::text])),
+  slot_key uuid,
   repeticoes numeric(8,2),
   rpe numeric(4,1) CHECK (rpe IS NULL OR (rpe >= 0 AND rpe <= 10)),
   dor numeric(4,1) CHECK (dor IS NULL OR (dor >= 0 AND dor <= 10)),
@@ -1698,6 +1724,17 @@ CREATE INDEX IF NOT EXISTS idx_treino_serie_logs_aluno
   ON public.treino_serie_logs (aluno_id, registrado_em DESC);
 CREATE INDEX IF NOT EXISTS idx_treino_serie_logs_sessao
   ON public.treino_serie_logs (sessao_id, exercise_index, set_index);
+CREATE INDEX IF NOT EXISTS idx_treino_serie_logs_aluno_slot
+  ON public.treino_serie_logs (aluno_id, slot_key)
+  WHERE slot_key IS NOT NULL;
+
+-- Bases já criadas: CREATE TABLE IF NOT EXISTS não acrescenta colunas novas
+ALTER TABLE public.treino_serie_logs ADD COLUMN IF NOT EXISTS slot_key uuid;
+ALTER TABLE public.treino_serie_logs ADD COLUMN IF NOT EXISTS carga_valor numeric(10, 2);
+ALTER TABLE public.treino_serie_logs ADD COLUMN IF NOT EXISTS carga_unidade text;
+ALTER TABLE public.treino_serie_logs DROP CONSTRAINT IF EXISTS treino_serie_logs_carga_unidade_check;
+ALTER TABLE public.treino_serie_logs ADD CONSTRAINT treino_serie_logs_carga_unidade_check
+  CHECK (carga_unidade IS NULL OR carga_unidade = ANY (ARRAY['kg'::text, 'lb'::text]));
 
 -- ============================================================================
 -- Phase 1b: Agent Foundation
@@ -1855,3 +1892,33 @@ CREATE TABLE IF NOT EXISTS public.coach_rules (
 
 CREATE INDEX IF NOT EXISTS idx_coach_rules_coach_active
   ON public.coach_rules (coach_id, active, priority ASC, created_at ASC);
+
+-- ============================================================================
+-- Email Queue — fila persistente para e-mails transacionais
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.email_queue (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  to_address text NOT NULL,
+  subject text NOT NULL,
+  text_body text,
+  html_body text,
+  from_address text,
+  status text NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'processing', 'sent', 'failed', 'dead')),
+  attempts int NOT NULL DEFAULT 0,
+  max_attempts int NOT NULL DEFAULT 5,
+  last_error text,
+  next_retry_at timestamptz,
+  sent_at timestamptz,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_queue_pending
+  ON public.email_queue (status, next_retry_at ASC)
+  WHERE status IN ('pending', 'failed');
+
+CREATE INDEX IF NOT EXISTS idx_email_queue_created
+  ON public.email_queue (created_at DESC);

@@ -24,6 +24,7 @@ const NotificationService = require('./services/notification.service');
 const AsaasService = require('./services/asaas.service');
 const { decryptCoachAsaasApiKey } = require('./utils/asaas-coach-secret-crypto');
 const JobsRunner = require('./jobs');
+const { setQueuePool } = require('./utils/email-queue');
 const createWebhookRouter = require('./routes/webhooks');
 const createFinancialWebhookRouter = require('./routes/financial-webhooks');
 const { createFinancialSync } = require('./financial');
@@ -410,6 +411,11 @@ if (notificationService) {
     financialSync.startWorker();
     logger.info('Financial Sync inicializado');
 }
+
+// =============== EMAIL QUEUE POOL ===============
+// Configura o pool para a fila de e-mails (persistência + retry automático)
+setQueuePool(pool);
+logger.info('Email queue pool configurado');
 
 // =============== BACKGROUND JOBS ===============
 let jobsRunner = null;

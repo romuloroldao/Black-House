@@ -10,7 +10,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Progress } from '@/components/ui/progress';
-import logoWhite from '@/assets/logo-white.svg';
+import { BrandLogo } from '@/components/BrandLogo';
+import { ThemeToggleCompact } from '@/components/ui/mode-toggle';
 import { Check, Eye, EyeOff, Mail, Lock, User, AlertCircle, Sparkles, Scale, Ruler, CreditCard } from 'lucide-react';
 import { z } from 'zod';
 import { maskCPF, validateCPF, onlyNumbers } from '@/utils/MaskFormat';
@@ -603,9 +604,12 @@ const Auth = () => {
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted p-4">
         <div className="w-full max-w-md space-y-6">
           {/* Logo */}
-          <div className="text-center space-y-4">
+          <div className="relative text-center space-y-4">
+            <div className="absolute right-0 top-0">
+              <ThemeToggleCompact />
+            </div>
             <div className="flex justify-center">
-              <img src={logoWhite} alt="Black House" className="h-20 w-auto" />
+              <BrandLogo className="h-20" />
             </div>
           </div>
 
@@ -758,9 +762,12 @@ const Auth = () => {
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted p-4">
         <div className="w-full max-w-md space-y-6">
           {/* Logo */}
-          <div className="text-center space-y-4">
+          <div className="relative text-center space-y-4">
+            <div className="absolute right-0 top-0">
+              <ThemeToggleCompact />
+            </div>
             <div className="flex justify-center">
-              <img src={logoWhite} alt="Black House" className="h-20 w-auto" />
+              <BrandLogo className="h-20" />
             </div>
           </div>
 
@@ -870,21 +877,20 @@ const Auth = () => {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted p-4">
       <div className="w-full max-w-md space-y-6">
         {/* Logo and Header */}
-        <div className="text-center space-y-4">
+        <div className="relative text-center space-y-4">
+          <div className="absolute right-0 top-0">
+            <ThemeToggleCompact />
+          </div>
           <div className="flex justify-center">
             <div className="relative">
-              <img 
-                src={logoWhite} 
-                alt="Black House" 
-                className="h-20 w-auto"
-              />
+              <BrandLogo className="h-20" />
               <div className="absolute -right-2 -top-2">
                 <Sparkles className="w-5 h-5 text-primary motion-safe:animate-pulse" />
               </div>
             </div>
           </div>
           <div>
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-primary-dark via-primary to-primary-glow bg-clip-text text-transparent">
+            <h1 className="bg-gradient-to-r from-primary-dark via-primary to-primary-glow bg-clip-text text-xl font-bold text-transparent sm:text-2xl">
               Black House
             </h1>
             <p className="text-muted-foreground text-sm mt-1">

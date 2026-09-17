@@ -31,9 +31,10 @@ Legenda: **Válido** · **Parcial** (rever trechos) · **Obsoleto** (não usar p
 | `docs/INVENTARIO-MD.md` | **Válido** | Este ficheiro |
 | `README.md` | **Válido** | Entrada mínima com links para `docs/` |
 | `docs/arquivo/*.md` | **Arquivo** | Notas com data (equivalência, nutrição, cadastro aluno) |
-| `docs/arquivo/2026-07-25-prd-blackhouse-recursos.md` | **Válido (as-built)** | Inventário/PRD do produto actual |
-| `docs/arquivo/2026-07-26-auditoria-agentic-os.md` | **Válido (visão)** | Auditoria transformação agentic — ainda não runtime |
-| `docs/arquivo/2026-07-26-prd-blackhouse-agentic-os.md` | **Válido (visão)** | PRD complementar Agentic OS |
+| `docs/arquivo/2026-08-18-prd-blackhouse-completo.md` | **Válido (PRD de produto)** | PRD unificado as-built (arquitectura, features, UX) |
+| `docs/arquivo/2026-07-25-prd-blackhouse-recursos.md` | **Arquivo** | PRD de recursos 2026-07-25; substituído pelo de 2026-08-18 |
+| `docs/arquivo/2026-07-26-auditoria-agentic-os.md` | **Arquivo (visão)** | Auditoria agentic; runtime descrito no PRD 2026-08-18 |
+| `docs/arquivo/2026-07-26-prd-blackhouse-agentic-os.md` | **Arquivo (visão)** | PRD complementar agentic; Phases 1a–6 já no código |
 | `docs/arquivo/2026-07-26-spec-phase-1a-execucao-diaria.md` | **Válido (spec)** | Persistência execução diária |
 | `docs/arquivo/2026-07-26-spec-phase-1b-agent-foundation.md` | **Válido (spec)** | Foundation do orquestrador/tools |
 | `docs/arquivo/2026-07-26-spec-phase-2-daily-agent.md` | **Válido (spec)** | MVP Daily Agent |

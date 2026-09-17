@@ -371,7 +371,7 @@ export default function PlanManager({ embedded = false, mode = "full" }: PlanMan
       {!embedded && (
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-3xl font-bold">Planos de Pagamento</h1>
+            <h1 className="text-xl font-bold sm:text-2xl">Planos de Pagamento</h1>
             <p className="text-muted-foreground">Gerencie seus planos e atribua alunos diretamente</p>
           </div>
           {showCatalog && (

@@ -10,6 +10,7 @@ import {
   LogOut,
   FileText,
   ClipboardCheck,
+  BookOpen,
   ChevronDown,
   MoreHorizontal,
   PanelLeftClose,
@@ -26,7 +27,8 @@ import { useDataContext } from "@/contexts/DataContext";
 import { useNavigate } from "react-router-dom";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { apiClient } from "@/lib/api-client";
-import logoWhite from "@/assets/logo-white.svg";
+import { BrandLogo } from "@/components/BrandLogo";
+import { ThemeToggleCompact } from "@/components/ui/mode-toggle";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -77,12 +79,14 @@ const StudentSidebar = ({
   /** Expansão temporária no hover (só desktop compact + pointer fino) */
   const [hoverExpand, setHoverExpand] = useState(false);
 
-  const MORE_TAB_IDS = ["progress", "videos", "reports", "financial", "profile", "dashboard"];
+  const MORE_TAB_IDS = ["progress", "videos", "education", "reports", "financial", "profile", "dashboard"];
   const coachUnreadTotal = unreadMessages + unreadCount;
 
-  /** Labels visíveis: expandido permanente, hover expand, ou drawer mobile */
-  const showLabels = !isCompact || hoverExpand || mobileOpen;
-  /** Tooltips só no compact sem hover expand (desktop) */
+  /** Expansão permanente ou hover no desktop (ignora mobileOpen). */
+  const railExpanded = !isCompact || hoverExpand;
+  /** Labels no rail expandido, hover, ou drawer mobile aberto. */
+  const showLabels = railExpanded || mobileOpen;
+  /** Tooltips só no compact sem hover (desktop). */
   const showIconTooltips = isCompact && !hoverExpand && !mobileOpen;
 
   const getFirstName = (value?: string | null): string => {
@@ -279,6 +283,8 @@ const StudentSidebar = ({
 
   const handleToggleMode = () => {
     setHoverExpand(false);
+    // Limpa flag do drawer — no desktop mobileOpen=true forçava labels sem overlay de fecho
+    onMobileOpenChange?.(false);
     toggle();
   };
 
@@ -300,6 +306,7 @@ const StudentSidebar = ({
   const moreMenuItems: MenuItem[] = [
     { id: "progress", label: "Fotos e métricas", icon: Camera },
     { id: "videos", label: "Vídeos", icon: Play },
+    { id: "education", label: "Educação", icon: BookOpen },
     { id: "reports", label: "Relatórios", icon: FileText },
     { id: "financial", label: "Financeiro", icon: DollarSign },
     { id: "profile", label: "Perfil", icon: User },
@@ -380,8 +387,8 @@ const StudentSidebar = ({
           "transition-[width] duration-200 ease-out motion-reduce:transition-none",
           /* Desktop: compact w-16 / expandido ou hover w-64 */
           "md:z-auto md:sticky md:top-0 md:self-start md:h-dvh md:max-h-dvh md:shadow-none",
-          showLabels ? "md:w-64" : "md:w-16",
-          /* Mobile: menu lateral só via hamburger */
+          railExpanded ? "md:w-64" : "md:w-16",
+          /* Mobile: menu lateral só via hamburger / drawer */
           "max-md:hidden",
           mobileOpen && "max-md:!flex",
           mobileOpen &&
@@ -392,17 +399,30 @@ const StudentSidebar = ({
         <div
           className={cn(
             "flex items-center border-b border-border",
-            showLabels ? "justify-between gap-2 p-4" : "justify-center p-3",
+            showLabels ? "justify-between gap-2 p-4" : "justify-center gap-1 p-3",
           )}
         >
-          <img
-            src={logoWhite}
-            alt="Black House"
+          <BrandLogo
             className={cn(
-              "w-auto transition-all duration-200 motion-reduce:transition-none",
+              "transition-all duration-200 motion-reduce:transition-none",
               showLabels ? "h-10" : "h-7",
             )}
           />
+          <div className="flex shrink-0 items-center gap-0.5">
+            <ThemeToggleCompact />
+            {mobileOpen ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-11 w-11 shrink-0 md:hidden"
+                aria-label="Fechar menu"
+                onClick={() => onMobileOpenChange?.(false)}
+              >
+                <PanelLeftClose className="h-5 w-5" aria-hidden />
+              </Button>
+            ) : null}
+          </div>
         </div>
 
         <ScrollArea className="flex-1">

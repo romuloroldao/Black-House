@@ -13,6 +13,7 @@ import { useDataContext } from "@/contexts/DataContext";
 import StudentDietView from "@/components/student/StudentDietView";
 import StudentWorkoutsView from "@/components/student/StudentWorkoutsView";
 import StudentVideosView from "@/components/student/StudentVideosView";
+import StudentEducationalLibraryView from "@/components/student/StudentEducationalLibraryView";
 import StudentCoachHubView from "@/components/student/StudentCoachHubView";
 import StudentProgressView from "@/components/student/StudentProgressView";
 import StudentFinancialView from "@/components/student/StudentFinancialView";
@@ -24,7 +25,8 @@ import StudentWeeklyCheckin from "@/components/student/StudentWeeklyCheckin";
 import NotificationsPopover from "@/components/NotificationsPopover";
 import { useStudentPortalRealtime } from "@/hooks/useStudentPortalRealtime";
 import { Button } from "@/components/ui/button";
-import logoWhite from "@/assets/logo-white.svg";
+import { BrandLogo } from "@/components/BrandLogo";
+import { ThemeToggleCompact } from "@/components/ui/mode-toggle";
 import { cn } from "@/lib/utils";
 import { apiClient } from "@/lib/api-client";
 import AgentReturnFab from "@/components/student/agent/AgentReturnFab";
@@ -37,7 +39,7 @@ import { useStudentNavMode } from "@/hooks/useStudentNavMode";
 const StudentPortal = () => {
   const { user } = useAuth();
   const { isReady } = useDataContext();
-  const { isCompact, mode, toggle: toggleNavMode } = useStudentNavMode();
+  const { isCompact, mode, setMode, toggle: toggleNavMode } = useStudentNavMode();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "hoje");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -122,6 +124,19 @@ const StudentPortal = () => {
     }
   };
 
+  /** Abrir navegação completa: drawer no mobile; expandir rail no desktop. */
+  const openPlatformNav = () => {
+    trackAgentEvent("nav_traditional_open", { via: "explore" });
+    const isMobile =
+      typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+    if (isMobile) {
+      setMobileNavOpen(true);
+      return;
+    }
+    setMobileNavOpen(false);
+    setMode("expanded");
+  };
+
   // Ao regressar à home, refrescar pendências (ex.: após abrir chat e marcar lidas).
   const prevTabRef = useRef(activeTab);
   useEffect(() => {
@@ -154,7 +169,7 @@ const StudentPortal = () => {
               hojeState={hojeState}
               profileStatus={profileStatus}
               onOpenProfileWizard={() => setProfileWizardOpen(true)}
-              onExplorePlatform={() => setMobileNavOpen(true)}
+              onExplorePlatform={openPlatformNav}
             />
           );
         case "diet":
@@ -163,6 +178,8 @@ const StudentPortal = () => {
           return <StudentWorkoutsView />;
         case "videos":
           return <StudentVideosView />;
+        case "education":
+          return <StudentEducationalLibraryView />;
         case "coach":
         case "chat":
         case "messages":
@@ -186,7 +203,7 @@ const StudentPortal = () => {
             />
           );
         default:
-          return <StudentTodayView onExplorePlatform={() => setMobileNavOpen(true)} />;
+          return <StudentTodayView onExplorePlatform={openPlatformNav} />;
       }
     } catch (error) {
       // DESIGN-ROOT-RENDER-UNBLOCK-001: Fallback seguro em caso de erro
@@ -230,20 +247,21 @@ const StudentPortal = () => {
           navMode={mode}
           onToggleNavMode={toggleNavMode}
         />
-        <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col max-md:pt-[calc(3.5rem+env(safe-area-inset-top,0px))]">
-          <header className="flex h-14 min-h-14 shrink-0 items-center gap-2 border-b border-border bg-background px-3 max-md:fixed max-md:inset-x-0 max-md:top-0 max-md:z-[100] max-md:min-h-[calc(3.5rem+env(safe-area-inset-top,0px))] max-md:pt-[env(safe-area-inset-top,0px)] max-md:shadow-md md:static md:top-auto md:z-30 md:min-h-14 md:pt-0 md:shadow-none bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/90 md:hidden">
+        <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col max-md:pt-[calc(3rem+env(safe-area-inset-top,0px))]">
+          <header className="flex h-12 min-h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-3 max-md:fixed max-md:inset-x-0 max-md:top-0 max-md:z-[100] max-md:min-h-[calc(3rem+env(safe-area-inset-top,0px))] max-md:pt-[env(safe-area-inset-top,0px)] max-md:shadow-md md:static md:top-auto md:z-30 md:min-h-12 md:pt-0 md:shadow-none bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/90 md:hidden">
             <Button
               type="button"
               variant="secondary"
-              className="h-11 shrink-0 gap-2 border border-primary/40 bg-primary/15 px-3 text-foreground shadow-sm hover:bg-primary/25 active:bg-primary/30"
+              className="h-9 shrink-0 gap-2 border border-primary/40 bg-primary/15 px-2.5 text-foreground shadow-sm hover:bg-primary/25 active:bg-primary/30"
               aria-label="Abrir menu de navegação"
               onClick={() => setMobileNavOpen(true)}
             >
-              <Menu className="h-6 w-6 shrink-0 text-primary" strokeWidth={2.75} aria-hidden />
+              <Menu className="h-5 w-5 shrink-0 text-primary" strokeWidth={2.75} aria-hidden />
               <span className="text-sm font-semibold tracking-wide">Menu</span>
             </Button>
-            <img src={logoWhite} alt="Black House" className="h-8 w-auto" />
-            <div className="ml-auto flex shrink-0 items-center">
+            <BrandLogo className="h-7" />
+            <div className="ml-auto flex shrink-0 items-center gap-1">
+              <ThemeToggleCompact />
               <NotificationsPopover onNavigate={handleTabChange} />
             </div>
           </header>
@@ -252,8 +270,14 @@ const StudentPortal = () => {
             tabIndex={-1}
             aria-live="polite"
             className={cn(
-              "flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain touch-pan-y [-webkit-overflow-scrolling:touch]",
+              "flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overscroll-y-contain touch-pan-y [-webkit-overflow-scrolling:touch]",
+              /* Hoje: trava o viewport — o Assistente faz scroll interno (melhor em ecrãs altos) */
+              activeTab === "hoje"
+                ? "overflow-hidden"
+                : "overflow-y-auto",
               "px-4 pt-4 transition-[padding] duration-200 motion-reduce:transition-none",
+              /* Hoje mobile: menos padding para o chat ganhar altura */
+              activeTab === "hoje" && "max-md:px-3 max-md:pt-2",
               /* Compact: mais área útil para o agente / conteúdo */
               isCompact
                 ? "md:px-5 md:pt-5 lg:px-6 lg:pt-6"
@@ -268,8 +292,8 @@ const StudentPortal = () => {
               key={activeTab}
               className={cn(
                 "student-tab-enter min-w-0",
-                /* Hoje: preenche a altura do main para o chat expandir ao colapsar o acordeão */
-                activeTab === "hoje" && "flex min-h-0 flex-1 flex-col",
+                /* Hoje: preenche a altura do main para o chat expandir */
+                activeTab === "hoje" && "flex h-full min-h-0 flex-1 flex-col",
               )}
             >
               {content}

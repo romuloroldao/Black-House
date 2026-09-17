@@ -284,6 +284,7 @@ function MealSlotEditor({
   refeicao,
   refeicaoIndex,
   canRemoveSlot,
+  alimentos,
   calcularTotaisRefeicao,
   onPlanoChange,
   onRemoveSlot,
@@ -296,6 +297,7 @@ function MealSlotEditor({
   refeicao: RefeicaoEditor;
   refeicaoIndex: number;
   canRemoveSlot: boolean;
+  alimentos: Food[];
   calcularTotaisRefeicao: (refeicao: RefeicaoEditor) => TotaisRefeicao;
   onPlanoChange: (index: number, plano: DietPlano | "") => void;
   onRemoveSlot: (index: number) => void;
@@ -466,6 +468,7 @@ function MealSlotEditor({
         alimentoAtual={subItem?.alimento ?? null}
         quantidadeAtual={subItem?.quantidade ?? 0}
         unidadeQuantidade={subItem?.unidade_quantidade || "g"}
+        alimentosDisponiveis={alimentos}
         onSubstituir={(novoAlimentoId, novaQuantidade, novoAlimento) => {
           if (subItemIndex == null) return;
           const un = quantityUnitLabel(subItem?.unidade_quantidade || "g");
@@ -1014,6 +1017,7 @@ export function DietCreatorMealsSection({
                         refeicao={refeicao}
                         refeicaoIndex={index}
                         canRemoveSlot={refeicoes.length > 1}
+                        alimentos={alimentos}
                         calcularTotaisRefeicao={calcularTotaisRefeicao}
                         onPlanoChange={editarPlanoRefeicao}
                         onRemoveSlot={removerRefeicao}

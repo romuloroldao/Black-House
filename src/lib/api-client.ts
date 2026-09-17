@@ -24,6 +24,7 @@ export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/alunos/me/refeicao-substituicoes',
     '/api/alunos/me/treino-sessoes',
     '/api/alunos/me/treino-cargas',
+    '/api/alunos/me/treino-evolucao',
     '/api/alunos/me/proxima-acao',
     '/api/agent',
     '/api/agent/sessions',
@@ -52,6 +53,7 @@ export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/feedbacks-alunos',
     '/api/feedbacks-alunos/',
     '/api/fotos-alunos',
+    '/api/fotos-alunos/classify-pose',
     '/api/fotos-alunos/',
     '/api/itens-dieta',
     '/api/itens-dieta/',
@@ -70,6 +72,7 @@ export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/coach/team/members',
     '/api/coach/team/members/',
     '/api/coach/me/notification-preferences',
+    '/api/coach/me/adherence-carteira',
     '/api/coach/rules',
     '/api/eventos',
     '/api/eventos/',
@@ -205,7 +208,17 @@ function mapLegacyApiToRestV1(endpoint: string): LegacyMapResult {
     if (match) {
         return { endpoint: `/api/alunos/${match[1]}/treino-agenda`, unwrapFirstRow: false };
     }
-    if (normalized === '/api/alunos/me/treino-agenda') {
+    if (normalized === '/api/alunos/me/treino-agenda' || normalized === '/api/alunos/me/treino-evolucao') {
+        return { endpoint, unwrapFirstRow: false };
+    }
+
+    match = normalized.match(/^\/api\/alunos\/([^/]+)\/treino-evolucao$/);
+    if (match) {
+        return { endpoint, unwrapFirstRow: false };
+    }
+
+    match = normalized.match(/^\/api\/alunos\/([^/]+)\/logbook-progressao$/);
+    if (match) {
         return { endpoint, unwrapFirstRow: false };
     }
 
@@ -243,6 +256,15 @@ function mapLegacyApiToRestV1(endpoint: string): LegacyMapResult {
 
     match = normalized.match(/^\/api\/feedbacks-alunos\/([^/]+)$/);
     if (match) return byIdToQuery('feedbacks_alunos', match[1]);
+
+    if (normalized === '/api/fotos-alunos/classify-pose') {
+        return { endpoint, unwrapFirstRow: false };
+    }
+
+    match = normalized.match(/^\/api\/fotos-alunos\/([^/]+)\/pose$/);
+    if (match) {
+        return { endpoint, unwrapFirstRow: false };
+    }
 
     match = normalized.match(/^\/api\/recurring-charges-config\/([^/]+)$/);
     if (match) return byIdToQuery('recurring_charges_config', match[1]);
@@ -1131,13 +1153,14 @@ class ApiClient {
         });
     }
 
-    async putTreinoSerieSafe(
+    async     putTreinoSerieSafe(
         sessaoId: string,
         body: {
             exercise_index: number;
             exercise_name: string;
             set_index?: number;
             carga?: string;
+            slot_key?: string | null;
             repeticoes?: number | null;
             rpe?: number | null;
             dor?: number | null;
@@ -1153,6 +1176,96 @@ class ApiClient {
 
     async getTreinoCargasSafe(treinoId: string): Promise<ApiResult<{ sessions: any[] } | null>> {
         return this.safeRequest(API_CONTRACT.alunos.treinoCargas(treinoId));
+    }
+
+    async getTreinoEvolucaoSafe(query?: {
+        as_of?: string;
+        week?: string;
+        alunoId?: string;
+    }): Promise<ApiResult<import('@/types/treino-evolucao').WorkoutEvolutionResponse | null>> {
+        const path = query?.alunoId
+            ? API_CONTRACT.alunos.treinoEvolucao(query.alunoId, query)
+            : API_CONTRACT.alunos.treinoEvolucaoMe(query);
+        return this.safeRequest(path);
+    }
+
+    async getLogbookProgressaoSafe(query: {
+        alunoId: string;
+        period?: string;
+        exercise_key?: string;
+        as_of?: string;
+    }): Promise<ApiResult<import('@/types/logbook-progressao').LoadProgressionResponse | null>> {
+        const path = API_CONTRACT.alunos.logbookProgressao(query.alunoId, {
+            period: query.period,
+            exercise_key: query.exercise_key,
+            as_of: query.as_of,
+        });
+        return this.safeRequest(path);
+    }
+
+    async classifyProgressPhotoPoseSafe(
+        file: File,
+    ): Promise<
+        ApiResult<{
+            pose: string;
+            confidence: number;
+            reason: string | null;
+            source: string;
+        } | null>
+    > {
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            const token = this.getToken();
+            const response = await fetch(API_CONTRACT.fotosAlunos.classifyPose(), {
+                method: 'POST',
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+                body: formData,
+            });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                return {
+                    success: false,
+                    data: null,
+                    error: body.error || 'Não foi possível identificar o ângulo da foto.',
+                };
+            }
+            return { success: true, data: body, error: null };
+        } catch (error) {
+            return {
+                success: false,
+                data: null,
+                error: error instanceof Error ? error.message : 'Erro ao classificar foto.',
+            };
+        }
+    }
+
+    async classifyProgressPhotoPoseByIdSafe(
+        fotoId: string,
+        persist = false,
+    ): Promise<
+        ApiResult<{
+            pose: string;
+            confidence: number;
+            reason: string | null;
+            source: string;
+            saved?: { id: string; descricao: string; url: string } | null;
+        } | null>
+    > {
+        return this.safeRequest(API_CONTRACT.fotosAlunos.classifyPose(), {
+            method: 'POST',
+            body: JSON.stringify({ foto_id: fotoId, persist: persist ? 1 : 0 }),
+        });
+    }
+
+    async updatePhotoPoseSafe(
+        fotoId: string,
+        pose: string,
+    ): Promise<ApiResult<{ id: string; descricao: string } | null>> {
+        return this.safeRequest(API_CONTRACT.fotosAlunos.updatePose(fotoId), {
+            method: 'PATCH',
+            body: JSON.stringify({ pose }),
+        });
     }
 
     async getProximaAcaoSafe(mealKeys?: string[]): Promise<ApiResult<any>> {
@@ -1361,6 +1474,38 @@ class ApiClient {
         return this.safeRequest(API_CONTRACT.weeklyCheckins.aiDraftResponse(checkinId), {
             method: 'POST',
             body: JSON.stringify({ hints: hints ?? '' }),
+        });
+    }
+
+    async getAdherenceCarteiraSafe(days?: number): Promise<ApiResult<import('@/types/adherence-carteira').AdherenceCarteiraResponse>> {
+        return this.safeRequest(API_CONTRACT.coach.adherenceCarteira(days));
+    }
+
+    async getCoachRulesSafe(includeInactive = false): Promise<ApiResult<{ items: import('@/types/coach-rule').CoachRule[] }>> {
+        const qs = includeInactive ? '?include_inactive=1' : '';
+        return this.safeRequest(`${API_CONTRACT.coach.rules()}${qs}`);
+    }
+
+    async createCoachRuleSafe(body: import('@/types/coach-rule').CoachRuleInput): Promise<ApiResult<import('@/types/coach-rule').CoachRule>> {
+        return this.safeRequest(API_CONTRACT.coach.rules(), {
+            method: 'POST',
+            body: JSON.stringify(body),
+        });
+    }
+
+    async updateCoachRuleSafe(
+        id: string,
+        body: Partial<import('@/types/coach-rule').CoachRuleInput> & { active?: boolean },
+    ): Promise<ApiResult<import('@/types/coach-rule').CoachRule>> {
+        return this.safeRequest(API_CONTRACT.coach.ruleById(id), {
+            method: 'PATCH',
+            body: JSON.stringify(body),
+        });
+    }
+
+    async deleteCoachRuleSafe(id: string): Promise<ApiResult<{ id: string; deleted: boolean }>> {
+        return this.safeRequest(API_CONTRACT.coach.ruleById(id), {
+            method: 'DELETE',
         });
     }
 

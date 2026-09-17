@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { apiClient } from "@/lib/api-client";
 import { useApiSafeList } from "@/hooks/useApiSafe";
 import { safeArray } from "@/lib/data-safe-utils";
-import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import { Button } from "@/components/ui/button";
@@ -35,7 +34,6 @@ import { VIDEO_CATEGORIES, VIDEO_CATEGORY_FILTER_ALL } from "@/lib/video-categor
 
 const VideoGallery = () => {
   const { confirm } = useConfirm();
-  const { user } = useAuth();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("videos");
   const [searchTerm, setSearchTerm] = useState("");
@@ -51,16 +49,13 @@ const VideoGallery = () => {
 
   useEffect(() => {
     if (!loadingVideos) {
-      const filteredRaw = safeArray(videosRaw)
-        .filter((video: any) => {
-          if (!user?.id) return true;
-          return video?.coach_id === user.id;
-        })
-        .sort((a: any, b: any) => {
-          const aTime = new Date(a?.created_at || 0).getTime();
-          const bTime = new Date(b?.created_at || 0).getTime();
-          return bTime - aTime;
-        });
+      // A API já filtra por role (admin=todos, coach=próprios). Não filtrar de novo por
+      // user.id — contas admin (ex. romulo) têm id ≠ coach_id dos vídeos e a lista ficava vazia.
+      const filteredRaw = safeArray(videosRaw).sort((a: any, b: any) => {
+        const aTime = new Date(a?.created_at || 0).getTime();
+        const bTime = new Date(b?.created_at || 0).getTime();
+        return bTime - aTime;
+      });
 
       const videosFormatados = filteredRaw.map((video: any) => ({
         id: video.id,
@@ -87,7 +82,7 @@ const VideoGallery = () => {
         console.warn('[REACT-SUPABASE-LEGACY-PURGE-FIX-010] Erro ao carregar vídeos (fallback vazio):', errorVideos);
       }
     }
-  }, [loadingVideos, videosRaw, user?.id, errorVideos]);
+  }, [loadingVideos, videosRaw, errorVideos]);
 
   const carregarVideos = () => {
     refetchVideos();
@@ -330,7 +325,7 @@ const VideoGallery = () => {
         {/* Header */}
         <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+          <h1 className="bg-gradient-primary bg-clip-text text-xl font-bold text-transparent sm:text-2xl">
             Galeria de Vídeos
           </h1>
           <p className="text-muted-foreground">

@@ -31,7 +31,16 @@ function classifyFastPath(text) {
   if (/restaurante|cardapio|fora\s+do\s+plano|comer\s+fora/.test(t)) {
     return { intent: 'restaurant', mode: 'restaurant' };
   }
-  if (/substit(u|o)|trocar\s+(o\s+)?alimento|equivalen/.test(t)) {
+  // Nutrition Replacement — domínio alimentar (não capturar treino/progresso/peso)
+  if (
+    /substit(u|o)|trocar\s+(o\s+)?alimento|equivalen|em\s+vez\s+de/.test(t) ||
+    /trocar\s+.+\s+por\s+/.test(t) ||
+    /nao\s+tenho\s+\w+|acabou\s+(o\s+|a\s+)?\w+|sem\s+(arroz|feijao|frango|carne|ovo|batata|macarrao|pao|leite|queijo|peixe)/.test(
+      t,
+    ) ||
+    /nao\s+quero\s+(comer\s+)?\w+/.test(t) ||
+    /substituir\s+.*(refeicao|almoco|jantar|cafe)/.test(t)
+  ) {
     return { intent: 'substitution', mode: 'substitution' };
   }
 
@@ -191,53 +200,198 @@ async function runFastPath(ctx, mode, context, options = {}) {
   }
 
   if (mode === 'substitution') {
+    const {
+      parseSubstitutionRequest,
+      matchItemsInMeal,
+      scoreFoodMatch,
+    } = require('./food-replacement');
+    const { formatRulesHint } = require('../coach-rules.service');
     const rules = (context.coach_rules || []).filter(
       (r) => r.trigger === 'substitution' || r.trigger === 'always',
     );
-    const { formatRulesHint } = require('../coach-rules.service');
     const hint = formatRulesHint(
       rules.filter((r) => r.trigger === 'substitution'),
       { max: 2 },
     );
+    const userText = String(options.userText || '');
+    const parsed = parseSubstitutionRequest(userText);
+
     const nextMeal = await dispatchTool(ctx, {
       name: 'get_next_action',
       args: { prefer: 'meal' },
     });
     toolResults.push({ name: 'get_next_action', result: nextMeal });
     const acao = nextMeal?.data;
-    const items = await fetchMealItems(ctx, acao, toolResults);
-    const meal = composer.mealLabel(acao?.description || acao?.payload?.meal_key);
-    const bullets = composer.formatItemsBullets(items, 6);
-    const lines = [
-      acao?.type === 'next_meal'
-        ? `Para a tua ${meal}, podes trocar um alimento por um equivalente isocalórico.`
-        : 'Podes trocar um alimento por um equivalente isocalórico na dieta.',
-      '',
-      'A troca vale só para hoje e mantém as kcal aproximadas do plano.',
-    ];
-    if (bullets.length) {
-      lines.push('', 'Itens da refeição actual:', ...bullets);
+
+    if (!acao || acao.type !== 'next_meal') {
+      const composed = composer.composeFoodReplacement({
+        acao: null,
+        ask: 'Qual refeição queres ajustar? Diz, por exemplo, «trocar arroz no almoço».',
+        coachHint: hint || null,
+      });
+      return {
+        intent: 'substitution',
+        assistantText: composed.assistantText,
+        cards: composed.cards,
+        toolResults,
+        usedLlm: false,
+      };
     }
-    if (hint) lines.push('', `Orientação do teu coach:\n${hint}`);
-    lines.push('', 'Escolhe o item na dieta e usa «Substitutos» para ver as opções.');
+
+    const items = await fetchMealItems(ctx, acao, toolResults);
+    const dietaNome = context.dieta?.nome || context.dieta_activa?.nome || null;
+
+    let targets = [];
+    if (parsed.origins.length) {
+      targets = matchItemsInMeal(parsed.origins, items);
+      if (!targets.length) {
+        const composed = composer.composeFoodReplacement({
+          acao,
+          ask: `Não encontrei «${parsed.origins.join(', ')}» na tua ${composer.mealLabel(acao.description || acao.payload?.meal_key)}. Qual alimento do plano queres trocar?`,
+          coachHint: hint || null,
+          dietaNome,
+        });
+        return {
+          intent: 'substitution',
+          assistantText: composed.assistantText,
+          cards: composed.cards,
+          toolResults,
+          usedLlm: false,
+        };
+      }
+    } else if (parsed.destination && items.length === 1) {
+      targets = [items[0]];
+    } else if (!parsed.origins.length && !parsed.destination) {
+      const composed = composer.composeFoodReplacement({
+        acao,
+        blocks: [],
+        coachHint: hint || null,
+        dietaNome,
+      });
+      return {
+        intent: 'substitution',
+        assistantText: composed.assistantText,
+        cards: composed.cards,
+        toolResults,
+        usedLlm: false,
+      };
+    } else if (!parsed.origins.length && parsed.destination) {
+      const composed = composer.composeFoodReplacement({
+        acao,
+        ask: `Queres «${parsed.destination}» em vez de quê no plano? Diz o alimento da refeição (ex.: «trocar arroz por ${parsed.destination}»).`,
+        coachHint: hint || null,
+        dietaNome,
+      });
+      return {
+        intent: 'substitution',
+        assistantText: composed.assistantText,
+        cards: composed.cards,
+        toolResults,
+        usedLlm: false,
+      };
+    }
+
+    const blocks = [];
+    for (const item of targets.slice(0, 3)) {
+      const alimentoId = item.alimento_id_original || item.alimento_id;
+      const q =
+        item.quantidade_original != null
+          ? Number(item.quantidade_original)
+          : item.quantidade != null
+            ? Number(item.quantidade)
+            : 100;
+      const u = item.unidade_original || item.unidade || 'g';
+
+      const listRes = await dispatchTool(ctx, {
+        name: 'list_substitutions',
+        args: {
+          alimento_id: alimentoId,
+          quantidade: q,
+          unidade: u,
+          limit: 10,
+        },
+      });
+      toolResults.push({ name: 'list_substitutions', result: listRes });
+
+      let optionsList = listRes?.ok ? listRes.data?.substituicoes || [] : [];
+      let destinationMatch = null;
+
+      if (parsed.destination) {
+        const scored = optionsList
+          .map((o) => ({ o, score: scoreFoodMatch(parsed.destination, o.nome) }))
+          .filter((x) => x.score >= 40)
+          .sort((a, b) => b.score - a.score);
+        if (scored.length) {
+          destinationMatch = scored[0].o;
+          optionsList = [
+            destinationMatch,
+            ...optionsList.filter((o) => o.alimento_id !== destinationMatch.alimento_id),
+          ];
+        } else {
+          const searchRes = await dispatchTool(ctx, {
+            name: 'search_food',
+            args: { q: parsed.destination, limit: 5 },
+          });
+          toolResults.push({ name: 'search_food', result: searchRes });
+          const found = searchRes?.ok ? searchRes.data?.alimentos || [] : [];
+          const inGroup = found.find((f) =>
+            optionsList.some((o) => o.alimento_id === f.id),
+          );
+          if (inGroup) {
+            destinationMatch = optionsList.find((o) => o.alimento_id === inGroup.id) || null;
+          }
+        }
+      }
+
+      blocks.push({
+        item: {
+          ...item,
+          nome_original: item.nome_original || item.nome,
+          quantidade: q,
+          unidade: u,
+        },
+        options: optionsList,
+        destinationMatch:
+          destinationMatch && !optionsList.some((o) => o.alimento_id === destinationMatch.alimento_id)
+            ? null
+            : destinationMatch,
+        destinationNotInGroup: Boolean(parsed.destination && !destinationMatch),
+      });
+    }
+
+    // Nota se destino pedido não está no grupo
+    let askExtra = null;
+    if (
+      parsed.destination &&
+      blocks.every((b) => !b.destinationMatch) &&
+      blocks.some((b) => b.options.length)
+    ) {
+      askExtra = null; // composer explica via opções do grupo
+    }
+
+    const composed = composer.composeFoodReplacement({
+      acao,
+      blocks,
+      ask: askExtra,
+      coachHint: hint || null,
+      dietaNome,
+    });
+
+    // Prefixo se destino pedido não casou no grupo
+    let text = composed.assistantText;
+    if (
+      parsed.destination &&
+      blocks.length &&
+      blocks.every((b) => !b.destinationMatch) &&
+      blocks.some((b) => (b.options || []).length)
+    ) {
+      text = `«${parsed.destination}» não tem equivalente isocalórico no mesmo grupo do plano. Aqui vão opções do grupo:\n\n${text}`;
+    }
 
     return {
       intent: 'substitution',
-      assistantText: lines.join('\n'),
-      cards: [
-        cardFromAction(acao, { items }),
-        {
-          id: 'open-diet-sub',
-          title: 'Ver substituições',
-          body: 'Abrir dieta e escolher o item',
-          primary_action: {
-            type: 'open_ui',
-            name: 'open_ui',
-            args: { target: 'dieta', meal_key: acao?.payload?.meal_key },
-          },
-          secondary_action: null,
-        },
-      ].filter(Boolean),
+      assistantText: text,
+      cards: composed.cards,
       toolResults,
       usedLlm: false,
     };

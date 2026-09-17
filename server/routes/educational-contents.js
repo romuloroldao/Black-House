@@ -65,18 +65,15 @@ async function assertAlunoCanReadContent(pool, userId, contentId) {
     throw err;
   }
 
+  // Biblioteca do coach: conteúdos activos do mesmo coach (não só Refeição Livre).
   const r = await pool.query(
     `SELECT ec.*
      FROM public.educational_contents ec
-     INNER JOIN public.dietas d ON d.refeicao_livre_content_id = ec.id
      WHERE ec.id = $1
        AND ec.coach_id = $2
        AND ec.active = true
-       AND d.aluno_id = $3
-       AND d.refeicao_livre_ativa = true
-       AND COALESCE(d.ativa, true) = true
      LIMIT 1`,
-    [contentId, aluno.coach_id, aluno.id],
+    [contentId, aluno.coach_id],
   );
 
   if (r.rows.length === 0) {
@@ -90,23 +87,36 @@ async function assertAlunoCanReadContent(pool, userId, contentId) {
 }
 
 module.exports = function createEducationalContentsRouter(pool, authenticate, domainSchemaGuard) {
-  // GET /api/educational-contents
-  router.get('/', authenticate, domainSchemaGuard, validateRole(['coach', 'admin']), async (req, res) => {
+  // GET /api/educational-contents — coach/admin: próprios; aluno: activos do seu coach
+  router.get('/', authenticate, domainSchemaGuard, validateRole(['coach', 'admin', 'aluno']), async (req, res) => {
     try {
-      const coachId = req.user.id;
       const { category, q, active } = req.query;
-      const conditions = ['coach_id = $1'];
-      const values = [coachId];
-      let idx = 2;
+      const conditions = [];
+      const values = [];
+      let idx = 1;
+
+      if (req.user.role === 'aluno') {
+        const aluno = await getAlunoRowForAuthUser(pool, req.user.id);
+        if (!aluno?.coach_id) {
+          return res.json([]);
+        }
+        conditions.push(`coach_id = $${idx++}`);
+        values.push(aluno.coach_id);
+        conditions.push(`active = true`);
+      } else {
+        // coach / admin: lista do próprio user id (admin usa o próprio id como nos outros CRUDs)
+        conditions.push(`coach_id = $${idx++}`);
+        values.push(req.user.id);
+
+        if (active === 'true' || active === 'false') {
+          conditions.push(`active = $${idx++}`);
+          values.push(active === 'true');
+        }
+      }
 
       if (category && typeof category === 'string' && category.trim()) {
         conditions.push(`category = $${idx++}`);
         values.push(category.trim());
-      }
-
-      if (active === 'true' || active === 'false') {
-        conditions.push(`active = $${idx++}`);
-        values.push(active === 'true');
       }
 
       if (q && typeof q === 'string' && q.trim().length >= 2) {

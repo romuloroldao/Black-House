@@ -117,7 +117,7 @@ export default function FoodCatalogPage() {
     <div className="container mx-auto p-6 max-w-7xl space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Catálogo de Alimentos</h1>
+          <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Catálogo de Alimentos</h1>
           <p className="text-muted-foreground mt-1">
             Gestão nutricional com versionamento e auditoria
           </p>
@@ -132,19 +132,19 @@ export default function FoodCatalogPage() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
           <div className="rounded-lg border p-3">
             <p className="text-muted-foreground">Total activos</p>
-            <p className="text-2xl font-semibold">{report.active}</p>
+            <p className="text-xl font-semibold">{report.active}</p>
           </div>
           <div className="rounded-lg border p-3">
             <p className="text-muted-foreground">Kcal divergente</p>
-            <p className="text-2xl font-semibold text-amber-600">{report.kcal_divergente}</p>
+            <p className="text-xl font-semibold text-amber-600">{report.kcal_divergente}</p>
           </div>
           <div className="rounded-lg border p-3">
             <p className="text-muted-foreground">Sem categoria</p>
-            <p className="text-2xl font-semibold">{report.sem_categoria}</p>
+            <p className="text-xl font-semibold">{report.sem_categoria}</p>
           </div>
           <div className="rounded-lg border p-3">
             <p className="text-muted-foreground">Baixa qualidade</p>
-            <p className="text-2xl font-semibold">{report.baixa_qualidade}</p>
+            <p className="text-xl font-semibold">{report.baixa_qualidade}</p>
           </div>
         </div>
       )}

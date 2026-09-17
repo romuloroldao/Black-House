@@ -16,7 +16,8 @@ import {
   FINANCIAL_PATHS,
   FINANCIAL_TAB_IDS,
 } from "@/lib/financial-routes";
-import logoWhite from "@/assets/logo-white.svg";
+import { BrandLogo } from "@/components/BrandLogo";
+import { ThemeToggleCompact } from "@/components/ui/mode-toggle";
 import {
   LayoutDashboard,
   Users,
@@ -383,17 +384,14 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
     <div className="h-full bg-gradient-card flex flex-col transition-all duration-300 ease-in-out motion-reduce:transition-none">
       {/* Logo */}
       <div className="p-6 border-b border-border flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-full flex flex-col items-center">
-            <img 
-              src={logoWhite} 
-              alt="Black House" 
-              className="w-full h-auto max-w-[180px] mb-2"
-            />
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-1 flex-col items-center">
+            <BrandLogo className="mb-2 h-auto w-full max-w-[180px]" />
             <p className="text-xs text-muted-foreground uppercase tracking-wider">
               saúde integrativa & performance
             </p>
           </div>
+          <ThemeToggleCompact className="shrink-0" />
         </div>
       </div>
 

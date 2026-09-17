@@ -146,7 +146,7 @@ const AppLayout = () => {
         case "user-linking":
           return <div className="p-6"><UserLinkingManager /></div>;
         case "analytics":
-          return <div className="p-6"><h1 className="text-3xl font-bold">Análises</h1><p className="text-muted-foreground">Análises detalhadas em desenvolvimento...</p></div>;
+          return <div className="p-6"><h1 className="text-xl font-bold sm:text-2xl">Análises</h1><p className="text-muted-foreground">Análises detalhadas em desenvolvimento...</p></div>;
         case "settings":
           return <SettingsManager />;
         default:

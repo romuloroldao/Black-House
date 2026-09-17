@@ -20,6 +20,11 @@ type Props = {
   onZoom: (side: Side, delta: number) => void;
   onZoomIn: (side: Side) => void;
   onZoomOut: (side: Side) => void;
+  /** Controlos de zoom ± acima da foto (modo Alinhar). */
+  showZoomControls?: boolean;
+  /** Hint «arraste para comparar» (primeira utilização). */
+  showDragHint?: boolean;
+  onDragHintDismiss?: () => void;
 };
 
 /**
@@ -40,6 +45,9 @@ export function ComparisonSlider({
   onZoom,
   onZoomIn,
   onZoomOut,
+  showZoomControls = false,
+  showDragHint = false,
+  onDragHintDismiss,
 }: Props) {
   const [value, setValue] = useState(50);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -190,74 +198,81 @@ export function ComparisonSlider({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <p className="text-xs text-muted-foreground">{tEvolution('panHint')}</p>
-      <div className="grid grid-cols-2 gap-2" aria-label={tEvolution('zoomControls')}>
-        <div className="flex items-center justify-between gap-1 rounded-lg border bg-background/80 px-2 py-1">
-          <span className="truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {tEvolution('before')}
-          </span>
-          <div className="flex items-center gap-0.5">
-            <Button
-              type="button"
-              size="icon"
-              variant="outline"
-              className="h-10 w-10 touch-manipulation"
-              onClick={() => onZoomOut('before')}
-              aria-label={`${tEvolution('before')}: ${tEvolution('zoomOut')}`}
-            >
-              <Minus className="h-4 w-4" />
-            </Button>
-            <span className="min-w-[2.75rem] text-center text-xs tabular-nums" aria-live="polite">
-              {beforePct}%
-            </span>
-            <Button
-              type="button"
-              size="icon"
-              variant="outline"
-              className="h-10 w-10 touch-manipulation"
-              onClick={() => onZoomIn('before')}
-              aria-label={`${tEvolution('before')}: ${tEvolution('zoomIn')}`}
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
+      {showZoomControls ? (
+        <>
+          <p className="text-xs text-muted-foreground">{tEvolution('panHint')}</p>
+          <div className="grid grid-cols-2 gap-2" aria-label={tEvolution('zoomControls')}>
+            <div className="flex items-center justify-between gap-1 rounded-lg border bg-background/80 px-2 py-1">
+              <span className="truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {tEvolution('before')}
+              </span>
+              <div className="flex items-center gap-0.5">
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  className="h-10 w-10 touch-manipulation"
+                  onClick={() => onZoomOut('before')}
+                  aria-label={`${tEvolution('before')}: ${tEvolution('zoomOut')}`}
+                >
+                  <Minus className="h-4 w-4" />
+                </Button>
+                <span className="min-w-[2.75rem] text-center text-xs tabular-nums" aria-live="polite">
+                  {beforePct}%
+                </span>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  className="h-10 w-10 touch-manipulation"
+                  onClick={() => onZoomIn('before')}
+                  aria-label={`${tEvolution('before')}: ${tEvolution('zoomIn')}`}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-1 rounded-lg border bg-background/80 px-2 py-1">
+              <span className="truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {tEvolution('after')}
+              </span>
+              <div className="flex items-center gap-0.5">
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  className="h-10 w-10 touch-manipulation"
+                  onClick={() => onZoomOut('after')}
+                  aria-label={`${tEvolution('after')}: ${tEvolution('zoomOut')}`}
+                >
+                  <Minus className="h-4 w-4" />
+                </Button>
+                <span className="min-w-[2.75rem] text-center text-xs tabular-nums" aria-live="polite">
+                  {afterPct}%
+                </span>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  className="h-10 w-10 touch-manipulation"
+                  onClick={() => onZoomIn('after')}
+                  aria-label={`${tEvolution('after')}: ${tEvolution('zoomIn')}`}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center justify-between gap-1 rounded-lg border bg-background/80 px-2 py-1">
-          <span className="truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {tEvolution('after')}
-          </span>
-          <div className="flex items-center gap-0.5">
-            <Button
-              type="button"
-              size="icon"
-              variant="outline"
-              className="h-10 w-10 touch-manipulation"
-              onClick={() => onZoomOut('after')}
-              aria-label={`${tEvolution('after')}: ${tEvolution('zoomOut')}`}
-            >
-              <Minus className="h-4 w-4" />
-            </Button>
-            <span className="min-w-[2.75rem] text-center text-xs tabular-nums" aria-live="polite">
-              {afterPct}%
-            </span>
-            <Button
-              type="button"
-              size="icon"
-              variant="outline"
-              className="h-10 w-10 touch-manipulation"
-              onClick={() => onZoomIn('after')}
-              aria-label={`${tEvolution('after')}: ${tEvolution('zoomIn')}`}
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      </div>
+        </>
+      ) : null}
 
       <div
         ref={trackRef}
-        className="relative min-h-[58dvh] flex-1 cursor-grab touch-none overflow-hidden rounded-xl border bg-muted active:cursor-grabbing md:min-h-[320px]"
-        onPointerDown={onPanPointerDown}
+        className="relative min-h-[min(62dvh,520px)] flex-1 cursor-grab touch-none overflow-hidden rounded-xl bg-muted active:cursor-grabbing md:min-h-[360px]"
+        onPointerDown={(e) => {
+          onDragHintDismiss?.();
+          onPanPointerDown(e);
+        }}
         onPointerMove={onPanPointerMove}
         onPointerUp={endPan}
         onPointerCancel={endPan}
@@ -266,7 +281,7 @@ export function ComparisonSlider({
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
         role="img"
-        aria-label={`${beforeAlt} / ${afterAlt}. ${tEvolution('panHint')}`}
+        aria-label={`${beforeAlt} / ${afterAlt}. ${tEvolution('dragToCompare')}`}
       >
         <img
           src={afterSrc}
@@ -297,7 +312,10 @@ export function ComparisonSlider({
           aria-label={tEvolution('splitSlider')}
           className="absolute inset-y-0 z-20 flex w-11 -translate-x-1/2 cursor-ew-resize touch-none items-stretch justify-center"
           style={{ left: `${value}%` }}
-          onPointerDown={onMaskPointerDown}
+          onPointerDown={(e) => {
+            onDragHintDismiss?.();
+            onMaskPointerDown(e);
+          }}
           onPointerMove={onMaskPointerMove}
           onPointerUp={endMask}
           onPointerCancel={endMask}
@@ -322,13 +340,26 @@ export function ComparisonSlider({
           {tEvolution('after')}
         </span>
         <AlignmentGuides visible={showGuides} />
+        {showDragHint ? (
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-6 z-30 flex justify-center px-4 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300"
+            aria-hidden
+          >
+            <span className="rounded-full bg-background/90 px-3 py-1.5 text-xs font-medium text-foreground shadow-md backdrop-blur-sm">
+              {tEvolution('dragToCompare')}
+            </span>
+          </div>
+        ) : null}
       </div>
       <input
         type="range"
         min={0}
         max={100}
         value={value}
-        onChange={(e) => setValue(Number(e.target.value))}
+        onChange={(e) => {
+          onDragHintDismiss?.();
+          setValue(Number(e.target.value));
+        }}
         className="h-11 w-full accent-primary touch-manipulation"
         aria-label={tEvolution('splitSlider')}
       />

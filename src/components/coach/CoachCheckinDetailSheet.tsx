@@ -35,6 +35,7 @@ import {
 import { getCheckinPrioridadeSummary, isCheckinPrioridade } from "@/lib/checkin-highlights";
 import type { WeeklyCheckinRecord } from "@/types/weekly-checkin";
 import CheckinPriorityBadge from "@/components/coach/CheckinPriorityBadge";
+import WorkoutEvolutionSection from "@/components/student/WorkoutEvolutionSection";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -90,9 +91,14 @@ export default function CoachCheckinDetailSheet({
   const [aiTrends, setAiTrends] = useState<string | null>(null);
   const [aiTrendsLoading, setAiTrendsLoading] = useState(false);
   const [aiDraftLoading, setAiDraftLoading] = useState(false);
+  const [draftContext, setDraftContext] = useState<{
+    insight?: string | null;
+    rules?: Array<{ title: string; body: string }>;
+  } | null>(null);
 
   useEffect(() => {
     setMarkedRespondido(false);
+    setDraftContext(null);
   }, [checkin?.id]);
 
   useEffect(() => {
@@ -185,7 +191,11 @@ export default function CoachCheckinDetailSheet({
       const result = await apiClient.weeklyCheckinAiDraftSafe(checkin.id);
       if (!result.success) throw new Error(result.error || "IA indisponível");
       if (result.data?.draft) setFeedback(result.data.draft);
-      toast({ title: "Rascunho gerado", description: "Revise e edite antes de salvar." });
+      setDraftContext({
+        insight: result.data?.insight?.text ?? null,
+        rules: result.data?.rules_applied ?? [],
+      });
+      toast({ title: "Rascunho gerado", description: "Revise e edite antes de salvar. Nada é enviado sozinho." });
     } catch (err: unknown) {
       toast({
         title: "Rascunho IA",
@@ -316,6 +326,12 @@ export default function CoachCheckinDetailSheet({
               </div>
             )}
 
+            <WorkoutEvolutionSection
+              alunoId={studentId}
+              audience="coach"
+              asOf={String(checkin.created_at).slice(0, 10)}
+            />
+
             {prioridade && (
               <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4">
                 <p className="text-sm font-semibold text-destructive">Triagem prioritária</p>
@@ -411,6 +427,16 @@ export default function CoachCheckinDetailSheet({
 
         <div className="space-y-3 border-t bg-background px-6 py-4">
           <p className="text-sm font-medium">Sua resposta ao aluno</p>
+          {draftContext?.insight && (
+            <p className="text-xs text-muted-foreground">
+              Contexto 7d: {draftContext.insight}
+            </p>
+          )}
+          {draftContext?.rules && draftContext.rules.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Método usado: {draftContext.rules.map((r) => r.title).join(" · ")}
+            </p>
+          )}
           <Textarea
             placeholder="Referencie o que o aluno relatou neste check-in..."
             value={feedback}

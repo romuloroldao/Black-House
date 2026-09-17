@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Minus, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -16,6 +16,7 @@ type Props = {
   onWheelZoom: (delta: number) => void;
   showGuides?: boolean;
   guides?: React.ReactNode;
+  showZoomControls?: boolean;
   className?: string;
 };
 
@@ -33,9 +34,11 @@ export function ImageViewport({
   onWheelZoom,
   showGuides,
   guides,
+  showZoomControls = true,
   className,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [imageError, setImageError] = useState(false);
   const dragRef = useRef<{
     pointerId: number;
     lastX: number;
@@ -117,42 +120,48 @@ export function ImageViewport({
     if (e.touches.length < 2) pinchRef.current = null;
   }, []);
 
+  useEffect(() => {
+    setImageError(false);
+  }, [src]);
+
   const pct = Math.round(viewport.scale * 100);
 
   return (
     <div className={cn('flex min-h-0 flex-col gap-1.5', className)}>
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-        <div className="flex items-center gap-1" role="group" aria-label={tEvolution('zoomControls')}>
-          <Button
-            type="button"
-            size="icon"
-            variant="outline"
-            className="h-11 w-11 touch-manipulation"
-            onClick={onZoomOut}
-            aria-label={tEvolution('zoomOut')}
-          >
-            <Minus className="h-4 w-4" />
-          </Button>
-          <span className="min-w-[3rem] text-center text-xs tabular-nums" aria-live="polite">
-            {pct}%
-          </span>
-          <Button
-            type="button"
-            size="icon"
-            variant="outline"
-            className="h-11 w-11 touch-manipulation"
-            onClick={onZoomIn}
-            aria-label={tEvolution('zoomIn')}
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
-        </div>
+        {showZoomControls ? (
+          <div className="flex items-center gap-1" role="group" aria-label={tEvolution('zoomControls')}>
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              className="h-11 w-11 touch-manipulation"
+              onClick={onZoomOut}
+              aria-label={tEvolution('zoomOut')}
+            >
+              <Minus className="h-4 w-4" />
+            </Button>
+            <span className="min-w-[3rem] text-center text-xs tabular-nums" aria-live="polite">
+              {pct}%
+            </span>
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              className="h-11 w-11 touch-manipulation"
+              onClick={onZoomIn}
+              aria-label={tEvolution('zoomIn')}
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       <div
         ref={containerRef}
-        className="relative min-h-[42dvh] flex-1 cursor-grab touch-none overflow-hidden rounded-xl border bg-muted active:cursor-grabbing md:min-h-[280px]"
+        className="relative min-h-[42dvh] flex-1 cursor-grab touch-none overflow-hidden rounded-xl bg-muted active:cursor-grabbing md:min-h-[280px]"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
@@ -164,17 +173,24 @@ export function ImageViewport({
         role="img"
         aria-label={`${label}: ${alt}. ${tEvolution('panHint')}`}
       >
-        <img
-          src={src}
-          alt={alt}
-          draggable={false}
-          className="pointer-events-none absolute left-1/2 top-1/2 h-full w-full max-w-none select-none object-contain"
-          style={{
-            transform: `translate(calc(-50% + ${viewport.x}%), calc(-50% + ${viewport.y}%)) scale(${viewport.scale})`,
-            transformOrigin: 'center center',
-            willChange: 'transform',
-          }}
-        />
+        {imageError ? (
+          <div className="absolute inset-0 flex items-center justify-center px-4 text-center text-sm text-muted-foreground">
+            {tEvolution('imageUnavailable')}
+          </div>
+        ) : (
+          <img
+            src={src}
+            alt={alt}
+            draggable={false}
+            onError={() => setImageError(true)}
+            className="pointer-events-none absolute left-1/2 top-1/2 h-full w-full max-w-none select-none object-contain"
+            style={{
+              transform: `translate(calc(-50% + ${viewport.x}%), calc(-50% + ${viewport.y}%)) scale(${viewport.scale})`,
+              transformOrigin: 'center center',
+              willChange: 'transform',
+            }}
+          />
+        )}
         {showGuides ? guides : null}
       </div>
     </div>

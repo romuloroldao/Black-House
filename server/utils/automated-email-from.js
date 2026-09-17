@@ -12,11 +12,8 @@ function getAutomatedEmailFrom() {
   return DEFAULT_AUTOMATED_FROM;
 }
 
-/** True se há transporte configurado (Resend ou SMTP). Sem isto, confirmação/reset não saem da API. */
+/** True se há transporte SMTP configurado. Sem isto, confirmação/reset não saem da API. */
 function isOutboundMailConfigured() {
-  if (process.env.RESEND_API_KEY && String(process.env.RESEND_API_KEY).trim()) {
-    return true;
-  }
   if (process.env.SMTP_HOST && String(process.env.SMTP_HOST).trim()) {
     return true;
   }

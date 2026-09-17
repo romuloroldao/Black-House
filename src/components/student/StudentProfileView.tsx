@@ -6,12 +6,14 @@ import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDataContext } from "@/contexts/DataContext";
-import { User, Save, Camera, Loader2, Upload, Bell } from "lucide-react";
+import { User, Save, Camera, Loader2, Upload, Bell, Palette } from "lucide-react";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { DateInputBR } from "@/components/ui/date-input-br";
 import { prepareImageForUpload } from "@/lib/prepare-image-upload";
+import { ModeToggle } from "@/components/ui/mode-toggle";
+import { Separator } from "@/components/ui/separator";
 
 const StudentProfileView = () => {
   const { user } = useAuth();
@@ -212,7 +214,7 @@ const StudentProfileView = () => {
   return (
     <div className="min-w-0 space-y-6 max-w-2xl">
       <div>
-        <h1 className="text-3xl font-bold mb-2">Meu Perfil</h1>
+        <h1 className="mb-2 text-xl font-bold sm:text-2xl">Meu Perfil</h1>
         <p className="text-muted-foreground">
           Gerencie suas informações pessoais
         </p>
@@ -285,6 +287,28 @@ const StudentProfileView = () => {
               </p>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="shadow-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Palette className="h-5 w-5 text-primary" />
+            Aparência
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="space-y-2">
+            <Label>Tema</Label>
+            <p className="text-sm text-muted-foreground">
+              Escolha claro, escuro ou seguir o sistema operativo.
+            </p>
+            <ModeToggle />
+          </div>
+          <Separator />
+          <p className="text-xs text-muted-foreground">
+            A preferência fica guardada neste dispositivo.
+          </p>
         </CardContent>
       </Card>
 

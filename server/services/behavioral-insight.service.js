@@ -40,6 +40,122 @@ async function tableExists(pool, name) {
 }
 
 /**
+ * Métricas determinísticas de uma janela (meal/workout). Sem I/O.
+ */
+function computeAdherenceWindow({
+  days,
+  end,
+  hasActiveDieta,
+  mealDays,
+  workoutCompletedDays,
+  agendaDias,
+}) {
+  const mealSet = mealDays instanceof Set ? mealDays : new Set(mealDays || []);
+  const workoutSet =
+    workoutCompletedDays instanceof Set
+      ? workoutCompletedDays
+      : new Set(workoutCompletedDays || []);
+  const agendaSet = agendaDias instanceof Set ? agendaDias : new Set(agendaDias || []);
+
+  let mealExpectedDays = 0;
+  let mealDoneDays = 0;
+  let workoutExpectedDays = 0;
+  let workoutDoneDays = 0;
+  let missDays = 0;
+  let streak = 0;
+
+  for (let i = 0; i < days; i++) {
+    const day = addDaysIso(end, -i);
+    const wd = isoWeekday(day);
+    const mealOk = mealSet.has(day);
+    const workoutExpected = agendaSet.size > 0 ? agendaSet.has(wd) : false;
+    const workoutOk = workoutSet.has(day);
+
+    if (hasActiveDieta) {
+      mealExpectedDays += 1;
+      if (mealOk) mealDoneDays += 1;
+    }
+    if (workoutExpected) {
+      workoutExpectedDays += 1;
+      if (workoutOk) workoutDoneDays += 1;
+    }
+
+    if (i > 0) {
+      if ((hasActiveDieta && !mealOk) || (workoutExpected && !workoutOk)) {
+        missDays += 1;
+      }
+    }
+  }
+
+  for (let i = 0; i < days; i++) {
+    const day = addDaysIso(end, -i);
+    const wd = isoWeekday(day);
+    const mealOk = mealSet.has(day);
+    const workoutExpected = agendaSet.size > 0 ? agendaSet.has(wd) : false;
+    const workoutOk = workoutSet.has(day);
+    const noExpectation = !hasActiveDieta && !workoutExpected;
+    const ok =
+      noExpectation ||
+      ((!hasActiveDieta || mealOk) && (!workoutExpected || workoutOk));
+    if (ok) streak += 1;
+    else break;
+  }
+
+  const mealRate =
+    mealExpectedDays > 0 ? Math.round((mealDoneDays / mealExpectedDays) * 100) : null;
+  const workoutRate =
+    workoutExpectedDays > 0
+      ? Math.round((workoutDoneDays / workoutExpectedDays) * 100)
+      : null;
+
+  return {
+    streak_days: streak,
+    miss_days_recent: missDays,
+    rates: {
+      meal_pct: mealRate,
+      workout_pct: workoutRate,
+      meal_days: mealDoneDays,
+      meal_expected: mealExpectedDays,
+      workout_done: workoutDoneDays,
+      workout_expected: workoutExpectedDays,
+    },
+  };
+}
+
+function composeInsightCopy(metrics) {
+  const { streak_days: streak, miss_days_recent: missDays, rates } = metrics;
+  const mealRate = rates.meal_pct;
+  const workoutRate = rates.workout_pct;
+  const mealDoneDays = rates.meal_days;
+  const workoutDoneDays = rates.workout_done;
+
+  let tone = 'neutral';
+  let text = 'Continua a registar o dia — eu ajudo no próximo passo.';
+
+  if (streak >= 5 && (mealRate == null || mealRate >= 70)) {
+    tone = 'positive';
+    text = `${streak} dias seguidos no plano. Mantém o ritmo.`;
+  } else if (streak >= 3) {
+    tone = 'positive';
+    text = `Streak de ${streak} dias. Bom trabalho — o que falta hoje?`;
+  } else if (missDays >= 3) {
+    tone = 'nudge';
+    text = `Nos últimos dias faltaram alguns registos (${missDays}). Sem stress — vamos ao próximo.`;
+  } else if (mealRate != null && mealRate < 40) {
+    tone = 'nudge';
+    text = 'As refeições andam irregulares. Marca a próxima quando puderes.';
+  } else if (workoutRate != null && workoutRate < 50) {
+    tone = 'nudge';
+    text = 'O treino tem falhado nalguns dias. Quando fores à sessão, regista série a série.';
+  } else if (mealDoneDays > 0 || workoutDoneDays > 0) {
+    tone = 'neutral';
+    text = 'Estás a registar execução — continua assim.';
+  }
+
+  return { tone, text };
+}
+
+/**
  * Calcula insight comportamental para um aluno (janela default 7 dias).
  */
 async function getBehavioralInsight(pool, aluno, { days = 7, asOf } = {}) {
@@ -92,7 +208,6 @@ async function getBehavioralInsight(pool, aluno, { days = 7, asOf } = {}) {
     for (const row of r.rows) workoutCompletedDays.add(String(row.data_ref).slice(0, 10));
   }
 
-  /** dias da semana com treino agendado */
   const agendaDias = new Set();
   if (hasAgenda) {
     const r = await pool.query(
@@ -102,97 +217,22 @@ async function getBehavioralInsight(pool, aluno, { days = 7, asOf } = {}) {
     for (const row of r.rows) agendaDias.add(Number(row.dia_semana));
   }
 
-  let mealExpectedDays = 0;
-  let mealDoneDays = 0;
-  let workoutExpectedDays = 0;
-  let workoutDoneDays = 0;
-  let missDays = 0;
-  let streak = 0;
-
-  for (let i = 0; i < days; i++) {
-    const day = addDaysIso(end, -i);
-    const wd = isoWeekday(day);
-    const mealOk = mealDays.has(day);
-    const workoutExpected = agendaDias.size > 0 ? agendaDias.has(wd) : false;
-    const workoutOk = workoutCompletedDays.has(day);
-
-    if (hasActiveDieta) {
-      mealExpectedDays += 1;
-      if (mealOk) mealDoneDays += 1;
-    }
-    if (workoutExpected) {
-      workoutExpectedDays += 1;
-      if (workoutOk) workoutDoneDays += 1;
-    }
-
-    // Misses: só dias fechados (não conta o dia corrente)
-    if (i > 0) {
-      if ((hasActiveDieta && !mealOk) || (workoutExpected && !workoutOk)) {
-        missDays += 1;
-      }
-    }
-  }
-
-  for (let i = 0; i < days; i++) {
-    const day = addDaysIso(end, -i);
-    const wd = isoWeekday(day);
-    const mealOk = mealDays.has(day);
-    const workoutExpected = agendaDias.size > 0 ? agendaDias.has(wd) : false;
-    const workoutOk = workoutCompletedDays.has(day);
-    const noExpectation = !hasActiveDieta && !workoutExpected;
-    const ok =
-      noExpectation ||
-      ((!hasActiveDieta || mealOk) && (!workoutExpected || workoutOk));
-    if (ok) streak += 1;
-    else break;
-  }
-
-  const mealRate =
-    mealExpectedDays > 0 ? Math.round((mealDoneDays / mealExpectedDays) * 100) : null;
-  const workoutRate =
-    workoutExpectedDays > 0
-      ? Math.round((workoutDoneDays / workoutExpectedDays) * 100)
-      : null;
-
-  let tone = 'neutral';
-  let text = 'Continua a registar o dia — eu ajudo no próximo passo.';
-
-  if (streak >= 5 && (mealRate == null || mealRate >= 70)) {
-    tone = 'positive';
-    text = `${streak} dias seguidos no plano. Mantém o ritmo.`;
-  } else if (streak >= 3) {
-    tone = 'positive';
-    text = `Streak de ${streak} dias. Bom trabalho — o que falta hoje?`;
-  } else if (missDays >= 3) {
-    tone = 'nudge';
-    text = `Nos últimos dias faltaram alguns registos (${missDays}). Sem stress — vamos ao próximo.`;
-  } else if (mealRate != null && mealRate < 40) {
-    tone = 'nudge';
-    text = 'As refeições andam irregulares. Marca a próxima quando puderes.';
-  } else if (workoutRate != null && workoutRate < 50) {
-    tone = 'nudge';
-    text = 'O treino tem falhado nalguns dias. Quando fores à sessão, regista série a série.';
-  } else if (mealDoneDays > 0 || workoutDoneDays > 0) {
-    tone = 'neutral';
-    text = 'Estás a registar execução — continua assim.';
-  }
+  const metrics = computeAdherenceWindow({
+    days,
+    end,
+    hasActiveDieta,
+    mealDays,
+    workoutCompletedDays,
+    agendaDias,
+  });
+  const copy = composeInsightCopy(metrics);
 
   return {
     available: true,
     window_days: days,
     as_of: end,
-    streak_days: streak,
-    miss_days_recent: missDays,
-    rates: {
-      meal_pct: mealRate,
-      workout_pct: workoutRate,
-      meal_days: mealDoneDays,
-      meal_expected: mealExpectedDays,
-      workout_done: workoutDoneDays,
-      workout_expected: workoutExpectedDays,
-    },
-    tone,
-    text,
+    ...metrics,
+    ...copy,
   };
 }
 
@@ -323,6 +363,8 @@ module.exports = {
   todayIso,
   addDaysIso,
   isoWeekday,
+  computeAdherenceWindow,
+  composeInsightCopy,
   getBehavioralInsight,
   recordDailyMisses,
   stableUuid,

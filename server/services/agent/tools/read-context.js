@@ -272,7 +272,7 @@ const readTools = [
   },
   {
     name: 'get_meal_detail',
-    description: 'Detalhe resumido da refeição actual do contexto',
+    description: 'Detalhe da refeição do plano (itens + overrides do dia)',
     autonomy: AUTONOMY.READ,
     idempotent: true,
     reversible: false,
@@ -284,6 +284,8 @@ const readTools = [
       })
       .strict(),
     async execute(ctx, args) {
+      const { itemMatchesPlano } = require('../food-replacement');
+      const substService = require('../../refeicao-substituicao.service');
       const hoje = await getAlunoHoje(ctx.pool, { aluno: ctx.aluno, userId: ctx.userId });
       const dietaId = args.dieta_id || hoje.dieta?.id;
       const mealKey = args.meal_key || null;
@@ -292,7 +294,8 @@ const readTools = [
 
       const itensRes = await ctx.pool.query(
         `SELECT i.id, i.refeicao, i.quantidade, i.unidade_quantidade, i.alimento_id,
-                a.nome AS alimento_nome
+                a.nome AS alimento_nome,
+                a.kcal_por_referencia, a.ptn_por_referencia, a.cho_por_referencia, a.lip_por_referencia
          FROM public.itens_dieta i
          LEFT JOIN public.alimentos a ON a.id = i.alimento_id
          WHERE i.dieta_id = $1
@@ -310,25 +313,55 @@ const readTools = [
           .trim();
 
       const keyNorm = mealKey ? normalize(mealKey) : '';
-      let itens = itensRes.rows;
+      let itens = itensRes.rows.filter((r) => itemMatchesPlano(r.refeicao, plano));
       if (keyNorm) {
-        const matched = itensRes.rows.filter((r) => {
+        const matched = itens.filter((r) => {
           const ref = normalize(r.refeicao);
           return ref === keyNorm || ref.includes(keyNorm) || keyNorm.includes(ref);
         });
         if (matched.length) itens = matched;
       } else {
-        itens = itensRes.rows.slice(0, 20);
+        itens = itens.slice(0, 20);
       }
 
-      const preview = itens.slice(0, 12).map((i) => ({
-        id: i.id,
-        refeicao: i.refeicao,
-        nome: i.alimento_nome || 'Alimento',
-        quantidade: i.quantidade != null ? Number(i.quantidade) : null,
-        unidade: i.unidade_quantidade || 'g',
-        alimento_id: i.alimento_id,
-      }));
+      let overrides = [];
+      try {
+        overrides = await substService.listForAluno(ctx.pool, ctx.aluno.id, {
+          dietaId,
+        });
+      } catch {
+        overrides = [];
+      }
+      const overrideByItem = new Map(
+        (overrides || []).map((o) => [String(o.item_dieta_id), o]),
+      );
+
+      const preview = itens.slice(0, 12).map((i) => {
+        const ov = overrideByItem.get(String(i.id));
+        const nomeBase = i.alimento_nome || 'Alimento';
+        const qOrig = i.quantidade != null ? Number(i.quantidade) : null;
+        const uOrig = i.unidade_quantidade || 'g';
+        return {
+          id: i.id,
+          refeicao: i.refeicao,
+          nome: ov?.alimento_substituto_nome || nomeBase,
+          nome_original: nomeBase,
+          quantidade:
+            ov?.quantidade_substituto != null
+              ? Number(ov.quantidade_substituto)
+              : qOrig,
+          unidade: ov?.unidade_substituto || uOrig,
+          quantidade_original: qOrig,
+          unidade_original: uOrig,
+          alimento_id: ov?.alimento_substituto_id || i.alimento_id,
+          alimento_id_original: i.alimento_id,
+          substituido_hoje: Boolean(ov),
+          kcal_por_referencia: i.kcal_por_referencia != null ? Number(i.kcal_por_referencia) : null,
+          ptn_por_referencia: i.ptn_por_referencia != null ? Number(i.ptn_por_referencia) : null,
+          cho_por_referencia: i.cho_por_referencia != null ? Number(i.cho_por_referencia) : null,
+          lip_por_referencia: i.lip_por_referencia != null ? Number(i.lip_por_referencia) : null,
+        };
+      });
 
       return ok({
         dieta_id: dietaId,
@@ -337,6 +370,59 @@ const readTools = [
         itens: preview,
         itens_total: itens.length,
         truncated: itens.length > preview.length,
+      });
+    },
+  },
+  {
+    name: 'search_food',
+    description: 'Pesquisa alimentos no catálogo por nome (para mapear pedido NL → alimento_id)',
+    autonomy: AUTONOMY.READ,
+    idempotent: true,
+    reversible: false,
+    inputSchema: z
+      .object({
+        q: z.string().min(1).max(120),
+        limit: z.number().int().positive().max(20).optional(),
+      })
+      .strict(),
+    async execute(ctx, args) {
+      const lim = Math.min(20, Math.max(1, Number(args.limit) || 8));
+      const q = String(args.q || '').trim();
+      if (!q) return ok({ query: q, alimentos: [] });
+      const like = `%${q.replace(/%/g, '')}%`;
+      const r = await ctx.pool.query(
+        `SELECT a.id, a.nome, a.tipo_id, t.nome_tipo AS tipo_nome, t.equiv_livre,
+                a.quantidade_referencia_g, a.kcal_por_referencia,
+                a.ptn_por_referencia, a.cho_por_referencia, a.lip_por_referencia
+         FROM public.alimentos a
+         LEFT JOIN public.tipos_alimentos t ON t.id = a.tipo_id
+         WHERE COALESCE(a.status, 'active') NOT IN ('deprecated', 'merged')
+           AND (
+             a.nome ILIKE $1
+             OR COALESCE(t.nome_tipo, '') ILIKE $1
+           )
+         ORDER BY
+           CASE WHEN LOWER(a.nome) = LOWER($2) THEN 0
+                WHEN LOWER(a.nome) LIKE LOWER($2) || '%' THEN 1
+                ELSE 2 END,
+           a.nome ASC
+         LIMIT $3`,
+        [like, q, lim],
+      );
+      return ok({
+        query: q,
+        alimentos: r.rows.map((row) => ({
+          id: row.id,
+          nome: row.nome,
+          tipo_id: row.tipo_id,
+          tipo_nome: row.tipo_nome,
+          equiv_livre: row.equiv_livre === true,
+          quantidade_referencia_g: Number(row.quantidade_referencia_g) || 100,
+          kcal_por_referencia: Number(row.kcal_por_referencia) || 0,
+          ptn_por_referencia: Number(row.ptn_por_referencia) || 0,
+          cho_por_referencia: Number(row.cho_por_referencia) || 0,
+          lip_por_referencia: Number(row.lip_por_referencia) || 0,
+        })),
       });
     },
   },

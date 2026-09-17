@@ -147,6 +147,12 @@ async function patchSession(pool, alunoId, alunoRow, sessaoId, body) {
       sessaoId: updated.id,
     });
   }
+  try {
+    require('./treino-evolucao.service').invalidateAluno(alunoId);
+    require('./logbook-progressao.service').invalidateAluno(alunoId);
+  } catch (_) {
+    /* ignore */
+  }
   return updated;
 }
 
@@ -162,6 +168,14 @@ async function upsertSerieLog(pool, alunoId, sessaoId, body) {
   }
   const exerciseName = String(body.exercise_name || '').trim() || `Exercício ${exerciseIndex + 1}`;
   const setIndex = body.set_index != null ? Number(body.set_index) : 1;
+  const { parseCarga } = require('./treino-evolucao.engine');
+  const parsedLoad = parseCarga(body.carga);
+  const slotRaw = body.slot_key || (body.metadata && body.metadata.slot_key);
+  const slotKey =
+    slotRaw &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(slotRaw))
+      ? String(slotRaw)
+      : null;
 
   const serie = await repo.upsertSerie(pool, {
     sessao_id: sessaoId,
@@ -170,6 +184,9 @@ async function upsertSerieLog(pool, alunoId, sessaoId, body) {
     exercise_name: exerciseName,
     set_index: Number.isFinite(setIndex) && setIndex >= 1 ? setIndex : 1,
     carga: body.carga != null ? String(body.carga) : null,
+    carga_valor: parsedLoad?.valor ?? null,
+    carga_unidade: parsedLoad?.unidade ?? null,
+    slot_key: slotKey,
     repeticoes: body.repeticoes != null && body.repeticoes !== '' ? Number(body.repeticoes) : null,
     rpe: body.rpe != null && body.rpe !== '' ? Number(body.rpe) : null,
     dor: body.dor != null && body.dor !== '' ? Number(body.dor) : null,
@@ -177,6 +194,13 @@ async function upsertSerieLog(pool, alunoId, sessaoId, body) {
     origem: body.origem === 'agent' ? 'agent' : 'ui',
     metadata: body.metadata || {},
   });
+
+  try {
+    require('./treino-evolucao.service').invalidateAluno(alunoId);
+    require('./logbook-progressao.service').invalidateAluno(alunoId);
+  } catch (_) {
+    /* ignore */
+  }
 
   // completedIndexes é autoritativo via PATCH (UI/agente) — não derivar de cada série
   // (um exercício tem várias séries; a 1ª não marca o exercício como completo).

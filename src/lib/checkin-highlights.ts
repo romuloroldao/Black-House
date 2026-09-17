@@ -46,6 +46,17 @@ export function getCheckinPrioridadeSummary(checkin: WeeklyCheckinRecord): strin
   return getCheckinHighlightFlags(checkin).join(" · ");
 }
 
+/** Ordenação: score de execução+pendência primeiro, depois prioridade do formulário, depois mais recente. */
+export function compareInboxForTriagem(
+  a: { checkin: WeeklyCheckinRecord; attentionScore?: number },
+  b: { checkin: WeeklyCheckinRecord; attentionScore?: number },
+): number {
+  const sa = a.attentionScore ?? 0;
+  const sb = b.attentionScore ?? 0;
+  if (sb !== sa) return sb - sa;
+  return compareCheckinsForTriagem(a.checkin, b.checkin);
+}
+
 /** Ordenação: prioridade primeiro, depois mais recente. */
 export function compareCheckinsForTriagem(
   a: WeeklyCheckinRecord,

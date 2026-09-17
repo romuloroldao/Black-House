@@ -12,13 +12,13 @@ import { Dumbbell, Clock, Target, ChevronDown, Play, Weight, FileDown } from "lu
 import { exportWorkoutToPdf } from "@/utils/workoutPdfExport";
 import StudentWorkoutSessionView from "@/components/student/StudentWorkoutSessionView";
 import PremiumEmptyState from "@/components/student/PremiumEmptyState";
-import { readSessionProgress } from "@/lib/workout-session-utils";
 import {
   DIAS_SEMANA_LABELS,
   DIAS_SEMANA_ORDEM,
   type DiaSemanaIso,
   type TreinoAgendaSession,
 } from "@/lib/treino-agenda-types";
+import { loadWorkoutSessionFromServer, type WorkoutSessionProgress } from "@/lib/workout-session-utils";
 
 function isoDayToday(): DiaSemanaIso {
   const d = new Date().getDay();
@@ -55,7 +55,22 @@ const StudentWorkoutsView = () => {
   }, [treinos, agendaSessions, diaHoje, hasAgenda]);
 
   const descansoHoje = hasAgenda && !treinoPrincipal;
-  const sessionProgress = treinoPrincipal ? readSessionProgress(treinoPrincipal.id) : null;
+  const [sessionProgress, setSessionProgress] = useState<WorkoutSessionProgress | null>(null);
+
+  useEffect(() => {
+    if (!treinoPrincipal?.id) {
+      setSessionProgress(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const hydrated = await loadWorkoutSessionFromServer(treinoPrincipal.id);
+      if (!cancelled) setSessionProgress(hydrated);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [treinoPrincipal?.id, treinoPrincipal?.alunoTreinoId]);
 
   const handleExportPdf = async (treino: any) => {
     try {
@@ -218,7 +233,7 @@ const StudentWorkoutsView = () => {
   return (
     <div className="min-w-0 space-y-6">
       <div>
-        <h1 className="mb-1 text-2xl font-bold sm:text-3xl">Meus treinos</h1>
+        <h1 className="mb-1 text-xl font-bold sm:text-2xl">Meus treinos</h1>
         <p className="text-muted-foreground">
           {treinos.length === 1
             ? "Seu plano de treino personalizado"

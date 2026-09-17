@@ -119,7 +119,7 @@ const NutritionManager = () => {
   return (
     <div className="p-6 space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-foreground">
+        <h1 className="text-xl font-bold text-foreground sm:text-2xl">
           Lista de Alimentos e Substituições
         </h1>
         <p className="text-muted-foreground mt-2">

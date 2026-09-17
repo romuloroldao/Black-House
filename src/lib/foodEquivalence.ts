@@ -47,23 +47,39 @@ export function canSubstitute(food: Food | null | undefined): boolean {
   return true;
 }
 
+function nameSearchRank(nome: string | undefined, q: string): number {
+  const query = q.trim().toLowerCase();
+  if (!query) return 0;
+  const n = (nome || '').toLowerCase();
+  if (n.startsWith(query)) return 3;
+  if (n.includes(query)) return 2;
+  return 1;
+}
+
 export function listarSubstituicoesIsocaloricas(
   foodRef: Food,
   quantidadeRef: number,
   unidadeRef: QuantityUnit | string,
   candidatos: Food[],
-  opts?: { limit?: number },
+  opts?: { limit?: number; searchQuery?: string },
 ): SubstituicaoIsocalorica[] {
   const limit = opts?.limit ?? 100;
+  const searchQuery = opts?.searchQuery?.trim() || '';
   const kcalRef = kcalPorPorcao(foodRef, quantidadeRef, unidadeRef);
   if (kcalRef <= 0 || !canSubstitute(foodRef)) return [];
 
   const out: SubstituicaoIsocalorica[] = [];
+  const queryLower = searchQuery ? searchQuery.toLowerCase() : '';
 
   for (const sub of candidatos) {
     if (!sub || sub.id === foodRef.id) continue;
     if (!sameEquivalenceGroup(foodRef, sub)) continue;
     if (!canSubstitute(sub)) continue;
+
+    if (queryLower) {
+      const nome = (sub.name || '').toLowerCase();
+      if (!nome.includes(queryLower)) continue;
+    }
 
     const qtd = calcularQuantidadeEquivalente(foodRef, quantidadeRef, unidadeRef, sub);
     if (qtd == null || !Number.isFinite(qtd) || qtd <= 0) continue;
@@ -77,10 +93,17 @@ export function listarSubstituicoesIsocaloricas(
     });
   }
 
-  out.sort((a, b) =>
-    Math.abs(a.quantidadeEquivalente - quantidadeRef) -
-    Math.abs(b.quantidadeEquivalente - quantidadeRef),
-  );
+  out.sort((a, b) => {
+    if (searchQuery) {
+      const ra = nameSearchRank(a.alimento.name, searchQuery);
+      const rb = nameSearchRank(b.alimento.name, searchQuery);
+      if (rb !== ra) return rb - ra;
+    }
+    const da = Math.abs(a.quantidadeEquivalente - quantidadeRef);
+    const db = Math.abs(b.quantidadeEquivalente - quantidadeRef);
+    if (da !== db) return da - db;
+    return (a.alimento.name || '').localeCompare(b.alimento.name || '');
+  });
 
   return out.slice(0, limit);
 }

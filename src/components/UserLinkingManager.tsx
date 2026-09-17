@@ -438,7 +438,7 @@ export default function UserLinkingManager() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{totalAlunos}</div>
+            <div className="text-xl font-bold sm:text-2xl">{totalAlunos}</div>
           </CardContent>
         </Card>
         <Card>
@@ -449,7 +449,7 @@ export default function UserLinkingManager() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-primary">{alunosVinculados}</div>
+            <div className="text-2xl font-bold text-primary">{alunosVinculados}</div>
           </CardContent>
         </Card>
         <Card>
@@ -460,7 +460,7 @@ export default function UserLinkingManager() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-amber-500">{alunosPendentes}</div>
+            <div className="text-2xl font-bold text-amber-500">{alunosPendentes}</div>
           </CardContent>
         </Card>
       </div>

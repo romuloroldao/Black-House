@@ -404,7 +404,7 @@ const StudentDietView = () => {
   return (
     <div className="min-w-0 space-y-5">
       <div>
-        <h1 className="mb-1 text-2xl font-bold sm:text-3xl">Minha dieta</h1>
+        <h1 className="mb-1 text-xl font-bold sm:text-2xl">Minha dieta</h1>
         <p className="text-muted-foreground">{dieta.nome}</p>
         {dieta.data_retorno && (
           <p className="mt-1 text-sm text-primary/90">

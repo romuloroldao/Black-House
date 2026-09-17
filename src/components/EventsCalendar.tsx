@@ -301,7 +301,7 @@ export function EventsCalendar() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold">Calendário de Eventos</h2>
+          <h2 className="text-xl font-bold sm:text-2xl">Calendário de Eventos</h2>
           <p className="text-muted-foreground">
             Gerencie eventos e lembretes automáticos
           </p>

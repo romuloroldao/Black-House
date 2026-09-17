@@ -12,6 +12,7 @@ const FinancialWebhookHealthJob = require('./financial-webhook-health.job');
 const ProfileCompletenessRemindersJob = require('./profile-completeness-reminders.job');
 const SmartRemindersJob = require('./smart-reminders.job');
 const DailyAdherenceJob = require('./daily-adherence.job');
+const EmailQueueJob = require('./email-queue.job');
 
 class JobsRunner {
     constructor(pool, notificationService, financialSync = null) {
@@ -79,6 +80,15 @@ class JobsRunner {
         const dailyAdherence = new DailyAdherenceJob(this.pool);
         dailyAdherence.start();
         this.jobs.push(dailyAdherence);
+
+        // Email Queue — processa fila de e-mails com retry
+        const emailQueue = new EmailQueueJob(this.pool);
+        emailQueue.start();
+        this.jobs.push(emailQueue);
+
+        const photoPoseNormalization = new (require('./photo-pose-normalization.job'))(this.pool);
+        photoPoseNormalization.start();
+        this.jobs.push(photoPoseNormalization);
 
         console.log(`[JobsRunner] ${this.jobs.length} jobs iniciados com sucesso`);
     }

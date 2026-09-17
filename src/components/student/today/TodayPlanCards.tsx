@@ -1,4 +1,4 @@
-import { ChevronRight, Dumbbell, Utensils } from "lucide-react";
+import { ChevronRight, Dumbbell, Utensils, BookOpen } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -8,10 +8,17 @@ import type { AlunoHojeDietaRotacao, AlunoHojeTreino } from "@/types/aluno-hoje"
 type TodayPlanCardsProps = {
   loading?: boolean;
   treino?: AlunoHojeTreino | null;
-  dieta?: { nome?: string | null; objetivo?: string | null; data_retorno?: string | null } | null;
+  dieta?: {
+    nome?: string | null;
+    objetivo?: string | null;
+    data_retorno?: string | null;
+    refeicao_livre_ativa?: boolean | null;
+    refeicao_livre_content_id?: string | null;
+  } | null;
   dietaRotacao?: AlunoHojeDietaRotacao | null;
   onOpenTreino: () => void;
   onOpenDieta: () => void;
+  onOpenGuiaEducativo?: (contentId: string) => void;
 };
 
 const TodayPlanCards = ({
@@ -21,6 +28,7 @@ const TodayPlanCards = ({
   dietaRotacao,
   onOpenTreino,
   onOpenDieta,
+  onOpenGuiaEducativo,
 }: TodayPlanCardsProps) => {
   if (loading) {
     return (
@@ -105,6 +113,19 @@ const TodayPlanCards = ({
                 Ver dieta
                 <ChevronRight className="h-4 w-4" />
               </Button>
+              {dieta.refeicao_livre_ativa &&
+              dieta.refeicao_livre_content_id &&
+              onOpenGuiaEducativo ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full gap-2"
+                  onClick={() => onOpenGuiaEducativo(dieta.refeicao_livre_content_id!)}
+                >
+                  <BookOpen className="h-4 w-4" />
+                  Ver guia educativo
+                </Button>
+              ) : null}
             </>
           ) : (
             <>

@@ -107,43 +107,93 @@ async function listSeriesBySessao(pool, sessaoId) {
 }
 
 async function upsertSerie(pool, row) {
-  const r = await pool.query(
-    `INSERT INTO public.treino_serie_logs (
-       sessao_id, aluno_id, exercise_index, exercise_name, set_index,
-       carga, repeticoes, rpe, dor, concluido, origem, metadata
-     ) VALUES (
-       $1, $2, $3, $4, $5,
-       $6, $7, $8, $9, COALESCE($10, true), COALESCE($11, 'ui'),
-       COALESCE($12::jsonb, '{}'::jsonb)
-     )
-     ON CONFLICT (sessao_id, exercise_index, set_index)
-     DO UPDATE SET
-       exercise_name = EXCLUDED.exercise_name,
-       carga = EXCLUDED.carga,
-       repeticoes = EXCLUDED.repeticoes,
-       rpe = EXCLUDED.rpe,
-       dor = EXCLUDED.dor,
-       concluido = EXCLUDED.concluido,
-       origem = EXCLUDED.origem,
-       metadata = EXCLUDED.metadata,
-       registrado_em = now()
-     RETURNING *`,
-    [
-      row.sessao_id,
-      row.aluno_id,
-      row.exercise_index,
-      row.exercise_name,
-      row.set_index ?? 1,
-      row.carga ?? null,
-      row.repeticoes ?? null,
-      row.rpe ?? null,
-      row.dor ?? null,
-      row.concluido !== false,
-      row.origem || 'ui',
-      row.metadata != null ? JSON.stringify(row.metadata) : '{}',
-    ],
-  );
-  return r.rows[0];
+  const paramsFull = [
+    row.sessao_id,
+    row.aluno_id,
+    row.exercise_index,
+    row.exercise_name,
+    row.set_index ?? 1,
+    row.carga ?? null,
+    row.carga_valor ?? null,
+    row.carga_unidade ?? null,
+    row.slot_key ?? null,
+    row.repeticoes ?? null,
+    row.rpe ?? null,
+    row.dor ?? null,
+    row.concluido !== false,
+    row.origem || 'ui',
+    row.metadata != null ? JSON.stringify(row.metadata) : '{}',
+  ];
+  try {
+    const r = await pool.query(
+      `INSERT INTO public.treino_serie_logs (
+         sessao_id, aluno_id, exercise_index, exercise_name, set_index,
+         carga, carga_valor, carga_unidade, slot_key,
+         repeticoes, rpe, dor, concluido, origem, metadata
+       ) VALUES (
+         $1, $2, $3, $4, $5,
+         $6, $7, $8, $9,
+         $10, $11, $12, COALESCE($13, true), COALESCE($14, 'ui'),
+         COALESCE($15::jsonb, '{}'::jsonb)
+       )
+       ON CONFLICT (sessao_id, exercise_index, set_index)
+       DO UPDATE SET
+         exercise_name = EXCLUDED.exercise_name,
+         carga = EXCLUDED.carga,
+         carga_valor = EXCLUDED.carga_valor,
+         carga_unidade = EXCLUDED.carga_unidade,
+         slot_key = COALESCE(EXCLUDED.slot_key, public.treino_serie_logs.slot_key),
+         repeticoes = EXCLUDED.repeticoes,
+         rpe = EXCLUDED.rpe,
+         dor = EXCLUDED.dor,
+         concluido = EXCLUDED.concluido,
+         origem = EXCLUDED.origem,
+         metadata = EXCLUDED.metadata,
+         registrado_em = now()
+       RETURNING *`,
+      paramsFull,
+    );
+    return r.rows[0];
+  } catch (err) {
+    if (err.code !== '42703') throw err;
+    const r = await pool.query(
+      `INSERT INTO public.treino_serie_logs (
+         sessao_id, aluno_id, exercise_index, exercise_name, set_index,
+         carga, repeticoes, rpe, dor, concluido, origem, metadata
+       ) VALUES (
+         $1, $2, $3, $4, $5,
+         $6, $7, $8, $9, COALESCE($10, true), COALESCE($11, 'ui'),
+         COALESCE($12::jsonb, '{}'::jsonb)
+       )
+       ON CONFLICT (sessao_id, exercise_index, set_index)
+       DO UPDATE SET
+         exercise_name = EXCLUDED.exercise_name,
+         carga = EXCLUDED.carga,
+         repeticoes = EXCLUDED.repeticoes,
+         rpe = EXCLUDED.rpe,
+         dor = EXCLUDED.dor,
+         concluido = EXCLUDED.concluido,
+         origem = EXCLUDED.origem,
+         metadata = EXCLUDED.metadata,
+         registrado_em = now()
+       RETURNING *`,
+      [
+        row.sessao_id,
+        row.aluno_id,
+        row.exercise_index,
+        row.exercise_name,
+        row.set_index ?? 1,
+        row.carga ?? null,
+        row.repeticoes ?? null,
+        row.rpe ?? null,
+        row.dor ?? null,
+        row.concluido !== false,
+        row.origem || 'ui',
+        row.metadata != null ? JSON.stringify(row.metadata) : '{}',
+      ],
+    );
+    return r.rows[0];
+  }
 }
 
 async function listCargasHistorico(pool, alunoId, treinoId, { limit = 24 } = {}) {
@@ -176,6 +226,50 @@ async function assertTreinoAtribuido(pool, alunoId, treinoId) {
   return r.rows[0] || null;
 }
 
+async function listSessoesWithSeriesInRange(pool, alunoId, startIso, endIso) {
+  const sessoesRes = await pool.query(
+    `SELECT id, aluno_id, aluno_treino_id, treino_id, data_ref::text AS data_ref,
+            status, started_at, completed_at
+     FROM public.treino_sessoes
+     WHERE aluno_id = $1
+       AND data_ref BETWEEN $2::date AND $3::date
+     ORDER BY data_ref ASC, started_at ASC`,
+    [alunoId, startIso, endIso],
+  );
+  const sessoes = sessoesRes.rows;
+  if (sessoes.length === 0) return [];
+
+  const ids = sessoes.map((s) => s.id);
+  let seriesRes;
+  try {
+    seriesRes = await pool.query(
+      `SELECT id, sessao_id, aluno_id, exercise_index, exercise_name, set_index,
+              carga, carga_valor, carga_unidade, slot_key,
+              repeticoes, rpe, dor, concluido, registrado_em, metadata
+       FROM public.treino_serie_logs
+       WHERE sessao_id = ANY($1::uuid[])
+       ORDER BY exercise_index ASC, set_index ASC`,
+      [ids],
+    );
+  } catch (err) {
+    if (err.code !== '42703') throw err;
+    seriesRes = await pool.query(
+      `SELECT id, sessao_id, aluno_id, exercise_index, exercise_name, set_index,
+              carga, repeticoes, rpe, dor, concluido, registrado_em, metadata
+       FROM public.treino_serie_logs
+       WHERE sessao_id = ANY($1::uuid[])
+       ORDER BY exercise_index ASC, set_index ASC`,
+      [ids],
+    );
+  }
+  const bySessao = new Map(sessoes.map((s) => [s.id, []]));
+  for (const row of seriesRes.rows) {
+    const list = bySessao.get(row.sessao_id);
+    if (list) list.push(row);
+  }
+  return sessoes.map((s) => ({ ...s, series: bySessao.get(s.id) || [] }));
+}
+
 module.exports = {
   getSessaoByAlunoTreinoDate,
   listSessoesByAlunoAndDate,
@@ -186,4 +280,5 @@ module.exports = {
   upsertSerie,
   listCargasHistorico,
   assertTreinoAtribuido,
+  listSessoesWithSeriesInRange,
 };

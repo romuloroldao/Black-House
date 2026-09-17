@@ -23,6 +23,7 @@ const createFoodCatalogRouter = require('./food-catalog');
 const createUploadsRouter = require('./uploads');
 const createEducationalContentsRouter = require('./educational-contents');
 const createRefeicoesRegistradasRouter = require('./refeicoes-registradas');
+const createFotosAlunosPoseRouter = require('./fotos-alunos-pose');
 const { deleteUserByUserRoleId } = require('../utils/deleteUserByUserRoleId');
 const AsaasService = require('../services/asaas.service');
 const { encryptCoachAsaasApiKey, decryptCoachAsaasApiKey } = require('../utils/asaas-coach-secret-crypto');
@@ -361,6 +362,75 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
         return res.status(500).json({
           error: error.message || 'Erro ao carregar agenda',
           error_code: 'TREINO_AGENDA_ERROR',
+        });
+      }
+    },
+  );
+
+  // GET /api/alunos/:alunoId/treino-evolucao — coach vê Log Book do aluno
+  router.get(
+    '/alunos/:alunoId/treino-evolucao',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'assistant']),
+    attachCoachScope,
+    validateUUIDParam('alunoId'),
+    async (req, res) => {
+      try {
+        const alunoId = req.params.alunoId;
+        if (req.user.role !== 'admin') {
+          const ok = await assertCoachCanAccessAluno(pool, req.coachScope, alunoId);
+          if (!ok) {
+            return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+          }
+        }
+        const evolucao = require('../services/treino-evolucao.service');
+        const asOf = req.query.as_of || req.query.week || undefined;
+        const payload = await evolucao.getWeeklyEvolution(pool, alunoId, {
+          asOf,
+          audience: 'coach',
+        });
+        return res.json(payload);
+      } catch (error) {
+        console.error('GET /alunos/:alunoId/treino-evolucao', error);
+        return res.status(500).json({
+          error: error.message || 'Erro ao carregar evolução do treino',
+          error_code: 'TREINO_EVOLUCAO_ERROR',
+        });
+      }
+    },
+  );
+
+  // GET /api/alunos/:alunoId/logbook-progressao — progressão de cargas (Logbook)
+  router.get(
+    '/alunos/:alunoId/logbook-progressao',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'assistant']),
+    attachCoachScope,
+    validateUUIDParam('alunoId'),
+    async (req, res) => {
+      try {
+        const alunoId = req.params.alunoId;
+        if (req.user.role !== 'admin') {
+          const ok = await assertCoachCanAccessAluno(pool, req.coachScope, alunoId);
+          if (!ok) {
+            return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+          }
+        }
+        const progressao = require('../services/logbook-progressao.service');
+        const payload = await progressao.getLoadProgression(pool, alunoId, {
+          period: req.query.period,
+          exerciseKey: req.query.exercise_key,
+          asOf: req.query.as_of,
+        });
+        return res.json(payload);
+      } catch (error) {
+        console.error('GET /alunos/:alunoId/logbook-progressao', error);
+        const status = error.statusCode || 500;
+        return res.status(status).json({
+          error: error.message || 'Erro ao carregar progressão de cargas',
+          error_code: error.code || 'LOGBOOK_PROGRESSAO_ERROR',
         });
       }
     },
@@ -4449,6 +4519,9 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
   // ROTA: /api/fotos-alunos — fotos de progresso (sem /rest/v1/fotos_alunos)
   // ============================================================================
 
+  // Classificar/gravar pose (ANTES de /:id)
+  router.use(createFotosAlunosPoseRouter(pool, authenticate, domainSchemaGuard, requireAlunoWhenStudent));
+
   router.get(
     '/fotos-alunos',
     authenticate,
@@ -4465,25 +4538,12 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           });
         }
 
+        const poseResolver = require('../services/foto-pose-resolver');
+        const hasPoseMeta = await poseResolver.hasPoseMetadataColumns(pool);
+        const listSql = poseResolver.buildFotoListSql(hasPoseMeta);
+
         if (req.user.role === 'admin') {
-          const r = await pool.query(
-            `SELECT
-               f.id,
-               f.aluno_id,
-               a.coach_id,
-               f.url,
-               f.descricao,
-               f.weekly_checkin_id,
-               f.created_at,
-               wc.created_at AS checkin_created_at,
-               wc.peso_kg
-             FROM public.fotos_alunos f
-             LEFT JOIN public.alunos a ON a.id = f.aluno_id
-             LEFT JOIN public.weekly_checkins wc ON wc.id = f.weekly_checkin_id
-             WHERE f.aluno_id = $1
-             ORDER BY COALESCE(wc.created_at, f.created_at) DESC NULLS LAST, f.created_at ASC NULLS LAST`,
-            [alunoId],
-          );
+          const r = await pool.query(listSql, [alunoId]);
           return res.json(r.rows);
         }
 
@@ -4492,48 +4552,14 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           if (!ok) {
             return res.status(403).json({ error: 'Sem permissão para este aluno', error_code: 'FORBIDDEN' });
           }
-          const r = await pool.query(
-            `SELECT
-               f.id,
-               f.aluno_id,
-               a.coach_id,
-               f.url,
-               f.descricao,
-               f.weekly_checkin_id,
-               f.created_at,
-               wc.created_at AS checkin_created_at,
-               wc.peso_kg
-             FROM public.fotos_alunos f
-             LEFT JOIN public.alunos a ON a.id = f.aluno_id
-             LEFT JOIN public.weekly_checkins wc ON wc.id = f.weekly_checkin_id
-             WHERE f.aluno_id = $1
-             ORDER BY COALESCE(wc.created_at, f.created_at) DESC NULLS LAST, f.created_at ASC NULLS LAST`,
-            [alunoId],
-          );
+          const r = await pool.query(listSql, [alunoId]);
           return res.json(r.rows);
         }
 
         if (req.aluno.id !== alunoId) {
           return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
         }
-        const r = await pool.query(
-          `SELECT
-             f.id,
-             f.aluno_id,
-             a.coach_id,
-             f.url,
-             f.descricao,
-             f.weekly_checkin_id,
-             f.created_at,
-             wc.created_at AS checkin_created_at,
-             wc.peso_kg
-           FROM public.fotos_alunos f
-           LEFT JOIN public.alunos a ON a.id = f.aluno_id
-           LEFT JOIN public.weekly_checkins wc ON wc.id = f.weekly_checkin_id
-           WHERE f.aluno_id = $1
-           ORDER BY COALESCE(wc.created_at, f.created_at) DESC NULLS LAST, f.created_at ASC NULLS LAST`,
-          [alunoId],
-        );
+        const r = await pool.query(listSql, [alunoId]);
         return res.json(r.rows);
       } catch (error) {
         return res.status(500).json({ error: error.message || 'Erro ao listar fotos' });
@@ -5353,20 +5379,22 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           )
         ).rows.length > 0;
 
+        const { insertCheckinPhoto } = require('../services/foto-pose-resolver');
         for (const f of fotosInput) {
           const url = String(f.url).trim();
-          const descricao = f.descricao != null ? String(f.descricao) : null;
+          const poseAluno = f.descricao != null ? String(f.descricao) : null;
           if (hasCheckinPhotoCol) {
-            await client.query(
-              `INSERT INTO public.fotos_alunos (aluno_id, url, descricao, weekly_checkin_id)
-               VALUES ($1, $2, $3, $4)`,
-              [aluno.id, url, descricao, createdCheckin.id],
-            );
+            await insertCheckinPhoto(pool, client, {
+              alunoId: aluno.id,
+              url,
+              poseAluno,
+              weeklyCheckinId: createdCheckin.id,
+            });
           } else {
             await client.query(
               `INSERT INTO public.fotos_alunos (aluno_id, url, descricao)
                VALUES ($1, $2, $3)`,
-              [aluno.id, url, descricao],
+              [aluno.id, url, poseAluno],
             );
           }
         }
@@ -5955,9 +5983,17 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
   // ============================================================================
   const VISIBILIDADES_VIDEO = ['active-students', 'inactive-students', 'guests', 'everyone'];
 
-  // GET /api/videos — coach: próprios vídeos; aluno: vídeos do coach com visibilidade permitida no portal
-  router.get('/videos', authenticate, domainSchemaGuard, validateRole(['coach', 'aluno']), async (req, res) => {
+  // GET /api/videos — admin: todos; coach: próprios; aluno: vídeos do coach com visibilidade no portal
+  router.get('/videos', authenticate, domainSchemaGuard, validateRole(['coach', 'aluno', 'admin']), async (req, res) => {
     try {
+      // Admin passava validateRole mas caía no ramo de aluno → lista vazia (galeria “sumia”).
+      if (req.user.role === 'admin') {
+        const result = await pool.query(
+          `SELECT * FROM public.videos ORDER BY created_at DESC`
+        );
+        return res.json(result.rows);
+      }
+
       if (req.user.role === 'coach') {
         const result = await pool.query(
           `SELECT * FROM public.videos WHERE coach_id = $1 ORDER BY created_at DESC`,
@@ -5989,8 +6025,8 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     }
   });
 
-  // POST /api/videos — apenas coach
-  router.post('/videos', authenticate, domainSchemaGuard, validateRole(['coach']), resolveCoachOrFail, async (req, res) => {
+  // POST /api/videos — coach (e admin)
+  router.post('/videos', authenticate, domainSchemaGuard, validateRole(['coach', 'admin']), resolveCoachOrFail, async (req, res) => {
     try {
       const {
         titulo,
@@ -6019,7 +6055,19 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
       }
 
       const tagArray = Array.isArray(tags) ? tags : [];
-      const coachId = req.user.id;
+      // Admin: body.coach_id, senão o coach com mais vídeos (galeria da assessoria), senão o próprio id.
+      let coachId = req.user.id;
+      if (req.user.role === 'admin') {
+        if (req.body?.coach_id) {
+          coachId = req.body.coach_id;
+        } else {
+          const top = await pool.query(
+            `SELECT coach_id FROM public.videos
+             GROUP BY coach_id ORDER BY COUNT(*) DESC NULLS LAST LIMIT 1`
+          );
+          if (top.rows[0]?.coach_id) coachId = top.rows[0].coach_id;
+        }
+      }
 
       const insertResult = await pool.query(
         `INSERT INTO public.videos (
@@ -6049,11 +6097,12 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     }
   });
 
-  // PATCH /api/videos/:id — apenas coach, apenas vídeos próprios
-  router.patch('/videos/:id', authenticate, domainSchemaGuard, validateRole(['coach']), resolveCoachOrFail, validateUUIDParam('id'), async (req, res) => {
+  // PATCH /api/videos/:id — coach (próprios) ou admin (qualquer)
+  router.patch('/videos/:id', authenticate, domainSchemaGuard, validateRole(['coach', 'admin']), resolveCoachOrFail, validateUUIDParam('id'), async (req, res) => {
     try {
       const { id } = req.params;
       const body = req.body || {};
+      const isAdmin = req.user.role === 'admin';
 
       const allowed = ['titulo', 'descricao', 'youtube_id', 'duracao', 'categoria', 'visibilidade', 'tags', 'instrutor', 'views', 'likes'];
       const updates = [];
@@ -6085,15 +6134,26 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
 
       updates.push('updated_at = now()');
       const idParam = values.length + 1;
-      const coachParam = values.length + 2;
-      values.push(id, req.user.id);
+      values.push(id);
 
-      const query = `
-        UPDATE public.videos
-        SET ${updates.join(', ')}
-        WHERE id = $${idParam} AND coach_id = $${coachParam}
-        RETURNING *
-      `;
+      let query;
+      if (isAdmin) {
+        query = `
+          UPDATE public.videos
+          SET ${updates.join(', ')}
+          WHERE id = $${idParam}
+          RETURNING *
+        `;
+      } else {
+        const coachParam = values.length + 1;
+        values.push(req.user.id);
+        query = `
+          UPDATE public.videos
+          SET ${updates.join(', ')}
+          WHERE id = $${idParam} AND coach_id = $${coachParam}
+          RETURNING *
+        `;
+      }
 
       const result = await pool.query(query, values);
 
@@ -6111,14 +6171,17 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     }
   });
 
-  // DELETE /api/videos/:id — apenas coach, apenas vídeos próprios
-  router.delete('/videos/:id', authenticate, domainSchemaGuard, validateRole(['coach']), resolveCoachOrFail, validateUUIDParam('id'), async (req, res) => {
+  // DELETE /api/videos/:id — coach (próprios) ou admin (qualquer)
+  router.delete('/videos/:id', authenticate, domainSchemaGuard, validateRole(['coach', 'admin']), resolveCoachOrFail, validateUUIDParam('id'), async (req, res) => {
     try {
       const { id } = req.params;
-      const del = await pool.query(
-        'DELETE FROM public.videos WHERE id = $1 AND coach_id = $2 RETURNING id',
-        [id, req.user.id]
-      );
+      const isAdmin = req.user.role === 'admin';
+      const del = isAdmin
+        ? await pool.query('DELETE FROM public.videos WHERE id = $1 RETURNING id', [id])
+        : await pool.query(
+            'DELETE FROM public.videos WHERE id = $1 AND coach_id = $2 RETURNING id',
+            [id, req.user.id]
+          );
 
       if (del.rows.length === 0) {
         return res.status(404).json({ error: 'Vídeo não encontrado', error_code: 'VIDEO_NOT_FOUND' });

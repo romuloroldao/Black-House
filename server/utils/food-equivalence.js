@@ -41,23 +41,40 @@ function canSubstitute(food) {
     return true;
 }
 
+/** Relevância textual: prefixo > contém > resto (já filtrado em SQL). */
+function nameSearchRank(nome, q) {
+    const query = String(q || '').trim().toLowerCase();
+    if (!query) return 0;
+    const n = String(nome || '').toLowerCase();
+    if (n.startsWith(query)) return 3;
+    if (n.includes(query)) return 2;
+    return 1;
+}
+
 /**
  * @param {object} foodRef alimento de referência (com tipo_id, kcal, portion)
  * @param {number} quantidadeRef
  * @param {string} unidadeRef
  * @param {object[]} candidatos outros alimentos (mesmo grupo)
- * @param {{ limit?: number }} opts
+ * @param {{ limit?: number, searchQuery?: string }} opts
  */
 function listarSubstituicoesIsocaloricas(foodRef, quantidadeRef, unidadeRef, candidatos, opts = {}) {
     const limit = opts.limit ?? 100;
+    const searchQuery = opts.searchQuery ? String(opts.searchQuery).trim() : '';
     const kcalRef = kcalPorPorcao(foodRef, quantidadeRef, unidadeRef);
     if (kcalRef <= 0 || !canSubstitute(foodRef)) return [];
 
     const out = [];
+    const queryLower = searchQuery ? searchQuery.toLowerCase() : '';
     for (const sub of candidatos) {
         if (!sub || String(sub.id) === String(foodRef.id)) continue;
         if (!sameEquivalenceGroup(foodRef, sub)) continue;
         if (!canSubstitute(sub)) continue;
+
+        if (queryLower) {
+            const nome = String(sub.nome || sub.name || '').toLowerCase();
+            if (!nome.includes(queryLower)) continue;
+        }
 
         const qtd = calcularQuantidadeEquivalente(foodRef, quantidadeRef, unidadeRef, sub);
         if (qtd == null || !Number.isFinite(qtd) || qtd <= 0) continue;
@@ -73,6 +90,14 @@ function listarSubstituicoesIsocaloricas(foodRef, quantidadeRef, unidadeRef, can
     }
 
     out.sort((a, b) => {
+        if (searchQuery) {
+            const ra = nameSearchRank(a.alimento.nome || a.alimento.name, searchQuery);
+            const rb = nameSearchRank(b.alimento.nome || b.alimento.name, searchQuery);
+            if (rb !== ra) return rb - ra;
+        }
+        const da = Math.abs(a.quantidadeEquivalente - quantidadeRef);
+        const db = Math.abs(b.quantidadeEquivalente - quantidadeRef);
+        if (da !== db) return da - db;
         const na = a.alimento.nome || a.alimento.name || '';
         const nb = b.alimento.nome || b.alimento.name || '';
         return na.localeCompare(nb);
@@ -86,5 +111,6 @@ module.exports = {
     calcularQuantidadeEquivalente,
     sameEquivalenceGroup,
     canSubstitute,
+    nameSearchRank,
     listarSubstituicoesIsocaloricas,
 };

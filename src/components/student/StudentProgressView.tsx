@@ -11,6 +11,7 @@ import {
 import { toast } from "sonner";
 import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import StudentProgressDashboard from "./StudentProgressDashboard";
+import WorkoutEvolutionSection from "@/components/student/WorkoutEvolutionSection";
 import WeightTimelineChart from "@/components/coach/WeightTimelineChart";
 import type { BodyMetricsResponse } from "@/types/profile-completeness";
 import CheckinStreakCard from "@/components/student/today/CheckinStreakCard";
@@ -116,7 +117,7 @@ const StudentProgressView = () => {
   return (
     <div className="min-w-0 space-y-6">
       <div className="min-w-0">
-        <h1 className="text-2xl font-bold sm:text-3xl">Fotos e evolução</h1>
+        <h1 className="text-xl font-bold sm:text-2xl">Fotos e evolução</h1>
         <p className="mt-1 text-muted-foreground">
           Acompanhe o histórico enviado no check-in semanal e as métricas
         </p>
@@ -139,6 +140,7 @@ const StudentProgressView = () => {
             photos={fotos}
             onDeletePhoto={handleDeletePhoto}
             onOpenCheckin={openCheckin}
+            onPhotosRefresh={loadProgressData}
           />
 
           <button
@@ -155,6 +157,7 @@ const StudentProgressView = () => {
         </TabsContent>
 
         <TabsContent value="metrics" className="mt-6 space-y-6">
+          <WorkoutEvolutionSection />
           <CheckinStreakCard
             loading={hojeLoading}
             streak={hoje?.checkin_streak ?? null}
@@ -167,7 +170,7 @@ const StudentProgressView = () => {
             loading={bodyMetricsLoading}
             compact
           />
-          <StudentProgressDashboard />
+          <StudentProgressDashboard showWorkoutEvolution={false} />
         </TabsContent>
       </Tabs>
     </div>

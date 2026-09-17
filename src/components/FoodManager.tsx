@@ -507,7 +507,7 @@ Batata doce,100,86,20,1.6,0.1`;
     <div className="container mx-auto p-6 max-w-7xl">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
+          <h1 className="flex items-center gap-2 text-xl font-bold sm:text-2xl">
             <Apple className="w-8 h-8 text-primary" />
             Gerenciar Alimentos
           </h1>

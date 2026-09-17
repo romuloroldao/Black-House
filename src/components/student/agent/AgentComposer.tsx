@@ -16,7 +16,7 @@ const AgentComposer = ({
   status,
   onSend,
   autoFocus = false,
-  placeholder = "O que precisas agora?",
+  placeholder = "Fale com o Coleman...",
   className,
 }: AgentComposerProps) => {
   const [draft, setDraft] = useState("");
@@ -39,15 +39,15 @@ const AgentComposer = ({
   return (
     <form
       className={cn(
-        "flex items-center gap-2 rounded-2xl border border-border bg-card p-2 shadow-sm",
-        "ring-offset-background focus-within:ring-2 focus-within:ring-ring/40",
+        "flex items-center gap-2 rounded-2xl border border-border bg-background p-2 shadow-sm",
+        "ring-offset-background focus-within:ring-2 focus-within:ring-primary/30",
         className,
       )}
       onSubmit={(e) => {
         e.preventDefault();
         submit();
       }}
-      aria-label="Enviar mensagem ao agente"
+      aria-label="Enviar mensagem ao Coleman"
     >
       <Input
         ref={inputRef}
@@ -55,9 +55,9 @@ const AgentComposer = ({
         onChange={(e) => setDraft(e.target.value)}
         placeholder={placeholder}
         disabled={sending}
-        className="min-h-11 flex-1 border-0 bg-transparent shadow-none focus-visible:ring-0"
+        className="min-h-11 flex-1 border-0 bg-transparent text-base shadow-none focus-visible:ring-0"
         autoComplete="off"
-        aria-label="Mensagem para o agente"
+        aria-label="Mensagem para o Coleman"
       />
       <Button
         type="submit"

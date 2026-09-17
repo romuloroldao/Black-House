@@ -375,8 +375,23 @@ module.exports = function(pool, authenticate) {
                     return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
                 }
             } else if (role === 'aluno') {
-                // Aluno: permitido se o PDF pertence ao coach e está ligado à dieta activa
-                // (validação completa feita na rota GET /api/educational-contents/:id)
+                const rows = await queryAlunoRowsFullForUser(pool, req.user.id);
+                const aluno = rows[0];
+                if (!aluno?.coach_id || String(aluno.coach_id) !== String(coachId)) {
+                    return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+                }
+                const safeCheckName = path.basename(filename);
+                const allowed = await pool.query(
+                    `SELECT 1 FROM public.educational_contents
+                     WHERE coach_id = $1 AND active = true
+                       AND file_url IS NOT NULL
+                       AND file_url LIKE $2
+                     LIMIT 1`,
+                    [coachId, `%${safeCheckName}%`],
+                );
+                if (allowed.rows.length === 0) {
+                    return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+                }
             } else {
                 return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
             }

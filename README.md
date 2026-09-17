@@ -5,6 +5,7 @@ Aplicação de gestão para coaches, com frontend React/Vite, backend Node.js/Ex
 ## Referências
 
 - Arquitetura atual: [`docs/ARQUITETURA-ATUAL.md`](docs/ARQUITETURA-ATUAL.md)
+- PRD do produto: [`docs/arquivo/2026-08-18-prd-blackhouse-completo.md`](docs/arquivo/2026-08-18-prd-blackhouse-completo.md)
 - Regras para não confundir: [`docs/REGRAS-PARA-NAO-CONFUNDIR.md`](docs/REGRAS-PARA-NAO-CONFUNDIR.md)
 - Inventário da documentação: [`docs/INVENTARIO-MD.md`](docs/INVENTARIO-MD.md)
 

@@ -36,6 +36,7 @@ import CheckinPhotosWeightStep, {
 } from "@/components/student/checkin/CheckinPhotosWeightStep";
 import { Skeleton } from "@/components/ui/skeleton";
 import ProfileCompletenessBanner from "@/components/student/ProfileCompletenessBanner";
+import WorkoutEvolutionSection from "@/components/student/WorkoutEvolutionSection";
 import type { ProfileCompletenessStatus } from "@/types/profile-completeness";
 
 const SECTION_IDS: CheckinSectionId[] = CHECKIN_SECTIONS.map((s) => s.id);
@@ -138,7 +139,9 @@ export default function StudentWeeklyCheckin({
       return;
     }
     if (photoDrafts.length < MIN_CHECKIN_PHOTOS) {
-      toast.error(`Envie pelo menos ${MIN_CHECKIN_PHOTOS} fotos antes de concluir.`);
+      toast.error(
+        `Envie pelo menos ${MIN_CHECKIN_PHOTOS} fotos (frente e costas) antes de concluir.`,
+      );
       syncStepToUrl(0);
       return;
     }
@@ -167,8 +170,15 @@ export default function StudentWeeklyCheckin({
       }
 
       const fotosPayload: Array<{ url: string; descricao?: string | null }> = [];
-      for (let i = 0; i < photoDrafts.length; i++) {
-        const draft = photoDrafts[i];
+      // Ordem canónica dos slots; descricao = orientação sugerida (pose_aluno no servidor).
+      // NÃO define pose_efetiva — a IA classifica depois.
+      const orderedDrafts = [...photoDrafts].sort((a, b) => {
+        const order = ["frente", "costas", "lado_esquerdo", "lado_direito"] as const;
+        return order.indexOf(a.descricao as (typeof order)[number]) -
+          order.indexOf(b.descricao as (typeof order)[number]);
+      });
+      for (let i = 0; i < orderedDrafts.length; i++) {
+        const draft = orderedDrafts[i];
         const fileName = `${Date.now()}-${i}-${draft.file.name}`;
         const uploadResult = await apiClient.uploadFile(
           "progress-photos",
@@ -178,7 +188,11 @@ export default function StudentWeeklyCheckin({
         const publicUrl =
           uploadResult?.url ||
           apiClient.getPublicUrl("progress-photos", `${alunoId}/${fileName}`);
-        fotosPayload.push({ url: publicUrl, descricao: draft.descricao || null });
+        fotosPayload.push({
+          url: publicUrl,
+          // Orientação do slot do guia visual → pose_aluno (auditoria apenas)
+          descricao: draft.descricao || null,
+        });
       }
 
       const response = await apiClient.requestSafe<{ success?: boolean }>("/api/checkins", {
@@ -307,7 +321,7 @@ export default function StudentWeeklyCheckin({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-3xl font-bold tracking-tight">Check-in Semanal</h2>
+        <h2 className="text-xl font-bold tracking-tight sm:text-2xl">Check-in Semanal</h2>
         <p className="text-muted-foreground mt-2">
           Um envio por semana — peso, fotos (mín. {MIN_CHECKIN_PHOTOS}) e questionário nos blocos
           seguintes
@@ -542,6 +556,8 @@ export default function StudentWeeklyCheckin({
         )}
 
         {currentSectionId === "treino" && (
+        <>
+        <WorkoutEvolutionSection compact />
         <Card>
           <CardHeader>
             <CardTitle>Treino e Exercícios</CardTitle>
@@ -602,6 +618,7 @@ export default function StudentWeeklyCheckin({
             </div>
           </CardContent>
         </Card>
+        </>
         )}
 
         {currentSectionId === "sono" && (

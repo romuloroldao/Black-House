@@ -251,7 +251,7 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
           <ArrowLeft className="w-5 h-5" />
         </Button>
         <div className="flex-1">
-          <h1 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+          <h1 className="bg-gradient-primary bg-clip-text text-xl font-bold text-transparent sm:text-2xl">
             {video ? "Editar Vídeo" : "Novo Vídeo"}
           </h1>
           <p className="text-muted-foreground">

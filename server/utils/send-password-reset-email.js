@@ -1,13 +1,13 @@
 /**
- * Envio do email de redefinição de senha (Resend HTTP ou SMTP via nodemailer).
- * Sem RESEND_* nem SMTP_*: não envia (o chamador pode expor link só em desenvolvimento).
+ * Envio do email de redefinição de senha via fila SMTP.
+ * Sem SMTP_HOST: não envia (o chamador pode expor link só em desenvolvimento).
  */
 const { buildTransactionalEmailHtml } = require('./transactional-email-html');
 const { sendTransactionalEmail } = require('./send-transactional-email');
 
 /**
  * @param {{ to: string, resetUrl: string, appName?: string }} opts
- * @returns {Promise<{ provider: 'resend' | 'smtp' | 'none' }>}
+ * @returns {Promise<{ provider: 'queue' | 'smtp' | 'none', id?: string }>}
  */
 async function sendPasswordResetEmail({ to, resetUrl, appName = 'Black House' }) {
   const subject = `${appName} — Redefinição de senha (pedido recebido)`;

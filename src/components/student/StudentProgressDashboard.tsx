@@ -4,6 +4,7 @@ import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import StudentCoachCheckinFeedback from "@/components/student/StudentCoachCheckinFeedback";
+import WorkoutEvolutionSection from "@/components/student/WorkoutEvolutionSection";
 import CoachCheckinDetailSheet from "@/components/coach/CoachCheckinDetailSheet";
 import type { WeeklyCheckinRecord } from "@/types/weekly-checkin";
 import { Badge } from "@/components/ui/badge";
@@ -49,6 +50,10 @@ interface StudentProgressDashboardProps {
   studentId?: string;
   /** Nome do aluno (drawer do coach ao clicar no gráfico). */
   studentName?: string;
+  /** Semana da análise de treino (YYYY-MM-DD). Default: hoje. */
+  asOf?: string;
+  /** Quando o pai já renderiza a secção, evita duplicar. Default: true. */
+  showWorkoutEvolution?: boolean;
 }
 
 type ChartPoint = {
@@ -71,6 +76,8 @@ type SonoChartPoint = {
 export default function StudentProgressDashboard({
   studentId,
   studentName = "Aluno",
+  asOf,
+  showWorkoutEvolution = true,
 }: StudentProgressDashboardProps = {}) {
   const { user } = useAuth();
   const [checkins, setCheckins] = useState<CheckinData[]>([]);
@@ -238,15 +245,26 @@ export default function StudentProgressDashboard({
     return <div>Carregando dados...</div>;
   }
 
+  const evolution = showWorkoutEvolution ? (
+    <WorkoutEvolutionSection
+      alunoId={studentId}
+      asOf={asOf}
+      audience={coachMode ? "coach" : "aluno"}
+    />
+  ) : null;
+
   if (checkins.length === 0) {
     return (
-      <Card>
-        <CardContent className="pt-6">
-          <p className="text-center text-muted-foreground">
-            Nenhum check-in registrado ainda. Preencha seu primeiro check-in semanal!
-          </p>
-        </CardContent>
-      </Card>
+      <div className="space-y-6">
+        {evolution}
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-center text-muted-foreground">
+              Nenhum check-in registrado ainda. Preencha seu primeiro check-in semanal!
+            </p>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
@@ -267,6 +285,7 @@ export default function StudentProgressDashboard({
             </SelectContent>
           </Select>
         </div>
+        {evolution}
         <Card>
           <CardContent className="pt-6">
             <p className="text-center text-muted-foreground">
@@ -353,9 +372,10 @@ export default function StudentProgressDashboard({
   return (
     <>
     <div className="space-y-6">
+      {evolution}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">Dashboard de Progresso</h2>
+          <h2 className="text-xl font-bold tracking-tight sm:text-2xl">Dashboard de Progresso</h2>
           <p className="text-muted-foreground mt-2">
             {filteredCheckins.length} check-in{filteredCheckins.length !== 1 ? 's' : ''} no período selecionado
           </p>
@@ -844,7 +864,7 @@ export default function StudentProgressDashboard({
                     </div>
                   </div>
                   <div className="flex items-end gap-2">
-                    <span className={`text-3xl font-bold ${isGood ? 'text-green-600' : isMedium ? 'text-yellow-600' : 'text-red-600'}`}>
+                    <span className={`text-2xl font-bold ${isGood ? 'text-green-600' : isMedium ? 'text-yellow-600' : 'text-red-600'}`}>
                       {consistency.toFixed(0)}%
                     </span>
                   </div>
@@ -876,7 +896,7 @@ export default function StudentProgressDashboard({
                     </div>
                   </div>
                   <div className="flex items-end gap-2">
-                    <span className={`text-3xl font-bold ${isGood ? 'text-green-600' : isMedium ? 'text-yellow-600' : 'text-red-600'}`}>
+                    <span className={`text-2xl font-bold ${isGood ? 'text-green-600' : isMedium ? 'text-yellow-600' : 'text-red-600'}`}>
                       {consistency.toFixed(0)}%
                     </span>
                   </div>
@@ -908,7 +928,7 @@ export default function StudentProgressDashboard({
                     </div>
                   </div>
                   <div className="flex items-end gap-2">
-                    <span className={`text-3xl font-bold ${isGood ? 'text-green-600' : isMedium ? 'text-yellow-600' : 'text-red-600'}`}>
+                    <span className={`text-2xl font-bold ${isGood ? 'text-green-600' : isMedium ? 'text-yellow-600' : 'text-red-600'}`}>
                       {consistency.toFixed(0)}%
                     </span>
                   </div>
@@ -940,7 +960,7 @@ export default function StudentProgressDashboard({
                     </div>
                   </div>
                   <div className="flex items-end gap-2">
-                    <span className={`text-3xl font-bold ${isGood ? 'text-green-600' : isMedium ? 'text-yellow-600' : 'text-red-600'}`}>
+                    <span className={`text-2xl font-bold ${isGood ? 'text-green-600' : isMedium ? 'text-yellow-600' : 'text-red-600'}`}>
                       {consistency.toFixed(0)}%
                     </span>
                   </div>

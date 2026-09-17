@@ -7,6 +7,7 @@ export type InboxFilterId =
   | "pendentes"
   | "respondidos"
   | "prioridade"
+  | "queda_aderencia"
   | "7d"
   | "30d"
   | "all"
@@ -23,7 +24,8 @@ export type InboxFilterOption = {
 export const INBOX_FILTER_OPTIONS: InboxFilterOption[] = [
   { id: "pendentes", label: "Pendentes de resposta" },
   { id: "sem_texto_portal", label: "Sem texto no portal" },
-  { id: "prioridade", label: "Prioridade" },
+  { id: "prioridade", label: "Prioridade (formulário)" },
+  { id: "queda_aderencia", label: "Queda de execução 7d" },
   { id: "respondidos", label: "Respondidos" },
   { id: "7d", label: "Últimos 7 dias" },
   { id: "30d", label: "Últimos 30 dias" },

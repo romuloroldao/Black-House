@@ -7,7 +7,7 @@ const { sendTransactionalEmail } = require('./send-transactional-email');
 
 /**
  * @param {{ to: string, confirmUrl: string, appName?: string }} opts
- * @returns {Promise<{ provider: 'resend' | 'smtp' | 'none' }>}
+ * @returns {Promise<{ provider: 'queue' | 'smtp' | 'none', id?: string }>}
  */
 async function sendEmailConfirmation({ to, confirmUrl, appName = 'Black House' }) {
   const subject = `${appName} — Confirmação de conta (último passo)`;

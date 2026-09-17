@@ -5,6 +5,7 @@ import {
   ChevronDown,
   Clock3,
   Eye,
+  Loader2,
   Scale,
   Trash2,
   TrendingUp,
@@ -33,12 +34,16 @@ import {
 } from '@/lib/evolution-timeline';
 import { tEvolution } from '@/i18n/evolution-photos';
 import { CompareEvolutionWorkspace } from './compare/CompareEvolutionWorkspace';
+import { usePhotoPosePendingStatus } from '@/hooks/usePhotoPoseBackfill';
+import { PhotoPoseCoachActions } from '@/components/coach/PhotoPoseCoachActions';
 
 type Props = {
   photos: EvolutionPhoto[];
   readonly?: boolean;
+  coachPoseEdit?: boolean;
   onDeletePhoto?: (photo: EvolutionPhoto) => void;
   onOpenCheckin?: () => void;
+  onPhotosRefresh?: () => void;
   className?: string;
 };
 
@@ -115,7 +120,7 @@ function PhotoThumb({
   onOpen: () => void;
   onDelete?: () => void;
 }) {
-  const label = poseLabel(photo.descricao, index);
+  const label = poseLabel(photo.descricao, index, photo);
 
   return (
     <div className={cn('group relative overflow-hidden rounded-xl border bg-muted', featured ? 'aspect-[3/4]' : 'aspect-square')}>
@@ -175,7 +180,7 @@ function CurrentCheckinHero({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <Badge className="mb-2">{tEvolution('currentState')}</Badge>
-            <CardTitle className="text-2xl">{tEvolution('currentWeek')}</CardTitle>
+            <CardTitle className="text-xl sm:text-2xl">{tEvolution('currentWeek')}</CardTitle>
             <CardDescription>
               {item.label} · {formatDateShort(item.date)}
             </CardDescription>
@@ -206,16 +211,21 @@ function CurrentCheckinHero({
           ))}
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <Button
-            type="button"
-            className="gap-2"
-            onClick={() => onCompare(item, firstItem ?? undefined)}
-            disabled={!firstItem || firstItem.id === item.id}
-          >
-            <ArrowLeftRight className="h-4 w-4" />
-            {tEvolution('compareFromStart')}
-          </Button>
-          <Button type="button" variant="outline" className="gap-2" onClick={() => onOpenPhoto({ item, photo: item.photos[0], index: 0 })}>
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <p className="text-xs font-medium text-muted-foreground">
+              {tEvolution('compareFromStartHint')}
+            </p>
+            <Button
+              type="button"
+              className="gap-2"
+              onClick={() => onCompare(item, firstItem ?? undefined)}
+              disabled={!firstItem || firstItem.id === item.id}
+            >
+              <ArrowLeftRight className="h-4 w-4" />
+              {tEvolution('compareFromStart')}
+            </Button>
+          </div>
+          <Button type="button" variant="outline" className="gap-2 sm:self-end" onClick={() => onOpenPhoto({ item, photo: item.photos[0], index: 0 })}>
             <Eye className="h-4 w-4" />
             {tEvolution('openPhotos')}
           </Button>
@@ -314,9 +324,9 @@ function CompareWeeksDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[100dvh] max-h-[100dvh] w-full max-w-none flex-col gap-2 overflow-hidden rounded-none border-0 p-3 sm:h-auto sm:max-h-[96vh] sm:w-[min(96vw,1200px)] sm:max-w-[1200px] sm:rounded-lg sm:border sm:p-5">
-        <DialogHeader className="shrink-0 space-y-0.5 pr-8 text-left">
-          <DialogTitle className="text-lg sm:text-xl">{tEvolution('compareTitle')}</DialogTitle>
-          <DialogDescription className="text-xs sm:text-sm">{tEvolution('compareDescription')}</DialogDescription>
+        <DialogHeader className="sr-only">
+          <DialogTitle>{tEvolution('compareTitle')}</DialogTitle>
+          <DialogDescription>{tEvolution('compareDescription')}</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {open ? (
@@ -336,12 +346,17 @@ function CompareWeeksDialog({
 function EvolutionPhotoLightbox({
   selection,
   onOpenChange,
+  coachPoseEdit,
+  onPhotosRefresh,
 }: {
   selection: PhotoSelection;
   onOpenChange: (open: boolean) => void;
+  coachPoseEdit?: boolean;
+  onPhotosRefresh?: () => void;
 }) {
   const open = Boolean(selection);
   const item = selection?.item ?? null;
+  const single = selection?.photo ?? null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -350,14 +365,34 @@ function EvolutionPhotoLightbox({
           <DialogTitle>{item ? `${item.label} · ${formatDateShort(item.date)}` : tEvolution('viewPhoto')}</DialogTitle>
           <DialogDescription>{tEvolution('timelineDescription')}</DialogDescription>
         </DialogHeader>
-        {item ? (
+        {single && coachPoseEdit ? (
+          <div className="space-y-4">
+            <div className="aspect-[3/4] max-h-[70vh] overflow-hidden rounded-xl border bg-muted sm:mx-auto sm:max-w-sm">
+              <img
+                src={single.url}
+                alt={poseLabel(single.descricao, selection?.index ?? 0, single)}
+                className="h-full w-full object-cover"
+              />
+            </div>
+            <PhotoPoseCoachActions photo={single} onUpdated={onPhotosRefresh} />
+          </div>
+        ) : item ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {item.photos.map((photo, index) => (
               <figure key={photo.id} className="space-y-2">
                 <div className="aspect-[3/4] overflow-hidden rounded-xl border bg-muted">
-                  <img src={photo.url} alt={poseLabel(photo.descricao, index)} className="h-full w-full object-cover" />
+                  <img
+                    src={photo.url}
+                    alt={poseLabel(photo.descricao, index, photo)}
+                    className="h-full w-full object-cover"
+                  />
                 </div>
-                <figcaption className="text-sm font-medium">{poseLabel(photo.descricao, index)}</figcaption>
+                <figcaption className="text-sm font-medium">
+                  {poseLabel(photo.descricao, index, photo)}
+                </figcaption>
+                {coachPoseEdit ? (
+                  <PhotoPoseCoachActions photo={photo} onUpdated={onPhotosRefresh} />
+                ) : null}
               </figure>
             ))}
           </div>
@@ -409,11 +444,18 @@ function CheckinTimeline({
 export default function EvolutionTimelineExperience({
   photos,
   readonly = false,
+  coachPoseEdit = false,
   onDeletePhoto,
   onOpenCheckin,
+  onPhotosRefresh,
   className,
 }: Props) {
   const items = useMemo(() => groupPhotosIntoCheckins(photos), [photos]);
+  const { isAnalyzing, pendingCount } = usePhotoPosePendingStatus(
+    photos,
+    onPhotosRefresh,
+    Boolean(onPhotosRefresh),
+  );
   const [compareOpen, setCompareOpen] = useState(false);
   const [compareCurrent, setCompareCurrent] = useState<EvolutionTimelineItem | null>(null);
   const [compareBaseline, setCompareBaseline] = useState<EvolutionTimelineItem | null>(null);
@@ -457,6 +499,19 @@ export default function EvolutionTimelineExperience({
 
   return (
     <div className={cn('space-y-6', className)}>
+      {isAnalyzing ? (
+        <div
+          className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-sm text-muted-foreground"
+          role="status"
+          aria-live="polite"
+        >
+          <Loader2 className="h-4 w-4 shrink-0 motion-safe:animate-spin" aria-hidden />
+          {tEvolution('classifyingPoseBanner', {
+            done: 0,
+            total: pendingCount,
+          })}
+        </div>
+      ) : null}
       <EvolutionSummaryBar items={items} />
       {newest ? (
         <CurrentCheckinHero
@@ -482,7 +537,12 @@ export default function EvolutionTimelineExperience({
         initialCurrent={compareCurrent}
         initialBaseline={compareBaseline}
       />
-      <EvolutionPhotoLightbox selection={photoSelection} onOpenChange={(open) => !open && setPhotoSelection(null)} />
+      <EvolutionPhotoLightbox
+        selection={photoSelection}
+        onOpenChange={(open) => !open && setPhotoSelection(null)}
+        coachPoseEdit={coachPoseEdit}
+        onPhotosRefresh={onPhotosRefresh}
+      />
     </div>
   );
 }

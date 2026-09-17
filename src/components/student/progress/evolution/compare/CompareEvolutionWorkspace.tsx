@@ -1,42 +1,33 @@
-import { useEffect, useMemo, useState } from 'react';
-import {
-  ArrowLeftRight,
-  Columns2,
-  FlipHorizontal2,
-  Link2,
-  Link2Off,
-  Maximize2,
-  Minimize2,
-  RotateCcw,
-  SplitSquareHorizontal,
-} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { SlidersHorizontal } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { tEvolution } from '@/i18n/evolution-photos';
+import { usePhotoPosePendingStatus } from '@/hooks/usePhotoPoseBackfill';
+import { isPoseAnalysisPending } from '@/lib/evolution-timeline-pose';
 import {
   formatDateShort,
-  formatWeight,
-  formatWeightDelta,
+  findPhotoByPose,
+  getAvailablePosesForPhotos,
+  getCommonPosesForPhotos,
   normalizePhotoPose,
   poseLabel,
+  weightDeltaBetween,
   type EvolutionPhoto,
   type EvolutionPhotoPose,
   type EvolutionTimelineItem,
 } from '@/lib/evolution-timeline';
+import { AdvancedCompareControls, AdvancedCompareSheet } from './AdvancedCompareSheet';
 import { AlignmentGuides } from './AlignmentGuides';
+import { AnglePoseSelector, type PoseOption } from './AnglePoseSelector';
+import { ComparisonModeTabs } from './ComparisonModeTabs';
+import { ComparisonPeriodHeader } from './ComparisonPeriodHeader';
 import { ComparisonSlider } from './ComparisonSlider';
+import { ComparisonViewportShell } from './ComparisonViewportShell';
 import { ImageViewport } from './ImageViewport';
 import { useSyncedViewports } from './useSyncedViewports';
-import type { CompareMode, RegionPreset } from './viewport-types';
+import type { CompareMode, CompareUiMode, RegionPreset } from './viewport-types';
 
 type Props = {
   items: EvolutionTimelineItem[];
@@ -44,15 +35,14 @@ type Props = {
   initialBaseline: EvolutionTimelineItem | null;
 };
 
-type PoseOption = {
-  /** Valor estável no Select */
-  value: string;
-  label: string;
-  pose?: EvolutionPhotoPose;
-  index?: number;
-};
-
 const POSE_ORDER: EvolutionPhotoPose[] = ['front', 'back', 'leftSide', 'rightSide', 'extra'];
+const POSE_CANONICAL_DESC: Record<Exclude<EvolutionPhotoPose, 'extra'>, string> = {
+  front: 'frente',
+  back: 'costas',
+  leftSide: 'lado_esquerdo',
+  rightSide: 'lado_direito',
+};
+const SLIDER_HINT_KEY = 'bh-compare-slider-hint-dismissed';
 
 function pickPhoto(item: EvolutionTimelineItem | null, poseKey: string | null): EvolutionPhoto | null {
   if (!item?.photos.length) return null;
@@ -68,17 +58,13 @@ function pickPhoto(item: EvolutionTimelineItem | null, poseKey: string | null): 
 
   if (poseKey.startsWith('pose:')) {
     const pose = poseKey.slice(5) as EvolutionPhotoPose;
-    const match = item.photos.find((p) => normalizePhotoPose(p.descricao) === pose);
-    if (match) return match;
-    // Sem esse ângulo neste check-in → null (UI mostra aviso, não inventa outro ângulo)
-    return null;
+    return findPhotoByPose(item.photos, pose);
   }
 
-  // Compat: valor legado = descrição raw
   const exact = item.photos.find((p) => (p.descricao || '') === poseKey);
   if (exact) return exact;
   const byNorm = item.photos.find(
-    (p) => normalizePhotoPose(p.descricao) === normalizePhotoPose(poseKey),
+    (p) => normalizePhotoPose(p.descricao, p) === normalizePhotoPose(poseKey),
   );
   return byNorm ?? null;
 }
@@ -90,29 +76,26 @@ function buildPoseOptions(
   const poseSeen = new Set<EvolutionPhotoPose>();
   const options: PoseOption[] = [];
 
-  for (const item of [current, baseline]) {
-    item?.photos.forEach((p, idx) => {
-      const pose = normalizePhotoPose(p.descricao);
-      if (pose !== 'extra') {
-        if (!poseSeen.has(pose)) {
-          poseSeen.add(pose);
-          options.push({
-            value: `pose:${pose}`,
-            label: poseLabel(p.descricao, idx),
-            pose,
-          });
-        }
-        return;
-      }
-      // Fotos sem pose conhecida: opção por índice nesse check-in (valor idx:N)
-      const value = `idx:${idx}`;
-      if (!options.some((o) => o.value === value)) {
-        options.push({
-          value,
-          label: poseLabel(p.descricao, idx),
-          index: idx,
-        });
-      }
+  const baselinePoses = baseline ? getAvailablePosesForPhotos(baseline.photos) : [];
+  const currentPoses = current ? getAvailablePosesForPhotos(current.photos) : [];
+  const commonPoses =
+    baseline && current
+      ? getCommonPosesForPhotos(baseline.photos, current.photos)
+      : [...new Set([...baselinePoses, ...currentPoses])];
+
+  for (const pose of commonPoses) {
+    if (poseSeen.has(pose)) continue;
+    poseSeen.add(pose);
+    const sample =
+      findPhotoByPose(baseline?.photos ?? [], pose) ||
+      findPhotoByPose(current?.photos ?? [], pose);
+    const desc =
+      sample?.descricao ||
+      (pose !== 'extra' ? POSE_CANONICAL_DESC[pose as keyof typeof POSE_CANONICAL_DESC] : undefined);
+    options.push({
+      value: `pose:${pose}`,
+      label: poseLabel(desc, poseIndexLabel(pose), sample ?? undefined),
+      pose,
     });
   }
 
@@ -125,52 +108,37 @@ function buildPoseOptions(
   return options;
 }
 
-function MetricChip({ label, value, tone }: { label: string; value: string; tone?: 'pos' | 'neg' }) {
-  return (
-    <div className="min-w-0 shrink-0 rounded-lg border bg-background/80 px-2.5 py-1.5">
-      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p
-        className={cn(
-          'text-sm font-semibold tabular-nums',
-          tone === 'pos' && 'text-emerald-600 dark:text-emerald-400',
-          tone === 'neg' && 'text-amber-600 dark:text-amber-400',
-        )}
-      >
-        {value}
-      </p>
-    </div>
-  );
+function poseIndexLabel(pose: EvolutionPhotoPose): number {
+  const idx = POSE_ORDER.indexOf(pose);
+  return idx >= 0 ? idx : 0;
 }
 
-const REGIONS: RegionPreset[] = ['fullBody', 'torso', 'abdomen', 'back', 'legs'];
-
-function regionLabel(r: RegionPreset) {
-  if (r === 'fullBody') return tEvolution('regionFullBody');
-  if (r === 'torso') return tEvolution('regionTorso');
-  if (r === 'abdomen') return tEvolution('regionAbdomen');
-  if (r === 'back') return tEvolution('regionBack');
-  return tEvolution('regionLegs');
+function readHintDismissed(): boolean {
+  try {
+    return localStorage.getItem(SLIDER_HINT_KEY) === '1';
+  } catch {
+    return false;
+  }
 }
 
 /**
- * Workspace de comparação — mobile-first.
- * Ordem: escolher semanas/ângulo → ver imagens (controlos sempre no topo).
+ * Workspace de comparação — hierarquia: evolução → foto → modos → ângulo → avançado.
  */
 export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseline }: Props) {
-  // Estado inicial só na montagem (dialog usa key ao abrir — não resetar em refetch).
-  // Antes = mais antiga (esquerda); Depois = mais recente (direita).
-  const [currentId, setCurrentId] = useState(
-    initialCurrent?.id || items[0]?.id || '',
-  );
+  const [currentId, setCurrentId] = useState(initialCurrent?.id || items[0]?.id || '');
   const [baselineId, setBaselineId] = useState(
     initialBaseline?.id || items[items.length - 1]?.id || '',
   );
-  const [mode, setMode] = useState<CompareMode>('split');
-  const [showGuides, setShowGuides] = useState(true);
+  const [uiMode, setUiMode] = useState<CompareUiMode>('compare');
+  const [alignView, setAlignView] = useState<CompareMode>('split');
+  const [showGuides, setShowGuides] = useState(false);
   const [region, setRegion] = useState<RegionPreset>('fullBody');
   const [flashAfter, setFlashAfter] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const [poseKey, setPoseKey] = useState<string | null>(null);
+  const [periodOpen, setPeriodOpen] = useState(false);
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [hintDismissed, setHintDismissed] = useState(readHintDismissed);
 
   const viewports = useSyncedViewports();
 
@@ -192,9 +160,73 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
 
   const beforePhoto = pickPhoto(baseline, poseKey);
   const afterPhoto = pickPhoto(current, poseKey);
-  const missingPhoto = !beforePhoto || !afterPhoto;
+
+  const comparePhotos = useMemo(
+    () => [...(baseline?.photos ?? []), ...(current?.photos ?? [])],
+    [baseline?.photos, current?.photos],
+  );
+  const { isAnalyzing: isClassifyingPoses } = usePhotoPosePendingStatus(comparePhotos);
+
+  const selectedPhotosPending =
+    Boolean(beforePhoto && isPoseAnalysisPending(beforePhoto)) ||
+    Boolean(afterPhoto && isPoseAnalysisPending(afterPhoto));
+
+  const hasAnyPhoto = Boolean(beforePhoto || afterPhoto);
+  const missingBoth = !beforePhoto && !afterPhoto;
+  const partial = hasAnyPhoto && (!beforePhoto || !afterPhoto);
+  const ready = Boolean(beforePhoto && afterPhoto);
+  const classifying = isClassifyingPoses || selectedPhotosPending;
+
+  const selectedAngleLabel = useMemo(() => {
+    if (!poseKey?.startsWith('pose:')) return null;
+    const pose = poseKey.slice(5) as EvolutionPhotoPose;
+    if (pose === 'extra') return null;
+    const desc = POSE_CANONICAL_DESC[pose as keyof typeof POSE_CANONICAL_DESC];
+    return desc ? poseLabel(desc, 0) : null;
+  }, [poseKey]);
+
+  const pairDelta = weightDeltaBetween(current?.pesoKg, baseline?.pesoKg);
 
   useEffect(() => {
+    if (!poseKey) return;
+    viewports.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset zoom ao mudar pose/período
+  }, [poseKey, baselineId, currentId]);
+
+  const renderMode: CompareMode =
+    uiMode === 'compare' ? 'split' : uiMode === 'sideBySide' ? 'sideBySide' : alignView;
+
+  const isAlign = uiMode === 'align';
+  const showZoom = isAlign;
+  const guidesVisible = isAlign && showGuides;
+
+  const dismissHint = useCallback(() => {
+    if (hintDismissed) return;
+    setHintDismissed(true);
+    try {
+      localStorage.setItem(SLIDER_HINT_KEY, '1');
+    } catch {
+      /* ignore */
+    }
+  }, [hintDismissed]);
+
+  const handleUiMode = (mode: CompareUiMode) => {
+    setUiMode(mode);
+    if (mode === 'align') {
+      setShowGuides(true);
+      const isMobile =
+        typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches;
+      if (isMobile) setAdjustOpen(true);
+    } else {
+      setShowGuides(false);
+      setFlashAfter(false);
+      if (mode === 'compare') setAlignView('split');
+      if (mode === 'sideBySide') setAlignView('sideBySide');
+    }
+  };
+
+  useEffect(() => {
+    if (!isAlign) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (
         e.code === 'Space' &&
@@ -205,7 +237,7 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
       ) {
         e.preventDefault();
         setFlashAfter(true);
-        setMode('flash');
+        setAlignView('flash');
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -217,7 +249,7 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, []);
+  }, [isAlign]);
 
   const applyRegion = (r: RegionPreset) => {
     setRegion(r);
@@ -229,321 +261,202 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
     setBaselineId(currentId);
   };
 
-  const deltaTone =
-    current?.deltaFirstKg == null || Math.abs(current.deltaFirstKg) < 0.05
-      ? undefined
-      : current.deltaFirstKg < 0
-        ? 'pos'
-        : 'neg';
-
-  const weekSelectors = (
-    <div className="sticky top-0 z-20 space-y-2 rounded-xl border bg-background/95 p-3 shadow-sm backdrop-blur-sm">
-      <p className="text-xs text-muted-foreground">{tEvolution('chooseWeeksHint')}</p>
-      <div className="grid gap-2 sm:grid-cols-[1fr_auto_1fr_1fr] sm:items-end">
-        <div className="space-y-1">
-          <Label htmlFor="cmp-before" className="text-xs font-semibold">
-            {tEvolution('before')}
-            {baseline ? (
-              <span className="ml-1 font-normal text-muted-foreground">
-                · {formatDateShort(baseline.date)}
-              </span>
-            ) : null}
-          </Label>
-          <Select value={baselineId} onValueChange={setBaselineId}>
-            <SelectTrigger id="cmp-before" className="h-11">
-              <SelectValue placeholder={tEvolution('before')} />
-            </SelectTrigger>
-            <SelectContent>
-              {items.map((item) => (
-                <SelectItem key={`b-${item.id}`} value={item.id}>
-                  {item.label} · {formatDateShort(item.date)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-11 w-full gap-1.5 sm:w-auto"
-          onClick={swapSides}
-          disabled={!baselineId || !currentId || baselineId === currentId}
-          aria-label={tEvolution('swapSides')}
-        >
-          <ArrowLeftRight className="h-4 w-4" />
-          <span className="text-xs sm:sr-only lg:not-sr-only">{tEvolution('swapSides')}</span>
-        </Button>
-
-        <div className="space-y-1">
-          <Label htmlFor="cmp-after" className="text-xs font-semibold">
-            {tEvolution('after')}
-            {current ? (
-              <span className="ml-1 font-normal text-muted-foreground">
-                · {formatDateShort(current.date)}
-              </span>
-            ) : null}
-          </Label>
-          <Select value={currentId} onValueChange={setCurrentId}>
-            <SelectTrigger id="cmp-after" className="h-11">
-              <SelectValue placeholder={tEvolution('after')} />
-            </SelectTrigger>
-            <SelectContent>
-              {items.map((item) => (
-                <SelectItem key={`a-${item.id}`} value={item.id}>
-                  {item.isCurrent ? tEvolution('currentWeek') : item.label} ·{' '}
-                  {formatDateShort(item.date)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="space-y-1">
-          <Label htmlFor="cmp-pose" className="text-xs font-semibold">
-            {tEvolution('pose')}
-          </Label>
-          <Select
-            value={poseKey || poseOptions[0]?.value || 'none'}
-            onValueChange={(v) => setPoseKey(v === 'none' ? null : v)}
-            disabled={poseOptions.length === 0}
-          >
-            <SelectTrigger id="cmp-pose" className="h-11">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {poseOptions.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-    </div>
-  );
+  const advancedProps = {
+    items,
+    baselineId,
+    currentId,
+    onBaselineId: setBaselineId,
+    onCurrentId: setCurrentId,
+    onSwapSides: swapSides,
+    showGuides,
+    onToggleGuides: () => setShowGuides((v) => !v),
+    synced: viewports.synced,
+    onToggleSynced: () => viewports.setSynced(!viewports.synced),
+    onReset: () => viewports.reset(),
+    expanded,
+    onToggleExpanded: () => setExpanded((v) => !v),
+    region,
+    onApplyRegion: applyRegion,
+    alignView,
+    onAlignView: setAlignView,
+    showAlignViewToggle: isAlign,
+    disabled: !ready,
+  };
 
   return (
-    <div className={cn('flex min-h-0 flex-col gap-2.5', expanded && 'min-h-[min(85dvh,900px)]')}>
-      {weekSelectors}
-
-      <div
-        className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        aria-label={tEvolution('metricsPanel')}
-      >
-        <MetricChip label={tEvolution('before')} value={formatWeight(baseline?.pesoKg ?? null)} />
-        <MetricChip label={tEvolution('after')} value={formatWeight(current?.pesoKg ?? null)} />
-        {current?.deltaPreviousKg != null ? (
-          <MetricChip
-            label={tEvolution('vsPrevious')}
-            value={formatWeightDelta(current.deltaPreviousKg) || '0 kg'}
-          />
-        ) : null}
-        {current?.deltaFirstKg != null ? (
-          <MetricChip
-            label={tEvolution('vsFirst')}
-            value={formatWeightDelta(current.deltaFirstKg) || '0 kg'}
-            tone={deltaTone}
-          />
-        ) : null}
-      </div>
-
-      <div
-        className="grid grid-cols-3 gap-1 rounded-xl border bg-muted/30 p-1"
-        role="radiogroup"
-        aria-label={tEvolution('compareModes')}
-      >
-        {(
-          [
-            { id: 'split' as const, icon: SplitSquareHorizontal, label: tEvolution('modeSplit') },
-            { id: 'sideBySide' as const, icon: Columns2, label: tEvolution('modeSideBySide') },
-            { id: 'flash' as const, icon: FlipHorizontal2, label: tEvolution('modeFlash') },
-          ] as const
-        ).map(({ id, icon: Icon, label }) => (
-          <Button
-            key={id}
-            type="button"
-            size="sm"
-            variant={mode === id ? 'secondary' : 'ghost'}
-            className="h-11 min-h-11 flex-col gap-0.5 px-1 text-[10px] leading-tight sm:h-10 sm:flex-row sm:gap-1.5 sm:text-xs"
-            onClick={() => setMode(id)}
-            aria-pressed={mode === id}
-            disabled={missingPhoto}
-          >
-            <Icon className="h-4 w-4 shrink-0" />
-            <span className="truncate">{label}</span>
-          </Button>
-        ))}
-      </div>
-
-      <div className="flex gap-1.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <Button
-          type="button"
-          size="sm"
-          variant={viewports.synced ? 'secondary' : 'outline'}
-          className="h-11 shrink-0 gap-1.5 px-3"
-          onClick={() => viewports.setSynced(!viewports.synced)}
-          aria-pressed={viewports.synced}
-          disabled={missingPhoto}
-        >
-          {viewports.synced ? <Link2 className="h-4 w-4" /> : <Link2Off className="h-4 w-4" />}
-          <span className="text-xs">{tEvolution('syncImages')}</span>
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant={showGuides ? 'secondary' : 'outline'}
-          className="h-11 shrink-0 px-3 text-xs"
-          onClick={() => setShowGuides((v) => !v)}
-          aria-pressed={showGuides}
-          disabled={missingPhoto}
-        >
-          {showGuides ? tEvolution('hideGuides') : tEvolution('showGuides')}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-11 shrink-0 gap-1.5 px-3"
-          onClick={() => viewports.reset()}
-          disabled={missingPhoto}
-        >
-          <RotateCcw className="h-4 w-4" />
-          <span className="text-xs">{tEvolution('resetView')}</span>
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-11 shrink-0 gap-1.5 px-3"
-          onClick={() => setExpanded((v) => !v)}
-          aria-pressed={expanded}
-        >
-          {expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-          <span className="sr-only sm:not-sr-only sm:text-xs">
-            {expanded ? tEvolution('exitFullscreen') : tEvolution('fullscreen')}
-          </span>
-        </Button>
-      </div>
-
-      {missingPhoto ? (
-        <div className="flex min-h-[40vh] flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-4 text-center">
-          <p className="text-sm font-medium text-foreground">{tEvolution('emptySlot')}</p>
-          <p className="max-w-sm text-xs text-muted-foreground">{tEvolution('emptySlotHint')}</p>
-        </div>
-      ) : (
-        <div
-          className={cn(
-            'relative flex min-h-0 flex-1 flex-col',
-            expanded ? 'min-h-[58dvh]' : 'min-h-[48dvh]',
-          )}
-        >
-          {mode === 'split' ? (
-            <ComparisonSlider
-              beforeSrc={beforePhoto!.url}
-              afterSrc={afterPhoto!.url}
-              beforeAlt={tEvolution('before')}
-              afterAlt={tEvolution('after')}
-              beforeViewport={viewports.before}
-              afterViewport={viewports.after}
-              showGuides={showGuides}
-              synced={viewports.synced}
-              onPan={viewports.pan}
-              onZoom={viewports.zoom}
-              onZoomIn={viewports.zoomIn}
-              onZoomOut={viewports.zoomOut}
-            />
-          ) : null}
-
-          {mode === 'sideBySide' ? (
-            <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 md:grid-cols-2 md:gap-3">
-              <ImageViewport
-                src={beforePhoto!.url}
-                alt={tEvolution('before')}
-                label={`${tEvolution('before')} · ${formatDateShort(baseline?.date)}`}
-                viewport={viewports.before}
-                onZoomIn={() => viewports.zoomIn('before')}
-                onZoomOut={() => viewports.zoomOut('before')}
-                onPan={(dx, dy) => viewports.pan('before', dx, dy)}
-                onWheelZoom={(d) => viewports.zoom('before', d)}
-                showGuides={showGuides}
-                guides={<AlignmentGuides visible={showGuides} />}
-                className="min-h-[42dvh] md:min-h-0"
-              />
-              <ImageViewport
-                src={afterPhoto!.url}
-                alt={tEvolution('after')}
-                label={`${tEvolution('after')} · ${formatDateShort(current?.date)}`}
-                viewport={viewports.after}
-                onZoomIn={() => viewports.zoomIn('after')}
-                onZoomOut={() => viewports.zoomOut('after')}
-                onPan={(dx, dy) => viewports.pan('after', dx, dy)}
-                onWheelZoom={(d) => viewports.zoom('after', d)}
-                showGuides={showGuides}
-                guides={<AlignmentGuides visible={showGuides} />}
-                className="min-h-[42dvh] md:min-h-0"
-              />
-            </div>
-          ) : null}
-
-          {mode === 'flash' ? (
-            <div className="relative flex min-h-[58dvh] flex-1 flex-col overflow-hidden rounded-xl border bg-muted">
-              <img
-                src={flashAfter ? afterPhoto!.url : beforePhoto!.url}
-                alt={flashAfter ? tEvolution('after') : tEvolution('before')}
-                className="pointer-events-none absolute left-1/2 top-1/2 h-full w-full max-w-none select-none object-contain"
-                style={{
-                  transform: `translate(calc(-50% + ${(flashAfter ? viewports.after : viewports.before).x}%), calc(-50% + ${(flashAfter ? viewports.after : viewports.before).y}%)) scale(${(flashAfter ? viewports.after : viewports.before).scale})`,
-                  transformOrigin: 'center center',
-                  willChange: 'transform',
-                }}
-              />
-              <Badge className="absolute left-2 top-2 z-10">
-                {flashAfter ? tEvolution('after') : tEvolution('before')}
-              </Badge>
-              <AlignmentGuides visible={showGuides} />
-              <button
-                type="button"
-                className="absolute inset-x-4 bottom-4 z-10 flex h-14 items-center justify-center rounded-full border bg-background/90 text-sm font-semibold shadow-lg backdrop-blur-sm active:scale-[0.98] sm:inset-x-auto sm:left-1/2 sm:w-56 sm:-translate-x-1/2"
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  setFlashAfter(true);
-                }}
-                onPointerUp={() => setFlashAfter(false)}
-                onPointerLeave={() => setFlashAfter(false)}
-                onPointerCancel={() => setFlashAfter(false)}
-                aria-label={tEvolution('holdToSwap')}
-              >
-                {tEvolution('holdToSwap')}
-              </button>
-            </div>
-          ) : null}
-        </div>
+    <div
+      className={cn(
+        'flex min-h-0 flex-col gap-3 overflow-x-hidden',
+        expanded && 'min-h-[min(88dvh,920px)]',
       )}
+    >
+      <ComparisonPeriodHeader
+        beforeDate={baseline?.date}
+        afterDate={current?.date}
+        afterWeightKg={current?.pesoKg ?? null}
+        pairDeltaKg={pairDelta}
+        onOpenPeriod={() => setPeriodOpen(true)}
+        className="pr-8"
+      />
 
-      {!missingPhoto ? (
-        <div
-          className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          role="group"
-          aria-label={tEvolution('regionPresets')}
-        >
-          {REGIONS.map((r) => (
-            <Button
-              key={r}
-              type="button"
-              size="sm"
-              variant={region === r ? 'secondary' : 'outline'}
-              className="h-10 shrink-0 px-3 text-xs"
-              onClick={() => applyRegion(r)}
-              aria-pressed={region === r}
-            >
-              {regionLabel(r)}
-            </Button>
-          ))}
+      <ComparisonViewportShell
+        missingBoth={missingBoth && !hasAnyPhoto && !classifying}
+        missingAngle={missingBoth && Boolean(poseKey) && Boolean(selectedAngleLabel) && !classifying}
+        missingAngleLabel={selectedAngleLabel}
+        partial={partial && !classifying}
+        classifying={classifying}
+        beforeDate={baseline?.date}
+        afterDate={current?.date}
+        className={cn(expanded ? 'min-h-[58dvh]' : 'min-h-[48dvh]')}
+      >
+        {ready ? (
+          <div
+            key={`${renderMode}-${poseKey}`}
+            className="flex min-h-0 flex-1 flex-col motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200"
+          >
+            {renderMode === 'split' ? (
+              <ComparisonSlider
+                beforeSrc={beforePhoto!.url}
+                afterSrc={afterPhoto!.url}
+                beforeAlt={tEvolution('before')}
+                afterAlt={tEvolution('after')}
+                beforeViewport={viewports.before}
+                afterViewport={viewports.after}
+                showGuides={guidesVisible}
+                synced={viewports.synced}
+                onPan={viewports.pan}
+                onZoom={viewports.zoom}
+                onZoomIn={viewports.zoomIn}
+                onZoomOut={viewports.zoomOut}
+                showZoomControls={showZoom}
+                showDragHint={uiMode === 'compare' && !hintDismissed}
+                onDragHintDismiss={dismissHint}
+              />
+            ) : null}
+
+            {renderMode === 'sideBySide' ? (
+              <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 md:grid-cols-2 md:gap-3">
+                <ImageViewport
+                  src={beforePhoto!.url}
+                  alt={tEvolution('before')}
+                  label={`${tEvolution('before')} · ${formatDateShort(baseline?.date)}`}
+                  viewport={viewports.before}
+                  onZoomIn={() => viewports.zoomIn('before')}
+                  onZoomOut={() => viewports.zoomOut('before')}
+                  onPan={(dx, dy) => viewports.pan('before', dx, dy)}
+                  onWheelZoom={(d) => viewports.zoom('before', d)}
+                  showGuides={guidesVisible}
+                  guides={<AlignmentGuides visible={guidesVisible} />}
+                  showZoomControls={showZoom}
+                  className="min-h-[42dvh] md:min-h-0"
+                />
+                <ImageViewport
+                  src={afterPhoto!.url}
+                  alt={tEvolution('after')}
+                  label={`${tEvolution('after')} · ${formatDateShort(current?.date)}`}
+                  viewport={viewports.after}
+                  onZoomIn={() => viewports.zoomIn('after')}
+                  onZoomOut={() => viewports.zoomOut('after')}
+                  onPan={(dx, dy) => viewports.pan('after', dx, dy)}
+                  onWheelZoom={(d) => viewports.zoom('after', d)}
+                  showGuides={guidesVisible}
+                  guides={<AlignmentGuides visible={guidesVisible} />}
+                  showZoomControls={showZoom}
+                  className="min-h-[42dvh] md:min-h-0"
+                />
+              </div>
+            ) : null}
+
+            {renderMode === 'flash' ? (
+              <div className="relative flex min-h-[min(62dvh,520px)] flex-1 flex-col overflow-hidden rounded-xl bg-muted">
+                <img
+                  src={flashAfter ? afterPhoto!.url : beforePhoto!.url}
+                  alt={flashAfter ? tEvolution('after') : tEvolution('before')}
+                  className="pointer-events-none absolute left-1/2 top-1/2 h-full w-full max-w-none select-none object-contain"
+                  style={{
+                    transform: `translate(calc(-50% + ${(flashAfter ? viewports.after : viewports.before).x}%), calc(-50% + ${(flashAfter ? viewports.after : viewports.before).y}%)) scale(${(flashAfter ? viewports.after : viewports.before).scale})`,
+                    transformOrigin: 'center center',
+                    willChange: 'transform',
+                  }}
+                />
+                <Badge className="absolute left-2 top-2 z-10">
+                  {flashAfter ? tEvolution('after') : tEvolution('before')}
+                </Badge>
+                <AlignmentGuides visible={guidesVisible} />
+                <button
+                  type="button"
+                  className="absolute inset-x-4 bottom-4 z-10 flex h-14 items-center justify-center rounded-full border bg-background/90 text-sm font-semibold shadow-lg backdrop-blur-sm motion-safe:active:scale-[0.98] sm:inset-x-auto sm:left-1/2 sm:w-56 sm:-translate-x-1/2"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    setFlashAfter(true);
+                  }}
+                  onPointerUp={() => setFlashAfter(false)}
+                  onPointerLeave={() => setFlashAfter(false)}
+                  onPointerCancel={() => setFlashAfter(false)}
+                  aria-label={tEvolution('holdToSwap')}
+                >
+                  {tEvolution('holdToSwap')}
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </ComparisonViewportShell>
+
+      <div className="shrink-0 space-y-2.5">
+        <ComparisonModeTabs value={uiMode} onChange={handleUiMode} disabled={!ready} />
+
+        <AnglePoseSelector
+          options={poseOptions}
+          value={poseKey}
+          onChange={setPoseKey}
+          disabled={poseOptions.length === 0}
+        />
+
+        <div className="flex justify-center">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-11 gap-1.5 text-xs text-muted-foreground"
+            onClick={() => {
+              if (uiMode !== 'align') setUiMode('align');
+              setShowGuides(true);
+              setAdjustOpen(true);
+            }}
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            {tEvolution('adjustCompare')}
+          </Button>
         </div>
-      ) : null}
+
+        {/* Desktop: painel avançado inline quando modo Alinhar */}
+        {isAlign ? (
+          <div className="hidden rounded-xl border border-border/60 bg-card/50 p-3 md:block">
+            <AdvancedCompareControls {...advancedProps} showPeriodSelectors={false} />
+          </div>
+        ) : null}
+      </div>
+
+      <AdvancedCompareSheet
+        open={periodOpen}
+        onOpenChange={setPeriodOpen}
+        title={tEvolution('changePeriod')}
+        description={tEvolution('chooseWeeksHint')}
+        {...advancedProps}
+        showPeriodSelectors
+        showAlignViewToggle={false}
+      />
+
+      <AdvancedCompareSheet
+        open={adjustOpen}
+        onOpenChange={setAdjustOpen}
+        title={tEvolution('adjustCompare')}
+        description={isAlign ? tEvolution('spaceHint') : tEvolution('chooseWeeksHint')}
+        {...advancedProps}
+        showPeriodSelectors
+        showAlignViewToggle
+      />
     </div>
   );
 }

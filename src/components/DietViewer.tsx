@@ -257,7 +257,7 @@ const DietViewer = () => {
   return (
     <div className="p-6 space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
+        <h1 className="flex items-center gap-2 text-xl font-bold text-foreground sm:text-2xl">
           <ChefHat className="w-8 h-8" />
           Dietas Criadas
         </h1>

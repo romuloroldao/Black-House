@@ -203,7 +203,7 @@ CHECKLIST ANTES DE RETORNAR:
     /**
      * Análise de foto de refeição (vision → JSON).
      */
-    async analyzeMealPhoto(imageBuffer, mimeType, systemPrompt, userPrompt) {
+    async analyzeMealPhoto(imageBuffer, mimeType, systemPrompt, userPrompt, options = {}) {
         if (!this.isVisionAvailable()) {
             throw new Error(
                 'IA de visão não está disponível. Configure Gemini (AI_VISION_PROVIDER / GEMINI_API_KEY).',
@@ -214,8 +214,45 @@ CHECKLIST ANTES DE RETORNAR:
             mimeType,
             systemPrompt,
             userPrompt,
-            { timeoutMs: 55000 },
+            { timeoutMs: 55000, ...options },
         );
+    }
+
+    /**
+     * Vision com fallback entre modelos (ex.: gemini-3.6-flash → gemini-flash-latest).
+     */
+    async analyzeMealPhotoWithModelFallback(imageBuffer, mimeType, systemPrompt, userPrompt) {
+        const primary = process.env.AI_VISION_MODEL || 'gemini-3.6-flash';
+        const fallbacks = String(process.env.AI_VISION_MODEL_FALLBACKS || 'gemini-flash-latest')
+            .split(',')
+            .map((m) => m.trim())
+            .filter(Boolean);
+        const models = [...new Set([primary, ...fallbacks])];
+        const { classifyVisionError } = require('../utils/pose-vision-errors');
+
+        let lastError;
+        for (const model of models) {
+            try {
+                return await this.analyzeMealPhoto(imageBuffer, mimeType, systemPrompt, userPrompt, {
+                    model,
+                });
+            } catch (error) {
+                lastError = error;
+                const kind = classifyVisionError(error);
+                const msg = String(error?.message || '');
+                const isQuota429 = kind === 'transient' && /429|quota exceeded/i.test(msg);
+                logger.warn('analyzeMealPhoto model failed', { model, kind, error: error.message });
+                if (isQuota429 && models.indexOf(model) < models.length - 1) {
+                    continue;
+                }
+                if (kind === 'transient') throw error;
+                if (kind === 'permanent_config' && models.indexOf(model) < models.length - 1) {
+                    continue;
+                }
+                if (kind === 'permanent_auth') throw error;
+            }
+        }
+        throw lastError || new Error('Falha na análise de imagem');
     }
 
     /**

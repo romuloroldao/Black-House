@@ -12,6 +12,8 @@ export type AgentCardAction = {
 export type AgentCardItem = {
   name: string;
   quantity?: string | null;
+  /** Quando presente, a linha da lista é clicável (ex.: opção de substituição). */
+  action?: AgentCardAction | null;
 };
 
 export type AgentActionCardModel = {
@@ -44,6 +46,7 @@ export type AgentUiOpenTarget =
   | "progress_photos"
   | "reports"
   | "videos"
+  | "education"
   | "profile"
   | "blocked_financial"
   | "blocked_operational";
@@ -291,6 +294,87 @@ export function useStudentAgent(options: UseStudentAgentOptions = {}) {
         return;
       }
 
+      if (action.name === "apply_substitution" && action.args) {
+        setStatus("sending");
+        const itemId = String(action.args.item_dieta_id);
+        const plano = String(action.args.plano || "A");
+        const nomeSub = action.args.alimento_substituto_nome
+          ? String(action.args.alimento_substituto_nome)
+          : null;
+        const res = await apiClient.putRefeicaoSubstituicaoSafe({
+          dieta_id: String(action.args.dieta_id),
+          item_dieta_id: itemId,
+          alimento_substituto_id: String(action.args.alimento_substituto_id),
+          quantidade_substituto:
+            action.args.quantidade_substituto != null
+              ? Number(action.args.quantidade_substituto)
+              : undefined,
+          unidade_substituto: action.args.unidade_substituto
+            ? String(action.args.unidade_substituto)
+            : undefined,
+          plano,
+          origem: "agent",
+        });
+        setStatus("idle");
+        if (res.success) {
+          optionsRef.current.onAfterMutation?.();
+          setThread((prev) => [
+            ...prev,
+            {
+              id: `sub-ok-${Date.now()}`,
+              role: "assistant",
+              content: nomeSub
+                ? `Feito. Troquei para ${nomeSub}, mantendo a refeição próxima do seu planejamento (só hoje).`
+                : "Feito. Apliquei a troca só para hoje, mantendo a refeição próxima do seu planejamento.",
+              cards: [
+                {
+                  id: `undo-sub-${itemId}`.slice(0, 64),
+                  title: "Troca aplicada",
+                  body: "Pode desfazer se mudou de ideia.",
+                  primary_action: null,
+                  secondary_action: {
+                    type: "tool",
+                    name: "clear_substitution",
+                    args: { item_dieta_id: itemId, plano },
+                  },
+                },
+              ],
+              at: new Date().toISOString(),
+            },
+          ]);
+        } else {
+          setError(res.error || "Não foi possível aplicar a substituição");
+          setStatus("error");
+        }
+        return;
+      }
+
+      if (action.name === "clear_substitution" && action.args) {
+        setStatus("sending");
+        const res = await apiClient.deleteRefeicaoSubstituicaoSafe({
+          item_dieta_id: String(action.args.item_dieta_id),
+          plano: action.args.plano ? String(action.args.plano) : undefined,
+          data_ref: action.args.data_ref ? String(action.args.data_ref) : undefined,
+        });
+        setStatus("idle");
+        if (res.success) {
+          optionsRef.current.onAfterMutation?.();
+          setThread((prev) => [
+            ...prev,
+            {
+              id: `sub-undo-${Date.now()}`,
+              role: "assistant",
+              content: "Pronto — desfiz a troca. A refeição voltou ao planejado para hoje.",
+              at: new Date().toISOString(),
+            },
+          ]);
+        } else {
+          setError(res.error || "Não foi possível desfazer a substituição");
+          setStatus("error");
+        }
+        return;
+      }
+
       if (action.name === "complete_meal" && action.args) {
         setStatus("sending");
         const res = await apiClient.putRefeicaoConclusaoSafe({
@@ -303,11 +387,35 @@ export function useStudentAgent(options: UseStudentAgentOptions = {}) {
         setStatus("idle");
         if (res.success) {
           optionsRef.current.onAfterMutation?.();
-          await send("O que faço agora?");
+          setThread((prev) => [
+            ...prev,
+            {
+              id: `meal-ok-${Date.now()}`,
+              role: "assistant",
+              content: "Refeição marcada como concluída. Quer ver o que vem a seguir?",
+              cards: [
+                {
+                  id: "next-after-meal",
+                  title: "Continuar",
+                  primary_action: {
+                    type: "tool",
+                    name: "ask_next",
+                    args: {},
+                  },
+                },
+              ],
+              at: new Date().toISOString(),
+            },
+          ]);
         } else {
           setError(res.error || "Não foi possível concluir a refeição");
           setStatus("error");
         }
+        return;
+      }
+
+      if (action.name === "ask_next") {
+        await send("O que faço agora?");
         return;
       }
 
@@ -348,6 +456,39 @@ export function useStudentAgent(options: UseStudentAgentOptions = {}) {
     await send("Voltei. O que faço agora?");
   }, [enabled, hydrateMessages, send]);
 
+  /**
+   * Greeting local (não persiste no servidor). Só se a thread hidratada estiver vazia
+   * e a chave diária ainda não foi usada.
+   */
+  const injectLocalOpening = useCallback(
+    (content: string, storageKey: string) => {
+      if (!enabled || !content.trim()) return;
+      try {
+        if (sessionStorage.getItem(storageKey) === "1") return;
+      } catch {
+        /* ignore */
+      }
+      setThread((prev) => {
+        if (prev.length > 0) return prev;
+        try {
+          sessionStorage.setItem(storageKey, "1");
+        } catch {
+          /* ignore */
+        }
+        trackAgentEvent("agent_home_opening", {});
+        return [
+          {
+            id: `opening-${storageKey}`,
+            role: "assistant",
+            content: content.trim(),
+            at: new Date().toISOString(),
+          },
+        ];
+      });
+    },
+    [enabled],
+  );
+
   return {
     enabled,
     sheetOpen,
@@ -365,5 +506,6 @@ export function useStudentAgent(options: UseStudentAgentOptions = {}) {
     setWeightDialogOpen,
     submitWeight,
     resumeIfNeeded,
+    injectLocalOpening,
   };
 }

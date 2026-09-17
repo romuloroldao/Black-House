@@ -10,18 +10,17 @@ test.describe('Agent-first home (portal aluno)', () => {
     await authenticateStudent(page, request, email, password);
   });
 
-  test('Agent Home mostra próxima acção, composer e atalhos', async ({ page }) => {
+  test('Agent Home: chat, composer e atalhos', async ({ page }) => {
     const portal = new StudentPortalPage(page);
     await portal.expectLoaded();
     await portal.expectTodayView();
 
-    await expect(page.getByRole('heading', { name: /Próxima|Seguir|Treino|Refeição|Check-in|dieta/i }).or(
-      page.getByText('Próxima acção'),
-    ).first()).toBeVisible({ timeout: 20_000 });
-
+    await expect(page.getByLabel('Conversa com o agente')).toBeVisible({
+      timeout: 20_000,
+    });
     await expect(page.getByLabel('Mensagem para o agente')).toBeVisible();
     await expect(page.getByRole('group', { name: 'Atalhos do agente' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Explorar plataforma' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Perguntar' })).toHaveCount(0);
   });
 
   test('atalho do agente envia intent e mostra resposta', async ({ page }) => {
@@ -29,11 +28,16 @@ test.describe('Agent-first home (portal aluno)', () => {
     await portal.expectLoaded();
     await portal.expectTodayView();
 
-    const chip = page.getByRole('button', { name: 'O que faço agora?' });
+    const chip = page
+      .getByRole('group', { name: 'Atalhos do agente' })
+      .getByRole('button')
+      .first();
     await chip.waitFor({ state: 'visible', timeout: 15_000 });
     await chip.click();
 
-    await expect(page.getByText('A pensar…').or(page.getByText(/Próxima|treino|refeição|dieta|dia|plano/i).first())).toBeVisible({
+    await expect(
+      page.getByText('A pensar…').or(page.getByText(/Próxima|treino|refeição|dieta|dia|plano|ajudar/i).first()),
+    ).toBeVisible({
       timeout: 30_000,
     });
   });

@@ -136,7 +136,7 @@ const StudentDashboardView = () => {
   return (
     <div className="min-w-0 space-y-6">
       <div>
-        <h1 className="text-2xl font-bold sm:text-3xl mb-2">Bem-vindo de volta!</h1>
+        <h1 className="mb-2 text-xl font-bold sm:text-2xl">Bem-vindo de volta!</h1>
         <p className="text-muted-foreground">
           Continue sua jornada de transformação
         </p>

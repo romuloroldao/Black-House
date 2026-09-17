@@ -6,7 +6,7 @@ import { API_CONTRACT } from "@/contracts/api-contract";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { getCheckinSummaryChips, hasRelato, isCheckinMarcadoSemTexto, isCheckinRespondido } from "@/lib/checkin-display";
-import { compareCheckinsForTriagem, isCheckinPrioridade } from "@/lib/checkin-highlights";
+import { compareInboxForTriagem, isCheckinPrioridade } from "@/lib/checkin-highlights";
 import {
   countByInboxFilter,
   formatFilterLabel,
@@ -15,6 +15,8 @@ import {
   type InboxFilterId,
 } from "@/lib/checkin-inbox-filters";
 import { matchesCheckinSearch } from "@/lib/checkin-relato-search";
+import { attentionScore } from "@/lib/adherence-ranking";
+import type { AdherenceCarteiraItem } from "@/types/adherence-carteira";
 import type { WeeklyCheckinRecord } from "@/types/weekly-checkin";
 import CoachCheckinDetailSheet from "@/components/coach/CoachCheckinDetailSheet";
 import CheckinPriorityBadge from "@/components/coach/CheckinPriorityBadge";
@@ -35,6 +37,8 @@ type InboxItem = {
   studentId: string;
   studentName: string;
   previousCheckin: WeeklyCheckinRecord | null;
+  attentionScore: number;
+  adherenceDrop: boolean;
 };
 
 export default function CoachCheckinInbox() {
@@ -50,9 +54,10 @@ export default function CoachCheckinInbox() {
   const loadInbox = useCallback(async (searchQuery?: string) => {
     setLoading(true);
     const term = searchQuery?.trim() ?? "";
-    const [checkinsResult, alunosResult] = await Promise.all([
+    const [checkinsResult, alunosResult, carteiraResult] = await Promise.all([
       apiClient.listWeeklyCheckinsSafe(term.length >= 2 ? { q: term } : undefined),
       apiClient.requestSafe<Array<{ id: string; nome?: string }>>("/api/alunos"),
+      apiClient.getAdherenceCarteiraSafe(7),
     ]);
 
     const alunosMap = new Map<string, string>();
@@ -79,6 +84,13 @@ export default function CoachCheckinInbox() {
       );
     }
 
+    const carteiraByAluno = new Map<string, AdherenceCarteiraItem>();
+    if (carteiraResult.success && Array.isArray(carteiraResult.data?.items)) {
+      for (const row of carteiraResult.data.items) {
+        carteiraByAluno.set(row.aluno_id, row);
+      }
+    }
+
     const inbox: InboxItem[] = checkins
       .slice()
       .sort(
@@ -90,11 +102,21 @@ export default function CoachCheckinInbox() {
         const alunoList = byAluno.get(studentId) || [];
         const idx = alunoList.findIndex((c) => c.id === checkin.id);
         const previousCheckin = idx >= 0 && idx < alunoList.length - 1 ? alunoList[idx + 1] : null;
+        const adh = carteiraByAluno.get(studentId);
+        const pending = !isCheckinRespondido(checkin);
         return {
           checkin,
           studentId,
           studentName: alunosMap.get(studentId) || "Aluno",
           previousCheckin,
+          attentionScore: attentionScore({
+            checkin_pendente: pending,
+            miss_days_recent: adh?.miss_days_recent ?? 0,
+            meal_pct: adh?.rates.meal_pct ?? null,
+            workout_pct: adh?.rates.workout_pct ?? null,
+            form_priority: isCheckinPrioridade(checkin),
+          }),
+          adherenceDrop: Boolean(adh?.adherence_drop),
         };
       });
 
@@ -185,20 +207,25 @@ export default function CoachCheckinInbox() {
   const filterCounts = useMemo(() => {
     const map = new Map<InboxFilterId, number>();
     for (const opt of INBOX_FILTER_OPTIONS) {
-      map.set(opt.id, countByInboxFilter(allCheckins, opt.id));
+      if (opt.id === "queda_aderencia") {
+        map.set(opt.id, items.filter((i) => i.adherenceDrop).length);
+      } else {
+        map.set(opt.id, countByInboxFilter(allCheckins, opt.id));
+      }
     }
     return map;
-  }, [allCheckins]);
+  }, [allCheckins, items]);
 
   const filteredItems = useMemo(() => {
     const term = search.trim().toLowerCase();
 
-    const matched = items.filter(({ checkin, studentName }) => {
-      if (term && !matchesCheckinSearch(checkin, studentName, term)) return false;
-      return matchesInboxFilter(checkin, filter);
+    const matched = items.filter((item) => {
+      if (term && !matchesCheckinSearch(item.checkin, item.studentName, term)) return false;
+      if (filter === "queda_aderencia") return item.adherenceDrop;
+      return matchesInboxFilter(item.checkin, filter);
     });
 
-    return matched.sort((a, b) => compareCheckinsForTriagem(a.checkin, b.checkin));
+    return matched.sort((a, b) => compareInboxForTriagem(a, b));
   }, [items, search, filter]);
 
   const prioridadeCountInView = useMemo(
@@ -234,6 +261,8 @@ export default function CoachCheckinInbox() {
       ? "Nenhum check-in pendente de resposta. Ótimo trabalho!"
       : filter === "prioridade"
         ? "Nenhum check-in com estresse, adesão baixa e relato longo neste momento."
+      : filter === "queda_aderencia"
+        ? "Nenhum aluno com queda de execução nos últimos 7 dias neste filtro."
         : filter === "respondidos"
           ? "Ainda não há check-ins marcados como respondidos neste filtro."
           : `Nenhum check-in encontrado em «${activeFilterLabel}».`;
@@ -241,9 +270,9 @@ export default function CoachCheckinInbox() {
   return (
     <div className="space-y-6 p-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Check-ins Semanais</h1>
+        <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Check-ins Semanais</h1>
         <p className="text-muted-foreground mt-1">
-          Triagem de todos os alunos — comece pelos pendentes e responda no drawer
+          Fila por execução real (7 dias) e check-in pendente — depois o formulário
         </p>
         {teamInboxHint && (
           <p className="mt-2 text-sm text-muted-foreground">{teamInboxHint}</p>
@@ -328,7 +357,7 @@ export default function CoachCheckinInbox() {
           <CardHeader>
             <CardTitle>Inbox</CardTitle>
             <CardDescription>
-              Ordenado do mais recente — clique para abrir detalhes e responder
+              Ordenado por atenção (pendente + queda de dieta/treino). Clique para responder.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
@@ -364,6 +393,11 @@ export default function CoachCheckinInbox() {
                         </Badge>
                       )}
                       <CheckinPriorityBadge checkin={checkin} />
+                      {item.adherenceDrop && (
+                        <Badge variant="outline" className="text-xs">
+                          Queda 7d
+                        </Badge>
+                      )}
                       {responded ? (
                         <Badge variant="outline" className="text-xs">
                           Respondido

@@ -739,7 +739,7 @@ const StudentManager = () => {
           <CardContent className="p-12 text-center">
             <div className="mb-4">
               <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mx-auto mb-4">
-                <Alert className="text-destructive text-4xl">!</Alert>
+                <Alert className="text-2xl text-destructive">!</Alert>
               </div>
               <h3 className="text-lg font-semibold mb-2">Erro ao carregar alunos</h3>
               <p className="text-sm text-muted-foreground mb-6">{errorAlunos}</p>
@@ -758,7 +758,7 @@ const StudentManager = () => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Gestão de Alunos</h1>
+          <h1 className="text-xl font-bold sm:text-2xl">Gestão de Alunos</h1>
           <p className="text-muted-foreground">
             Gerencie todos os seus alunos em um só lugar
           </p>

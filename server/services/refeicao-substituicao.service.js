@@ -2,19 +2,13 @@
  * Serviço: substituições diárias (override do item do plano, sem mutar itens_dieta).
  */
 const {
-  listarSubstituicoesIsocaloricas,
-  kcalPorPorcao,
-} = require('../utils/food-equivalence');
+  listSubstituicoes,
+  calcularSubstituicaoDireta,
+  FOOD_SELECT_BASE,
+} = require('./alimento-substituicoes.service');
 const repo = require('../repositories/refeicao-substituicao.repository');
 
-const FOOD_SELECT = `SELECT
-  a.id, a.nome, a.origem_ptn, a.tipo_id,
-  t.nome_tipo AS tipo_nome, t.macro_predominante, t.equiv_livre,
-  a.quantidade_referencia_g, a.kcal_por_referencia,
-  a.ptn_por_referencia, a.cho_por_referencia, a.lip_por_referencia,
-  COALESCE(a.alcool_por_referencia, 0)::numeric AS alcool_por_referencia
-FROM public.alimentos a
-LEFT JOIN public.tipos_alimentos t ON t.id = a.tipo_id`;
+const FOOD_SELECT = FOOD_SELECT_BASE;
 
 function todayIso(date = new Date()) {
   return date.toISOString().slice(0, 10);
@@ -62,52 +56,38 @@ async function listForAluno(pool, alunoId, { date, dietaId } = {}) {
 /**
  * Lista opções isocalóricas (reusa lógica do endpoint /alimentos/:id/substituicoes).
  */
-async function listOptions(pool, { alimentoId, quantidade, unidade, limit = 20 }) {
-  const foodRef = await getAlimento(pool, alimentoId);
-  if (!foodRef) throw notFoundError('Alimento não encontrado');
+async function listOptions(pool, { alimentoId, quantidade, unidade, limit = 20, q }) {
+  const result = await listSubstituicoes(pool, {
+    alimentoId,
+    quantidade,
+    unidade,
+    limit,
+    q,
+  });
 
-  const q = Number(quantidade) || 100;
   const u = String(unidade || 'g').toLowerCase();
-  const lim = Math.min(50, Math.max(1, Number(limit) || 20));
-
-  if (Number(foodRef.kcal_por_referencia) <= 0 || foodRef.equiv_livre) {
-    return {
-      referencia: foodRef,
-      quantidade_referencia: q,
-      unidade_referencia: u,
-      kcal_referencia: 0,
-      substituicoes: [],
-      mensagem: 'Substituição isocalórica não se aplica a este alimento.',
-    };
-  }
-
-  const grupoRes = await pool.query(
-    `${FOOD_SELECT} WHERE a.tipo_id = $1 AND a.id <> $2
-       AND COALESCE(a.status, 'active') NOT IN ('deprecated', 'merged')
-     ORDER BY a.nome ASC`,
-    [foodRef.tipo_id, alimentoId],
-  );
-
-  const substituicoes = listarSubstituicoesIsocaloricas(foodRef, q, u, grupoRes.rows, {
-    limit: lim,
-  }).map((s) => ({
+  const substituicoes = (result.substituicoes || []).map((s) => ({
     alimento_id: s.alimento.id,
-    nome: s.alimento.nome,
+    nome: s.alimento.name || s.alimento.nome,
     quantidade_equivalente: s.quantidadeEquivalente,
     unidade: u === 'un' ? 'un' : 'g',
     kcal_equivalente: s.kcalEquivalente,
+    ptn_por_referencia: Number(s.alimento.protein ?? s.alimento.ptn_por_referencia) || 0,
+    cho_por_referencia: Number(s.alimento.carbs ?? s.alimento.cho_por_referencia) || 0,
+    lip_por_referencia: Number(s.alimento.fat ?? s.alimento.lip_por_referencia) || 0,
   }));
 
   return {
     referencia: {
-      id: foodRef.id,
-      nome: foodRef.nome,
-      tipo_id: foodRef.tipo_id,
+      id: result.referencia?.id,
+      nome: result.referencia?.name || result.referencia?.nome,
+      tipo_id: result.referencia?.tipo_id,
     },
-    quantidade_referencia: q,
-    unidade_referencia: u,
-    kcal_referencia: Math.round(kcalPorPorcao(foodRef, q, u) * 10) / 10,
+    quantidade_referencia: result.quantidadeReferencia,
+    unidade_referencia: result.unidadeReferencia,
+    kcal_referencia: result.kcalReferencia,
     substituicoes,
+    mensagem: result.mensagem,
   };
 }
 
@@ -135,18 +115,17 @@ async function applyForAluno(pool, alunoId, body) {
   let unidadeSubstituto = body.unidade_substituto || unidadeOriginal;
 
   if (quantidadeSubstituto == null || quantidadeSubstituto === '') {
-    const options = await listOptions(pool, {
-      alimentoId: item.alimento_id,
+    const direct = await calcularSubstituicaoDireta(pool, {
+      alimentoRefId: item.alimento_id,
+      alimentoSubId: alimentoSubstitutoId,
       quantidade: quantidadeOriginal,
       unidade: unidadeOriginal,
-      limit: 100,
     });
-    const match = options.substituicoes.find((s) => s.alimento_id === alimentoSubstitutoId);
-    if (!match) {
+    if (!direct) {
       throw validationError('Substituto não é isocalórico válido para este alimento');
     }
-    quantidadeSubstituto = match.quantidade_equivalente;
-    unidadeSubstituto = match.unidade;
+    quantidadeSubstituto = direct.quantidadeEquivalente;
+    unidadeSubstituto = direct.unidade;
   }
 
   const subFood = await getAlimento(pool, alimentoSubstitutoId);

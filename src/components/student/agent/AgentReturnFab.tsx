@@ -29,10 +29,10 @@ const AgentReturnFab = ({ activeTab, onReturn, className }: AgentReturnFabProps)
         trackAgentEvent("agent_return", { from_tab: activeTab });
         onReturn();
       }}
-      aria-label="Voltar ao agente"
+      aria-label="Voltar ao Coleman"
     >
       <Sparkles className="h-4 w-4" aria-hidden />
-      Agente
+      Coleman
     </Button>
   );
 };

@@ -352,7 +352,7 @@ class AIProviderManager {
         }
         try {
             if (!this.visionConfig.model) {
-                this.visionConfig.model = 'gemini-2.5-pro';
+                this.visionConfig.model = 'gemini-3.6-flash';
             }
             const GeminiProvider = require('./providers/gemini.provider');
             this.visionProvider = new GeminiProvider(this.visionConfig.apiKey, this.visionConfig.model);
@@ -407,6 +407,19 @@ class AIProviderManager {
         if (!provider || typeof provider.extractStructuredDataFromImage !== 'function') {
             throw new Error(
                 'IA de visão não está disponível. Configure AI_VISION_PROVIDER=gemini e GEMINI_API_KEY.',
+            );
+        }
+        const modelOverride = options.model ? String(options.model).trim() : null;
+        if (modelOverride && modelOverride !== this.visionConfig.model) {
+            const GeminiProvider = require('./providers/gemini.provider');
+            const temp = new GeminiProvider(this.visionConfig.apiKey, modelOverride);
+            temp.initialize();
+            return temp.extractStructuredDataFromImage(
+                imageBuffer,
+                mimeType,
+                systemPrompt,
+                userPrompt,
+                options,
             );
         }
         return provider.extractStructuredDataFromImage(

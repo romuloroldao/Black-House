@@ -13,7 +13,7 @@ const { buildStudentNotificationEmail, DEFAULT_APP } = require('./student-notifi
  *   context?: Record<string, unknown>,
  *   appName?: string,
  * }} opts
- * @returns {Promise<{ provider: 'resend' | 'smtp' | 'none', skipped?: boolean }>}
+ * @returns {Promise<{ provider: 'queue' | 'smtp' | 'none', id?: string, skipped?: boolean }>}
  */
 async function sendStudentNotificationEmail({
   to,

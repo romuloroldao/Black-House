@@ -1,4 +1,5 @@
 import { tEvolution } from '@/i18n/evolution-photos';
+import { getEffectivePose, pickBestPhotoForPose } from './evolution-timeline-pose';
 
 export type EvolutionPhotoPose = 'front' | 'back' | 'leftSide' | 'rightSide' | 'extra';
 
@@ -11,6 +12,20 @@ export type EvolutionPhoto = {
   weekly_checkin_id?: string | null;
   checkin_created_at?: string | null;
   peso_kg?: number | string | null;
+  pose_aluno?: string | null;
+  pose_vision?: string | null;
+  pose_vision_confidence?: number | null;
+  pose_vision_reason?: string | null;
+  pose_coach?: string | null;
+  pose_source?: string | null;
+  pose_efetiva?: string | null;
+  pose_quality?: {
+    people_count?: number | null;
+    body_visible?: boolean | null;
+    suitable_for_compare?: boolean | null;
+  } | null;
+  pose_analysis_status?: 'pending' | 'processing' | 'classified' | 'failed' | null;
+  pose_analyzed_at?: string | null;
 };
 
 export type EvolutionTimelineItem = {
@@ -42,7 +57,110 @@ const poseMap: Record<string, EvolutionPhotoPose> = {
 
 const poseOrder: EvolutionPhotoPose[] = ['front', 'back', 'leftSide', 'rightSide', 'extra'];
 
-export function normalizePhotoPose(description?: string | null): EvolutionPhotoPose {
+const LEGACY_ORDER_FALLBACK =
+  import.meta.env.VITE_POSE_LEGACY_ORDER_FALLBACK === 'true';
+
+/** Ordem canónica de poses por índice no check-in (legado). */
+const poseIndexToCanonical: EvolutionPhotoPose[] = ['front', 'back', 'leftSide', 'rightSide'];
+
+const DB_TO_UI: Record<string, EvolutionPhotoPose> = {
+  frente: 'front',
+  costas: 'back',
+  lado_esquerdo: 'leftSide',
+  lado_direito: 'rightSide',
+};
+
+export function isUntaggedPhoto(photo: EvolutionPhoto): boolean {
+  const eff = getEffectivePose(photo);
+  if (eff.comparable) return false;
+  if (photo.pose_analysis_status === 'pending' || photo.pose_analysis_status === 'processing') {
+    return true;
+  }
+  return normalizePhotoPose(photo.descricao) === 'extra';
+}
+
+export { getEffectivePose, pickBestPhotoForPose } from './evolution-timeline-pose';
+
+/**
+ * Encontra a melhor foto para a pose pedida (pose_efetiva; sem fallback por ordem por defeito).
+ */
+export function findPhotoByPose(
+  photos: EvolutionPhoto[],
+  pose: EvolutionPhotoPose,
+): EvolutionPhoto | null {
+  if (!photos.length || pose === 'extra') return null;
+
+  const best = pickBestPhotoForPose(photos, pose);
+  if (best) return best;
+
+  if (!LEGACY_ORDER_FALLBACK) return null;
+
+  const explicit = photos.find((p) => normalizePhotoPose(p.descricao) === pose);
+  if (explicit) return explicit;
+
+  const poseIndex = poseIndexToCanonical.indexOf(pose);
+  if (poseIndex < 0) return null;
+
+  const chrono = sortPhotosChronologically(photos);
+  const candidate = chrono[poseIndex];
+  if (candidate && isUntaggedPhoto(candidate)) {
+    return candidate;
+  }
+  return null;
+}
+
+/** Poses comparáveis disponíveis num check-in. */
+export function getAvailablePosesForPhotos(photos: EvolutionPhoto[]): EvolutionPhotoPose[] {
+  const found = new Set<EvolutionPhotoPose>();
+  for (const photo of photos) {
+    const eff = getEffectivePose(photo);
+    if (!eff.comparable) continue;
+    const ui = DB_TO_UI[normalizeDbPoseForUi(eff.pose)];
+    if (ui) found.add(ui);
+  }
+  if (found.size > 0) {
+    return poseIndexToCanonical.filter((p) => found.has(p));
+  }
+  if (LEGACY_ORDER_FALLBACK) {
+    const legacy: EvolutionPhotoPose[] = [];
+    for (const pose of poseIndexToCanonical) {
+      if (findPhotoByPose(photos, pose)) legacy.push(pose);
+    }
+    return legacy;
+  }
+  return [];
+}
+
+/** Poses comparáveis disponíveis em ambos os check-ins (interseção). */
+export function getCommonPosesForPhotos(
+  photosA: EvolutionPhoto[],
+  photosB: EvolutionPhoto[],
+): EvolutionPhotoPose[] {
+  const a = new Set(getAvailablePosesForPhotos(photosA));
+  const b = new Set(getAvailablePosesForPhotos(photosB));
+  return poseIndexToCanonical.filter((p) => a.has(p) && b.has(p));
+}
+
+function normalizeDbPoseForUi(raw: string): string {
+  return String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[-_]+/g, '_');
+}
+
+export function sortPhotosChronologically(photos: EvolutionPhoto[]): EvolutionPhoto[] {
+  return [...photos].sort(
+    (a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime(),
+  );
+}
+
+export function normalizePhotoPose(description?: string | null, photo?: EvolutionPhoto): EvolutionPhotoPose {
+  if (photo) {
+    const eff = getEffectivePose(photo);
+    const db = normalizeDbPoseForUi(eff.pose);
+    if (DB_TO_UI[db]) return DB_TO_UI[db];
+    if (db === 'desconhecido' || db === 'invalido') return 'extra';
+  }
   const key = String(description || '')
     .trim()
     .toLowerCase()
@@ -51,8 +169,8 @@ export function normalizePhotoPose(description?: string | null): EvolutionPhotoP
   return poseMap[key] || 'extra';
 }
 
-export function poseLabel(description: string | null | undefined, index: number): string {
-  const pose = normalizePhotoPose(description);
+export function poseLabel(description: string | null | undefined, index: number, photo?: EvolutionPhoto): string {
+  const pose = normalizePhotoPose(description, photo);
   if (pose === 'front') return tEvolution('front');
   if (pose === 'back') return tEvolution('back');
   if (pose === 'leftSide') return tEvolution('leftSide');
@@ -69,6 +187,16 @@ export function formatWeightDelta(kg: number | null): string | null {
   if (kg == null || Math.abs(kg) < 0.05) return null;
   const sign = kg > 0 ? '+' : '';
   return `${sign}${kg.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} kg`;
+}
+
+/** Delta de peso entre o par Antes (baseline) e Depois (current). */
+export function weightDeltaBetween(
+  afterKg: number | null | undefined,
+  beforeKg: number | null | undefined,
+): number | null {
+  if (afterKg == null || beforeKg == null) return null;
+  if (!Number.isFinite(afterKg) || !Number.isFinite(beforeKg)) return null;
+  return afterKg - beforeKg;
 }
 
 export function formatDateShort(iso?: string | null): string {
@@ -111,8 +239,8 @@ function getGroupId(photo: EvolutionPhoto): string {
 
 export function sortPhotosByPose(photos: EvolutionPhoto[]): EvolutionPhoto[] {
   return [...photos].sort((a, b) => {
-    const poseA = poseOrder.indexOf(normalizePhotoPose(a.descricao));
-    const poseB = poseOrder.indexOf(normalizePhotoPose(b.descricao));
+    const poseA = poseOrder.indexOf(normalizePhotoPose(a.descricao, a));
+    const poseB = poseOrder.indexOf(normalizePhotoPose(b.descricao, b));
     if (poseA !== poseB) return poseA - poseB;
     return new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
   });

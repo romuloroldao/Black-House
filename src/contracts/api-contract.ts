@@ -51,6 +51,31 @@ export const API_CONTRACT = {
       `${API_BASE}/api/alunos/me/treino-sessoes/${encodeURIComponent(id)}/series`,
     treinoCargas: (treinoId: string) =>
       `${API_BASE}/api/alunos/me/treino-cargas?treino_id=${encodeURIComponent(treinoId)}`,
+    treinoEvolucaoMe: (query?: { as_of?: string; week?: string }) => {
+      const params = new URLSearchParams();
+      if (query?.as_of) params.set('as_of', query.as_of);
+      if (query?.week) params.set('week', query.week);
+      const qs = params.toString();
+      return `${API_BASE}/api/alunos/me/treino-evolucao${qs ? `?${qs}` : ''}`;
+    },
+    treinoEvolucao: (alunoId: string, query?: { as_of?: string; week?: string }) => {
+      const params = new URLSearchParams();
+      if (query?.as_of) params.set('as_of', query.as_of);
+      if (query?.week) params.set('week', query.week);
+      const qs = params.toString();
+      return `${API_BASE}/api/alunos/${encodeURIComponent(alunoId)}/treino-evolucao${qs ? `?${qs}` : ''}`;
+    },
+    logbookProgressao: (
+      alunoId: string,
+      query?: { period?: string; exercise_key?: string; as_of?: string },
+    ) => {
+      const params = new URLSearchParams();
+      if (query?.period) params.set('period', query.period);
+      if (query?.exercise_key) params.set('exercise_key', query.exercise_key);
+      if (query?.as_of) params.set('as_of', query.as_of);
+      const qs = params.toString();
+      return `${API_BASE}/api/alunos/${encodeURIComponent(alunoId)}/logbook-progressao${qs ? `?${qs}` : ''}`;
+    },
     proximaAcao: (mealKeys?: string[]) => {
       const qs =
         mealKeys && mealKeys.length > 0
@@ -85,12 +110,13 @@ export const API_CONTRACT = {
     gruposEquivalencia: () => `${API_BASE}/api/alimentos/grupos-equivalencia`,
     substituicoes: (
       alimentoId: string,
-      query?: { quantidade?: number; unidade?: string; limit?: number },
+      query?: { quantidade?: number; unidade?: string; limit?: number; q?: string },
     ) => {
       const q = new URLSearchParams();
       if (query?.quantidade != null) q.set('quantidade', String(query.quantidade));
       if (query?.unidade) q.set('unidade', query.unidade);
       if (query?.limit != null) q.set('limit', String(query.limit));
+      if (query?.q) q.set('q', query.q);
       const qs = q.toString();
       return `${API_BASE}/api/alimentos/${alimentoId}/substituicoes${qs ? `?${qs}` : ''}`;
     },
@@ -184,6 +210,14 @@ export const API_CONTRACT = {
     aiTrendsSummary: () => `${API_BASE}/api/weekly-checkins/ai/trends-summary`,
     aiDraftResponse: (checkinId: string) =>
       `${API_BASE}/api/weekly-checkins/${encodeURIComponent(checkinId)}/ai/draft-response`,
+  },
+  fotosAlunos: {
+    list: (alunoId: string) =>
+      `${API_BASE}/api/fotos-alunos?aluno_id=${encodeURIComponent(alunoId)}`,
+    byId: (id: string) => `${API_BASE}/api/fotos-alunos/${encodeURIComponent(id)}`,
+    classifyPose: () => `${API_BASE}/api/fotos-alunos/classify-pose`,
+    updatePose: (id: string) =>
+      `${API_BASE}/api/fotos-alunos/${encodeURIComponent(id)}/pose`,
   },
   feedbacksAlunos: {
     list: (alunoId: string) =>
@@ -293,6 +327,10 @@ export const API_CONTRACT = {
     ruleById: (id: string) => `${API_BASE}/api/coach/rules/${encodeURIComponent(id)}`,
     teamMembers: () => `${API_BASE}/api/coach/team/members`,
     teamMemberById: (id: string) => `${API_BASE}/api/coach/team/members/${id}`,
+    adherenceCarteira: (days?: number) => {
+      const qs = days != null ? `?days=${encodeURIComponent(String(days))}` : '';
+      return `${API_BASE}/api/coach/me/adherence-carteira${qs}`;
+    },
   },
   /** Calendário de turmas (public.eventos + eventos_participantes) — ver EventsCalendar */
   eventosTurma: {
@@ -350,6 +388,9 @@ const CONTRACT_PATTERNS = [
   '/api/alunos/me/treino-sessoes/:id',
   '/api/alunos/me/treino-sessoes/:id/series',
   '/api/alunos/me/treino-cargas',
+  '/api/alunos/me/treino-evolucao',
+  '/api/alunos/:alunoId/treino-evolucao',
+  '/api/alunos/:alunoId/logbook-progressao',
   '/api/alunos/me/proxima-acao',
   '/api/agent/sessions',
   '/api/agent/sessions/current',
@@ -391,7 +432,9 @@ const CONTRACT_PATTERNS = [
   '/api/feedbacks-alunos',
   '/api/feedbacks-alunos/:id',
   '/api/fotos-alunos',
+  '/api/fotos-alunos/classify-pose',
   '/api/fotos-alunos/:id',
+  '/api/fotos-alunos/:id/pose',
   '/api/itens-dieta',
   '/api/itens-dieta/:id',
   '/api/dieta-farmacos',
@@ -460,6 +503,7 @@ const CONTRACT_PATTERNS = [
   '/api/agenda-eventos/:id/snooze',
   '/api/agenda-eventos/:id',
   '/api/coach/me/notification-preferences',
+  '/api/coach/me/adherence-carteira',
   '/api/coach/rules',
   '/api/coach/rules/:id',
   '/api/coach/team/members',

@@ -283,7 +283,7 @@ const PaymentManager = () => {
     <div className="p-6 space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+        <h1 className="bg-gradient-primary bg-clip-text text-xl font-bold text-transparent sm:text-2xl">
           Pagamentos
         </h1>
         <p className="text-muted-foreground">

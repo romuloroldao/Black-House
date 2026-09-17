@@ -153,25 +153,25 @@ function cardFromProximaAcao(acao, { items = null } = {}) {
  */
 function composeRestDay({ dayPhrase, nextWorkout, proximaAcao }) {
   const day = capitalize(dayPhrase || 'hoje');
-  const lines = [`${day} é dia de descanso na tua agenda.`];
+  const lines = [`${day} é dia de descanso na sua agenda.`];
 
   if (nextWorkout?.detalhe?.nome) {
     const when = formatDayLabel(nextWorkout.day_label, nextWorkout.dia_semana_nome);
     lines.push(
-      `O teu próximo treino é ${when}: «${nextWorkout.detalhe.nome}».`,
+      `Seu próximo treino é ${when}: «${nextWorkout.detalhe.nome}».`,
     );
   } else {
-    lines.push('Não há outro treino marcado nos próximos dias — confirma a agenda com o coach se precisares.');
+    lines.push('Não há outro treino marcado nos próximos dias — confirme a agenda com o coach se precisar.');
   }
 
   if (proximaAcao?.type === 'next_meal' || proximaAcao?.type === 'open_diet') {
     lines.push(
-      `Enquanto isso, a próxima acção do plano é a alimentação${
+      `Enquanto isso, o foco do plano é a alimentação${
         proximaAcao.description ? ` (${mealLabel(proximaAcao.description)})` : ''
       }.`,
     );
   } else if (proximaAcao?.type === 'checkin') {
-    lines.push('Se quiseres, ainda podes avançar o check-in semanal.');
+    lines.push('Se quiser, ainda pode avançar o check-in semanal.');
   } else if (proximaAcao?.type && proximaAcao.type !== 'idle' && proximaAcao.type !== 'today_workout') {
     lines.push(`Agora faz sentido: ${proximaAcao.title || 'seguir o plano'}.`);
   }
@@ -210,11 +210,11 @@ function composeWorkoutDay({ dayPhrase, treino, canStartToday, mode }) {
     assistantText = `Vamos ao «${nome}» — série a série, com carga e RPE.`;
   } else if (explicit) {
     assistantText = `Treino de ${dayPhrase}: «${nome}».${
-      canStartToday ? ' Podes iniciar a sessão guiada agora.' : ' A sessão guiada só no próprio dia.'
+      canStartToday ? ' Pode iniciar a sessão guiada agora.' : ' A sessão guiada só no próprio dia.'
     }`;
   } else {
-    assistantText = `O teu treino de hoje é «${nome}».${
-      canStartToday ? ' Queres começar a sessão guiada?' : ''
+    assistantText = `Seu treino de hoje é «${nome}».${
+      canStartToday ? ' Quer começar a sessão guiada?' : ''
     }`;
   }
 
@@ -247,7 +247,7 @@ function composeNextWorkout({ nextWorkout, todayRest }) {
   if (!nextWorkout?.detalhe?.nome) {
     return {
       assistantText:
-        'Não encontrei um próximo treino na tua agenda semanal. Abre Treinos ou pede ao coach para configurar os dias.',
+        'Não encontrei um próximo treino na sua agenda semanal. Abra Treinos ou peça ao coach para configurar os dias.',
       cards: [cardOpenUi('open-workouts', 'Ver treinos', 'Abrir agenda / treinos', 'treino')],
     };
   }
@@ -262,8 +262,8 @@ function composeNextWorkout({ nextWorkout, todayRest }) {
   }
   lines.push(
     isToday
-      ? `O teu próximo treino é hoje: «${nome}».`
-      : `O teu próximo treino é ${when}: «${nome}».`,
+      ? `Seu próximo treino é hoje: «${nome}».`
+      : `Seu próximo treino é ${when}: «${nome}».`,
   );
   if (isToday) {
     lines.push('Podes iniciar a sessão guiada quando quiseres.');
@@ -351,7 +351,7 @@ function composeNextAction({ acao, tone = 'normal', items = null }) {
 function composeMeal({ acao, items = null, prefix = '' }) {
   if (!acao || acao.type === 'idle') {
     return {
-      assistantText: 'Não há refeição pendente no plano de agora. Se comeste fora, podes registar com foto.',
+      assistantText: 'Não há refeição pendente no plano agora. Se comeu fora, pode registrar com foto.',
       cards: [
         cardOpenUi('meal-photo', 'Refeição livre', 'Tirar foto do prato', 'meal_photo'),
         cardOpenUi('dieta', 'Ver dieta', 'Abrir plano alimentar', 'dieta'),
@@ -360,21 +360,22 @@ function composeMeal({ acao, items = null, prefix = '' }) {
   }
   if (acao.type === 'open_diet') {
     return {
-      assistantText: `Aqui está o teu plano de hoje${acao.description ? ` («${acao.description}»)` : ''}. Abre a dieta só se quiseres ver todas as refeições.`,
+      assistantText: `Aqui está o seu plano de hoje${acao.description ? ` («${acao.description}»)` : ''}. Abra a dieta se quiser ver todas as refeições.`,
       cards: [cardFromProximaAcao(acao)].filter(Boolean),
     };
   }
 
   const meal = mealLabel(acao.description || acao.payload?.meal_key);
   const bullets = formatItemsBullets(items, 8);
-  const lines = [`${prefix}A tua próxima refeição é a ${meal} 🍽️`];
+  const lines = [`${prefix}Sua próxima refeição é a ${meal}.`];
   if (bullets.length) {
-    lines.push('', ...bullets);
+    lines.push('', 'No plano:', ...bullets);
     if (Array.isArray(items) && items.length > 8) {
       lines.push(`• … e mais ${items.length - 8} itens`);
     }
+    lines.push('', 'Quer que eu detalhe, troque algum item ou marque como concluída?');
   } else {
-    lines.push('', 'Ainda não consegui listar os alimentos desta refeição.');
+    lines.push('', 'Ainda não consegui listar os alimentos — posso abrir a dieta ou tentar de novo.');
   }
 
   return {
@@ -628,7 +629,7 @@ function composeRestaurant({ freeMealHint, coachHint }) {
   const lines = [
     'Ok — estás fora do plano. O melhor caminho é registar a refeição livre com uma foto e ajustar os itens antes de guardar.',
   ];
-  if (coachHint) lines.push(`Orientação do teu coach:\n${coachHint}`);
+  if (coachHint) lines.push(`Orientação do seu coach:\n${coachHint}`);
   else if (freeMealHint) lines.push(`Orientação do coach: ${freeMealHint}`);
 
   return {
@@ -637,6 +638,153 @@ function composeRestaurant({ freeMealHint, coachHint }) {
       cardOpenUi('restaurant', 'Registar refeição livre', 'Câmara / galeria', 'meal_photo'),
       cardOpenUi('dieta', 'Ver dieta', 'Consultar o plano', 'dieta'),
     ],
+  };
+}
+
+/**
+ * Nutrition Replacement Intelligence — resposta contextual com quantidades.
+ *
+ * @param {object} opts
+ * @param {object|null} opts.acao — próxima acção (next_meal)
+ * @param {Array} opts.blocks — [{ item, options[], destinationMatch? }]
+ * @param {string|null} opts.ask — pergunta de clarificação (sem inventar)
+ * @param {string|null} opts.coachHint
+ */
+function composeFoodReplacement({
+  acao = null,
+  blocks = [],
+  ask = null,
+  coachHint = null,
+  dietaNome = null,
+} = {}) {
+  const meal = mealLabel(acao?.description || acao?.payload?.meal_key);
+  const dietaId = acao?.payload?.dieta_id;
+  const plano = acao?.payload?.plano || 'A';
+  const mealKey = acao?.payload?.meal_key;
+
+  if (ask) {
+    return {
+      assistantText: ask,
+      cards: [
+        cardOpenUi('open-diet-sub', 'Ver dieta', 'Abrir o plano e escolher o item', 'dieta', {
+          meal_key: mealKey,
+        }),
+      ],
+    };
+  }
+
+  if (!blocks.length) {
+    const lines = [
+      acao?.type === 'next_meal'
+        ? `Claro. Para a sua ${meal}, posso trocar um alimento mantendo a refeição próxima do planejado.`
+        : 'Claro. Posso trocar um alimento mantendo a refeição próxima do planejado.',
+      '',
+      'Qual item quer trocar? (ex.: «trocar arroz por batata-doce» ou «estou sem frango»).',
+    ];
+    return {
+      assistantText: lines.join('\n'),
+      cards: [
+        cardOpenUi('open-diet-sub', 'Ver dieta', 'Abrir o plano e escolher o item', 'dieta', {
+          meal_key: mealKey,
+        }),
+      ],
+    };
+  }
+
+  const lines = [];
+  const cards = [];
+
+  for (const block of blocks) {
+    const item = block.item;
+    const opts = Array.isArray(block.options) ? block.options : [];
+    const nomeOrig = item?.nome_original || item?.nome || 'alimento';
+    const qOrig = item?.quantidade;
+    const uOrig = item?.unidade || 'g';
+
+    const applyTargets = [];
+    if (block.destinationMatch) applyTargets.push(block.destinationMatch);
+    for (const o of opts) {
+      if (applyTargets.length >= 3) break;
+      if (!applyTargets.some((x) => x.alimento_id === o.alimento_id)) applyTargets.push(o);
+    }
+
+    if (!applyTargets.length) {
+      lines.push('');
+      lines.push(
+        `Para ${nomeOrig}, não encontrei um equivalente isocalórico fiável neste grupo. Quer tentar outro alimento ou abrir a dieta?`,
+      );
+      continue;
+    }
+
+    const top = applyTargets[0];
+    const topQty = Math.round(top.quantidade_equivalente);
+    const topUnit = top.unidade || 'g';
+    lines.push('');
+    if (block.destinationMatch) {
+      lines.push(
+        qOrig != null
+          ? `Sem problema. Para manter a ${meal} próxima do planejado, eu trocaria ${nomeOrig} (${qOrig}${uOrig}) por ${top.nome} (~${topQty}${topUnit}).`
+          : `Sem problema. Eu trocaria ${nomeOrig} por ${top.nome} (~${topQty}${topUnit}) para manter a ${meal} no caminho.`,
+      );
+      lines.push('É a opção mais alinhada ao que pediu.');
+    } else if (applyTargets.length === 1) {
+      lines.push(
+        qOrig != null
+          ? `Para substituir ${nomeOrig} (${qOrig}${uOrig}) sem fugir do plano, eu iria de ${top.nome} (~${topQty}${topUnit}).`
+          : `Para substituir ${nomeOrig}, eu iria de ${top.nome} (~${topQty}${topUnit}).`,
+      );
+    } else {
+      lines.push(
+        qOrig != null
+          ? `Para substituir ${nomeOrig} (${qOrig}${uOrig}) mantendo a energia parecida, a minha primeira escolha é ${top.nome} (~${topQty}${topUnit}).`
+          : `Para substituir ${nomeOrig}, a minha primeira escolha é ${top.nome} (~${topQty}${topUnit}).`,
+      );
+      if (applyTargets.length > 1) {
+        lines.push('Se preferir, também tenho estas alternativas:');
+      }
+    }
+
+    const listItems = applyTargets.map((o) => ({
+      name: o.nome,
+      quantity: `${Math.round(o.quantidade_equivalente)}${o.unidade || 'g'}`,
+      action: {
+        type: 'tool',
+        name: 'apply_substitution',
+        args: {
+          dieta_id: dietaId,
+          item_dieta_id: item.id,
+          alimento_substituto_id: o.alimento_id,
+          alimento_substituto_nome: o.nome,
+          quantidade_substituto: o.quantidade_equivalente,
+          unidade_substituto: o.unidade || 'g',
+          plano,
+        },
+      },
+    }));
+
+    cards.push({
+      id: `sub-opts-${item.id}`.slice(0, 64),
+      title: `Trocar ${nomeOrig}`,
+      body: 'Toque para aplicar só hoje.',
+      items: listItems,
+      primary_action: null,
+      secondary_action: null,
+    });
+  }
+
+  if (coachHint) {
+    lines.push('', `Orientação do seu coach:\n${coachHint}`);
+  }
+
+  cards.push(
+    cardOpenUi('open-diet-sub', 'Ver na dieta', 'Abrir o plano completo', 'dieta', {
+      meal_key: mealKey,
+    }),
+  );
+
+  return {
+    assistantText: lines.filter(Boolean).join('\n').trim(),
+    cards: cards.slice(0, 4),
   };
 }
 
@@ -657,4 +805,5 @@ module.exports = {
   composeProgressPreview,
   composeBehavioral,
   composeRestaurant,
+  composeFoodReplacement,
 };

@@ -202,7 +202,7 @@ export default function StudentMessagesView() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold">Mensagens dos coaches</h1>
+          <h1 className="text-xl font-bold sm:text-2xl">Mensagens dos coaches</h1>
           <p className="text-muted-foreground">Carregando mensagens...</p>
         </div>
       </div>
@@ -214,7 +214,7 @@ export default function StudentMessagesView() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Mensagens dos coaches</h1>
+        <h1 className="text-xl font-bold sm:text-2xl">Mensagens dos coaches</h1>
         <p className="text-muted-foreground">
           Avisos enviados pelos coaches da equipa. Cada mensagem mostra quem enviou.
         </p>

@@ -10,10 +10,12 @@ type AgentThreadProps = {
   thread: AgentThreadItem[];
   status: "idle" | "sending" | "error";
   error: string | null;
-  chips: AgentChip[];
-  onSend: (text: string) => void;
+  chips?: AgentChip[];
+  onSend?: (text: string) => void;
   onCardAction: (action: AgentCardAction) => void;
   emptyHint?: string;
+  /** Quando false, chips ficam fora (ex.: acima do composer) */
+  showChips?: boolean;
   className?: string;
 };
 
@@ -21,10 +23,11 @@ const AgentThread = ({
   thread,
   status,
   error,
-  chips,
+  chips = [],
   onSend,
   onCardAction,
-  emptyHint = "Pergunte qualquer coisa — respondo com o seu plano de hoje.",
+  emptyHint = "Fale com o Coleman sobre a sua dieta, treino ou o que fazer agora.",
+  showChips = true,
   className,
 }: AgentThreadProps) => {
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -46,24 +49,26 @@ const AgentThread = ({
 
   return (
     <div className={cn("flex flex-col gap-3", className)}>
-      <div className="flex shrink-0 flex-wrap gap-2" role="group" aria-label="Atalhos do agente">
-        {chips.slice(0, 3).map((chip) => (
-          <Button
-            key={chip.label}
-            type="button"
-            size="sm"
-            variant="secondary"
-            className={cn(
-              "min-h-9 rounded-full text-xs font-normal",
-              "motion-safe:active:scale-[0.98] motion-safe:transition-transform motion-safe:duration-100",
-            )}
-            disabled={sending}
-            onClick={() => onSend(chip.text)}
-          >
-            {chip.label}
-          </Button>
-        ))}
-      </div>
+      {showChips && chips.length > 0 && onSend && (
+        <div className="flex shrink-0 flex-wrap gap-2" role="group" aria-label="Atalhos do agente">
+          {chips.slice(0, 4).map((chip) => (
+            <Button
+              key={chip.label}
+              type="button"
+              size="sm"
+              variant="secondary"
+              className={cn(
+                "min-h-9 rounded-full text-xs font-normal",
+                "motion-safe:active:scale-[0.98] motion-safe:transition-transform motion-safe:duration-100",
+              )}
+              disabled={sending}
+              onClick={() => onSend(chip.text)}
+            >
+              {chip.label}
+            </Button>
+          ))}
+        </div>
+      )}
 
       <div className="space-y-3" aria-live="polite" aria-relevant="additions" aria-busy={sending}>
         {isEmpty && (
@@ -74,14 +79,14 @@ const AgentThread = ({
           <div
             key={item.id}
             className={cn(
-              "max-w-[95%] space-y-2",
+              "max-w-[min(95%,28rem)] min-w-0 space-y-2",
               item.role === "user" ? "ml-auto" : "mr-auto",
               "motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-200",
             )}
           >
             <div
               className={cn(
-                "rounded-2xl px-3 py-2 text-sm whitespace-pre-line",
+                "min-w-0 overflow-hidden rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
                 item.role === "user"
                   ? "bg-primary text-primary-foreground"
                   : "bg-muted/80 text-foreground",
@@ -107,7 +112,7 @@ const AgentThread = ({
               className="h-4 w-4 motion-safe:animate-spin motion-reduce:opacity-70"
               aria-hidden
             />
-            A pensar…
+            Coleman está pensando…
           </div>
         )}
 
@@ -120,7 +125,7 @@ const AgentThread = ({
           </p>
         )}
 
-        <div ref={bottomRef} />
+        <div ref={bottomRef} className="h-px w-full shrink-0" aria-hidden />
       </div>
     </div>
   );

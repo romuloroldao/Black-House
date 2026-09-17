@@ -3,6 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "./contexts/AuthContext";
 import { DataContextProvider } from "./contexts/DataContext";
 import { ConfirmProvider } from "./contexts/ConfirmContext";
@@ -31,125 +32,127 @@ const queryClient = new QueryClient();
 // BootstrapGuard usa useLocation(), que requer BrowserRouter já montado
 // Hierarquia corrigida: BrowserRouter → BootstrapGuard → Routes
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <AuthProvider>
-      <DataContextProvider>
-        <ConfirmProvider>
-        <BootstrapAwareErrorBoundary>
-          <BrowserRouter>
-            <BootstrapGuard>
-              <TooltipProvider>
-                <Toaster />
-                <Sonner />
-                <Routes>
-                {/* Rotas públicas */}
-                <Route path="/auth" element={<Auth />} />
-                
-                {/* Rotas do COACH (base '/') */}
-                <Route 
-                  path="/" 
-                  element={
-                    <ProtectedRoute allowedRoles={['coach', 'admin']}>
-                      <Index />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/financeiro/*"
-                  element={
-                    <ProtectedRoute allowedRoles={['coach', 'admin']}>
-                      <Index />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/alunos/:id"
-                  element={
-                    <ProtectedRoute allowedRoles={['coach', 'admin']}>
-                      <StudentDetails />
-                    </ProtectedRoute>
-                  } 
-                />
-                <Route 
-                  path="/dieta/:id" 
-                  element={
-                    <ProtectedRoute allowedRoles={['coach', 'admin']}>
-                      <DietaPage />
-                    </ProtectedRoute>
-                  } 
-                />
-                <Route 
-                  path="/treino/:id" 
-                  element={
-                    <ProtectedRoute allowedRoles={['coach', 'admin']}>
-                      <TreinoPage />
-                    </ProtectedRoute>
-                  } 
-                />
-                <Route 
-                  path="/report/:id" 
-                  element={
-                    <ProtectedRoute allowedRoles={['coach', 'admin']}>
-                      <ReportViewPage />
-                    </ProtectedRoute>
-                  } 
-                />
-                
-                {/* Rotas do ALUNO (base '/portal-aluno') */}
-                <Route 
-                  path="/portal-aluno/blocked" 
-                  element={
-                    <ProtectedRoute allowedRoles={['aluno']} checkPayment={false}>
-                      <StudentBlocked />
-                    </ProtectedRoute>
-                  } 
-                />
-                <Route
-                  path="/portal-aluno/access-blocked"
-                  element={
-                    <ProtectedRoute allowedRoles={['aluno']} checkPayment={false}>
-                      <StudentAccessBlocked />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route 
-                  path="/portal-aluno/guia/:contentId" 
-                  element={
-                    <ProtectedRoute allowedRoles={['aluno']} checkPayment={true}>
-                      <StudentEducationalGuidePage />
-                    </ProtectedRoute>
-                  } 
-                />
-                <Route 
-                  path="/portal-aluno/*" 
-                  element={
-                    <ProtectedRoute allowedRoles={['aluno']} checkPayment={true}>
-                      <StudentPortal />
-                    </ProtectedRoute>
-                  } 
-                />
-                
-                {/* Rotas legacy (redirecionamento automático via ProtectedRoute) */}
-                <Route 
-                  path="/aluno" 
-                  element={
-                    <ProtectedRoute allowedRoles={['aluno']} checkPayment={true}>
-                      <StudentPortal />
-                    </ProtectedRoute>
-                  } 
-                />
-                
-                {/* 404 */}
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-              </TooltipProvider>
-            </BootstrapGuard>
-          </BrowserRouter>
-        </BootstrapAwareErrorBoundary>
-        </ConfirmProvider>
-      </DataContextProvider>
-    </AuthProvider>
-  </QueryClientProvider>
+  <ThemeProvider attribute="class" defaultTheme="dark" enableSystem storageKey="bh-theme">
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <DataContextProvider>
+          <ConfirmProvider>
+          <BootstrapAwareErrorBoundary>
+            <BrowserRouter>
+              <BootstrapGuard>
+                <TooltipProvider>
+                  <Toaster />
+                  <Sonner />
+                  <Routes>
+                  {/* Rotas públicas */}
+                  <Route path="/auth" element={<Auth />} />
+                  
+                  {/* Rotas do COACH (base '/') */}
+                  <Route 
+                    path="/" 
+                    element={
+                      <ProtectedRoute allowedRoles={['coach', 'admin']}>
+                        <Index />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/financeiro/*"
+                    element={
+                      <ProtectedRoute allowedRoles={['coach', 'admin']}>
+                        <Index />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/alunos/:id"
+                    element={
+                      <ProtectedRoute allowedRoles={['coach', 'admin']}>
+                        <StudentDetails />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/dieta/:id" 
+                    element={
+                      <ProtectedRoute allowedRoles={['coach', 'admin']}>
+                        <DietaPage />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/treino/:id" 
+                    element={
+                      <ProtectedRoute allowedRoles={['coach', 'admin']}>
+                        <TreinoPage />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/report/:id" 
+                    element={
+                      <ProtectedRoute allowedRoles={['coach', 'admin']}>
+                        <ReportViewPage />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  
+                  {/* Rotas do ALUNO (base '/portal-aluno') */}
+                  <Route 
+                    path="/portal-aluno/blocked" 
+                    element={
+                      <ProtectedRoute allowedRoles={['aluno']} checkPayment={false}>
+                        <StudentBlocked />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route
+                    path="/portal-aluno/access-blocked"
+                    element={
+                      <ProtectedRoute allowedRoles={['aluno']} checkPayment={false}>
+                        <StudentAccessBlocked />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route 
+                    path="/portal-aluno/guia/:contentId" 
+                    element={
+                      <ProtectedRoute allowedRoles={['aluno']} checkPayment={true}>
+                        <StudentEducationalGuidePage />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/portal-aluno/*" 
+                    element={
+                      <ProtectedRoute allowedRoles={['aluno']} checkPayment={true}>
+                        <StudentPortal />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  
+                  {/* Rotas legacy (redirecionamento automático via ProtectedRoute) */}
+                  <Route 
+                    path="/aluno" 
+                    element={
+                      <ProtectedRoute allowedRoles={['aluno']} checkPayment={true}>
+                        <StudentPortal />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  
+                  {/* 404 */}
+                  <Route path="*" element={<NotFound />} />
+                </Routes>
+                </TooltipProvider>
+              </BootstrapGuard>
+            </BrowserRouter>
+          </BootstrapAwareErrorBoundary>
+          </ConfirmProvider>
+        </DataContextProvider>
+      </AuthProvider>
+    </QueryClientProvider>
+  </ThemeProvider>
 );
 
 export default App;

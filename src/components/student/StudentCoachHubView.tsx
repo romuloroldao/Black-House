@@ -117,7 +117,7 @@ const StudentCoachHubView = () => {
   return (
     <div className="min-w-0 space-y-5 md:space-y-6">
       <div className="md:px-2 lg:px-4">
-        <h1 className="text-2xl font-bold sm:text-3xl">Coach</h1>
+        <h1 className="text-xl font-bold sm:text-2xl">Coach</h1>
         <p className="text-sm text-muted-foreground sm:text-base">
           Chat direto e avisos do seu coach num só lugar
         </p>

@@ -396,7 +396,7 @@ export default function FoodReviewManager({ onBack }: Props) {
             <CardTitle className="text-lg">Recentes</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{alimentosRecentes.length}</div>
+            <div className="text-xl font-bold sm:text-2xl">{alimentosRecentes.length}</div>
             <p className="text-sm text-muted-foreground">Últimos 30 dias</p>
           </CardContent>
         </Card>
@@ -405,7 +405,7 @@ export default function FoodReviewManager({ onBack }: Props) {
             <CardTitle className="text-lg">Suspeitos</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-amber-600">{alimentosSuspeitos.length}</div>
+            <div className="text-2xl font-bold text-amber-600">{alimentosSuspeitos.length}</div>
             <p className="text-sm text-muted-foreground">Valores inconsistentes</p>
           </CardContent>
         </Card>
@@ -414,7 +414,7 @@ export default function FoodReviewManager({ onBack }: Props) {
             <CardTitle className="text-lg">Duplicados</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-destructive">{duplicateGroups.length}</div>
+            <div className="text-2xl font-bold text-destructive">{duplicateGroups.length}</div>
             <p className="text-sm text-muted-foreground">Grupos similares</p>
           </CardContent>
         </Card>

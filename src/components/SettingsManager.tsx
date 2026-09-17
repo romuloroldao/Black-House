@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { User, Bell, Key, Palette, Eye, EyeOff, Camera, Loader2, Shield } from "lucide-react";
+import { User, Bell, Key, Palette, Eye, EyeOff, Camera, Loader2, Shield, BookOpen } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -27,6 +27,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import UserRolesManager from "./UserRolesManager";
+import CoachRulesManager from "./coach/CoachRulesManager";
+import { ModeToggle } from "@/components/ui/mode-toggle";
 import { API_CONTRACT } from "@/contracts/api-contract";
 import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
@@ -450,14 +452,14 @@ const SettingsManager = () => {
   return (
     <div className="container max-w-5xl py-6">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold tracking-tight">Configurações</h1>
+        <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Configurações</h1>
         <p className="text-muted-foreground">
           Gerencie suas preferências e configurações do sistema
         </p>
       </div>
 
       <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5 lg:w-[620px]">
+        <TabsList className="grid w-full grid-cols-3 sm:grid-cols-6 lg:w-auto">
           <TabsTrigger value="profile" className="gap-2">
             <User className="h-4 w-4" />
             <span className="hidden sm:inline">Perfil</span>
@@ -465,6 +467,10 @@ const SettingsManager = () => {
           <TabsTrigger value="users" className="gap-2">
             <Shield className="h-4 w-4" />
             <span className="hidden sm:inline">Usuários</span>
+          </TabsTrigger>
+          <TabsTrigger value="method" className="gap-2">
+            <BookOpen className="h-4 w-4" />
+            <span className="hidden sm:inline">Método</span>
           </TabsTrigger>
           <TabsTrigger value="notifications" className="gap-2">
             <Bell className="h-4 w-4" />
@@ -482,6 +488,10 @@ const SettingsManager = () => {
 
         <TabsContent value="users">
           <UserRolesManager />
+        </TabsContent>
+
+        <TabsContent value="method">
+          <CoachRulesManager />
         </TabsContent>
 
         <TabsContent value="profile" className="space-y-4">
@@ -1028,8 +1038,9 @@ const SettingsManager = () => {
               <div className="space-y-2">
                 <Label>Tema</Label>
                 <p className="text-sm text-muted-foreground">
-                  O tema escuro/claro é detectado automaticamente do seu sistema
+                  Escolha claro, escuro ou seguir o sistema operativo.
                 </p>
+                <ModeToggle />
               </div>
               
               <Separator />
