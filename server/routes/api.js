@@ -6222,6 +6222,9 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     'is_template',
     'tags',
     'exercicios',
+    'periodizacao_ativa',
+    'periodizacao_observacao',
+    'periodizacao_content_id',
   ]);
 
   async function fetchTreinoById(treinoId) {
@@ -6747,12 +6750,22 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
       const tags = Array.isArray(body.tags) ? body.tags : [];
       const exercicios = normalizeExerciseList(body.exercicios || []);
       const isTemplate = body.is_template === true;
+      const periodizacaoAtiva = body.periodizacao_ativa === true;
+      const periodizacaoObservacao =
+        body.periodizacao_observacao != null && String(body.periodizacao_observacao).trim()
+          ? String(body.periodizacao_observacao).trim()
+          : null;
+      const periodizacaoContentId =
+        body.periodizacao_content_id != null && String(body.periodizacao_content_id).trim()
+          ? String(body.periodizacao_content_id).trim()
+          : null;
 
       const insertResult = await pool.query(
         `INSERT INTO public.treinos (
           nome, descricao, duracao, dificuldade, categoria, num_exercicios,
-          is_template, tags, exercicios, coach_id, versao, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9::jsonb, $10, 1, now())
+          is_template, tags, exercicios, coach_id, versao, updated_at,
+          periodizacao_ativa, periodizacao_observacao, periodizacao_content_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9::jsonb, $10, 1, now(), $11, $12, $13)
         RETURNING *`,
         [
           nome,
@@ -6765,6 +6778,9 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           tags,
           JSON.stringify(exercisesToApiJson(exercicios)),
           req.user.id,
+          periodizacaoAtiva,
+          periodizacaoObservacao,
+          periodizacaoContentId,
         ],
       );
       return res.status(201).json(insertResult.rows[0]);
@@ -6825,9 +6841,15 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
         } else if (key === 'duracao' || key === 'num_exercicios') {
           sets.push(`${key} = $${idx}`);
           values.push(parseInt(String(raw), 10));
-        } else if (key === 'is_template') {
+        } else if (key === 'is_template' || key === 'periodizacao_ativa') {
           sets.push(`${key} = $${idx}`);
           values.push(raw === true);
+        } else if (key === 'periodizacao_content_id') {
+          sets.push(`${key} = $${idx}`);
+          values.push(raw != null && String(raw).trim() ? String(raw).trim() : null);
+        } else if (key === 'periodizacao_observacao') {
+          sets.push(`${key} = $${idx}`);
+          values.push(raw != null && String(raw).trim() ? String(raw).trim() : null);
         } else {
           sets.push(`${key} = $${idx}`);
           values.push(raw);

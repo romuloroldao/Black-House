@@ -31,5 +31,8 @@ export function mapTreinoApiToWorkoutForm(treino: Record<string, unknown>) {
     atribuicaoId: treino.aluno_treino_id ?? null,
     personalizacoes: Number(treino.personalizacoes ?? 0),
     templateVersao: treino.template_versao ?? treino.versao ?? null,
+    periodizacaoAtiva: treino.periodizacao_ativa === true,
+    periodizacaoObservacao: treino.periodizacao_observacao != null ? String(treino.periodizacao_observacao) : "",
+    periodizacaoContentId: treino.periodizacao_content_id != null ? String(treino.periodizacao_content_id) : null,
   };
 }

@@ -9,9 +9,10 @@ export const EDUCATIONAL_CONTENT_TYPE_LABELS: Record<EducationalContentType, str
   video: "Vídeo",
 };
 
-/** Categorias extensíveis — hoje usadas em Refeição Livre e futuras secções. */
+/** Categorias extensíveis — Refeição Livre, Periodizações de Treino e outras secções. */
 export const EDUCATIONAL_CONTENT_CATEGORIES = [
   "Refeição Livre",
+  "Periodizações de Treino",
   "Hidratação",
   "Suplementação",
   "Sono",
@@ -19,6 +20,9 @@ export const EDUCATIONAL_CONTENT_CATEGORIES = [
   "Finais de Semana",
   "Educação Alimentar",
 ] as const;
+
+/** Categoria usada na caixa de periodização na ficha de treino. */
+export const PERIODIZACAO_TREINO_CATEGORY = "Periodizações de Treino" as const;
 
 export type EducationalContentCategory = (typeof EDUCATIONAL_CONTENT_CATEGORIES)[number];
 

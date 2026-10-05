@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Dumbbell, Clock, Target, ChevronDown, Play, Weight, FileDown } from "lucide-react";
 import { exportWorkoutToPdf } from "@/utils/workoutPdfExport";
 import StudentWorkoutSessionView from "@/components/student/StudentWorkoutSessionView";
+import StudentPeriodizacaoCard from "@/components/student/StudentPeriodizacaoCard";
 import PremiumEmptyState from "@/components/student/PremiumEmptyState";
 import {
   DIAS_SEMANA_LABELS,
@@ -147,12 +148,22 @@ const StudentWorkoutsView = () => {
               `/api/alunos-treinos/${at.id}/treino-resolvido`,
             );
             const treino = treinoResult.success ? treinoResult.data : null;
+            let periodizacaoTitle: string | null = null;
+            if (treino?.periodizacao_ativa && treino?.periodizacao_content_id) {
+              const contentResult = await apiClient.requestSafe<{ title?: string }>(
+                `/api/educational-contents/${treino.periodizacao_content_id}`,
+              );
+              if (contentResult.success && contentResult.data?.title) {
+                periodizacaoTitle = String(contentResult.data.title);
+              }
+            }
             return {
               ...treino,
               alunoTreinoId: at.id,
               dataExpiracao: at.data_expiracao,
               data_retorno: at.data_retorno,
               diasAntecedenciaNotificacao: at.dias_antecedencia_notificacao,
+              periodizacaoTitle,
             };
           }),
         );
@@ -383,6 +394,14 @@ const StudentWorkoutsView = () => {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
+                {treino.periodizacao_ativa ? (
+                  <StudentPeriodizacaoCard
+                    observacao={treino.periodizacao_observacao}
+                    contentId={treino.periodizacao_content_id}
+                    contentTitle={treino.periodizacaoTitle}
+                  />
+                ) : null}
+
                 <div className="flex flex-wrap gap-2">
                   <Button
                     type="button"
