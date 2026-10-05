@@ -250,6 +250,9 @@ async function resolveEffectiveWorkout(pool, alunoTreinoId) {
     aluno_treino_id: link.aluno_treino_id,
     personalizacoes,
     resolved_from: 'template_overrides',
+    periodizacao_ativa: link.periodizacao_ativa === true,
+    periodizacao_observacao: link.periodizacao_observacao ?? null,
+    periodizacao_content_id: link.periodizacao_content_id ?? null,
     created_at: link.created_at,
     updated_at: link.updated_at,
   };

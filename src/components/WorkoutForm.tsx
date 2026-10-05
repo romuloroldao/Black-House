@@ -22,6 +22,7 @@ import {
   GripVertical,
   Copy
 } from "lucide-react";
+import WorkoutPeriodizacaoFields from "@/components/workout/WorkoutPeriodizacaoFields";
 
 interface WorkoutFormProps {
   workout?: any;
@@ -62,6 +63,16 @@ const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSav
     notes: workout?.notes || ""
   });
 
+  const [periodizacaoAtiva, setPeriodizacaoAtiva] = useState(
+    () => workout?.periodizacaoAtiva === true,
+  );
+  const [periodizacaoObservacao, setPeriodizacaoObservacao] = useState(
+    () => String(workout?.periodizacaoObservacao ?? ""),
+  );
+  const [periodizacaoContentId, setPeriodizacaoContentId] = useState<string | null>(
+    () => (workout?.periodizacaoContentId != null ? String(workout.periodizacaoContentId) : null),
+  );
+
   const [exercises, setExercises] = useState<Exercise[]>(() => {
     if (workout?.exercises && Array.isArray(workout.exercises) && workout.exercises.length > 0) {
       return workout.exercises;
@@ -96,6 +107,9 @@ const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSav
         objectives: [],
         notes: "",
       });
+      setPeriodizacaoAtiva(false);
+      setPeriodizacaoObservacao("");
+      setPeriodizacaoContentId(null);
       setExercises([
         {
           id: "1",
@@ -123,6 +137,11 @@ const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSav
       objectives: Array.isArray(workout.objectives) ? workout.objectives : [],
       notes: String(workout.notes ?? ""),
     });
+    setPeriodizacaoAtiva(workout.periodizacaoAtiva === true);
+    setPeriodizacaoObservacao(String(workout.periodizacaoObservacao ?? ""));
+    setPeriodizacaoContentId(
+      workout.periodizacaoContentId != null ? String(workout.periodizacaoContentId) : null,
+    );
 
     if (mappedExercises.length > 0) {
       setExercises(mappedExercises);
@@ -243,6 +262,9 @@ const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSav
           ordem: ex.order ?? index + 1,
         })),
         coach_id: user.id,
+        periodizacao_ativa: periodizacaoAtiva,
+        periodizacao_observacao: periodizacaoObservacao.trim() || null,
+        periodizacao_content_id: periodizacaoAtiva ? periodizacaoContentId : null,
       };
 
       if (workout?.id) {
@@ -447,6 +469,17 @@ const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSav
               )}
             </CardContent>
           </Card>
+
+          {!studentCopy && (
+            <WorkoutPeriodizacaoFields
+              ativa={periodizacaoAtiva}
+              observacao={periodizacaoObservacao}
+              contentId={periodizacaoContentId}
+              onAtivaChange={setPeriodizacaoAtiva}
+              onObservacaoChange={setPeriodizacaoObservacao}
+              onContentIdChange={setPeriodizacaoContentId}
+            />
+          )}
 
           {/* Tags */}
           <Card>
