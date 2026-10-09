@@ -6473,6 +6473,180 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     },
   );
 
+  // GET /api/alunos-treinos — lista vínculos (filtro aluno_id / ativo)
+  router.get(
+    '/alunos-treinos',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'aluno']),
+    attachCoachScope,
+    async (req, res) => {
+      try {
+        const alunoId =
+          req.query.aluno_id != null ? String(req.query.aluno_id).trim() : '';
+        const ativoRaw = req.query.ativo;
+        const filterAtivo =
+          ativoRaw === undefined || ativoRaw === null || ativoRaw === ''
+            ? null
+            : String(ativoRaw) === 'true' || String(ativoRaw) === '1';
+
+        if (req.user.role === 'aluno') {
+          const alunoRow = await getAlunoRowForAuthUser(req.user.id);
+          if (!alunoRow) {
+            return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+          }
+          if (alunoId && String(alunoId) !== String(alunoRow.id)) {
+            return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+          }
+          const params = [alunoRow.id];
+          let sql = `SELECT * FROM public.alunos_treinos WHERE aluno_id = $1`;
+          if (filterAtivo !== null) {
+            params.push(filterAtivo);
+            sql += ` AND COALESCE(ativo, true) = $2`;
+          }
+          sql += ` ORDER BY created_at DESC NULLS LAST`;
+          const result = await pool.query(sql, params);
+          return res.json(result.rows);
+        }
+
+        if (!alunoId) {
+          return res.status(400).json({
+            error: 'aluno_id é obrigatório',
+            error_code: 'MISSING_PARAMETERS',
+          });
+        }
+        if (!isValidUUID(alunoId)) {
+          return res.status(400).json({
+            error: 'aluno_id inválido',
+            error_code: 'INVALID_UUID',
+          });
+        }
+
+        if (req.user.role !== 'admin') {
+          const ok = await assertCoachCanAccessAluno(pool, req.coachScope, alunoId);
+          if (!ok) {
+            return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+          }
+        }
+
+        const params = [alunoId];
+        let sql = `SELECT * FROM public.alunos_treinos WHERE aluno_id = $1`;
+        if (filterAtivo !== null) {
+          params.push(filterAtivo);
+          sql += ` AND COALESCE(ativo, true) = $2`;
+        }
+        sql += ` ORDER BY created_at DESC NULLS LAST`;
+        const result = await pool.query(sql, params);
+        return res.json(result.rows);
+      } catch (error) {
+        console.error('Erro ao listar alunos_treinos:', error);
+        return res.status(500).json({
+          error: error.message || 'Erro ao listar vínculos de treino',
+          error_code: 'ALUNO_TREINO_LIST_ERROR',
+        });
+      }
+    },
+  );
+
+  // PATCH /api/alunos-treinos/:id/validade — renova data_expiracao / aviso
+  router.patch(
+    '/alunos-treinos/:id/validade',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    attachCoachScope,
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const linkRes = await pool.query(
+          'SELECT id, aluno_id FROM public.alunos_treinos WHERE id = $1 LIMIT 1',
+          [req.params.id],
+        );
+        const link = linkRes.rows[0];
+        if (!link) {
+          return res.status(404).json({
+            error: 'Vínculo não encontrado',
+            error_code: 'ALUNO_TREINO_NOT_FOUND',
+          });
+        }
+
+        if (req.user.role !== 'admin') {
+          const ok = await assertCoachCanAccessAluno(pool, req.coachScope, link.aluno_id);
+          if (!ok) {
+            return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+          }
+        }
+
+        const body = req.body || {};
+        let dataExpiracao =
+          body.data_expiracao != null
+            ? String(body.data_expiracao).slice(0, 10)
+            : body.data_retorno != null
+              ? String(body.data_retorno).slice(0, 10)
+              : null;
+
+        if (!dataExpiracao || !/^\d{4}-\d{2}-\d{2}$/.test(dataExpiracao)) {
+          return res.status(400).json({
+            error: 'data_expiracao é obrigatória (YYYY-MM-DD)',
+            error_code: 'MISSING_PARAMETERS',
+          });
+        }
+
+        const today = new Date();
+        const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        if (dataExpiracao < todayIso) {
+          return res.status(400).json({
+            error: 'data_expiracao deve ser hoje ou futura',
+            error_code: 'INVALID_DATE',
+          });
+        }
+
+        const sets = [
+          'data_expiracao = $1',
+          'data_retorno = $1',
+          'notificacao_expiracao_enviada = false',
+        ];
+        const values = [dataExpiracao];
+        let idx = 2;
+
+        if (body.dias_antecedencia_notificacao != null) {
+          const dias = parseInt(String(body.dias_antecedencia_notificacao), 10);
+          if (!Number.isFinite(dias) || dias < 0) {
+            return res.status(400).json({
+              error: 'dias_antecedencia_notificacao inválido',
+              error_code: 'INVALID_PARAMETER',
+            });
+          }
+          sets.push(`dias_antecedencia_notificacao = $${idx++}`);
+          values.push(dias);
+        }
+
+        values.push(link.id);
+        const updateResult = await pool.query(
+          `UPDATE public.alunos_treinos
+           SET ${sets.join(', ')}
+           WHERE id = $${idx}
+           RETURNING *`,
+          values,
+        );
+
+        try {
+          await afterTableMutation(pool, 'alunos_treinos', updateResult.rows[0]);
+        } catch (hookErr) {
+          console.warn('[treino] return_reminder hook failed:', hookErr?.message || hookErr);
+        }
+
+        return res.json(updateResult.rows[0]);
+      } catch (error) {
+        console.error('Erro ao renovar validade do treino:', error);
+        return res.status(500).json({
+          error: error.message || 'Erro ao renovar validade',
+          error_code: 'ALUNO_TREINO_VALIDADE_ERROR',
+        });
+      }
+    },
+  );
+
   // DELETE /api/alunos-treinos/:id — remove o vínculo aluno↔treino. Se o treino vinculado
   // for uma cópia exclusiva do aluno (aluno_id preenchido) e ficar sem qualquer vínculo,
   // remove também a cópia. Nunca apaga templates/treinos de biblioteca (aluno_id NULL).

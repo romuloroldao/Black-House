@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare, Trash2, User, Utensils, TrendingUp, Activity, Wallet, Upload } from "lucide-react";
+import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare, Trash2, User, Utensils, TrendingUp, Activity, Wallet, Upload, CalendarClock } from "lucide-react";
 import StudentImporter, { type ImportCompleteResult } from "./StudentImporter";
 import ImportHistoryPanel from "@/components/import/ImportHistoryPanel";
 import StudentPortalStatusCard from "@/components/student/StudentPortalStatusCard";
@@ -111,6 +111,10 @@ export default function StudentDetails() {
   const [treinoSelecionado, setTreinoSelecionado] = useState<string>("");
   const [diasValidade, setDiasValidade] = useState<string>("45");
   const [diasAntecedenciaNotif, setDiasAntecedenciaNotif] = useState<string>("7");
+  const [renewTarget, setRenewTarget] = useState<(Treino & { alunoTreinoId: string }) | null>(null);
+  const [renewDate, setRenewDate] = useState("");
+  const [renewDiasAntecedencia, setRenewDiasAntecedencia] = useState("7");
+  const [renewingValidade, setRenewingValidade] = useState(false);
   
   // Estados para criar dieta
   const [isCriarDietaOpen, setIsCriarDietaOpen] = useState(false);
@@ -392,6 +396,69 @@ export default function StudentDetails() {
       });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const todayISODate = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+
+  const addDaysISO = (days: number) => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + days);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+
+  const openRenewValidade = (treino: Treino & { alunoTreinoId: string }) => {
+    setRenewTarget(treino);
+    setRenewDate(addDaysISO(45));
+    setRenewDiasAntecedencia(String(treino.diasAntecedenciaNotificacao ?? 7));
+  };
+
+  const handleRenewValidade = async () => {
+    if (!renewTarget) return;
+    const today = todayISODate();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(renewDate) || renewDate < today) {
+      toast({
+        title: "Data inválida",
+        description: "Escolha uma data de vencimento a partir de hoje.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const dias = parseInt(renewDiasAntecedencia, 10);
+    try {
+      setRenewingValidade(true);
+      const result = await apiClient.requestSafe(
+        `/api/alunos-treinos/${renewTarget.alunoTreinoId}/validade`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            data_expiracao: renewDate,
+            ...(Number.isFinite(dias) ? { dias_antecedencia_notificacao: dias } : {}),
+          }),
+        },
+      );
+      if (!result.success) {
+        throw new Error(result.error || "Erro ao renovar validade");
+      }
+      toast({
+        title: "Validade renovada",
+        description: `"${renewTarget.nome}" vale até ${formatDateBR(renewDate)}.`,
+      });
+      setRenewTarget(null);
+      carregarDadosAluno();
+    } catch (error: any) {
+      toast({
+        title: "Erro ao renovar validade",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setRenewingValidade(false);
     }
   };
 
@@ -867,6 +934,14 @@ export default function StudentDetails() {
                           Editar treino
                         </Button>
                         <Button
+                          className="flex-1"
+                          variant={diasRestantes !== null && diasRestantes < 0 ? "default" : "outline"}
+                          onClick={() => openRenewValidade(treino)}
+                        >
+                          <CalendarClock className="mr-2 h-4 w-4" />
+                          Renovar validade
+                        </Button>
+                        <Button
                           variant="destructive"
                           size="sm"
                           className="flex-1"
@@ -897,6 +972,76 @@ export default function StudentDetails() {
             )}
           </CardContent>
         </Card>
+
+        <Dialog
+          open={!!renewTarget}
+          onOpenChange={(open) => {
+            if (!renewingValidade && !open) setRenewTarget(null);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Renovar validade</DialogTitle>
+              <DialogDescription>
+                Atualiza a data de vencimento do treino "{renewTarget?.nome}" sem alterar o template.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label htmlFor="renew-date">Data de vencimento</Label>
+                <Input
+                  id="renew-date"
+                  type="date"
+                  min={todayISODate()}
+                  value={renewDate}
+                  onChange={(e) => setRenewDate(e.target.value)}
+                />
+                <div className="flex flex-wrap gap-2">
+                  {[30, 45, 60, 90].map((dias) => (
+                    <Button
+                      key={dias}
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setRenewDate(addDaysISO(dias))}
+                    >
+                      +{dias}d
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="renew-dias-antecedencia">Aviso com antecedência (dias)</Label>
+                <Input
+                  id="renew-dias-antecedencia"
+                  type="number"
+                  min={0}
+                  value={renewDiasAntecedencia}
+                  onChange={(e) => setRenewDiasAntecedencia(e.target.value)}
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setRenewTarget(null)}
+                  disabled={renewingValidade}
+                >
+                  Cancelar
+                </Button>
+                <Button onClick={handleRenewValidade} disabled={renewingValidade}>
+                  {renewingValidade ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
+                      Salvando...
+                    </>
+                  ) : (
+                    "Salvar validade"
+                  )}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <WeeklyWorkoutAgendaEditor
           alunoId={id!}

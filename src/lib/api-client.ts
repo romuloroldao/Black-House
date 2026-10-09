@@ -240,9 +240,12 @@ function mapLegacyApiToRestV1(endpoint: string): LegacyMapResult {
     match = normalized.match(/^\/api\/dietas\/([^/]+)$/);
     if (match) return byIdToQuery('dietas', match[1]);
 
-    // /api/alunos-treinos/assign (POST: vincula template) e rotas semânticas de atribuição
-    // usam rotas REAIS no servidor — não reescrever para /rest/v1.
-    if (/^\/api\/alunos-treinos\/[^/]+\/(treino-resolvido|personalizacao)$/.test(normalized)) {
+    // /api/alunos-treinos (lista + assign + personalização/validade) — rotas semânticas reais.
+    // Nunca reescrever para /rest/v1 (a listagem legada devolve 404 em /api/alunos-treinos).
+    if (normalized === '/api/alunos-treinos' || normalized === '/api/alunos-treinos/assign') {
+        return { endpoint, unwrapFirstRow: false };
+    }
+    if (/^\/api\/alunos-treinos\/[^/]+\/(treino-resolvido|personalizacao|validade)$/.test(normalized)) {
         return { endpoint, unwrapFirstRow: false };
     }
     if (/^\/api\/alunos-treinos\/[^/]+$/.test(normalized)) {
@@ -287,10 +290,10 @@ function mapLegacyApiToRestV1(endpoint: string): LegacyMapResult {
     match = normalized.match(/^\/api\/avisos-destinatarios\/([^/]+)$/);
     if (match) return byIdToQuery('avisos_destinatarios', match[1]);
 
+    // Nota: /api/treinos e /api/alunos-treinos NÃO entram no tableMap —
+    // têm rotas semânticas próprias (biblioteca + validade/personalização).
     const tableMap: Record<string, string> = {
-        '/api/treinos': 'treinos',
         '/api/dietas': 'dietas',
-        '/api/alunos-treinos': 'alunos_treinos',
         '/api/feedbacks-alunos': 'feedbacks_alunos',
         '/api/recurring-charges-config': 'recurring_charges_config',
         '/api/itens-dieta': 'itens_dieta',
