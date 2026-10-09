@@ -36,3 +36,6 @@ e2e/.env
 playwright-report/
 test-results/
 blob-report/
+
+# MediaPipe (copiado no prebuild)
+public/mediapipe/

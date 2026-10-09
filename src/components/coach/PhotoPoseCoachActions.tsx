@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/select';
 import { apiClient } from '@/lib/api-client';
 import { getEffectivePose, type EvolutionPhoto } from '@/lib/evolution-timeline';
+import { isAutomaticPoseSource } from '@/lib/evolution-timeline-pose';
 import { tEvolution } from '@/i18n/evolution-photos';
 import { toast } from 'sonner';
 
@@ -44,7 +45,7 @@ export function PhotoPoseCoachActions({ photo, onUpdated }: Props) {
 
   const effective = getEffectivePose(photo);
   const isCoachCorrected = photo.pose_source === 'coach' || Boolean(photo.pose_coach);
-  const isAuto = effective.source === 'vision' && !isCoachCorrected;
+  const isAuto = isAutomaticPoseSource(effective.source) && !isCoachCorrected;
 
   const openDialog = () => {
     setSelected(effective.pose || 'frente');

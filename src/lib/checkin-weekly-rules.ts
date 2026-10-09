@@ -37,14 +37,14 @@ export const CHECKIN_PHOTO_SLOTS: ReadonlyArray<{
     pose: "lado_esquerdo",
     index: 2,
     label: "Lado esquerdo",
-    hint: "Perfil esquerdo",
+    hint: "Ombro esquerdo virado para a câmara",
     required: false,
   },
   {
     pose: "lado_direito",
     index: 3,
     label: "Lado direito",
-    hint: "Perfil direito",
+    hint: "Ombro direito virado para a câmara",
     required: false,
   },
 ];

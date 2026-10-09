@@ -225,7 +225,8 @@ class GeminiProvider {
             } catch (error) {
                 lastError = error;
                 const kind = classifyVisionError(error);
-                if (kind !== 'transient' || attempt >= maxAttempts) {
+                const dailyQuota = /PerDay/i.test(String(error?.message || ''));
+                if (kind !== 'transient' || dailyQuota || attempt >= maxAttempts) {
                     throw error;
                 }
                 const delayMs = Math.min(30_000, 1000 * 2 ** (attempt - 1));

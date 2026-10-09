@@ -14,7 +14,12 @@ function optionalCheckinText(value: string): string | null {
 
 export type CheckinSubmitExtras = {
   pesoKg: number;
-  fotos: Array<{ url: string; descricao?: string | null }>;
+  fotos: Array<{
+    url: string;
+    descricao?: string | null;
+    pose_client?: string;
+    pose_client_confidence?: number;
+  }>;
 };
 
 /** Payload alinhado a POST /api/checkins (server/routes/api.js). */

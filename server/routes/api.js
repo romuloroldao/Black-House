@@ -32,6 +32,7 @@ const { getCoachFinancialPolicy, recalculateStudentAccess } = require('../financ
 const { registerCoachWebhook } = require('../financial/sync/webhook-registration');
 const { getCoachAsaasService } = require('../financial/coach-asaas');
 const { afterTableMutation } = require('../services/return-reminder.service');
+const { parseWorkoutValidityBody } = require('../utils/workout-validity');
 const {
   isMeaningfulCoachResposta,
   sqlMeaningfulCoachRespostaWhere,
@@ -4753,6 +4754,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
   // ============================================================================
 
   const { trendsSummary: checkinTrendsSummary, draftResponse: checkinDraftResponse } = require('../services/checkin-ai.service');
+  const { checkinAiLimiter } = require('../middleware/rate-limiter');
 
   router.post(
     '/weekly-checkins/ai/trends-summary',
@@ -4760,6 +4762,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     domainSchemaGuard,
     validateRole(['coach', 'admin', 'assistant']),
     attachCoachScope,
+    checkinAiLimiter,
     async (req, res) => {
       try {
         const alunoId = req.body?.aluno_id;
@@ -4785,6 +4788,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     validateRole(['coach', 'admin', 'assistant']),
     attachCoachScope,
     validateUUIDParam('id'),
+    checkinAiLimiter,
     async (req, res) => {
       try {
         const data = await checkinDraftResponse(
@@ -5389,6 +5393,9 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
               url,
               poseAluno,
               weeklyCheckinId: createdCheckin.id,
+              poseClient: f.pose_client
+                ? { pose: f.pose_client, confidence: f.pose_client_confidence }
+                : null,
             });
           } else {
             await client.query(
@@ -6468,6 +6475,68 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
         return res.status(500).json({
           error: error.message || 'Erro ao personalizar treino',
           error_code: 'TREINO_PERSONALIZACAO_ERROR',
+        });
+      }
+    },
+  );
+
+  // PATCH /api/alunos-treinos/:id/validade — renova a validade do mesmo vínculo (mantém personalizações)
+  router.patch(
+    '/alunos-treinos/:id/validade',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    attachCoachScope,
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const linkRes = await pool.query(
+          'SELECT id, aluno_id FROM public.alunos_treinos WHERE id = $1 LIMIT 1',
+          [req.params.id],
+        );
+        const link = linkRes.rows[0];
+        if (!link) {
+          return res.status(404).json({ error: 'Vínculo não encontrado', error_code: 'ALUNO_TREINO_NOT_FOUND' });
+        }
+
+        if (req.user.role !== 'admin') {
+          const ok = await assertCoachCanAccessAluno(pool, req.coachScope, link.aluno_id);
+          if (!ok) {
+            return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+          }
+        }
+
+        const parsed = parseWorkoutValidityBody(req.body || {});
+        if (!parsed.ok) {
+          return res.status(400).json({ error: parsed.error, error_code: parsed.error_code });
+        }
+
+        // data_expiracao precisa ser gravada aqui: syncWorkoutReturnSchedule só a preenche se estiver nula.
+        const updated = await pool.query(
+          `UPDATE public.alunos_treinos
+           SET data_expiracao = $1::date,
+               data_retorno = $1::date,
+               dias_antecedencia_notificacao = COALESCE($2::int, dias_antecedencia_notificacao),
+               notificacao_expiracao_enviada = false,
+               ativo = true
+           WHERE id = $3
+           RETURNING *`,
+          [parsed.dataExpiracao, parsed.diasAntecedencia, link.id],
+        );
+
+        try {
+          await afterTableMutation(pool, 'alunos_treinos', updated.rows[0]);
+        } catch (hookErr) {
+          console.warn('[treino] return_reminder hook failed:', hookErr?.message || hookErr);
+        }
+
+        const fresh = await pool.query('SELECT * FROM public.alunos_treinos WHERE id = $1', [link.id]);
+        return res.json(fresh.rows[0]);
+      } catch (error) {
+        console.error('Erro ao renovar validade do treino:', error);
+        return res.status(500).json({
+          error: error.message || 'Erro ao renovar validade do treino',
+          error_code: 'ALUNO_TREINO_VALIDADE_ERROR',
         });
       }
     },

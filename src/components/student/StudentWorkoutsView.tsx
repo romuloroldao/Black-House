@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiClient } from "@/lib/api-client";
+import { dateKeyFromApi, daysBetweenDateKeys, todayDateKey } from "@/lib/date-format";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Dumbbell, Clock, Target, ChevronDown, Play, Weight, FileDown } from "lucide-react";
@@ -344,10 +345,9 @@ const StudentWorkoutsView = () => {
         {treinos.map((treino, idx) => {
           const isExpanded = expandedWorkouts.has(treino.id);
           const exercicios = treino.exercicios || [];
-          const hoje = new Date();
-          const dataExpiracao = treino.dataExpiracao ? new Date(treino.dataExpiracao) : null;
-          const diasRestantes = dataExpiracao
-            ? Math.ceil((dataExpiracao.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24))
+          const expiracaoKey = dateKeyFromApi(treino.dataExpiracao);
+          const diasRestantes = expiracaoKey
+            ? daysBetweenDateKeys(todayDateKey(), expiracaoKey)
             : null;
           const isHoje =
             treinoPrincipal &&
@@ -376,7 +376,9 @@ const StudentWorkoutsView = () => {
                       >
                         {diasRestantes > 0
                           ? `${diasRestantes}d restantes`
-                          : "Expirado"}
+                          : diasRestantes === 0
+                            ? "Expira hoje"
+                            : "Expirado"}
                       </Badge>
                     )}
                   </div>

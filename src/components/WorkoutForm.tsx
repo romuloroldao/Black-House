@@ -11,8 +11,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { 
   ArrowLeft, 
+  BookmarkPlus,
+  Loader2,
   Plus, 
   Trash2, 
   Save, 
@@ -50,6 +53,9 @@ const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSav
   const { user } = useAuth();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
+  const [isSaveTemplateOpen, setIsSaveTemplateOpen] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
   const [formData, setFormData] = useState({
     name: workout?.name || "",
     description: workout?.description || "",
@@ -197,6 +203,92 @@ const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSav
     });
   };
 
+  // asNewTemplate: novos slot_keys para que o template não partilhe identidade com o original
+  const buildTreinoPayload = (
+    coachId: string,
+    options: { asNewTemplate?: boolean; nome?: string } = {},
+  ) => ({
+    nome: options.nome ?? formData.name,
+    descricao: formData.description,
+    categoria: formData.category,
+    dificuldade: formData.difficulty,
+    duracao: formData.duration,
+    is_template: options.asNewTemplate ? true : studentCopy ? false : formData.isTemplate,
+    tags: formData.tags,
+    num_exercicios: exercises.length,
+    exercicios: exercises.map((ex, index) => {
+      const slotKey = options.asNewTemplate ? crypto.randomUUID() : ex.slotKey || ex.id;
+      return {
+        slot_key: slotKey,
+        id: slotKey,
+        nome: ex.name,
+        series: ex.sets,
+        repeticoes: ex.reps,
+        peso: ex.weight,
+        descanso: ex.rest,
+        observacoes: ex.notes,
+        video_url: ex.videoUrl,
+        ordem: ex.order ?? index + 1,
+      };
+    }),
+    coach_id: coachId,
+  });
+
+  const openSaveAsTemplate = () => {
+    setTemplateName(formData.name ? `${formData.name} (cópia)` : "");
+    setIsSaveTemplateOpen(true);
+  };
+
+  const handleSaveAsTemplate = async () => {
+    const nome = templateName.trim();
+    if (!nome || !formData.category || !formData.difficulty) {
+      toast({
+        title: "Erro",
+        description: "Nome, categoria e dificuldade são obrigatórios",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!user) {
+      toast({
+        title: "Erro",
+        description: "Você precisa estar autenticado para salvar um treino.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setSavingTemplate(true);
+      const result = await apiClient.requestSafe('/api/treinos', {
+        method: 'POST',
+        body: JSON.stringify(buildTreinoPayload(user.id, { asNewTemplate: true, nome })),
+      });
+      if (!result.success) {
+        toast({
+          title: "Erro ao criar template",
+          description: result.error || "Não foi possível criar o template.",
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: "Template criado!",
+        description: `"${nome}" já está na biblioteca para atribuir a outros alunos. Este aluno continua no treino atual.`,
+      });
+      setIsSaveTemplateOpen(false);
+    } catch (error) {
+      console.error('Erro ao criar template:', error);
+      toast({
+        title: "Erro ao criar template",
+        description: "Não foi possível criar o template. Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
+
   const handleSave = async () => {
     try {
       setSaving(true);
@@ -221,29 +313,7 @@ const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSav
         return;
       }
 
-      const treinoData = {
-        nome: formData.name,
-        descricao: formData.description,
-        categoria: formData.category,
-        dificuldade: formData.difficulty,
-        duracao: formData.duration,
-        is_template: studentCopy ? false : formData.isTemplate,
-        tags: formData.tags,
-        num_exercicios: exercises.length,
-        exercicios: exercises.map((ex, index) => ({
-          slot_key: ex.slotKey || ex.id,
-          id: ex.slotKey || ex.id,
-          nome: ex.name,
-          series: ex.sets,
-          repeticoes: ex.reps,
-          peso: ex.weight,
-          descanso: ex.rest,
-          observacoes: ex.notes,
-          video_url: ex.videoUrl,
-          ordem: ex.order ?? index + 1,
-        })),
-        coach_id: user.id,
-      };
+      const treinoData = buildTreinoPayload(user.id);
 
       if (workout?.id) {
         if (studentCopy && atribuicaoId) {
@@ -343,10 +413,16 @@ const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSav
             </Badge>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           <Button variant="outline" onClick={onBack} disabled={saving}>
             Cancelar
           </Button>
+          {studentCopy && (
+            <Button variant="outline" onClick={openSaveAsTemplate} disabled={saving || savingTemplate}>
+              <BookmarkPlus className="w-4 h-4 mr-2" />
+              Salvar como novo template
+            </Button>
+          )}
           <Button onClick={handleSave} className="shadow-glow" disabled={saving}>
             {saving ? (
               <>
@@ -598,6 +674,55 @@ const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSav
           </Card>
         </div>
       </div>
+
+      <Dialog
+        open={isSaveTemplateOpen}
+        onOpenChange={(open) => {
+          if (!savingTemplate) setIsSaveTemplateOpen(open);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Salvar como novo template</DialogTitle>
+            <DialogDescription>
+              Cria um template na biblioteca com os exercícios exatamente como estão nesta tela,
+              incluindo alterações ainda não salvas. O aluno continua neste treino e o template
+              original não muda.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="template-name">Nome do novo template</Label>
+              <Input
+                id="template-name"
+                value={templateName}
+                onChange={(e) => setTemplateName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && !savingTemplate && handleSaveAsTemplate()}
+                autoFocus
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => setIsSaveTemplateOpen(false)}
+                disabled={savingTemplate}
+              >
+                Cancelar
+              </Button>
+              <Button onClick={handleSaveAsTemplate} disabled={savingTemplate || !templateName.trim()}>
+                {savingTemplate ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 motion-safe:animate-spin" />
+                    Criando...
+                  </>
+                ) : (
+                  "Criar template"
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

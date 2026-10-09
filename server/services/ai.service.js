@@ -138,7 +138,7 @@ CHECKLIST ANTES DE RETORNAR:
      * Extrai dados estruturados de um PDF usando IA multimodal
      * @param {string|string[]} pdfText - Texto extraído do PDF (string OU array por página)
      * @param {Buffer|null} pdfBuffer - Buffer do PDF para providers multimodais (Gemini)
-     * @param {Object|null} promptOverrides - { systemPrompt, userPrompt } da import-engine
+     * @param {Object|null} promptOverrides - { systemPrompt, userPrompt, feature } (feature → ai_usage_events)
      * @returns {Promise<Object>} Dados estruturados do aluno e dieta
      * @throws {Error} Se IA não estiver disponível ou ocorrer erro na extração
      */
@@ -165,7 +165,8 @@ CHECKLIST ANTES DE RETORNAR:
                 promptText,
                 systemPrompt,
                 userPrompt,
-                pdfBuffer
+                pdfBuffer,
+                { feature: promptOverrides?.feature || 'import_pdf' }
             );
 
             // Log do que foi retornado (para debug)
@@ -219,37 +220,50 @@ CHECKLIST ANTES DE RETORNAR:
     }
 
     /**
-     * Vision com fallback entre modelos (ex.: gemini-3.6-flash → gemini-flash-latest).
+     * Cadeia de modelos de visão: principal + AI_VISION_MODEL_FALLBACKS.
+     * Itens aceitam "provider:modelo" (ex. "groq:qwen/qwen3.8-27b"); sem prefixo = provider principal.
      */
-    async analyzeMealPhotoWithModelFallback(imageBuffer, mimeType, systemPrompt, userPrompt) {
-        const primary = process.env.AI_VISION_MODEL || 'gemini-3.6-flash';
+    getVisionModelChain() {
+        const vision = this.providerManager.getProviderInfo().vision || {};
+        const primaryProvider = vision.provider || process.env.AI_VISION_PROVIDER || 'gemini';
+        const primaryModel = vision.model || process.env.AI_VISION_MODEL || 'gemini-3.6-flash';
         const fallbacks = String(process.env.AI_VISION_MODEL_FALLBACKS || 'gemini-flash-latest')
             .split(',')
             .map((m) => m.trim())
-            .filter(Boolean);
-        const models = [...new Set([primary, ...fallbacks])];
+            .filter(Boolean)
+            .map((m) => (/^(gemini|groq):/i.test(m) ? m : `${primaryProvider}:${m}`));
+        return [...new Set([`${primaryProvider}:${primaryModel}`, ...fallbacks])];
+    }
+
+    /**
+     * Vision com fallback na cadeia de modelos/providers (cotas do plano gratuito são por modelo).
+     * options.deadlineMs: prazo total da cadeia (fluxos síncronos com o utilizador à espera).
+     */
+    async analyzeMealPhotoWithModelFallback(imageBuffer, mimeType, systemPrompt, userPrompt, options = {}) {
+        const models = this.getVisionModelChain();
         const { classifyVisionError } = require('../utils/pose-vision-errors');
+        const { deadlineMs, ...callOptions } = options;
+        const started = Date.now();
 
         let lastError;
         for (const model of models) {
+            const remainingMs = deadlineMs ? deadlineMs - (Date.now() - started) : null;
+            if (remainingMs !== null && remainingMs < 5000) break;
             try {
                 return await this.analyzeMealPhoto(imageBuffer, mimeType, systemPrompt, userPrompt, {
+                    ...callOptions,
+                    ...(remainingMs !== null
+                        ? { timeoutMs: Math.min(callOptions.timeoutMs || 55000, remainingMs) }
+                        : {}),
                     model,
                 });
             } catch (error) {
                 lastError = error;
-                const kind = classifyVisionError(error);
-                const msg = String(error?.message || '');
-                const isQuota429 = kind === 'transient' && /429|quota exceeded/i.test(msg);
-                logger.warn('analyzeMealPhoto model failed', { model, kind, error: error.message });
-                if (isQuota429 && models.indexOf(model) < models.length - 1) {
-                    continue;
-                }
-                if (kind === 'transient') throw error;
-                if (kind === 'permanent_config' && models.indexOf(model) < models.length - 1) {
-                    continue;
-                }
-                if (kind === 'permanent_auth') throw error;
+                logger.warn('analyzeMealPhoto model failed', {
+                    model,
+                    kind: classifyVisionError(error),
+                    error: error.message,
+                });
             }
         }
         throw lastError || new Error('Falha na análise de imagem');

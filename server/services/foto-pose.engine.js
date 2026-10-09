@@ -6,7 +6,8 @@
 const COMPARABLE_POSES = ['frente', 'costas', 'lado_esquerdo', 'lado_direito'];
 const ALL_POSES = [...COMPARABLE_POSES, 'desconhecido', 'invalido'];
 const ANALYSIS_STATUSES = ['pending', 'processing', 'classified', 'failed'];
-const POSE_SOURCES = ['coach', 'vision', 'student', 'unknown'];
+const POSE_SOURCES = ['coach', 'vision', 'client_mediapipe', 'server_mediapipe', 'student', 'unknown'];
+const AUTOMATIC_POSE_SOURCES = ['vision', 'client_mediapipe', 'server_mediapipe'];
 
 function envNum(key, fallback) {
   const v = Number(process.env[key]);
@@ -71,7 +72,7 @@ function resolveEffectivePose(row = {}, thresholds = getThresholds()) {
       pose,
       source,
       confidence: hasConfidence ? confidence : source === 'coach' ? 1 : null,
-      needs_review: source === 'vision' && hasConfidence && confidence < thresholds.high,
+      needs_review: AUTOMATIC_POSE_SOURCES.includes(source) && hasConfidence && confidence < thresholds.high,
       comparable: isComparablePose(pose),
     };
   }
@@ -202,6 +203,20 @@ function buildPoseRecordFromVision(visionResult, row = {}, thresholds = getThres
 }
 
 /**
+ * Pose calculada no dispositivo (MediaPipe). Dado enviado pelo cliente: só aceita poses
+ * comparáveis acima do limiar; o resto segue para a fila de visão no servidor.
+ * @returns {null | { pose: string, confidence: number }}
+ */
+function acceptClientPose(poseClient, minConfidence = envNum('POSE_CLIENT_MIN_CONFIDENCE', 0.8)) {
+  if (!poseClient || typeof poseClient !== 'object') return null;
+  const raw = String(poseClient.pose || '').trim().toLowerCase();
+  if (!COMPARABLE_POSES.includes(raw)) return null;
+  const confidence = Number(poseClient.confidence);
+  if (!Number.isFinite(confidence) || confidence < minConfidence || confidence > 1) return null;
+  return { pose: raw, confidence };
+}
+
+/**
  * Desempate quando há várias fotos da mesma pose num check-in.
  */
 function pickBestPhotoForPose(photos, targetPose, resolveRow = resolveEffectivePose) {
@@ -248,6 +263,7 @@ module.exports = {
   isComparablePose,
   resolveEffectivePose,
   buildPoseRecordFromVision,
+  acceptClientPose,
   pickBestPhotoForPose,
   mapVisionToDbPose,
 };

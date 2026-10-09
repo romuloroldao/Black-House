@@ -876,6 +876,7 @@ async function tryLlmPlan(intentRaw, context) {
       SYSTEM_PROMPT_V1,
       userPrompt,
       null,
+      { feature: 'agent' },
     );
     if (!raw || typeof raw !== 'object') return null;
     return {

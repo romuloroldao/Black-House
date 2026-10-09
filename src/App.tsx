@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "./contexts/AuthContext";
 import { DataContextProvider } from "./contexts/DataContext";
@@ -23,6 +23,12 @@ import ReportViewPage from "./pages/ReportViewPage";
 import StudentEducationalGuidePage from "./pages/StudentEducationalGuidePage";
 
 const queryClient = new QueryClient();
+
+// E-mails antigos apontavam para /student-portal?tab=…; esses links continuam nas caixas de entrada.
+const LegacyStudentPortalRedirect = () => {
+  const { search } = useLocation();
+  return <Navigate to={`/portal-aluno/dashboard${search}`} replace />;
+};
 
 // RBAC-01: Rotas separadas por role (coach vs aluno)
 // DESIGN-FRONTEND-DATA-CONTEXT-LOCK-015: Bootstrap com lock de contexto de dados
@@ -131,6 +137,8 @@ const App = () => (
                     } 
                   />
                   
+                  <Route path="/student-portal" element={<LegacyStudentPortalRedirect />} />
+
                   {/* Rotas legacy (redirecionamento automático via ProtectedRoute) */}
                   <Route 
                     path="/aluno" 

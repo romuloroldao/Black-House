@@ -944,7 +944,12 @@ ALTER TABLE public.fotos_alunos
   ADD COLUMN IF NOT EXISTS pose_analysis_status text DEFAULT 'pending',
   ADD COLUMN IF NOT EXISTS pose_analyzed_at timestamptz,
   ADD COLUMN IF NOT EXISTS content_hash text,
-  ADD COLUMN IF NOT EXISTS pose_analysis_attempts integer NOT NULL DEFAULT 0;
+  ADD COLUMN IF NOT EXISTS pose_analysis_attempts integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS pose_reclassify_at timestamptz;
+
+CREATE INDEX IF NOT EXISTS idx_fotos_alunos_pose_reclassify
+  ON public.fotos_alunos (pose_reclassify_at)
+  WHERE pose_reclassify_at IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_fotos_alunos_pose_status
   ON public.fotos_alunos (pose_analysis_status)
@@ -1922,3 +1927,27 @@ CREATE INDEX IF NOT EXISTS idx_email_queue_pending
 
 CREATE INDEX IF NOT EXISTS idx_email_queue_created
   ON public.email_queue (created_at DESC);
+
+-- ============================================================================
+-- AI Usage Events — uso de IA externa por funcionalidade
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.ai_usage_events (
+  id bigserial PRIMARY KEY,
+  feature text NOT NULL DEFAULT 'unknown',
+  modality text NOT NULL DEFAULT 'text'
+    CHECK (modality IN ('text', 'vision')),
+  provider text,
+  model text,
+  status text NOT NULL
+    CHECK (status IN ('ok', 'error')),
+  error_kind text,
+  latency_ms int,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_usage_events_created
+  ON public.ai_usage_events (created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_ai_usage_events_feature_created
+  ON public.ai_usage_events (feature, created_at DESC);

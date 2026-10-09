@@ -63,6 +63,7 @@ export default function CheckinPhotosWeightStep({
           continue;
         }
         const prepared = await prepareImageForUpload(file);
+        void import("@/lib/pose-detect").then((m) => m.startPoseDetection(prepared));
         preparedDrafts.push({
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
           file: prepared,
