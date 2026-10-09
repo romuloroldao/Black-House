@@ -242,7 +242,7 @@ function mapLegacyApiToRestV1(endpoint: string): LegacyMapResult {
 
     // /api/alunos-treinos/assign (POST: vincula template) e rotas semânticas de atribuição
     // usam rotas REAIS no servidor — não reescrever para /rest/v1.
-    if (/^\/api\/alunos-treinos\/[^/]+\/(treino-resolvido|personalizacao)$/.test(normalized)) {
+    if (/^\/api\/alunos-treinos\/[^/]+\/(treino-resolvido|personalizacao|validade)$/.test(normalized)) {
         return { endpoint, unwrapFirstRow: false };
     }
     if (/^\/api\/alunos-treinos\/[^/]+$/.test(normalized)) {
