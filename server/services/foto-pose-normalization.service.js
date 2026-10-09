@@ -42,14 +42,16 @@ async function resetStaleProcessing(pool) {
 
 async function claimPendingPhotos(pool, limit = BATCH_LIMIT) {
   const r = await pool.query(
-    `SELECT id, aluno_id, url, descricao, pose_coach, pose_aluno, pose_analysis_attempts, content_hash
+    `SELECT id, aluno_id, url, descricao, pose_coach, pose_aluno, pose_analysis_attempts, content_hash,
+            pose_analysis_status, pose_reclassify_at
      FROM public.fotos_alunos
      WHERE pose_coach IS NULL
        AND (
          pose_analysis_status = 'pending'
          OR (pose_analysis_status = 'failed' AND pose_analysis_attempts < $2)
+         OR (pose_analysis_status = 'classified' AND pose_reclassify_at IS NOT NULL)
        )
-     ORDER BY created_at ASC
+     ORDER BY (pose_reclassify_at IS NOT NULL) ASC, created_at ASC
      LIMIT $1
      FOR UPDATE SKIP LOCKED`,
     [limit, MAX_ATTEMPTS],
@@ -62,6 +64,20 @@ async function markProcessing(pool, id) {
     `UPDATE public.fotos_alunos
      SET pose_analysis_status = 'processing',
          pose_analysis_attempts = pose_analysis_attempts + 1,
+         pose_analyzed_at = now()
+     WHERE id = $1`,
+    [id],
+  );
+}
+
+function isReclassifyRow(row) {
+  return Boolean(row?.pose_reclassify_at) && row?.pose_analysis_status === 'classified';
+}
+
+async function clearReclassifyFlag(pool, id) {
+  await pool.query(
+    `UPDATE public.fotos_alunos
+     SET pose_reclassify_at = NULL,
          pose_analyzed_at = now()
      WHERE id = $1`,
     [id],
@@ -140,10 +156,16 @@ async function classifyAndPersistPhoto(pool, row) {
     return poseResolver.setCoachPose(pool, row.id, row.pose_coach);
   }
 
+  const reclassify = isReclassifyRow(row);
+
   let buffer;
   try {
     buffer = await resolveImageBufferFromUrl(row.url);
   } catch (err) {
+    if (reclassify) {
+      await clearReclassifyFlag(pool, row.id);
+      return null;
+    }
     await markFailed(pool, row.id, err.message, 'permanent');
     return null;
   }
@@ -163,22 +185,26 @@ async function classifyAndPersistPhoto(pool, row) {
       },
       row,
     );
-    return poseResolver.applyEffectivePoseUpdate(pool, row.id, {
+    const fromCache = await poseResolver.applyEffectivePoseUpdate(pool, row.id, {
       ...patch,
       content_hash: contentHash,
     });
+    if (reclassify) await clearReclassifyFlag(pool, row.id);
+    return fromCache;
   }
 
-  const existing = await pool.query(
-    `SELECT pose_analysis_status, content_hash FROM public.fotos_alunos WHERE id = $1`,
-    [row.id],
-  );
-  if (
-    existing.rows[0]?.pose_analysis_status === 'classified' &&
-    existing.rows[0]?.content_hash === contentHash
-  ) {
-    metrics.cache_hit += 1;
-    return existing.rows[0];
+  if (!reclassify) {
+    const existing = await pool.query(
+      `SELECT pose_analysis_status, content_hash FROM public.fotos_alunos WHERE id = $1`,
+      [row.id],
+    );
+    if (
+      existing.rows[0]?.pose_analysis_status === 'classified' &&
+      existing.rows[0]?.content_hash === contentHash
+    ) {
+      metrics.cache_hit += 1;
+      return existing.rows[0];
+    }
   }
 
   let vision;
@@ -189,10 +215,16 @@ async function classifyAndPersistPhoto(pool, row) {
     logger.warn('pose_classify_error', {
       foto_id: row.id,
       kind,
+      reclassify,
       error: err.message,
       duration_ms: Date.now() - started,
       model: process.env.AI_VISION_MODEL,
     });
+    if (reclassify) {
+      metrics.transient_skipped += 1;
+      if (kind !== 'transient') await clearReclassifyFlag(pool, row.id);
+      return null;
+    }
     if (isRetryableVisionError(err)) {
       await revertToPending(pool, row.id, err.message);
       return null;
@@ -206,6 +238,7 @@ async function classifyAndPersistPhoto(pool, row) {
     ...patch,
     content_hash: contentHash,
   });
+  if (reclassify) await clearReclassifyFlag(pool, row.id);
 
   const pose = engine.normalizePose(saved?.pose_efetiva);
   if (pose === 'invalido') metrics.invalid += 1;
@@ -218,6 +251,7 @@ async function classifyAndPersistPhoto(pool, row) {
     pose_source: saved?.pose_source,
     confidence: saved?.pose_vision_confidence,
     cache_hit: false,
+    reclassify,
     duration_ms: Date.now() - started,
   });
 
@@ -258,7 +292,7 @@ async function processBatch(pool) {
   let processed = 0;
   let transient = 0;
   for (const row of rows) {
-    await markProcessing(pool, row.id);
+    if (!isReclassifyRow(row)) await markProcessing(pool, row.id);
     const beforeStatus = row.pose_analysis_status;
     const result = await classifyAndPersistPhoto(pool, row);
     if (result) {

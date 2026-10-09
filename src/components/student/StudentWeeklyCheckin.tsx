@@ -24,7 +24,7 @@ import {
   type CheckinSectionId,
 } from "@/lib/checkin-sections";
 import { CHECKIN_FIELD_LABELS, INITIAL_CHECKIN_FORM, type CheckinFormData } from "@/lib/checkin-types";
-import { buildCheckinPayload } from "@/lib/checkin-payload";
+import { buildCheckinPayload, type CheckinSubmitExtras } from "@/lib/checkin-payload";
 import { startOfNextCalendarWeek, type CheckinStreakInfo } from "@/lib/checkin-streak";
 import {
   MIN_CHECKIN_PHOTOS,
@@ -169,9 +169,10 @@ export default function StudentWeeklyCheckin({
         return;
       }
 
-      const fotosPayload: Array<{ url: string; descricao?: string | null }> = [];
+      const fotosPayload: CheckinSubmitExtras["fotos"] = [];
       // Ordem canónica dos slots; descricao = orientação sugerida (pose_aluno no servidor).
-      // NÃO define pose_efetiva — a IA classifica depois.
+      // pose_client vem do MediaPipe no dispositivo; o servidor só aceita acima do limiar.
+      const { getPoseDetection } = await import("@/lib/pose-detect");
       const orderedDrafts = [...photoDrafts].sort((a, b) => {
         const order = ["frente", "costas", "lado_esquerdo", "lado_direito"] as const;
         return order.indexOf(a.descricao as (typeof order)[number]) -
@@ -188,10 +189,14 @@ export default function StudentWeeklyCheckin({
         const publicUrl =
           uploadResult?.url ||
           apiClient.getPublicUrl("progress-photos", `${alunoId}/${fileName}`);
+        const detected = await getPoseDetection(draft.file, 3000);
         fotosPayload.push({
           url: publicUrl,
           // Orientação do slot do guia visual → pose_aluno (auditoria apenas)
           descricao: draft.descricao || null,
+          ...(detected
+            ? { pose_client: detected.pose, pose_client_confidence: detected.confidence }
+            : {}),
         });
       }
 

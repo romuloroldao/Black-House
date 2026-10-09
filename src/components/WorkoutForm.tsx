@@ -11,8 +11,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { 
   ArrowLeft, 
+  BookmarkPlus,
+  Loader2,
   Plus, 
   Trash2, 
   Save, 
@@ -22,13 +25,6 @@ import {
   GripVertical,
   Copy
 } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 
 interface WorkoutFormProps {
   workout?: any;
@@ -57,6 +53,9 @@ const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSav
   const { user } = useAuth();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
+  const [isSaveTemplateOpen, setIsSaveTemplateOpen] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
   const [formData, setFormData] = useState({
     name: workout?.name || "",
     description: workout?.description || "",
@@ -89,9 +88,6 @@ const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSav
   });
 
   const [newTag, setNewTag] = useState("");
-  const [saveAsTemplateOpen, setSaveAsTemplateOpen] = useState(false);
-  const [newTemplateName, setNewTemplateName] = useState("");
-  const [savingTemplate, setSavingTemplate] = useState(false);
 
   useEffect(() => {
     if (!workout) {
@@ -207,50 +203,44 @@ const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSav
     });
   };
 
+  // asNewTemplate: novos slot_keys para que o template não partilhe identidade com o original
   const buildTreinoPayload = (
     coachId: string,
     options: { asNewTemplate?: boolean; nome?: string } = {},
-  ) => {
-    const asNewTemplate = options.asNewTemplate === true;
-    return {
-      nome: options.nome ?? formData.name,
-      descricao: formData.description,
-      categoria: formData.category,
-      dificuldade: formData.difficulty,
-      duracao: formData.duration,
-      is_template: asNewTemplate ? true : studentCopy ? false : formData.isTemplate,
-      tags: formData.tags,
-      num_exercicios: exercises.length,
-      exercicios: exercises.map((ex, index) => {
-        const slotKey = asNewTemplate
-          ? (typeof crypto !== "undefined" && "randomUUID" in crypto
-              ? crypto.randomUUID()
-              : `${Date.now()}-${index}`)
-          : ex.slotKey || ex.id;
-        return {
-          slot_key: slotKey,
-          id: slotKey,
-          nome: ex.name,
-          series: ex.sets,
-          repeticoes: ex.reps,
-          peso: ex.weight,
-          descanso: ex.rest,
-          observacoes: ex.notes,
-          video_url: ex.videoUrl,
-          ordem: ex.order ?? index + 1,
-        };
-      }),
-      coach_id: coachId,
-    };
-  };
+  ) => ({
+    nome: options.nome ?? formData.name,
+    descricao: formData.description,
+    categoria: formData.category,
+    dificuldade: formData.difficulty,
+    duracao: formData.duration,
+    is_template: options.asNewTemplate ? true : studentCopy ? false : formData.isTemplate,
+    tags: formData.tags,
+    num_exercicios: exercises.length,
+    exercicios: exercises.map((ex, index) => {
+      const slotKey = options.asNewTemplate ? crypto.randomUUID() : ex.slotKey || ex.id;
+      return {
+        slot_key: slotKey,
+        id: slotKey,
+        nome: ex.name,
+        series: ex.sets,
+        repeticoes: ex.reps,
+        peso: ex.weight,
+        descanso: ex.rest,
+        observacoes: ex.notes,
+        video_url: ex.videoUrl,
+        ordem: ex.order ?? index + 1,
+      };
+    }),
+    coach_id: coachId,
+  });
 
   const openSaveAsTemplate = () => {
-    setNewTemplateName(formData.name ? `${formData.name} (cópia)` : "");
-    setSaveAsTemplateOpen(true);
+    setTemplateName(formData.name ? `${formData.name} (cópia)` : "");
+    setIsSaveTemplateOpen(true);
   };
 
-  const handleSaveAsNewTemplate = async () => {
-    const nome = newTemplateName.trim();
+  const handleSaveAsTemplate = async () => {
+    const nome = templateName.trim();
     if (!nome || !formData.category || !formData.difficulty) {
       toast({
         title: "Erro",
@@ -270,14 +260,14 @@ const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSav
 
     try {
       setSavingTemplate(true);
-      const createResult = await apiClient.requestSafe("/api/treinos", {
-        method: "POST",
+      const result = await apiClient.requestSafe('/api/treinos', {
+        method: 'POST',
         body: JSON.stringify(buildTreinoPayload(user.id, { asNewTemplate: true, nome })),
       });
-      if (!createResult.success) {
+      if (!result.success) {
         toast({
           title: "Erro ao criar template",
-          description: createResult.error || "Não foi possível criar o template.",
+          description: result.error || "Não foi possível criar o template.",
           variant: "destructive",
         });
         return;
@@ -286,9 +276,9 @@ const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSav
         title: "Template criado!",
         description: `"${nome}" já está na biblioteca para atribuir a outros alunos. Este aluno continua no treino atual.`,
       });
-      setSaveAsTemplateOpen(false);
+      setIsSaveTemplateOpen(false);
     } catch (error) {
-      console.error("Erro ao criar template:", error);
+      console.error('Erro ao criar template:', error);
       toast({
         title: "Erro ao criar template",
         description: "Não foi possível criar o template. Tente novamente.",
@@ -428,12 +418,8 @@ const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSav
             Cancelar
           </Button>
           {studentCopy && (
-            <Button
-              variant="outline"
-              onClick={openSaveAsTemplate}
-              disabled={saving || savingTemplate}
-            >
-              <Copy className="w-4 h-4 mr-2" />
+            <Button variant="outline" onClick={openSaveAsTemplate} disabled={saving || savingTemplate}>
+              <BookmarkPlus className="w-4 h-4 mr-2" />
               Salvar como novo template
             </Button>
           )}
@@ -452,48 +438,6 @@ const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSav
           </Button>
         </div>
       </div>
-
-      <Dialog
-        open={saveAsTemplateOpen}
-        onOpenChange={(open) => {
-          if (!savingTemplate) setSaveAsTemplateOpen(open);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Salvar como novo template</DialogTitle>
-            <DialogDescription>
-              Cria um template na biblioteca com os exercícios exatamente como estão nesta tela,
-              incluindo alterações ainda não salvas. O aluno continua neste treino e o template
-              original não muda.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="template-name">Nome do novo template</Label>
-              <Input
-                id="template-name"
-                value={newTemplateName}
-                onChange={(e) => setNewTemplateName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && !savingTemplate && handleSaveAsNewTemplate()}
-                autoFocus
-              />
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                onClick={() => setSaveAsTemplateOpen(false)}
-                disabled={savingTemplate}
-              >
-                Cancelar
-              </Button>
-              <Button onClick={handleSaveAsNewTemplate} disabled={savingTemplate}>
-                {savingTemplate ? "Criando..." : "Criar template"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Informações Básicas */}
@@ -730,6 +674,55 @@ const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSav
           </Card>
         </div>
       </div>
+
+      <Dialog
+        open={isSaveTemplateOpen}
+        onOpenChange={(open) => {
+          if (!savingTemplate) setIsSaveTemplateOpen(open);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Salvar como novo template</DialogTitle>
+            <DialogDescription>
+              Cria um template na biblioteca com os exercícios exatamente como estão nesta tela,
+              incluindo alterações ainda não salvas. O aluno continua neste treino e o template
+              original não muda.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="template-name">Nome do novo template</Label>
+              <Input
+                id="template-name"
+                value={templateName}
+                onChange={(e) => setTemplateName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && !savingTemplate && handleSaveAsTemplate()}
+                autoFocus
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => setIsSaveTemplateOpen(false)}
+                disabled={savingTemplate}
+              >
+                Cancelar
+              </Button>
+              <Button onClick={handleSaveAsTemplate} disabled={savingTemplate || !templateName.trim()}>
+                {savingTemplate ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 motion-safe:animate-spin" />
+                    Criando...
+                  </>
+                ) : (
+                  "Criar template"
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

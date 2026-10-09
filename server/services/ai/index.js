@@ -12,6 +12,7 @@
  */
 
 const logger = require('../../utils/logger');
+const { setUsagePool, trackAiCall } = require('./usage-log');
 
 function getProviderSpecificApiKey(provider) {
     const normalizedProvider = provider?.toLowerCase();
@@ -52,17 +53,10 @@ class AIProviderManager {
         this.visionProvider = null;
         this.visionProviderName = null;
         this.visionConfig = {
-            provider: process.env.AI_VISION_PROVIDER || 'gemini',
-            apiKey:
-                process.env.AI_VISION_API_KEY ||
-                process.env.GEMINI_API_KEY ||
-                process.env.AI_API_KEY_FALLBACK ||
-                (String(process.env.AI_PROVIDER || '').toLowerCase() === 'gemini'
-                    ? process.env.AI_API_KEY
-                    : null) ||
-                null,
+            provider: String(process.env.AI_VISION_PROVIDER || 'gemini').toLowerCase(),
             model: process.env.AI_VISION_MODEL || null,
         };
+        this._visionProviders = new Map();
     }
 
     /**
@@ -239,19 +233,24 @@ class AIProviderManager {
      * @param {string} systemPrompt - Prompt do sistema
      * @param {string} userPrompt - Prompt do usuário
      * @param {Buffer|null} pdfBuffer - PDF original para providers multimodais/layout-aware
+     * @param {{ feature?: string }} [meta] - funcionalidade chamadora (para ai_usage_events)
      * @returns {Promise<Object>} Dados estruturados
      * @throws {Error} Se IA não estiver disponível ou ocorrer erro na extração
      */
-    async extractStructuredData(pdfText, systemPrompt, userPrompt, pdfBuffer = null) {
+    async extractStructuredData(pdfText, systemPrompt, userPrompt, pdfBuffer = null, meta = {}) {
         if (!this.isAvailable()) {
             throw new Error(
                 'IA não está disponível. Verifique se AI_PROVIDER e AI_API_KEY estão configurados.'
             );
         }
+        const feature = meta?.feature || 'unknown';
 
         // Tentar provider primário primeiro
         try {
-            const result = await this.provider.extractStructuredData(pdfText, systemPrompt, userPrompt, pdfBuffer);
+            const result = await trackAiCall(
+                { feature, modality: 'text', provider: this.providerName, model: this.config.model },
+                () => this.provider.extractStructuredData(pdfText, systemPrompt, userPrompt, pdfBuffer),
+            );
             logger.info('AI: Dados extraídos com sucesso usando provider primário', {
                 provider: this.providerName
             });
@@ -270,7 +269,15 @@ class AIProviderManager {
                         fallbackProvider: this.fallbackProviderName
                     });
                     
-                    const result = await this.fallbackProvider.extractStructuredData(pdfText, systemPrompt, userPrompt, pdfBuffer);
+                    const result = await trackAiCall(
+                        {
+                            feature,
+                            modality: 'text',
+                            provider: this.fallbackProviderName,
+                            model: this.fallbackConfig.model,
+                        },
+                        () => this.fallbackProvider.extractStructuredData(pdfText, systemPrompt, userPrompt, pdfBuffer),
+                    );
                     
                     logger.info('AI: Dados extraídos com sucesso usando provider de fallback', {
                         fallbackProvider: this.fallbackProviderName,
@@ -300,6 +307,11 @@ class AIProviderManager {
         }
     }
 
+    /** Pool PostgreSQL para registar uso em ai_usage_events. */
+    setUsagePool(dbPool) {
+        setUsagePool(dbPool);
+    }
+
     /**
      * Retorna informações sobre o provider atual
      * @returns {Object}
@@ -323,113 +335,109 @@ class AIProviderManager {
     }
 
     /**
-     * Inicializa provider de visão (Gemini por defeito) para análise de imagens.
+     * Inicializa provider de visão (AI_VISION_PROVIDER: gemini | groq) para análise de imagens.
      */
     initializeVisionProvider() {
-        const name = String(this.visionConfig.provider || 'gemini').toLowerCase();
-        if (name !== 'gemini') {
-            logger.warn('AI Vision: apenas gemini é suportado actualmente', { provider: name });
+        const name = this.visionConfig.provider;
+        if (!VISION_PROVIDERS.includes(name)) {
+            logger.warn('AI Vision: provider não suportado', { provider: name, allowed: VISION_PROVIDERS });
             return false;
         }
-        if (!this.visionConfig.apiKey) {
-            // Reutilizar provider primário/fallback se já for Gemini
-            if (this.providerName === 'gemini' && this.provider) {
-                this.visionProvider = this.provider;
-                this.visionProviderName = 'gemini';
-                this.visionConfig.model = this.config.model;
-                logger.info('AI Vision: a reutilizar provider Gemini primário');
-                return true;
-            }
-            if (this.fallbackProviderName === 'gemini' && this.fallbackProvider) {
-                this.visionProvider = this.fallbackProvider;
-                this.visionProviderName = 'gemini';
-                this.visionConfig.model = this.fallbackConfig.model;
-                logger.info('AI Vision: a reutilizar provider Gemini de fallback');
-                return true;
-            }
-            logger.warn('AI Vision: Gemini não configurado (AI_VISION_API_KEY / GEMINI_API_KEY)');
-            return false;
+        if (!this.visionConfig.model) {
+            this.visionConfig.model = DEFAULT_VISION_MODELS[name];
         }
         try {
-            if (!this.visionConfig.model) {
-                this.visionConfig.model = 'gemini-3.6-flash';
-            }
-            const GeminiProvider = require('./providers/gemini.provider');
-            this.visionProvider = new GeminiProvider(this.visionConfig.apiKey, this.visionConfig.model);
-            this.visionProvider.initialize();
-            this.visionProviderName = 'gemini';
-            logger.info('AI Vision Provider inicializado', {
-                provider: 'gemini',
-                model: this.visionConfig.model,
-            });
+            this.visionProvider = this._getVisionProvider(name, this.visionConfig.model);
+            this.visionProviderName = name;
+            logger.info('AI Vision Provider inicializado', { provider: name, model: this.visionConfig.model });
             return true;
         } catch (error) {
-            logger.warn('AI Vision: falha ao inicializar', { error: error.message });
+            logger.warn('AI Vision: falha ao inicializar', { provider: name, error: error.message });
             this.visionProvider = null;
             this.visionProviderName = null;
             return false;
         }
     }
 
-    isVisionAvailable() {
-        if (this.visionProvider && typeof this.visionProvider.extractStructuredDataFromImage === 'function') {
-            return true;
+    /** Instância (em cache) de provider de visão para provider+modelo. */
+    _getVisionProvider(provider, model) {
+        const cacheKey = `${provider}:${model}`;
+        if (this._visionProviders.has(cacheKey)) return this._visionProviders.get(cacheKey);
+        const apiKey = visionApiKeyFor(provider, this.visionConfig.provider);
+        if (!apiKey) {
+            const err = new Error(`IA de visão: chave de API ausente para ${provider}`);
+            err.code = 'VISION_NOT_CONFIGURED';
+            throw err;
         }
-        if (
-            this.providerName === 'gemini' &&
-            this.provider &&
-            typeof this.provider.extractStructuredDataFromImage === 'function'
-        ) {
-            return true;
-        }
-        if (
-            this.fallbackProviderName === 'gemini' &&
-            this.fallbackProvider &&
-            typeof this.fallbackProvider.extractStructuredDataFromImage === 'function'
-        ) {
-            return true;
-        }
-        return false;
+        const Provider =
+            provider === 'groq'
+                ? require('./providers/groq.provider')
+                : require('./providers/gemini.provider');
+        const instance = new Provider(apiKey, model);
+        instance.initialize();
+        this._visionProviders.set(cacheKey, instance);
+        return instance;
     }
 
-    _resolveVisionProvider() {
-        if (this.visionProvider) return this.visionProvider;
-        if (this.providerName === 'gemini' && this.provider) return this.provider;
-        if (this.fallbackProviderName === 'gemini' && this.fallbackProvider) return this.fallbackProvider;
-        return null;
+    isVisionAvailable() {
+        return Boolean(this.visionProvider);
     }
 
     /**
-     * Análise estruturada de imagem (meal photo / vision).
+     * Análise estruturada de imagem (meal photo / pose).
+     * options.model aceita "provider:modelo" (ex. "groq:qwen/qwen3.8-27b") ou só o modelo do provider principal.
      */
     async extractStructuredDataFromImage(imageBuffer, mimeType, systemPrompt, userPrompt, options = {}) {
-        const provider = this._resolveVisionProvider();
-        if (!provider || typeof provider.extractStructuredDataFromImage !== 'function') {
+        if (!this.visionProvider) {
             throw new Error(
-                'IA de visão não está disponível. Configure AI_VISION_PROVIDER=gemini e GEMINI_API_KEY.',
+                'IA de visão não está disponível. Configure AI_VISION_PROVIDER (gemini|groq) e a chave correspondente.',
             );
         }
-        const modelOverride = options.model ? String(options.model).trim() : null;
-        if (modelOverride && modelOverride !== this.visionConfig.model) {
-            const GeminiProvider = require('./providers/gemini.provider');
-            const temp = new GeminiProvider(this.visionConfig.apiKey, modelOverride);
-            temp.initialize();
-            return temp.extractStructuredDataFromImage(
-                imageBuffer,
-                mimeType,
-                systemPrompt,
-                userPrompt,
-                options,
-            );
-        }
-        return provider.extractStructuredDataFromImage(
-            imageBuffer,
-            mimeType,
-            systemPrompt,
-            userPrompt,
-            options,
+        const spec = options.model
+            ? parseVisionModelSpec(options.model, this.visionProviderName)
+            : { provider: this.visionProviderName, model: this.visionConfig.model };
+        const provider = this._getVisionProvider(spec.provider, spec.model);
+        return trackAiCall(
+            { feature: options.feature || 'unknown', modality: 'vision', provider: spec.provider, model: spec.model },
+            () => provider.extractStructuredDataFromImage(imageBuffer, mimeType, systemPrompt, userPrompt, options),
         );
     }
+}
+
+const VISION_PROVIDERS = ['gemini', 'groq'];
+const DEFAULT_VISION_MODELS = { gemini: 'gemini-3.6-flash', groq: 'qwen/qwen3.8-27b' };
+
+function visionApiKeyFor(provider, primaryVisionProvider) {
+    const textProvider = String(process.env.AI_PROVIDER || '').toLowerCase();
+    const fallbackProvider = String(process.env.AI_PROVIDER_FALLBACK || '').toLowerCase();
+    if (provider === primaryVisionProvider && process.env.AI_VISION_API_KEY) {
+        return process.env.AI_VISION_API_KEY;
+    }
+    if (provider === 'groq') {
+        return (
+            process.env.GROQ_API_KEY ||
+            (textProvider === 'groq' ? process.env.AI_API_KEY : null) ||
+            (fallbackProvider === 'groq' ? process.env.AI_API_KEY_FALLBACK : null) ||
+            null
+        );
+    }
+    if (provider === 'gemini') {
+        return (
+            process.env.GEMINI_API_KEY ||
+            (fallbackProvider === 'gemini' ? process.env.AI_API_KEY_FALLBACK : null) ||
+            (textProvider === 'gemini' ? process.env.AI_API_KEY : null) ||
+            null
+        );
+    }
+    return null;
+}
+
+/** "groq:qwen/qwen3.8-27b" → { provider: 'groq', model: 'qwen/qwen3.8-27b' }; sem prefixo usa defaultProvider. */
+function parseVisionModelSpec(spec, defaultProvider) {
+    const raw = String(spec || '').trim();
+    const match = raw.match(/^(gemini|groq):(.+)$/i);
+    if (match) return { provider: match[1].toLowerCase(), model: match[2].trim() };
+    return { provider: defaultProvider, model: raw };
 }
 
 // Singleton instance
@@ -466,3 +474,4 @@ try {
 }
 
 module.exports = aiProviderManager;
+module.exports.parseVisionModelSpec = parseVisionModelSpec;

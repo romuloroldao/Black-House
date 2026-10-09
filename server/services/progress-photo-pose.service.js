@@ -12,7 +12,7 @@ const { normalizeUploadImage } = require('../utils/normalize-upload-image');
 const engine = require('./foto-pose.engine');
 
 const POSES = engine.COMPARABLE_POSES;
-const VISION_MAX_SIDE = 1024;
+const VISION_MAX_SIDE = Number(process.env.POSE_VISION_MAX_SIDE) || 1024;
 const VISION_MAX_BYTES = 1.5 * 1024 * 1024;
 
 function buildSystemPrompt() {
@@ -23,8 +23,10 @@ Regras:
 - Analisa se a pessoa está de FRENTE, de COSTAS, de LADO ESQUERDO ou de LADO DIREITO em relação à câmara.
 - frente = rosto/peito/abdômen de frente para a câmara
 - costas = costas/nuca voltadas para a câmara
-- lado_esquerdo = perfil esquerdo do corpo
-- lado_direito = perfil direito do corpo
+- Convenção ANATÓMICA (lado do corpo da pessoa, não o lado da imagem):
+  - lado_esquerdo = o lado ESQUERDO do corpo está voltado para a câmara (ombro e braço esquerdos mais próximos da câmara); o rosto/nariz aponta para a ESQUERDA da imagem
+  - lado_direito = o lado DIREITO do corpo está voltado para a câmara (ombro e braço direitos mais próximos da câmara); o rosto/nariz aponta para a DIREITA da imagem
+  - Se a foto parecer espelhada (selfie no espelho), usa na mesma a regra acima sobre a imagem tal como está
 - desconhecido = ângulo ambíguo ou confiança insuficiente
 - invalido = sem pessoa, múltiplas pessoas, corpo insuficientemente visível, ou foto inadequada para comparação
 - Se people_count > 1, pose DEVE ser "invalido"
@@ -52,9 +54,9 @@ function normalizePose(raw) {
   return engine.normalizePose(raw);
 }
 
-async function prepareBuffer(imageBuffer) {
+async function prepareBuffer(imageBuffer, maxSide = VISION_MAX_SIDE) {
   const normalized = await normalizeUploadImage(imageBuffer, {
-    maxSide: VISION_MAX_SIDE,
+    maxSide,
     maxBytes: VISION_MAX_BYTES,
     quality: 78,
   });
@@ -172,6 +174,7 @@ async function classifyProgressPhotoPose(input = {}) {
       prepared.mimeType,
       buildSystemPrompt(),
       buildUserPrompt(),
+      { feature: 'pose' },
     );
   } catch (error) {
     logger.warn('classifyProgressPhotoPose vision failed', {
@@ -181,6 +184,11 @@ async function classifyProgressPhotoPose(input = {}) {
     throw error;
   }
 
+  return interpretPoseVision(raw);
+}
+
+/** Converte o JSON bruto do modelo de visão no resultado de pose usado pelo pipeline. */
+function interpretPoseVision(raw) {
   const peopleCount = Number(raw?.people_count);
   let pose = normalizePose(raw?.pose);
   if (Number.isFinite(peopleCount) && peopleCount > 1) {
@@ -204,5 +212,9 @@ module.exports = {
   classifyProgressPhotoPose,
   normalizePose,
   resolveImageBufferFromUrl,
+  prepareBuffer,
+  interpretPoseVision,
+  buildSystemPrompt,
+  buildUserPrompt,
   POSES,
 };

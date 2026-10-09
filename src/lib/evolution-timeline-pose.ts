@@ -9,6 +9,12 @@ const COMPARABLE_DB = ['frente', 'costas', 'lado_esquerdo', 'lado_direito'] as c
 const POSE_CONFIDENCE_HIGH = Number(import.meta.env.VITE_POSE_CONFIDENCE_HIGH) || 0.85;
 const POSE_CONFIDENCE_LOW = Number(import.meta.env.VITE_POSE_CONFIDENCE_LOW) || 0.6;
 
+const AUTOMATIC_POSE_SOURCES = ['vision', 'client_mediapipe', 'server_mediapipe'];
+
+export function isAutomaticPoseSource(source?: string | null): boolean {
+  return AUTOMATIC_POSE_SOURCES.includes(String(source || ''));
+}
+
 export type EffectivePoseResult = {
   pose: string;
   source: string;
@@ -70,7 +76,7 @@ export function getEffectivePose(photo: EvolutionPhoto): EffectivePoseResult {
       pose,
       source,
       confidence: hasConfidence ? confidence : source === 'coach' ? 1 : null,
-      needs_review: source === 'vision' && hasConfidence && confidence < POSE_CONFIDENCE_HIGH,
+      needs_review: isAutomaticPoseSource(source) && hasConfidence && confidence < POSE_CONFIDENCE_HIGH,
       comparable: isComparableDbPose(pose),
     };
   }

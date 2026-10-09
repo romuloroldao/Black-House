@@ -131,10 +131,109 @@ class GroqProvider {
         }
     }
 
-    async extractStructuredDataFromImage() {
-        const err = new Error('Groq não suporta análise de imagens (VISION_UNSUPPORTED)');
-        err.code = 'VISION_UNSUPPORTED';
-        throw err;
+    /**
+     * Extrai JSON estruturado a partir de uma imagem (modelos Groq com visão, ex. qwen/qwen3.8-27b).
+     * @param {Buffer} imageBuffer
+     * @param {string} mimeType
+     * @param {string} systemPrompt
+     * @param {string} userPrompt
+     * @param {{ timeoutMs?: number }} [options]
+     */
+    async extractStructuredDataFromImage(
+        imageBuffer,
+        mimeType = 'image/jpeg',
+        systemPrompt,
+        userPrompt,
+        options = {},
+    ) {
+        if (!this.client) {
+            this.initialize();
+        }
+        if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) {
+            throw new Error('imageBuffer inválido');
+        }
+
+        const timeoutMs = options.timeoutMs || 55000;
+        const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${imageBuffer.toString('base64')}`;
+        const request = {
+            model: this.model,
+            messages: [
+                { role: 'system', content: systemPrompt },
+                {
+                    role: 'user',
+                    content: [
+                        { type: 'text', text: userPrompt },
+                        { type: 'image_url', image_url: { url: dataUrl } },
+                    ],
+                },
+            ],
+            response_format: { type: 'json_object' },
+            temperature: 0.2,
+            // plano gratuito: limite de 1000 tokens de saída por minuto por modelo
+            max_tokens: Number(process.env.GROQ_VISION_MAX_TOKENS) || 600,
+        };
+
+        const response = await this._createWithRateLimitRetry(request, timeoutMs);
+        const content = response.choices?.[0]?.message?.content || '';
+        const parsedData = parseJsonContent(content);
+
+        logger.info('Dados extraídos pela IA vision (Groq)', {
+            model: this.model,
+            dataKeys: Object.keys(parsedData || {}),
+        });
+        return parsedData;
+    }
+
+    /**
+     * Limites do Groq gratuito são por minuto: um 429 com retry-after curto vale a espera.
+     */
+    async _createWithRateLimitRetry(request, timeoutMs, maxAttempts = 3) {
+        let lastError;
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+            try {
+                return await this.client.chat.completions.create(request, {
+                    timeout: timeoutMs,
+                    maxRetries: 0,
+                });
+            } catch (error) {
+                lastError = error;
+                if (error?.constructor?.name === 'APIConnectionTimeoutError') {
+                    const err = new Error('Timeout na análise de imagem (Groq)');
+                    err.code = 'AI_TIMEOUT';
+                    throw err;
+                }
+                const headers = error?.headers;
+                const retryAfterSec = Number(
+                    typeof headers?.get === 'function' ? headers.get('retry-after') : headers?.['retry-after'],
+                );
+                const maxWaitSec = Number(process.env.GROQ_RATE_LIMIT_MAX_WAIT_SEC) || 30;
+                const canWait =
+                    error?.status === 429 &&
+                    Number.isFinite(retryAfterSec) &&
+                    retryAfterSec <= maxWaitSec &&
+                    attempt < maxAttempts;
+                if (!canWait) throw error;
+                logger.warn('Groq vision 429 — a aguardar retry-after', {
+                    model: this.model,
+                    attempt,
+                    retryAfterSec,
+                });
+                await new Promise((r) => setTimeout(r, Math.ceil(retryAfterSec * 1000) + 250));
+            }
+        }
+        throw lastError;
+    }
+}
+
+function parseJsonContent(content) {
+    try {
+        return JSON.parse(content);
+    } catch {
+        const jsonMatch = String(content).match(/\{[\s\S]*\}/);
+        if (jsonMatch) return JSON.parse(jsonMatch[0]);
+        throw new Error(
+            `Resposta da IA (vision) sem JSON válido. Conteúdo: ${String(content).substring(0, 400)}`,
+        );
     }
 }
 

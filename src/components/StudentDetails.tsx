@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare, Trash2, User, Utensils, TrendingUp, Activity, Wallet, Upload, CalendarClock } from "lucide-react";
+import { ArrowLeft, CalendarClock, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare, Trash2, User, Utensils, TrendingUp, Activity, Wallet, Upload } from "lucide-react";
 import StudentImporter, { type ImportCompleteResult } from "./StudentImporter";
 import ImportHistoryPanel from "@/components/import/ImportHistoryPanel";
 import StudentPortalStatusCard from "@/components/student/StudentPortalStatusCard";
@@ -32,7 +32,14 @@ import {
 } from "@/components/DietRotationFields";
 import { DietRotationBadge } from "@/components/DietRotationBadge";
 import { getAlunoDisplayName } from "@/lib/aluno-display";
-import { formatDateBR } from "@/lib/date-format";
+import {
+  addDaysToDateKey,
+  dateKeyFromApi,
+  daysBetweenDateKeys,
+  formatDateBR,
+  formatISODateToBR,
+  todayDateKey,
+} from "@/lib/date-format";
 import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import EvolutionTimelineExperience from "@/components/student/progress/evolution/EvolutionTimelineExperience";
 import LoadProgressionSection from "@/components/coach/LoadProgressionSection";
@@ -111,10 +118,13 @@ export default function StudentDetails() {
   const [treinoSelecionado, setTreinoSelecionado] = useState<string>("");
   const [diasValidade, setDiasValidade] = useState<string>("45");
   const [diasAntecedenciaNotif, setDiasAntecedenciaNotif] = useState<string>("7");
-  const [renewTarget, setRenewTarget] = useState<(Treino & { alunoTreinoId: string }) | null>(null);
-  const [renewDate, setRenewDate] = useState("");
-  const [renewDiasAntecedencia, setRenewDiasAntecedencia] = useState("7");
-  const [renewingValidade, setRenewingValidade] = useState(false);
+
+  // Estados para renovar validade de um treino atribuído
+  const [renovarTreino, setRenovarTreino] = useState<(Treino & { alunoTreinoId: string }) | null>(null);
+  const [renovarDias, setRenovarDias] = useState<string>("45");
+  const [renovarData, setRenovarData] = useState<string>("");
+  const [renovarAntecedencia, setRenovarAntecedencia] = useState<string>("7");
+  const [renovando, setRenovando] = useState(false);
   
   // Estados para criar dieta
   const [isCriarDietaOpen, setIsCriarDietaOpen] = useState(false);
@@ -320,21 +330,19 @@ export default function StudentDetails() {
     try {
       setSaving(true);
 
-      // Calcular data de expiração
-      let dataExpiracao = null;
-      if (diasValidade && parseInt(diasValidade) > 0) {
-        dataExpiracao = new Date();
-        dataExpiracao.setDate(dataExpiracao.getDate() + parseInt(diasValidade));
-      }
+      const dataExpiracao =
+        diasValidade && parseInt(diasValidade) > 0
+          ? addDaysToDateKey(todayDateKey(), parseInt(diasValidade))
+          : null;
 
-      // Atribuir: copia o treino/template e vincula cópia exclusiva ao aluno
+      // Atribuir: vincula o template ao aluno (personalizações ficam no vínculo)
       const createResult = await apiClient.requestSafe('/api/alunos-treinos/assign', {
         method: 'POST',
         body: JSON.stringify({
           aluno_id: id,
           treino_id: treinoSelecionado,
-          data_expiracao: dataExpiracao?.toISOString().split('T')[0] ?? null,
-          data_retorno: dataExpiracao?.toISOString().split('T')[0] ?? null,
+          data_expiracao: dataExpiracao,
+          data_retorno: dataExpiracao,
           dias_antecedencia_notificacao: diasAntecedenciaNotif ? parseInt(diasAntecedenciaNotif) : 7,
         }),
       });
@@ -360,6 +368,74 @@ export default function StudentDetails() {
       });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const abrirRenovarValidade = (treino: Treino & { alunoTreinoId: string }) => {
+    setRenovarTreino(treino);
+    setRenovarDias("45");
+    setRenovarData(addDaysToDateKey(todayDateKey(), 45));
+    setRenovarAntecedencia(String(treino.diasAntecedenciaNotificacao ?? 7));
+  };
+
+  const handleRenovarDiasChange = (value: string) => {
+    setRenovarDias(value);
+    const n = parseInt(value);
+    if (Number.isFinite(n) && n >= 0) {
+      setRenovarData(addDaysToDateKey(todayDateKey(), n));
+    }
+  };
+
+  const handleRenovarDataChange = (value: string) => {
+    setRenovarData(value);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      setRenovarDias(String(daysBetweenDateKeys(todayDateKey(), value)));
+    }
+  };
+
+  const handleRenovarValidade = async () => {
+    if (!renovarTreino) return;
+    const hoje = todayDateKey();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(renovarData) || renovarData < hoje) {
+      toast({
+        title: "Data inválida",
+        description: "Escolha uma data de vencimento a partir de hoje.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const antecedencia = parseInt(renovarAntecedencia);
+
+    try {
+      setRenovando(true);
+      const result = await apiClient.requestSafe(
+        `/api/alunos-treinos/${renovarTreino.alunoTreinoId}/validade`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            data_expiracao: renovarData,
+            ...(Number.isFinite(antecedencia) ? { dias_antecedencia_notificacao: antecedencia } : {}),
+          }),
+        },
+      );
+      if (!result.success) {
+        throw new Error(result.error || 'Erro ao renovar validade');
+      }
+
+      toast({
+        title: "Validade renovada",
+        description: `"${renovarTreino.nome}" vale até ${formatISODateToBR(renovarData)}.`,
+      });
+      setRenovarTreino(null);
+      carregarDadosAluno();
+    } catch (error: any) {
+      toast({
+        title: "Erro ao renovar validade",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setRenovando(false);
     }
   };
 
@@ -396,69 +472,6 @@ export default function StudentDetails() {
       });
     } finally {
       setSaving(false);
-    }
-  };
-
-  const todayISODate = () => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  };
-
-  const addDaysISO = (days: number) => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    d.setDate(d.getDate() + days);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  };
-
-  const openRenewValidade = (treino: Treino & { alunoTreinoId: string }) => {
-    setRenewTarget(treino);
-    setRenewDate(addDaysISO(45));
-    setRenewDiasAntecedencia(String(treino.diasAntecedenciaNotificacao ?? 7));
-  };
-
-  const handleRenewValidade = async () => {
-    if (!renewTarget) return;
-    const today = todayISODate();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(renewDate) || renewDate < today) {
-      toast({
-        title: "Data inválida",
-        description: "Escolha uma data de vencimento a partir de hoje.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const dias = parseInt(renewDiasAntecedencia, 10);
-    try {
-      setRenewingValidade(true);
-      const result = await apiClient.requestSafe(
-        `/api/alunos-treinos/${renewTarget.alunoTreinoId}/validade`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({
-            data_expiracao: renewDate,
-            ...(Number.isFinite(dias) ? { dias_antecedencia_notificacao: dias } : {}),
-          }),
-        },
-      );
-      if (!result.success) {
-        throw new Error(result.error || "Erro ao renovar validade");
-      }
-      toast({
-        title: "Validade renovada",
-        description: `"${renewTarget.nome}" vale até ${formatDateBR(renewDate)}.`,
-      });
-      setRenewTarget(null);
-      carregarDadosAluno();
-    } catch (error: any) {
-      toast({
-        title: "Erro ao renovar validade",
-        description: error.message,
-        variant: "destructive",
-      });
-    } finally {
-      setRenewingValidade(false);
     }
   };
 
@@ -891,10 +904,9 @@ export default function StudentDetails() {
             {treinos.length > 0 ? (
               <div className="grid gap-4 md:grid-cols-2">
                 {treinos.map((treino) => {
-                  const hoje = new Date();
-                  const dataExpiracao = treino.dataExpiracao ? new Date(treino.dataExpiracao) : null;
-                  const diasRestantes = dataExpiracao 
-                    ? Math.ceil((dataExpiracao.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24))
+                  const expiracaoKey = dateKeyFromApi(treino.dataExpiracao);
+                  const diasRestantes = expiracaoKey
+                    ? daysBetweenDateKeys(todayDateKey(), expiracaoKey)
                     : null;
                   
                   return (
@@ -917,14 +929,16 @@ export default function StudentDetails() {
                             variant={diasRestantes <= 7 ? "destructive" : "secondary"}
                             className={diasRestantes <= 7 ? "bg-destructive/10 text-destructive border-destructive/20" : ""}
                           >
-                            {diasRestantes > 0 
+                            {diasRestantes > 0
                               ? `Expira em ${diasRestantes} ${diasRestantes === 1 ? 'dia' : 'dias'}`
-                              : 'Expirado'
+                              : diasRestantes === 0
+                                ? 'Expira hoje'
+                                : 'Expirado'
                             }
                           </Badge>
                         )}
                       </div>
-                      <div className="flex flex-col gap-2 sm:flex-row">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                         <Button
                           className="flex-1"
                           variant="outline"
@@ -936,7 +950,7 @@ export default function StudentDetails() {
                         <Button
                           className="flex-1"
                           variant={diasRestantes !== null && diasRestantes < 0 ? "default" : "outline"}
-                          onClick={() => openRenewValidade(treino)}
+                          onClick={() => abrirRenovarValidade(treino)}
                         >
                           <CalendarClock className="mr-2 h-4 w-4" />
                           Renovar validade
@@ -974,68 +988,72 @@ export default function StudentDetails() {
         </Card>
 
         <Dialog
-          open={!!renewTarget}
+          open={renovarTreino !== null}
           onOpenChange={(open) => {
-            if (!renewingValidade && !open) setRenewTarget(null);
+            if (!open && !renovando) setRenovarTreino(null);
           }}
         >
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Renovar validade</DialogTitle>
               <DialogDescription>
-                Atualiza a data de vencimento do treino "{renewTarget?.nome}" sem alterar o template.
+                {renovarTreino?.nome}: mantém exercícios e personalizações deste aluno, só muda a data
+                de vencimento e reagenda os lembretes de retorno.
+                {renovarTreino?.dataExpiracao && (
+                  <> Vencimento atual: {formatISODateToBR(dateKeyFromApi(renovarTreino.dataExpiracao))}.</>
+                )}
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4 py-2">
-              <div className="space-y-2">
-                <Label htmlFor="renew-date">Data de vencimento</Label>
-                <Input
-                  id="renew-date"
-                  type="date"
-                  min={todayISODate()}
-                  value={renewDate}
-                  onChange={(e) => setRenewDate(e.target.value)}
-                />
-                <div className="flex flex-wrap gap-2">
-                  {[30, 45, 60, 90].map((dias) => (
-                    <Button
-                      key={dias}
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setRenewDate(addDaysISO(dias))}
-                    >
-                      +{dias}d
-                    </Button>
-                  ))}
+            <div className="space-y-4 py-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="renovar-dias">Validade (dias a partir de hoje)</Label>
+                  <Input
+                    id="renovar-dias"
+                    type="number"
+                    min="0"
+                    value={renovarDias}
+                    onChange={(e) => handleRenovarDiasChange(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="renovar-data">Ou data exata</Label>
+                  <Input
+                    id="renovar-data"
+                    type="date"
+                    min={todayDateKey()}
+                    value={renovarData}
+                    onChange={(e) => handleRenovarDataChange(e.target.value)}
+                  />
                 </div>
               </div>
+              {renovarData && (
+                <p className="text-sm text-muted-foreground">
+                  Vence em <strong className="text-foreground">{formatISODateToBR(renovarData)}</strong>
+                </p>
+              )}
               <div className="space-y-2">
-                <Label htmlFor="renew-dias-antecedencia">Aviso com antecedência (dias)</Label>
+                <Label htmlFor="renovar-antecedencia">Notificar com antecedência (dias)</Label>
                 <Input
-                  id="renew-dias-antecedencia"
+                  id="renovar-antecedencia"
                   type="number"
-                  min={0}
-                  value={renewDiasAntecedencia}
-                  onChange={(e) => setRenewDiasAntecedencia(e.target.value)}
+                  min="0"
+                  value={renovarAntecedencia}
+                  onChange={(e) => setRenovarAntecedencia(e.target.value)}
                 />
               </div>
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => setRenewTarget(null)}
-                  disabled={renewingValidade}
-                >
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={() => setRenovarTreino(null)} disabled={renovando}>
                   Cancelar
                 </Button>
-                <Button onClick={handleRenewValidade} disabled={renewingValidade}>
-                  {renewingValidade ? (
+                <Button onClick={handleRenovarValidade} disabled={renovando || !renovarData}>
+                  {renovando ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
                       Salvando...
                     </>
                   ) : (
-                    "Salvar validade"
+                    "Renovar"
                   )}
                 </Button>
               </div>

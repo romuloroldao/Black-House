@@ -34,6 +34,8 @@ const PATCH_FILES = [
     '20260726_dieta_substituicoes.sql',
     '20260726_coach_rules.sql',
     '20260818_treino_serie_log_identity.sql',
+    '20261008_ai_usage_events.sql',
+    '20261009_foto_pose_reclassify.sql',
 ];
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations');

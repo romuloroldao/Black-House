@@ -120,3 +120,25 @@ describe('pickBestPhotoForPose', () => {
     assert.equal(engine.pickBestPhotoForPose(photos, 'frente')?.id, 'y');
   });
 });
+
+describe('acceptClientPose', () => {
+  test('aceita pose comparável acima do limiar', () => {
+    assert.deepEqual(engine.acceptClientPose({ pose: 'lado_esquerdo', confidence: 0.9 }, 0.8), {
+      pose: 'lado_esquerdo',
+      confidence: 0.9,
+    });
+  });
+
+  test('rejeita abaixo do limiar, fora de 0..1 ou sem confiança', () => {
+    assert.equal(engine.acceptClientPose({ pose: 'frente', confidence: 0.79 }, 0.8), null);
+    assert.equal(engine.acceptClientPose({ pose: 'frente', confidence: 5 }, 0.8), null);
+    assert.equal(engine.acceptClientPose({ pose: 'frente' }, 0.8), null);
+  });
+
+  test('inválido/desconhecido do cliente seguem para a fila do servidor', () => {
+    assert.equal(engine.acceptClientPose({ pose: 'invalido', confidence: 0.99 }, 0.8), null);
+    assert.equal(engine.acceptClientPose({ pose: 'desconhecido', confidence: 0.99 }, 0.8), null);
+    assert.equal(engine.acceptClientPose({ pose: "frente'; drop", confidence: 0.99 }, 0.8), null);
+    assert.equal(engine.acceptClientPose(null), null);
+  });
+});

@@ -164,21 +164,26 @@ async function analyzeMealPhoto({ imageBuffer, imagemPath, alunoId }) {
 
   let raw;
   try {
-    raw = await aiService.analyzeMealPhoto(
+    raw = await aiService.analyzeMealPhotoWithModelFallback(
       compressed.buffer,
       compressed.mime || mime,
       buildSystemPrompt(),
       buildUserPrompt(),
+      { feature: 'meal_photo', timeoutMs: 30000, deadlineMs: 50000 },
     );
   } catch (e) {
     logger.error('meal-photo-ai: falha provider', { error: e.message });
+    const rateLimited =
+      e.statusCode === 429 || e.status === 429 || /429|quota|rate limit/i.test(String(e.message || ''));
     const err = new Error(
       e.message?.includes('timeout') || e.message?.includes('Timeout')
         ? 'A análise demorou demasiado. Tente novamente com outra foto.'
-        : 'Não foi possível analisar a refeição. Tente novamente em instantes.',
+        : rateLimited
+          ? 'Limite diário de análises por foto atingido. Tente novamente mais tarde ou registe manualmente.'
+          : 'Não foi possível analisar a refeição. Tente novamente em instantes.',
     );
-    err.statusCode = e.statusCode === 429 ? 429 : 502;
-    err.error_code = e.statusCode === 429 ? 'AI_RATE_LIMIT' : 'AI_BAD_RESPONSE';
+    err.statusCode = rateLimited ? 429 : 502;
+    err.error_code = rateLimited ? 'AI_RATE_LIMIT' : 'AI_BAD_RESPONSE';
     err.cause = e;
     throw err;
   }
@@ -224,5 +229,6 @@ module.exports = {
   resolveMealPhotoFile,
   compressForVision,
   buildSystemPrompt,
+  buildUserPrompt,
   VISION_MAX_SIDE,
 };

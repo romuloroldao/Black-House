@@ -8,7 +8,7 @@ const DEFAULT_APP = 'Black House';
 function studentPortalUrl(tab) {
   const base = siteBaseUrl();
   const t = tab && String(tab).trim() ? String(tab).trim() : 'dashboard';
-  return `${base}/student-portal?tab=${encodeURIComponent(t)}`;
+  return `${base}/portal-aluno/dashboard?tab=${encodeURIComponent(t)}`;
 }
 
 function formatBRL(value) {

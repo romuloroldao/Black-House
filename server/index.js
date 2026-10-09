@@ -219,6 +219,8 @@ logger.info('STEP-02: Pool inicializado com sucesso', {
     hasConnect: typeof pool.connect === 'function'
 });
 
+aiProviderManager.setUsagePool(pool);
+
 // SCHEMA-03: Validação de schema no boot
 
 let globalSchemaValid = false;

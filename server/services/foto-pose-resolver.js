@@ -48,7 +48,8 @@ async function findCachedByHash(pool, contentHash, excludeId = null) {
     SELECT id, pose_vision, pose_vision_confidence, pose_vision_reason, pose_quality,
            pose_coach, pose_efetiva, pose_source, content_hash
     FROM public.fotos_alunos
-    WHERE content_hash = $1 AND pose_analysis_status = 'classified'`;
+    WHERE content_hash = $1 AND pose_analysis_status = 'classified'
+      AND pose_reclassify_at IS NULL`;
   if (excludeId) {
     params.push(excludeId);
     sql += ` AND id <> $2`;
@@ -130,7 +131,7 @@ async function setCoachPose(pool, fotoId, pose) {
   });
 }
 
-async function insertCheckinPhoto(pool, client, { alunoId, url, poseAluno, weeklyCheckinId }) {
+async function insertCheckinPhoto(pool, client, { alunoId, url, poseAluno, weeklyCheckinId, poseClient = null }) {
   const db = client || pool;
   const hasMeta = await hasPoseMetadataColumns(pool);
   if (!hasMeta) {
@@ -138,6 +139,19 @@ async function insertCheckinPhoto(pool, client, { alunoId, url, poseAluno, weekl
       `INSERT INTO public.fotos_alunos (aluno_id, url, descricao, weekly_checkin_id)
        VALUES ($1, $2, $3, $4) RETURNING id`,
       [alunoId, url, poseAluno || null, weeklyCheckinId],
+    );
+    return r.rows[0];
+  }
+  const accepted = engine.acceptClientPose(poseClient);
+  if (accepted) {
+    const r = await db.query(
+      `INSERT INTO public.fotos_alunos (
+         aluno_id, url, descricao, weekly_checkin_id,
+         pose_aluno, pose_vision, pose_vision_confidence, pose_vision_reason,
+         pose_analysis_status, pose_source, pose_efetiva, pose_analyzed_at
+       ) VALUES ($1, $2, $3, $4, $5, $3, $6, 'MediaPipe no dispositivo', 'classified', 'client_mediapipe', $3, now())
+       RETURNING id`,
+      [alunoId, url, accepted.pose, weeklyCheckinId, poseAluno || null, accepted.confidence],
     );
     return r.rows[0];
   }

@@ -27,7 +27,8 @@
     "db:seed-equivalencia": "node server/scripts/seed-equivalencia-alimentar.js",
     "db:reimport-diet": "node server/scripts/reimport-diet-from-pdf.js",
     "pose:inventory": "node server/scripts/pose-inventory.js",
-    "prebuild": "npm run validate:no-supabase && npm run verify:api-contract && npm run generate:favicon",
+    "pose:drain": "node server/scripts/pose-drain-pending.js",
+    "prebuild": "node scripts/copy-mediapipe-assets.mjs && npm run validate:no-supabase && npm run verify:api-contract && npm run generate:favicon",
     "test:e2e": "playwright test --config e2e/playwright.config.ts",
     "test:e2e:ui": "playwright test --config e2e/playwright.config.ts --ui",
     "test:e2e:student": "playwright test --config e2e/playwright.config.ts --project student-mobile",
@@ -38,6 +39,7 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
+    "@mediapipe/tasks-vision": "^1.1.0",
     "@radix-ui/react-accordion": "^1.2.11",
     "@radix-ui/react-alert-dialog": "^1.1.14",
     "@radix-ui/react-aspect-ratio": "^1.1.7",

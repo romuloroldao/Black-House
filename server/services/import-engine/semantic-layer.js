@@ -58,7 +58,7 @@ class SemanticLayer {
                 const raw = await aiService.extractStructuredData(
                     aiInput,
                     useMultimodal ? pdfBuffer : null,
-                    { systemPrompt, userPrompt }
+                    { systemPrompt, userPrompt, feature: 'import_pdf' }
                 );
                 return { raw, aiUsed: true, source: 'ai' };
             } catch (aiError) {
