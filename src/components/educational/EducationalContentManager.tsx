@@ -19,7 +19,7 @@ import {
   Video,
 } from "lucide-react";
 import {
-  EDUCATIONAL_CONTENT_CATEGORIES,
+  mergeEducationalCategories,
   contentTypeLabel,
   type EducationalContent,
 } from "@/lib/educational-content";
@@ -53,6 +53,10 @@ const EducationalContentManager = () => {
   );
 
   const items = Array.isArray(itemsRaw) ? itemsRaw : [];
+  const knownCategories = useMemo(
+    () => mergeEducationalCategories(items.map((i) => i.category)),
+    [items],
+  );
 
   const handleDelete = async (item: EducationalContent) => {
     const ok = await confirm(confirmDelete(`o conteúdo "${item.title}"`));
@@ -98,6 +102,7 @@ const EducationalContentManager = () => {
     return (
       <EducationalContentForm
         initial={editing}
+        knownCategories={knownCategories}
         onCancel={() => setShowForm(false)}
         onSaved={() => {
           setShowForm(false);
@@ -114,7 +119,7 @@ const EducationalContentManager = () => {
           <h1 className="text-xl font-bold md:text-2xl">Conteúdos Educativos</h1>
           <p className="text-muted-foreground mt-1 text-sm md:text-base">
             Biblioteca reutilizável. Conteúdos activos ficam disponíveis na secção Educação do portal do aluno.
-            A categoria Refeição Livre também pode ser ligada à dieta.
+            A categoria Refeição Livre também pode ser ligada à dieta. Pode criar categorias novas ao subir conteúdo.
           </p>
         </div>
         <Button onClick={openCreate} className="w-full sm:w-auto">
@@ -143,7 +148,7 @@ const EducationalContentManager = () => {
         >
           Todos ({items.length})
         </Button>
-        {EDUCATIONAL_CONTENT_CATEGORIES.map((cat) => {
+        {knownCategories.map((cat) => {
           const count = items.filter((i) => i.category === cat).length;
           return (
             <Button

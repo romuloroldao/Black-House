@@ -9,7 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  EDUCATIONAL_CONTENT_CATEGORIES,
+  mergeEducationalCategories,
   contentTypeLabel,
   type EducationalContent,
 } from "@/lib/educational-content";
@@ -45,14 +45,12 @@ const StudentEducationalLibraryView = () => {
   }, []);
 
   const categoriesInUse = useMemo(() => {
-    const present = new Set(
-      items.map((i) => i.category).filter((c): c is string => Boolean(c && c.trim())),
-    );
-    const ordered: string[] = EDUCATIONAL_CONTENT_CATEGORIES.filter((c) => present.has(c));
-    for (const c of present) {
-      if (!ordered.includes(c)) ordered.push(c);
-    }
-    return ordered;
+    const present = items
+      .map((i) => i.category?.trim())
+      .filter((c): c is string => Boolean(c));
+    const presentKeys = new Set(present.map((c) => c.toLowerCase()));
+    // Só categorias com conteúdo (presets vazios não aparecem no portal do aluno).
+    return mergeEducationalCategories(present).filter((c) => presentKeys.has(c.toLowerCase()));
   }, [items]);
 
   const filtered = useMemo(() => {

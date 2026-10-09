@@ -16,20 +16,28 @@ import {
 } from "@/components/ui/select";
 import { ArrowLeft, Loader2, Upload } from "lucide-react";
 import {
-  EDUCATIONAL_CONTENT_CATEGORIES,
   EDUCATIONAL_CONTENT_TYPES,
   EDUCATIONAL_CONTENT_TYPE_LABELS,
+  mergeEducationalCategories,
   type EducationalContent,
   type EducationalContentType,
 } from "@/lib/educational-content";
 
+const NEW_CATEGORY_VALUE = "__new__";
+
 interface Props {
   initial: EducationalContent | null;
+  knownCategories?: string[];
   onCancel: () => void;
   onSaved: () => void;
 }
 
-const EducationalContentForm = ({ initial, onCancel, onSaved }: Props) => {
+const EducationalContentForm = ({
+  initial,
+  knownCategories = [],
+  onCancel,
+  onSaved,
+}: Props) => {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -37,6 +45,8 @@ const EducationalContentForm = ({ initial, onCancel, onSaved }: Props) => {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [category, setCategory] = useState(initial?.category ?? "Refeição Livre");
+  const [customCategory, setCustomCategory] = useState("");
+  const [isNewCategory, setIsNewCategory] = useState(false);
   const [contentType, setContentType] = useState<EducationalContentType>(
     initial?.content_type ?? "pdf",
   );
@@ -44,6 +54,22 @@ const EducationalContentForm = ({ initial, onCancel, onSaved }: Props) => {
   const [articleContent, setArticleContent] = useState(initial?.article_content ?? "");
   const [videoUrl, setVideoUrl] = useState(initial?.video_url ?? "");
   const [active, setActive] = useState(initial?.active ?? true);
+
+  const categoryOptions = mergeEducationalCategories([
+    ...knownCategories,
+    initial?.category,
+  ]);
+
+  const handleCategoryChange = (value: string) => {
+    if (value === NEW_CATEGORY_VALUE) {
+      setIsNewCategory(true);
+      setCustomCategory("");
+      return;
+    }
+    setIsNewCategory(false);
+    setCustomCategory("");
+    setCategory(value);
+  };
 
   const handlePdfUpload = async (file: File) => {
     setUploading(true);
@@ -78,10 +104,16 @@ const EducationalContentForm = ({ initial, onCancel, onSaved }: Props) => {
       return;
     }
 
+    const resolvedCategory = isNewCategory ? customCategory.trim() : category.trim();
+    if (isNewCategory && !resolvedCategory) {
+      toast({ variant: "destructive", title: "Digite o nome da nova categoria" });
+      return;
+    }
+
     const payload = {
       title: title.trim(),
       description: description.trim() || null,
-      category: category.trim() || null,
+      category: resolvedCategory || null,
       content_type: contentType,
       file_url: contentType === "pdf" ? fileUrl.trim() || null : null,
       article_content: contentType === "article" ? articleContent.trim() || null : null,
@@ -130,18 +162,31 @@ const EducationalContentForm = ({ initial, onCancel, onSaved }: Props) => {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label>Categoria</Label>
-              <Select value={category} onValueChange={setCategory}>
+              <Select
+                value={isNewCategory ? NEW_CATEGORY_VALUE : category}
+                onValueChange={handleCategoryChange}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Categoria" />
                 </SelectTrigger>
                 <SelectContent>
-                  {EDUCATIONAL_CONTENT_CATEGORIES.map((cat) => (
+                  {categoryOptions.map((cat) => (
                     <SelectItem key={cat} value={cat}>
                       {cat}
                     </SelectItem>
                   ))}
+                  <SelectItem value={NEW_CATEGORY_VALUE}>Nova categoria…</SelectItem>
                 </SelectContent>
               </Select>
+              {isNewCategory ? (
+                <Input
+                  autoFocus
+                  value={customCategory}
+                  onChange={(e) => setCustomCategory(e.target.value)}
+                  placeholder="Nome da nova categoria"
+                  maxLength={100}
+                />
+              ) : null}
             </div>
 
             <div className="space-y-2">
