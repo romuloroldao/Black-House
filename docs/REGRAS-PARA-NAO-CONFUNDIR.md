@@ -48,7 +48,17 @@
 
 ---
 
-## 7. Pedidos à IA (Cursor, etc.)
+## 7. Git e deploy
+
+- **`main` é produção.** A VPS (`/root`) fica no `main`; deploy = `git pull` no `main` + build.
+- Mudanças entram no `main` só por PR, com merge commit.
+- `melhoria-aluno`, `lancamento` e afins são históricos; não criar branch a partir deles.
+- Nada de código só na VPS: se um ficheiro é necessário para o build, tem de estar commitado. (Ex.: `src/lib/pose-detect.ts` e `pose-classify.ts` existiam só no servidor e o build do GitHub falhava.)
+- Antes do primeiro `git pull` que traga ficheiros que existiam como não rastreados na VPS, apagar a cópia local (`git pull` recusa sobrescrever).
+
+---
+
+## 8. Pedidos à IA (Cursor, etc.)
 
 - Indicar sempre: “segue `docs/ARQUITETURA-ATUAL.md` e não assumes Supabase”.
 - Se a IA propor novo `.md` na raiz, pedir para colocar em **`docs/`** ou **`docs/arquivo/`**.
