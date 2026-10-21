@@ -247,8 +247,8 @@ Não declarar sucesso só porque a PR mergeou.
 4. ~~`feat(student): check-in wizard + autosave` (2.x)~~ **feito**  
 5. ~~`feat(student): workout session mode` (3A)~~ **feito**  
 6. ~~`feat(student): diet day view + persist substitutions` (3B)~~ **feito**  
-7. `feat(student): progress truth + mobile reports` (4.x) ← **próximo**  
-8. `feat(student): coleman assist (gated)` (5.x)  
+7. ~~`feat(student): progress truth + mobile reports` (4.x)~~ **feito**  
+8. `feat(student): coleman assist (gated)` (5.x) ← **condicional / próximo**  
 
 Cada PR: critérios de aceite da tabela da onda + estados loading/vazio/erro + viewport 375 e 768.
 
@@ -260,10 +260,11 @@ Cada PR: critérios de aceite da tabela da onda + estados loading/vazio/erro + v
 | 0.2 Remover mocks | Feito | `StudentDashboardView.tsx` (Hoje) |
 | 1.1–1.3 Shell mobile | Feito | `StudentBottomNav.tsx`, `StudentPortal.tsx`, sidebar só `md+` |
 | 2.1–2.5 Check-in wizard | Feito | `StudentWeeklyCheckin.tsx` |
-| 3A Treino sessão | Feito | `StudentWorkoutsView.tsx` — Começar, 1 exercício/tela, vídeo inline, PDF em menu |
-| 3B Dieta do dia | Feito | `StudentDietView.tsx` — refeição “Agora”, check “comi”, substituição persistida em `itens_dieta` |
+| 3A Treino sessão | Feito | `StudentWorkoutsView.tsx` |
+| 3B Dieta do dia | Feito | `StudentDietView.tsx` |
+| 4.x Progresso + relatórios | Feito | `StudentProgressSummary.tsx`, `StudentProgressView.tsx`, `StudentReportsView.tsx` (full-screen) |
 | 0.3 Entrevistas | Pendente (pesquisa) | — |
-| 4.x Progresso verdadeiro | Pendente | — |
+| 5.x Coleman | Condicional | Ausente no repo — só após shell estável + escopo |
 
 ---
 

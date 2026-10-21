@@ -154,10 +154,10 @@ export default function StudentProgressDashboard({ studentId }: StudentProgressD
   if (filteredCheckins.length === 0) {
     return (
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-bold">Dashboard de Progresso</h2>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-xl sm:text-2xl font-bold">Detalhes do progresso</h2>
           <Select value={periodFilter} onValueChange={setPeriodFilter}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-full sm:w-[180px] min-h-[44px]">
               <SelectValue placeholder="Selecione o período" />
             </SelectTrigger>
             <SelectContent>
@@ -247,15 +247,15 @@ export default function StudentProgressDashboard({ studentId }: StudentProgressD
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">Dashboard de Progresso</h2>
-          <p className="text-muted-foreground mt-2">
-            {filteredCheckins.length} check-in{filteredCheckins.length !== 1 ? 's' : ''} no período selecionado
+          <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Detalhes do progresso</h2>
+          <p className="text-muted-foreground mt-1 text-sm">
+            {filteredCheckins.length} check-in{filteredCheckins.length !== 1 ? 's' : ''} no período
           </p>
         </div>
         <Select value={periodFilter} onValueChange={setPeriodFilter}>
-          <SelectTrigger className="w-[180px]">
+          <SelectTrigger className="w-full sm:w-[180px] min-h-[44px]">
             <SelectValue placeholder="Selecione o período" />
           </SelectTrigger>
           <SelectContent>
