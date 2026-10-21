@@ -245,3 +245,7 @@ Sem baseline atual no repo — definir instrumentação junto com o shell:
 ## Artefato interativo
 
 Versão navegável por ponto de contato no Cursor Canvas da análise (mesmo conteúdo estruturado).
+
+## Próximo artefato
+
+Roadmap de execução (Design Excellence): [`ROADMAP_EXCELENCIA_ALUNO_MOBILE.md`](./ROADMAP_EXCELENCIA_ALUNO_MOBILE.md).
