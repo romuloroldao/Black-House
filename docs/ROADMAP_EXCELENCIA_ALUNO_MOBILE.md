@@ -245,9 +245,9 @@ Não declarar sucesso só porque a PR mergeou.
 2. ~~`feat(student): analytics events skeleton` (0.1)~~ **feito** — `src/lib/studentAnalytics.ts` + eventos nas telas-chave  
 3. ~~`feat(student): mobile bottom nav + Hoje` (1.1–1.3)~~ **feito** — bottom nav + Mais sheet + CTA primário  
 4. ~~`feat(student): check-in wizard + autosave` (2.x)~~ **feito**  
-5. `feat(student): workout session mode` (3A) ← **próximo**  
-6. `feat(student): diet day view + persist substitutions` (3B)  
-7. `feat(student): progress truth + mobile reports` (4.x)  
+5. ~~`feat(student): workout session mode` (3A)~~ **feito**  
+6. ~~`feat(student): diet day view + persist substitutions` (3B)~~ **feito**  
+7. `feat(student): progress truth + mobile reports` (4.x) ← **próximo**  
 8. `feat(student): coleman assist (gated)` (5.x)  
 
 Cada PR: critérios de aceite da tabela da onda + estados loading/vazio/erro + viewport 375 e 768.
@@ -259,9 +259,11 @@ Cada PR: critérios de aceite da tabela da onda + estados loading/vazio/erro + v
 | 0.1 Analytics skeleton | Feito | `src/lib/studentAnalytics.ts`, portal, check-in, treino, dieta |
 | 0.2 Remover mocks | Feito | `StudentDashboardView.tsx` (Hoje) |
 | 1.1–1.3 Shell mobile | Feito | `StudentBottomNav.tsx`, `StudentPortal.tsx`, sidebar só `md+` |
-| 2.1–2.5 Check-in wizard | Feito | `StudentWeeklyCheckin.tsx` — 5 passos, autosave localStorage, meta de água, numeração linear |
+| 2.1–2.5 Check-in wizard | Feito | `StudentWeeklyCheckin.tsx` |
+| 3A Treino sessão | Feito | `StudentWorkoutsView.tsx` — Começar, 1 exercício/tela, vídeo inline, PDF em menu |
+| 3B Dieta do dia | Feito | `StudentDietView.tsx` — refeição “Agora”, check “comi”, substituição persistida em `itens_dieta` |
 | 0.3 Entrevistas | Pendente (pesquisa) | — |
-| 3.x Treino sessão / Dieta dia | Pendente | — |
+| 4.x Progresso verdadeiro | Pendente | — |
 
 ---
 

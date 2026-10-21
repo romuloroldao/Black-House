@@ -113,7 +113,7 @@ export default function FoodSubstitutionDialog({
       return diffA - diffB;
     });
 
-    setSubstituicoes(novasSubstituicoes.slice(0, 5)); // Top 5
+    setSubstituicoes(novasSubstituicoes.slice(0, 3)); // Top 3 — mobile-first
   };
 
   const handleSubstituir = () => {
@@ -128,28 +128,28 @@ export default function FoodSubstitutionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto w-[calc(100%-2rem)] sm:w-full">
         <DialogHeader>
-          <DialogTitle>Substituir Alimento</DialogTitle>
+          <DialogTitle>Substituir alimento</DialogTitle>
           <DialogDescription>
-            Alimento atual: <strong>{alimentoAtual.nome}</strong> ({quantidadeAtual}g)
+            Atual: <strong>{alimentoAtual.nome}</strong> ({quantidadeAtual}g)
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label>Critério de Equivalência</Label>
+            <Label>Equivalência</Label>
             <RadioGroup value={criterio} onValueChange={(value) => setCriterio(value as "kcal" | "cho")}>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-2 min-h-[44px]">
                 <RadioGroupItem value="kcal" id="kcal" />
                 <Label htmlFor="kcal" className="font-normal">
-                  Por Calorias (kcal) - Melhor para controle energético total
+                  Por calorias (kcal)
                 </Label>
               </div>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-2 min-h-[44px]">
                 <RadioGroupItem value="cho" id="cho" />
                 <Label htmlFor="cho" className="font-normal">
-                  Por Carboidratos (CHO) - Melhor para controle glicêmico
+                  Por carboidratos (CHO)
                 </Label>
               </div>
             </RadioGroup>
