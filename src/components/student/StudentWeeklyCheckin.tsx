@@ -1,63 +1,254 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
+import { Progress } from "@/components/ui/progress";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import escalaBristol from "@/assets/escala-bristol.jpg";
 import { trackStudentEvent } from "@/lib/studentAnalytics";
 
+const STORAGE_KEY = "bh_checkin_draft_v1";
+
+const STEPS = [
+  { id: "nutricao", title: "Nutrição", description: "Plano alimentar da semana" },
+  { id: "treino", title: "Treino", description: "Sessões e cardio" },
+  { id: "habitos", title: "Hábitos", description: "Suplementos, água e sol" },
+  { id: "bemestar", title: "Bem-estar", description: "Sono, mental e digestão" },
+  { id: "resumo", title: "Resumo", description: "Revise e envie" },
+] as const;
+
+type FormData = {
+  beliscou_fora_plano: string;
+  seguiu_plano_nota: number;
+  apetite: string;
+  treinou_todas_sessoes: string;
+  desafiou_treinos: string;
+  fez_cardio: string;
+  seguiu_suplementacao: string;
+  recursos_hormonais: string;
+  ingeriu_agua_minima: string;
+  exposicao_sol: string;
+  pressao_arterial: string;
+  glicemia: string;
+  media_horas_sono: string;
+  dificuldade_adormecer: string;
+  acordou_noite: string;
+  estresse_semana: string;
+  lida_desafios: string;
+  convivio_familiar: string;
+  convivio_trabalho: string;
+  postura_problemas: string;
+  higiene_sono: string;
+  autoestima: number;
+  media_evacuacoes: string;
+  formato_fezes: string;
+  nao_cumpriu_porque: string;
+};
+
+const EMPTY_FORM: FormData = {
+  beliscou_fora_plano: "",
+  seguiu_plano_nota: 3,
+  apetite: "",
+  treinou_todas_sessoes: "",
+  desafiou_treinos: "",
+  fez_cardio: "",
+  seguiu_suplementacao: "",
+  recursos_hormonais: "",
+  ingeriu_agua_minima: "",
+  exposicao_sol: "",
+  pressao_arterial: "",
+  glicemia: "",
+  media_horas_sono: "",
+  dificuldade_adormecer: "",
+  acordou_noite: "",
+  estresse_semana: "",
+  lida_desafios: "",
+  convivio_familiar: "",
+  convivio_trabalho: "",
+  postura_problemas: "",
+  higiene_sono: "",
+  autoestima: 3,
+  media_evacuacoes: "",
+  formato_fezes: "",
+  nao_cumpriu_porque: "",
+};
+
+function YesNo({
+  value,
+  onChange,
+  name,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  name: string;
+}) {
+  return (
+    <RadioGroup value={value} onValueChange={onChange}>
+      <div className="flex items-center space-x-2 min-h-[44px]">
+        <RadioGroupItem value="sim" id={`${name}-sim`} />
+        <Label htmlFor={`${name}-sim`} className="font-normal cursor-pointer">
+          Sim
+        </Label>
+      </div>
+      <div className="flex items-center space-x-2 min-h-[44px]">
+        <RadioGroupItem value="nao" id={`${name}-nao`} />
+        <Label htmlFor={`${name}-nao`} className="font-normal cursor-pointer">
+          Não
+        </Label>
+      </div>
+    </RadioGroup>
+  );
+}
+
+function loadDraft(): { formData: FormData; step: number } | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.formData) return null;
+    return {
+      formData: { ...EMPTY_FORM, ...parsed.formData },
+      step: typeof parsed.step === "number" ? parsed.step : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export default function StudentWeeklyCheckin() {
+  const draft = loadDraft();
   const [loading, setLoading] = useState(false);
+  const [step, setStep] = useState(draft?.step ?? 0);
+  const [formData, setFormData] = useState<FormData>(draft?.formData ?? EMPTY_FORM);
+  const [pesoKg, setPesoKg] = useState<number | null>(null);
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
   const submittedRef = useRef(false);
 
   useEffect(() => {
-    trackStudentEvent("checkin_started");
+    trackStudentEvent("checkin_started", { resumed: !!draft });
     return () => {
       if (!submittedRef.current) {
-        trackStudentEvent("checkin_abandoned");
+        trackStudentEvent("checkin_abandoned", { step });
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const [formData, setFormData] = useState({
-    beliscou_fora_plano: "",
-    seguiu_plano_nota: 3,
-    apetite: "",
-    treinou_todas_sessoes: "",
-    desafiou_treinos: "",
-    fez_cardio: "",
-    seguiu_suplementacao: "",
-    recursos_hormonais: "",
-    ingeriu_agua_minima: "",
-    exposicao_sol: "",
-    pressao_arterial: "",
-    glicemia: "",
-    media_horas_sono: "",
-    dificuldade_adormecer: "",
-    acordou_noite: "",
-    estresse_semana: "",
-    lida_desafios: "",
-    convivio_familiar: "",
-    convivio_trabalho: "",
-    postura_problemas: "",
-    higiene_sono: "",
-    autoestima: 3,
-    media_evacuacoes: "",
-    formato_fezes: "",
-    nao_cumpriu_porque: "",
-  });
+  useEffect(() => {
+    (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user?.email) return;
+      const { data: aluno } = await supabase
+        .from("alunos")
+        .select("peso")
+        .eq("email", user.email)
+        .maybeSingle();
+      if (aluno?.peso) setPesoKg(Number(aluno.peso));
+    })();
+  }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-
+  const persistDraft = useCallback((nextForm: FormData, nextStep: number) => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ formData: nextForm, step: nextStep, savedAt: Date.now() })
+      );
+      setDraftSavedAt(new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }));
+    } catch {
+      /* quota / private mode */
+    }
+  }, []);
+
+  useEffect(() => {
+    persistDraft(formData, step);
+  }, [formData, step, persistDraft]);
+
+  const setField = <K extends keyof FormData>(key: K, value: FormData[K]) => {
+    setFormData((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const aguaLitros =
+    pesoKg != null ? (pesoKg * 0.035).toFixed(1).replace(".", ",") : null;
+
+  const validateStep = (index: number): string | null => {
+    if (index === 0) {
+      if (!formData.beliscou_fora_plano || !formData.apetite) {
+        return "Preencha as perguntas de nutrição para continuar.";
+      }
+    }
+    if (index === 1) {
+      if (
+        !formData.treinou_todas_sessoes ||
+        !formData.desafiou_treinos ||
+        !formData.fez_cardio
+      ) {
+        return "Preencha as perguntas de treino para continuar.";
+      }
+    }
+    if (index === 2) {
+      if (
+        !formData.seguiu_suplementacao ||
+        !formData.recursos_hormonais ||
+        !formData.ingeriu_agua_minima ||
+        !formData.exposicao_sol
+      ) {
+        return "Preencha as perguntas de hábitos para continuar.";
+      }
+    }
+    if (index === 3) {
+      if (
+        !formData.media_horas_sono ||
+        !formData.dificuldade_adormecer ||
+        !formData.higiene_sono ||
+        !formData.estresse_semana ||
+        !formData.lida_desafios ||
+        !formData.convivio_familiar ||
+        !formData.convivio_trabalho ||
+        !formData.postura_problemas ||
+        !formData.media_evacuacoes ||
+        !formData.formato_fezes
+      ) {
+        return "Preencha as perguntas obrigatórias de bem-estar para continuar.";
+      }
+    }
+    return null;
+  };
+
+  const goNext = () => {
+    const error = validateStep(step);
+    if (error) {
+      toast.error(error);
+      return;
+    }
+    setStep((s) => Math.min(s + 1, STEPS.length - 1));
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const goBack = () => {
+    setStep((s) => Math.max(s - 1, 0));
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleSubmit = async () => {
+    const error = validateStep(3);
+    if (error) {
+      toast.error(error);
+      setStep(3);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) throw new Error("Usuário não autenticado");
 
       const { data: aluno } = await supabase
@@ -68,7 +259,7 @@ export default function StudentWeeklyCheckin() {
 
       if (!aluno) throw new Error("Aluno não encontrado");
 
-      const { error } = await supabase.from("weekly_checkins").insert({
+      const { error: insertError } = await supabase.from("weekly_checkins").insert({
         aluno_id: aluno.id,
         beliscou_fora_plano: formData.beliscou_fora_plano,
         seguiu_plano_nota: formData.seguiu_plano_nota,
@@ -97,71 +288,68 @@ export default function StudentWeeklyCheckin() {
         nao_cumpriu_porque: formData.nao_cumpriu_porque || null,
       });
 
-      if (error) throw error;
+      if (insertError) throw insertError;
 
       submittedRef.current = true;
-      trackStudentEvent("checkin_submitted");
-      toast.success("Check-in enviado com sucesso! Seu coach já pode visualizar suas respostas.");
-      
-      // Reset form
-      setFormData({
-        beliscou_fora_plano: "",
-        seguiu_plano_nota: 3,
-        apetite: "",
-        treinou_todas_sessoes: "",
-        desafiou_treinos: "",
-        fez_cardio: "",
-        seguiu_suplementacao: "",
-        recursos_hormonais: "",
-        ingeriu_agua_minima: "",
-        exposicao_sol: "",
-        pressao_arterial: "",
-        glicemia: "",
-        media_horas_sono: "",
-        dificuldade_adormecer: "",
-        acordou_noite: "",
-        estresse_semana: "",
-        lida_desafios: "",
-        convivio_familiar: "",
-        convivio_trabalho: "",
-        postura_problemas: "",
-        higiene_sono: "",
-        autoestima: 3,
-        media_evacuacoes: "",
-        formato_fezes: "",
-        nao_cumpriu_porque: "",
-      });
-    } catch (error: any) {
-      console.error("Erro ao enviar check-in:", error);
-      
-      // Mensagens amigáveis para erros comuns
-      let mensagemErro = "Não foi possível enviar o check-in. Por favor, tente novamente.";
-      
-      if (error.message?.includes("apetite") || error.code === "23514") {
-        mensagemErro = "Por favor, preencha todos os campos obrigatórios antes de enviar.";
-      } else if (error.message?.includes("Usuário não autenticado")) {
+      trackStudentEvent("checkin_submitted", { steps: STEPS.length });
+      localStorage.removeItem(STORAGE_KEY);
+      setFormData(EMPTY_FORM);
+      setStep(0);
+      toast.success(
+        "Check-in enviado com sucesso! Seu coach já pode visualizar suas respostas."
+      );
+    } catch (err: any) {
+      console.error("Erro ao enviar check-in:", err);
+      let mensagemErro =
+        "Não foi possível enviar o check-in. Por favor, tente novamente.";
+      if (err.message?.includes("apetite") || err.code === "23514") {
+        mensagemErro =
+          "Por favor, preencha todos os campos obrigatórios antes de enviar.";
+      } else if (err.message?.includes("Usuário não autenticado")) {
         mensagemErro = "Sua sessão expirou. Por favor, faça login novamente.";
-      } else if (error.message?.includes("Aluno não encontrado")) {
+      } else if (err.message?.includes("Aluno não encontrado")) {
         mensagemErro = "Perfil não encontrado. Entre em contato com seu coach.";
       }
-      
       toast.error(mensagemErro);
     } finally {
       setLoading(false);
     }
   };
 
+  const progressPct = ((step + 1) / STEPS.length) * 100;
+  const current = STEPS[step];
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 max-w-2xl mx-auto">
       <div>
-        <h2 className="text-3xl font-bold tracking-tight">Check-in Semanal</h2>
-        <p className="text-muted-foreground mt-2">
-          Preencha seu check-in semanal para acompanhar seu progresso
+        <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
+          Check-in Semanal
+        </h2>
+        <p className="text-muted-foreground mt-1 text-sm sm:text-base">
+          Passo {step + 1} de {STEPS.length}: {current.title}
         </p>
+        {draftSavedAt && (
+          <p className="text-xs text-muted-foreground mt-1">
+            Rascunho salvo às {draftSavedAt}
+          </p>
+        )}
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Nutrição e Dieta */}
+      <div className="space-y-2">
+        <Progress value={progressPct} className="h-2" />
+        <div className="flex justify-between gap-1 text-[10px] sm:text-xs text-muted-foreground">
+          {STEPS.map((s, i) => (
+            <span
+              key={s.id}
+              className={i === step ? "text-primary font-medium" : undefined}
+            >
+              {s.title}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {step === 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Nutrição e Dieta</CardTitle>
@@ -171,16 +359,15 @@ export default function StudentWeeklyCheckin() {
               <Label>1. Beliscou fora do plano?</Label>
               <RadioGroup
                 value={formData.beliscou_fora_plano}
-                onValueChange={(value) => setFormData({ ...formData, beliscou_fora_plano: value })}
-                required
+                onValueChange={(v) => setField("beliscou_fora_plano", v)}
               >
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-2 min-h-[44px]">
                   <RadioGroupItem value="prejudicando" id="beliscou-sim" />
                   <Label htmlFor="beliscou-sim" className="font-normal cursor-pointer">
                     Sim, isso está me prejudicando
                   </Label>
                 </div>
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-2 min-h-[44px]">
                   <RadioGroupItem value="comprometido" id="beliscou-nao" />
                   <Label htmlFor="beliscou-nao" className="font-normal cursor-pointer">
                     Não, estou 100% comprometido
@@ -190,14 +377,13 @@ export default function StudentWeeklyCheckin() {
             </div>
 
             <div className="space-y-3">
-              <Label>2. Seguiu o plano alimentar (0 a 5)?</Label>
+              <Label>2. Seguiu o plano alimentar (1 a 5)?</Label>
               <RadioGroup
                 value={formData.seguiu_plano_nota.toString()}
-                onValueChange={(value) => setFormData({ ...formData, seguiu_plano_nota: parseInt(value) })}
-                required
+                onValueChange={(v) => setField("seguiu_plano_nota", parseInt(v))}
               >
                 {[1, 2, 3, 4, 5].map((nota) => (
-                  <div key={nota} className="flex items-center space-x-2">
+                  <div key={nota} className="flex items-center space-x-2 min-h-[44px]">
                     <RadioGroupItem value={nota.toString()} id={`nota-${nota}`} />
                     <Label htmlFor={`nota-${nota}`} className="font-normal cursor-pointer">
                       Nota {nota}
@@ -211,482 +397,16 @@ export default function StudentWeeklyCheckin() {
               <Label>3. Apetite</Label>
               <RadioGroup
                 value={formData.apetite}
-                onValueChange={(value) => setFormData({ ...formData, apetite: value })}
-                required
+                onValueChange={(v) => setField("apetite", v)}
               >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="alto" id="apetite-alto" />
-                  <Label htmlFor="apetite-alto" className="font-normal cursor-pointer">Alto</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="normal" id="apetite-normal" />
-                  <Label htmlFor="apetite-normal" className="font-normal cursor-pointer">Normal</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="ruim" id="apetite-ruim" />
-                  <Label htmlFor="apetite-ruim" className="font-normal cursor-pointer">Ruim</Label>
-                </div>
-              </RadioGroup>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Treino */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Treino e Exercícios</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-3">
-              <Label>4. Treinou todas as sessões da semana?</Label>
-              <RadioGroup
-                value={formData.treinou_todas_sessoes}
-                onValueChange={(value) => setFormData({ ...formData, treinou_todas_sessoes: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="sim" id="treinou-sim" />
-                  <Label htmlFor="treinou-sim" className="font-normal cursor-pointer">Sim</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="nao" id="treinou-nao" />
-                  <Label htmlFor="treinou-nao" className="font-normal cursor-pointer">Não</Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            <div className="space-y-3">
-              <Label>5. Tem se desafiado nos treinos?</Label>
-              <RadioGroup
-                value={formData.desafiou_treinos}
-                onValueChange={(value) => setFormData({ ...formData, desafiou_treinos: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="sim" id="desafio-sim" />
-                  <Label htmlFor="desafio-sim" className="font-normal cursor-pointer">Sim</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="nao" id="desafio-nao" />
-                  <Label htmlFor="desafio-nao" className="font-normal cursor-pointer">Não</Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            <div className="space-y-3">
-              <Label>6. Fez todo o cardio da semana?</Label>
-              <RadioGroup
-                value={formData.fez_cardio}
-                onValueChange={(value) => setFormData({ ...formData, fez_cardio: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="sim" id="cardio-sim" />
-                  <Label htmlFor="cardio-sim" className="font-normal cursor-pointer">Sim</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="nao" id="cardio-nao" />
-                  <Label htmlFor="cardio-nao" className="font-normal cursor-pointer">Não</Label>
-                </div>
-              </RadioGroup>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Suplementação */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Suplementação e Recursos</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-3">
-              <Label>7. Seguiu a suplementação e manipulados?</Label>
-              <RadioGroup
-                value={formData.seguiu_suplementacao}
-                onValueChange={(value) => setFormData({ ...formData, seguiu_suplementacao: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="sim" id="supl-sim" />
-                  <Label htmlFor="supl-sim" className="font-normal cursor-pointer">Sim</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="nao" id="supl-nao" />
-                  <Label htmlFor="supl-nao" className="font-normal cursor-pointer">Não</Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            <div className="space-y-3">
-              <Label>8. Recursos hormonais</Label>
-              <RadioGroup
-                value={formData.recursos_hormonais}
-                onValueChange={(value) => setFormData({ ...formData, recursos_hormonais: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="sim" id="hormonal-sim" />
-                  <Label htmlFor="hormonal-sim" className="font-normal cursor-pointer">Sim</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="nao" id="hormonal-nao" />
-                  <Label htmlFor="hormonal-nao" className="font-normal cursor-pointer">Não</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="nao_uso" id="hormonal-nao-uso" />
-                  <Label htmlFor="hormonal-nao-uso" className="font-normal cursor-pointer">
-                    Não faço uso
-                  </Label>
-                </div>
-              </RadioGroup>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Hidratação e Sol */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Hidratação e Exposição Solar</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-3">
-              <Label>9. Ingeriu água mínima (peso x 0,035)?</Label>
-              <RadioGroup
-                value={formData.ingeriu_agua_minima}
-                onValueChange={(value) => setFormData({ ...formData, ingeriu_agua_minima: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="sim" id="agua-sim" />
-                  <Label htmlFor="agua-sim" className="font-normal cursor-pointer">Sim</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="nao" id="agua-nao" />
-                  <Label htmlFor="agua-nao" className="font-normal cursor-pointer">Não</Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            <div className="space-y-3">
-              <Label>10. Exposição ao sol 15min/dia?</Label>
-              <RadioGroup
-                value={formData.exposicao_sol}
-                onValueChange={(value) => setFormData({ ...formData, exposicao_sol: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="sim" id="sol-sim" />
-                  <Label htmlFor="sol-sim" className="font-normal cursor-pointer">Sim</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="nao" id="sol-nao" />
-                  <Label htmlFor="sol-nao" className="font-normal cursor-pointer">Não</Label>
-                </div>
-              </RadioGroup>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Saúde Física */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Saúde Física</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="pressao">11. Pressão arterial (opcional)</Label>
-              <Textarea
-                id="pressao"
-                value={formData.pressao_arterial}
-                onChange={(e) => setFormData({ ...formData, pressao_arterial: e.target.value })}
-                placeholder="Ex: 120/80"
-                rows={2}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="glicemia">12. Glicemia em jejum e pós-prandial (opcional)</Label>
-              <Textarea
-                id="glicemia"
-                value={formData.glicemia}
-                onChange={(e) => setFormData({ ...formData, glicemia: e.target.value })}
-                placeholder="Ex: Jejum 85 mg/dL, Pós 110 mg/dL"
-                rows={2}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Sono */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Qualidade do Sono</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-3">
-              <Label>13. Média de horas de sono (7 dias)</Label>
-              <RadioGroup
-                value={formData.media_horas_sono}
-                onValueChange={(value) => setFormData({ ...formData, media_horas_sono: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="4-5" id="sono-4-5" />
-                  <Label htmlFor="sono-4-5" className="font-normal cursor-pointer">4 a 5 horas</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="5-6" id="sono-5-6" />
-                  <Label htmlFor="sono-5-6" className="font-normal cursor-pointer">5 a 6 horas</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="6-8" id="sono-6-8" />
-                  <Label htmlFor="sono-6-8" className="font-normal cursor-pointer">6 a 8 horas</Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            <div className="space-y-3">
-              <Label>14. Dificuldade para adormecer?</Label>
-              <RadioGroup
-                value={formData.dificuldade_adormecer}
-                onValueChange={(value) => setFormData({ ...formData, dificuldade_adormecer: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="sim" id="dif-sim" />
-                  <Label htmlFor="dif-sim" className="font-normal cursor-pointer">Sim</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="nao" id="dif-nao" />
-                  <Label htmlFor="dif-nao" className="font-normal cursor-pointer">Não</Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="acordou">15. Acordou à noite? Quantas vezes?</Label>
-              <Textarea
-                id="acordou"
-                value={formData.acordou_noite}
-                onChange={(e) => setFormData({ ...formData, acordou_noite: e.target.value })}
-                placeholder="Ex: 2 vezes"
-                rows={2}
-              />
-            </div>
-
-            <div className="space-y-3">
-              <Label>21. Higiene do sono</Label>
-              <RadioGroup
-                value={formData.higiene_sono}
-                onValueChange={(value) => setFormData({ ...formData, higiene_sono: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="sim" id="higiene-sim" />
-                  <Label htmlFor="higiene-sim" className="font-normal cursor-pointer">Sim</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="nao" id="higiene-nao" />
-                  <Label htmlFor="higiene-nao" className="font-normal cursor-pointer">Não</Label>
-                </div>
-              </RadioGroup>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Mental e Emocional */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Saúde Mental e Emocional</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-3">
-              <Label>16. Estresse da semana</Label>
-              <RadioGroup
-                value={formData.estresse_semana}
-                onValueChange={(value) => setFormData({ ...formData, estresse_semana: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="sim" id="estresse-sim" />
-                  <Label htmlFor="estresse-sim" className="font-normal cursor-pointer">Sim</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="nao" id="estresse-nao" />
-                  <Label htmlFor="estresse-nao" className="font-normal cursor-pointer">Não</Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            <div className="space-y-3">
-              <Label>17. Lida com desafios e imprevistos</Label>
-              <RadioGroup
-                value={formData.lida_desafios}
-                onValueChange={(value) => setFormData({ ...formData, lida_desafios: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="nao_lida_bem" id="desafios-nao" />
-                  <Label htmlFor="desafios-nao" className="font-normal cursor-pointer">
-                    Não estou lidando bem
-                  </Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="as_vezes_abate" id="desafios-as-vezes" />
-                  <Label htmlFor="desafios-as-vezes" className="font-normal cursor-pointer">
-                    Às vezes me abate
-                  </Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="lida_bem" id="desafios-bem" />
-                  <Label htmlFor="desafios-bem" className="font-normal cursor-pointer">
-                    Lido bem e de forma positiva
-                  </Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            <div className="space-y-3">
-              <Label>18. Convívio familiar</Label>
-              <RadioGroup
-                value={formData.convivio_familiar}
-                onValueChange={(value) => setFormData({ ...formData, convivio_familiar: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="ruim" id="familiar-ruim" />
-                  <Label htmlFor="familiar-ruim" className="font-normal cursor-pointer">Ruim</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="bom" id="familiar-bom" />
-                  <Label htmlFor="familiar-bom" className="font-normal cursor-pointer">Bom</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="otimo" id="familiar-otimo" />
-                  <Label htmlFor="familiar-otimo" className="font-normal cursor-pointer">Ótimo</Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            <div className="space-y-3">
-              <Label>19. Convívio no trabalho</Label>
-              <RadioGroup
-                value={formData.convivio_trabalho}
-                onValueChange={(value) => setFormData({ ...formData, convivio_trabalho: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="ruim" id="trabalho-ruim" />
-                  <Label htmlFor="trabalho-ruim" className="font-normal cursor-pointer">Ruim</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="bom" id="trabalho-bom" />
-                  <Label htmlFor="trabalho-bom" className="font-normal cursor-pointer">Bom</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="otimo" id="trabalho-otimo" />
-                  <Label htmlFor="trabalho-otimo" className="font-normal cursor-pointer">Ótimo</Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            <div className="space-y-3">
-              <Label>20. Postura frente a problemas</Label>
-              <RadioGroup
-                value={formData.postura_problemas}
-                onValueChange={(value) => setFormData({ ...formData, postura_problemas: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="nao_sabe_resolver" id="postura-nao" />
-                  <Label htmlFor="postura-nao" className="font-normal cursor-pointer">
-                    Não estou sabendo resolver
-                  </Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="resiliente" id="postura-sim" />
-                  <Label htmlFor="postura-sim" className="font-normal cursor-pointer">
-                    Resiliente e resolutivo
-                  </Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            <div className="space-y-3">
-              <Label>22. Autoestima da semana: {formData.autoestima}</Label>
-              <Slider
-                value={[formData.autoestima]}
-                onValueChange={(value) => setFormData({ ...formData, autoestima: value[0] })}
-                min={1}
-                max={5}
-                step={1}
-                className="w-full"
-              />
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>1 - Muito baixa</span>
-                <span>5 - Muito alta</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Saúde Digestiva */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Saúde Digestiva</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-3">
-              <Label>23. Média de evacuações por dia</Label>
-              <RadioGroup
-                value={formData.media_evacuacoes}
-                onValueChange={(value) => setFormData({ ...formData, media_evacuacoes: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="dias_sem" id="evac-dias" />
-                  <Label htmlFor="evac-dias" className="font-normal cursor-pointer">
-                    Fico dias sem ir
-                  </Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="1" id="evac-1" />
-                  <Label htmlFor="evac-1" className="font-normal cursor-pointer">1 vez</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="2" id="evac-2" />
-                  <Label htmlFor="evac-2" className="font-normal cursor-pointer">2 vezes</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="3" id="evac-3" />
-                  <Label htmlFor="evac-3" className="font-normal cursor-pointer">3 vezes</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="mais_4" id="evac-mais" />
-                  <Label htmlFor="evac-mais" className="font-normal cursor-pointer">+4 vezes</Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            <div className="space-y-3">
-              <Label>24. Formato das fezes (Escala de Bristol)</Label>
-              <div className="my-4 rounded-lg overflow-hidden border">
-                <img 
-                  src={escalaBristol} 
-                  alt="Escala de Bristol - Tipos de fezes de 1 a 7" 
-                  className="w-full max-w-md mx-auto"
-                />
-              </div>
-              <RadioGroup
-                value={formData.formato_fezes}
-                onValueChange={(value) => setFormData({ ...formData, formato_fezes: value })}
-                required
-              >
-                {[1, 2, 3, 4, 5, 6, 7].map((tipo) => (
-                  <div key={tipo} className="flex items-center space-x-2">
-                    <RadioGroupItem value={`tipo${tipo}`} id={`fezes-${tipo}`} />
-                    <Label htmlFor={`fezes-${tipo}`} className="font-normal cursor-pointer">
-                      Tipo {tipo}
+                {(["alto", "normal", "ruim"] as const).map((opt) => (
+                  <div key={opt} className="flex items-center space-x-2 min-h-[44px]">
+                    <RadioGroupItem value={opt} id={`apetite-${opt}`} />
+                    <Label
+                      htmlFor={`apetite-${opt}`}
+                      className="font-normal cursor-pointer capitalize"
+                    >
+                      {opt}
                     </Label>
                   </div>
                 ))}
@@ -694,37 +414,436 @@ export default function StudentWeeklyCheckin() {
             </div>
           </CardContent>
         </Card>
+      )}
 
-        {/* Observações */}
+      {step === 1 && (
         <Card>
           <CardHeader>
-            <CardTitle>Observações Finais</CardTitle>
+            <CardTitle>Treino e Exercícios</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-6">
+            <div className="space-y-3">
+              <Label>4. Treinou todas as sessões da semana?</Label>
+              <YesNo
+                name="treinou"
+                value={formData.treinou_todas_sessoes}
+                onChange={(v) => setField("treinou_todas_sessoes", v)}
+              />
+            </div>
+            <div className="space-y-3">
+              <Label>5. Tem se desafiado nos treinos?</Label>
+              <YesNo
+                name="desafio"
+                value={formData.desafiou_treinos}
+                onChange={(v) => setField("desafiou_treinos", v)}
+              />
+            </div>
+            <div className="space-y-3">
+              <Label>6. Fez todo o cardio da semana?</Label>
+              <YesNo
+                name="cardio"
+                value={formData.fez_cardio}
+                onChange={(v) => setField("fez_cardio", v)}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {step === 2 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Hábitos</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="space-y-3">
+              <Label>7. Seguiu a suplementação e manipulados?</Label>
+              <YesNo
+                name="supl"
+                value={formData.seguiu_suplementacao}
+                onChange={(v) => setField("seguiu_suplementacao", v)}
+              />
+            </div>
+            <div className="space-y-3">
+              <Label>8. Recursos hormonais</Label>
+              <RadioGroup
+                value={formData.recursos_hormonais}
+                onValueChange={(v) => setField("recursos_hormonais", v)}
+              >
+                <div className="flex items-center space-x-2 min-h-[44px]">
+                  <RadioGroupItem value="sim" id="hormonal-sim" />
+                  <Label htmlFor="hormonal-sim" className="font-normal cursor-pointer">
+                    Sim
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-2 min-h-[44px]">
+                  <RadioGroupItem value="nao" id="hormonal-nao" />
+                  <Label htmlFor="hormonal-nao" className="font-normal cursor-pointer">
+                    Não
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-2 min-h-[44px]">
+                  <RadioGroupItem value="nao_uso" id="hormonal-nao-uso" />
+                  <Label htmlFor="hormonal-nao-uso" className="font-normal cursor-pointer">
+                    Não faço uso
+                  </Label>
+                </div>
+              </RadioGroup>
+            </div>
+            <div className="space-y-3">
+              <Label>
+                9. Ingeriu a água mínima
+                {aguaLitros
+                  ? ` (meta ≈ ${aguaLitros} L — peso × 0,035)?`
+                  : " (peso × 0,035)?"}
+              </Label>
+              <YesNo
+                name="agua"
+                value={formData.ingeriu_agua_minima}
+                onChange={(v) => setField("ingeriu_agua_minima", v)}
+              />
+            </div>
+            <div className="space-y-3">
+              <Label>10. Exposição ao sol 15 min/dia?</Label>
+              <YesNo
+                name="sol"
+                value={formData.exposicao_sol}
+                onChange={(v) => setField("exposicao_sol", v)}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {step === 3 && (
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Saúde física (opcional)</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="pressao">11. Pressão arterial</Label>
+                <Textarea
+                  id="pressao"
+                  value={formData.pressao_arterial}
+                  onChange={(e) => setField("pressao_arterial", e.target.value)}
+                  placeholder="Ex: 120/80"
+                  rows={2}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="glicemia">12. Glicemia (jejum e pós-prandial)</Label>
+                <Textarea
+                  id="glicemia"
+                  value={formData.glicemia}
+                  onChange={(e) => setField("glicemia", e.target.value)}
+                  placeholder="Ex: Jejum 85 mg/dL, Pós 110 mg/dL"
+                  rows={2}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Sono</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-3">
+                <Label>13. Média de horas de sono (7 dias)</Label>
+                <RadioGroup
+                  value={formData.media_horas_sono}
+                  onValueChange={(v) => setField("media_horas_sono", v)}
+                >
+                  {[
+                    ["4-5", "4 a 5 horas"],
+                    ["5-6", "5 a 6 horas"],
+                    ["6-8", "6 a 8 horas"],
+                  ].map(([val, label]) => (
+                    <div key={val} className="flex items-center space-x-2 min-h-[44px]">
+                      <RadioGroupItem value={val} id={`sono-${val}`} />
+                      <Label htmlFor={`sono-${val}`} className="font-normal cursor-pointer">
+                        {label}
+                      </Label>
+                    </div>
+                  ))}
+                </RadioGroup>
+              </div>
+              <div className="space-y-3">
+                <Label>14. Dificuldade para adormecer?</Label>
+                <YesNo
+                  name="dif"
+                  value={formData.dificuldade_adormecer}
+                  onChange={(v) => setField("dificuldade_adormecer", v)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="acordou">15. Acordou à noite? Quantas vezes?</Label>
+                <Textarea
+                  id="acordou"
+                  value={formData.acordou_noite}
+                  onChange={(e) => setField("acordou_noite", e.target.value)}
+                  placeholder="Ex: 2 vezes"
+                  rows={2}
+                />
+              </div>
+              <div className="space-y-3">
+                <Label>16. Higiene do sono</Label>
+                <YesNo
+                  name="higiene"
+                  value={formData.higiene_sono}
+                  onChange={(v) => setField("higiene_sono", v)}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Mental e emocional</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-3">
+                <Label>17. Teve estresse esta semana?</Label>
+                <YesNo
+                  name="estresse"
+                  value={formData.estresse_semana}
+                  onChange={(v) => setField("estresse_semana", v)}
+                />
+              </div>
+              <div className="space-y-3">
+                <Label>18. Lida com desafios e imprevistos</Label>
+                <RadioGroup
+                  value={formData.lida_desafios}
+                  onValueChange={(v) => setField("lida_desafios", v)}
+                >
+                  <div className="flex items-center space-x-2 min-h-[44px]">
+                    <RadioGroupItem value="nao_lida_bem" id="desafios-nao" />
+                    <Label htmlFor="desafios-nao" className="font-normal cursor-pointer">
+                      Não estou lidando bem
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2 min-h-[44px]">
+                    <RadioGroupItem value="as_vezes_abate" id="desafios-as-vezes" />
+                    <Label htmlFor="desafios-as-vezes" className="font-normal cursor-pointer">
+                      Às vezes me abate
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2 min-h-[44px]">
+                    <RadioGroupItem value="lida_bem" id="desafios-bem" />
+                    <Label htmlFor="desafios-bem" className="font-normal cursor-pointer">
+                      Lido bem e de forma positiva
+                    </Label>
+                  </div>
+                </RadioGroup>
+              </div>
+              <div className="space-y-3">
+                <Label>19. Convívio familiar</Label>
+                <RadioGroup
+                  value={formData.convivio_familiar}
+                  onValueChange={(v) => setField("convivio_familiar", v)}
+                >
+                  {(["ruim", "bom", "otimo"] as const).map((opt) => (
+                    <div key={opt} className="flex items-center space-x-2 min-h-[44px]">
+                      <RadioGroupItem value={opt} id={`familiar-${opt}`} />
+                      <Label
+                        htmlFor={`familiar-${opt}`}
+                        className="font-normal cursor-pointer capitalize"
+                      >
+                        {opt === "otimo" ? "Ótimo" : opt}
+                      </Label>
+                    </div>
+                  ))}
+                </RadioGroup>
+              </div>
+              <div className="space-y-3">
+                <Label>20. Convívio no trabalho</Label>
+                <RadioGroup
+                  value={formData.convivio_trabalho}
+                  onValueChange={(v) => setField("convivio_trabalho", v)}
+                >
+                  {(["ruim", "bom", "otimo"] as const).map((opt) => (
+                    <div key={opt} className="flex items-center space-x-2 min-h-[44px]">
+                      <RadioGroupItem value={opt} id={`trabalho-${opt}`} />
+                      <Label
+                        htmlFor={`trabalho-${opt}`}
+                        className="font-normal cursor-pointer capitalize"
+                      >
+                        {opt === "otimo" ? "Ótimo" : opt}
+                      </Label>
+                    </div>
+                  ))}
+                </RadioGroup>
+              </div>
+              <div className="space-y-3">
+                <Label>21. Postura frente a problemas</Label>
+                <RadioGroup
+                  value={formData.postura_problemas}
+                  onValueChange={(v) => setField("postura_problemas", v)}
+                >
+                  <div className="flex items-center space-x-2 min-h-[44px]">
+                    <RadioGroupItem value="nao_sabe_resolver" id="postura-nao" />
+                    <Label htmlFor="postura-nao" className="font-normal cursor-pointer">
+                      Não estou sabendo resolver
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2 min-h-[44px]">
+                    <RadioGroupItem value="resiliente" id="postura-sim" />
+                    <Label htmlFor="postura-sim" className="font-normal cursor-pointer">
+                      Resiliente e resolutivo
+                    </Label>
+                  </div>
+                </RadioGroup>
+              </div>
+              <div className="space-y-3">
+                <Label>22. Autoestima da semana: {formData.autoestima}</Label>
+                <Slider
+                  value={[formData.autoestima]}
+                  onValueChange={(v) => setField("autoestima", v[0])}
+                  min={1}
+                  max={5}
+                  step={1}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>1 — Muito baixa</span>
+                  <span>5 — Muito alta</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Saúde digestiva</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-3">
+                <Label>23. Média de evacuações por dia</Label>
+                <RadioGroup
+                  value={formData.media_evacuacoes}
+                  onValueChange={(v) => setField("media_evacuacoes", v)}
+                >
+                  {[
+                    ["dias_sem", "Fico dias sem ir"],
+                    ["1", "1 vez"],
+                    ["2", "2 vezes"],
+                    ["3", "3 vezes"],
+                    ["mais_4", "+4 vezes"],
+                  ].map(([val, label]) => (
+                    <div key={val} className="flex items-center space-x-2 min-h-[44px]">
+                      <RadioGroupItem value={val} id={`evac-${val}`} />
+                      <Label htmlFor={`evac-${val}`} className="font-normal cursor-pointer">
+                        {label}
+                      </Label>
+                    </div>
+                  ))}
+                </RadioGroup>
+              </div>
+              <div className="space-y-3">
+                <Label>24. Formato das fezes (Escala de Bristol)</Label>
+                <div className="my-4 rounded-lg overflow-hidden border">
+                  <img
+                    src={escalaBristol}
+                    alt="Escala de Bristol — tipos de fezes de 1 a 7"
+                    className="w-full max-w-md mx-auto"
+                  />
+                </div>
+                <RadioGroup
+                  value={formData.formato_fezes}
+                  onValueChange={(v) => setField("formato_fezes", v)}
+                >
+                  {[1, 2, 3, 4, 5, 6, 7].map((tipo) => (
+                    <div key={tipo} className="flex items-center space-x-2 min-h-[44px]">
+                      <RadioGroupItem value={`tipo${tipo}`} id={`fezes-${tipo}`} />
+                      <Label htmlFor={`fezes-${tipo}`} className="font-normal cursor-pointer">
+                        Tipo {tipo}
+                      </Label>
+                    </div>
+                  ))}
+                </RadioGroup>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {step === 4 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Resumo e envio</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <ul className="text-sm space-y-2 text-muted-foreground">
+              <li>
+                Nutrição: nota {formData.seguiu_plano_nota}/5 · apetite{" "}
+                {formData.apetite || "—"}
+              </li>
+              <li>
+                Treino completo:{" "}
+                {formData.treinou_todas_sessoes === "sim" ? "sim" : "não"} · cardio:{" "}
+                {formData.fez_cardio === "sim" ? "sim" : "não"}
+              </li>
+              <li>
+                Água mínima:{" "}
+                {formData.ingeriu_agua_minima === "sim" ? "sim" : "não"}
+                {aguaLitros ? ` (meta ${aguaLitros} L)` : ""}
+              </li>
+              <li>Sono: {formData.media_horas_sono || "—"} · autoestima {formData.autoestima}/5</li>
+            </ul>
             <div className="space-y-2">
-              <Label htmlFor="observacoes">25. O que não cumpriu? Por quê?</Label>
+              <Label htmlFor="observacoes">25. O que não cumpriu? Por quê? (opcional)</Label>
               <Textarea
                 id="observacoes"
                 value={formData.nao_cumpriu_porque}
-                onChange={(e) => setFormData({ ...formData, nao_cumpriu_porque: e.target.value })}
+                onChange={(e) => setField("nao_cumpriu_porque", e.target.value)}
                 placeholder="Descreva os desafios enfrentados durante a semana..."
                 rows={4}
               />
             </div>
           </CardContent>
         </Card>
+      )}
 
-        <Button type="submit" size="lg" className="w-full" disabled={loading}>
-          {loading ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Enviando...
-            </>
-          ) : (
-            "Enviar Check-in Semanal"
-          )}
+      <div className="flex gap-3 sticky bottom-20 md:bottom-4 bg-background/95 py-3 border-t border-border -mx-1 px-1">
+        <Button
+          type="button"
+          variant="outline"
+          className="min-h-[44px] flex-1"
+          onClick={goBack}
+          disabled={step === 0 || loading}
+        >
+          <ChevronLeft className="h-4 w-4 mr-1" />
+          Voltar
         </Button>
-      </form>
+        {step < STEPS.length - 1 ? (
+          <Button
+            type="button"
+            className="min-h-[44px] flex-1"
+            onClick={goNext}
+          >
+            Continuar
+            <ChevronRight className="h-4 w-4 ml-1" />
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            className="min-h-[44px] flex-1"
+            onClick={handleSubmit}
+            disabled={loading}
+          >
+            {loading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Enviando...
+              </>
+            ) : (
+              "Enviar check-in"
+            )}
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
