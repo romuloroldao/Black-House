@@ -1,12 +1,16 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useApiSafeList } from "@/hooks/useApiSafe";
+import { safeArray } from "@/lib/data-safe-utils";
+import { API_CONTRACT } from "@/contracts/api-contract";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import SearchDialog from "./SearchDialog";
+import CoachAdherenceCarteiraCard from "./coach/CoachAdherenceCarteiraCard";
 import { 
   Users, 
   Dumbbell, 
@@ -25,9 +29,19 @@ interface DashboardProps {
   onTabChange?: (tab: string) => void;
 }
 
+// DESIGN-ROOT-RENDER-UNBLOCK-001: Dashboard deve renderizar mesmo sem dados
 const Dashboard = ({ onTabChange }: DashboardProps) => {
   const { user } = useAuth();
+  const coachEndpoint = user?.id ? API_CONTRACT.alunos.byCoach() : undefined;
   const [searchOpen, setSearchOpen] = useState(false);
+  
+  // REACT-API-RESILIENCE-FIX-008: Usar hook resiliente para alunos
+  const { data: alunos, loading: loadingAlunos } = useApiSafeList(
+    () => apiClient.getAlunosByCoachSafe(),
+    { autoFetch: true, endpointKey: coachEndpoint, availabilityKey: 'alunosByCoach' }
+  );
+  
+  // DESIGN-ROOT-RENDER-UNBLOCK-001: Valores padrão seguros
   const [stats, setStats] = useState({
     totalAlunos: 0,
     totalDietas: 0,
@@ -35,6 +49,7 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
     totalVideos: 0,
     mensagensNaoLidas: 0,
   });
+  // DESIGN-ROOT-RENDER-UNBLOCK-001: Array vazio como padrão seguro
   const [recentStudents, setRecentStudents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -42,75 +57,51 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
     carregarEstatisticas();
   }, [user]);
 
+  // REACT-API-RESILIENCE-FIX-008: Atualizar stats quando alunos carregarem
+  useEffect(() => {
+    if (!loadingAlunos) {
+      setStats(prev => ({
+        ...prev,
+        totalAlunos: alunos.length
+      }));
+      
+      // Alunos recentes (5 mais novos)
+      const alunosRecentes = safeArray(alunos)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 5)
+        .map(a => ({ id: a.id, nome: a.nome, email: a.email, created_at: a.created_at }));
+      
+      setRecentStudents(alunosRecentes);
+      setLoading(false);
+    }
+  }, [alunos, loadingAlunos]);
+
   const carregarEstatisticas = async () => {
     if (!user) return;
     
-    try {
-      // Carregar total de alunos
-      const { count: countAlunos } = await supabase
-        .from('alunos')
-        .select('*', { count: 'exact', head: true })
-        .eq('coach_id', user.id);
+    // REACT-API-RESILIENCE-FIX-008: Remover try/catch - alunos são carregados pelo hook
+    // Estatísticas adicionais podem ser adicionadas aqui quando endpoints existirem
+    
+    // DESIGN-SUPABASE-PURGE-MESSAGING-001: Remover PostgREST. Substituir por endpoints semânticos futuros.
+    // Temporariamente, definir como 0 ou buscar de forma simplificada se houver endpoint.
+    const countDietas = 0; // await apiClient.getDietasCount(); // Exemplo de futura rota semântica
+    const countTreinos = 0; // await apiClient.getTreinosCountByCoach(user.id);
+    const countVideos = 0; // await apiClient.getVideosCountByCoach(user.id);
 
-      // Carregar total de dietas
-      const { count: countDietas } = await supabase
-        .from('dietas')
-        .select('*', { count: 'exact', head: true });
+    // DESIGN-SUPABASE-PURGE-MESSAGING-001: Coach não deve usar rotas de mensagens
+    // Mensagens são exclusivas para alunos
+    // Para coach, usar endpoint específico quando disponível
+    let totalMensagensNaoLidas = 0;
+    // TODO: Criar endpoint GET /api/mensagens/coach para coaches quando necessário
+    // Por enquanto, coaches não têm acesso a mensagens via API
 
-      // Carregar total de treinos
-      const { count: countTreinos } = await supabase
-        .from('treinos')
-        .select('*', { count: 'exact', head: true })
-        .eq('coach_id', user.id);
-
-      // Carregar total de vídeos
-      const { count: countVideos } = await supabase
-        .from('videos')
-        .select('*', { count: 'exact', head: true })
-        .eq('coach_id', user.id);
-
-      // Carregar mensagens não lidas
-      const { data: conversas } = await supabase
-        .from('conversas')
-        .select('id')
-        .eq('coach_id', user.id);
-
-      let totalMensagensNaoLidas = 0;
-      if (conversas) {
-        for (const conversa of conversas) {
-          const { count } = await supabase
-            .from('mensagens')
-            .select('*', { count: 'exact', head: true })
-            .eq('conversa_id', conversa.id)
-            .eq('lida', false)
-            .neq('remetente_id', user.id);
-          
-          totalMensagensNaoLidas += count || 0;
-        }
-      }
-
-      // Carregar alunos recentes
-      const { data: alunosRecentes } = await supabase
-        .from('alunos')
-        .select('id, nome, email, created_at')
-        .eq('coach_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-      setStats({
-        totalAlunos: countAlunos || 0,
-        totalDietas: countDietas || 0,
-        totalTreinos: countTreinos || 0,
-        totalVideos: countVideos || 0,
-        mensagensNaoLidas: totalMensagensNaoLidas,
-      });
-
-      setRecentStudents(alunosRecentes || []);
-    } catch (error) {
-      console.error('Erro ao carregar estatísticas:', error);
-    } finally {
-      setLoading(false);
-    }
+    setStats(prev => ({
+      ...prev,
+      totalDietas: countDietas,
+      totalTreinos: countTreinos,
+      totalVideos: countVideos,
+      mensagensNaoLidas: totalMensagensNaoLidas,
+    }));
   };
 
   const statsCards = [
@@ -164,14 +155,29 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
     }
   };
 
-  const recentActivities = recentStudents.map((student, index) => ({
-    id: student.id,
-    student: student.nome,
-    action: "foi adicionado(a) ao sistema",
-    time: formatTimeAgo(new Date(student.created_at)),
-    avatar: "",
-    type: "student"
-  }));
+  // DESIGN-ROOT-RENDER-UNBLOCK-001: Validar recentStudents antes de .map()
+  const recentActivities = Array.isArray(recentStudents) && recentStudents.length > 0
+    ? recentStudents.map((student) => {
+        // DESIGN-ROOT-RENDER-UNBLOCK-001: Validar propriedades antes de acessar
+        if (!student || !student.id || !student.nome) {
+          return null;
+        }
+        try {
+          return {
+            id: student.id,
+            student: student.nome || 'Aluno',
+            action: "foi adicionado(a) ao sistema",
+            time: student.created_at ? formatTimeAgo(new Date(student.created_at)) : 'Data não disponível',
+            avatar: "",
+            type: "student"
+          };
+        } catch (error) {
+          // DESIGN-ROOT-RENDER-UNBLOCK-001: Se houver erro ao formatar, retornar null
+          console.warn('[DESIGN-ROOT-RENDER-UNBLOCK-001] Erro ao processar aluno recente:', error);
+          return null;
+        }
+      }).filter((activity): activity is NonNullable<typeof activity> => activity !== null)
+    : [];
 
   const upcomingTasks = [
     {
@@ -218,16 +224,18 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
     }
   };
 
-  return (
-    <div className="min-h-screen bg-background p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* Welcome Section */}
-        <div className="mb-8">
-          <h2 className="text-2xl font-semibold mb-2">Bem-vindo de volta! 👋</h2>
-          <p className="text-muted-foreground">
-            Aqui está um resumo das suas atividades de hoje
-          </p>
-        </div>
+  // DESIGN-ROOT-RENDER-UNBLOCK-001: Garantir que sempre retorna JSX válido
+  try {
+    return (
+      <div className="min-h-screen bg-background p-6">
+        <div className="max-w-7xl mx-auto">
+          {/* Welcome Section */}
+          <div className="mb-8">
+            <h2 className="text-2xl font-semibold mb-2">Bem-vindo de volta! 👋</h2>
+            <p className="text-muted-foreground">
+              Aqui está um resumo das suas atividades de hoje
+            </p>
+          </div>
 
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -276,7 +284,12 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
                     <div key={activity.id} className="flex items-center gap-4 p-3 rounded-lg hover:bg-muted/50 transition-smooth">
                       <Avatar className="w-10 h-10">
                         <AvatarImage src={activity.avatar} />
-                        <AvatarFallback>{activity.student.split(' ').map((n: string) => n[0]).join('')}</AvatarFallback>
+                        {/* DESIGN-ROOT-RENDER-UNBLOCK-001: Validar activity.student antes de .split() */}
+                        <AvatarFallback>
+                          {activity.student && typeof activity.student === 'string' && activity.student.length > 0
+                            ? activity.student.split(' ').filter((n: string) => n && n.length > 0).map((n: string) => n[0]).join('').toUpperCase() || 'A'
+                            : 'A'}
+                        </AvatarFallback>
                       </Avatar>
                       <div className="flex-1">
                         <p className="text-sm">
@@ -302,6 +315,7 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
 
           {/* Sidebar */}
           <div className="space-y-6">
+            <CoachAdherenceCarteiraCard onOpenCheckins={() => onTabChange?.("check-ins")} />
             {/* Quick Actions */}
             <Card className="bg-gradient-card border-0 shadow-card">
               <CardHeader>
@@ -406,7 +420,18 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
         onNavigate={onTabChange}
       />
     </div>
-  );
+    );
+  } catch (error) {
+    // DESIGN-ROOT-RENDER-UNBLOCK-001: Fallback mínimo se houver erro durante render
+    console.error('[DESIGN-ROOT-RENDER-UNBLOCK-001] Erro crítico no Dashboard durante render:', error);
+    return (
+      <div className="min-h-screen bg-background p-6 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-muted-foreground">Carregando dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 };
 
 export default Dashboard;

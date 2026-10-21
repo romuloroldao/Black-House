@@ -6,18 +6,24 @@ const NotFound = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Handle incorrectly encoded URLs like /%3Ftab=settings (encoded ?tab=settings)
+    // Handle incorrectly encoded URLs like /%3Ftab=settings or /auth%3Freset=token
     const path = location.pathname;
-    
-    // Check if path contains URL-encoded query string
+
     if (path.includes('%3F') || path.includes('%3f')) {
-      const decodedPath = decodeURIComponent(path);
-      // Extract query string from decoded path
-      const questionMarkIndex = decodedPath.indexOf('?');
-      if (questionMarkIndex !== -1) {
-        const queryString = decodedPath.substring(questionMarkIndex);
-        navigate('/' + queryString, { replace: true });
-        return;
+      try {
+        const decodedPath = decodeURIComponent(path);
+        if (decodedPath.startsWith('/auth?')) {
+          navigate(decodedPath, { replace: true });
+          return;
+        }
+        const questionMarkIndex = decodedPath.indexOf('?');
+        if (questionMarkIndex !== -1) {
+          const queryString = decodedPath.substring(questionMarkIndex);
+          navigate('/' + queryString, { replace: true });
+          return;
+        }
+      } catch {
+        // ignore malformed encoding
       }
     }
 

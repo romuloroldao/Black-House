@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Megaphone, User, Users, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 
@@ -16,9 +16,36 @@ interface Aviso {
   anexo_url: string | null;
   created_at: string;
   coach_id: string;
+  coach_display_name: string;
   lido: boolean;
   lido_em: string | null;
   destinatario_id: string;
+}
+
+function displayNameFromCoachUser(data: Record<string, unknown> | null | undefined): string {
+  if (!data) return "Coach";
+  const nome = typeof data.coach_nome_completo === "string" ? data.coach_nome_completo.trim() : "";
+  if (nome) return nome;
+  const email = typeof data.email === "string" ? data.email : "";
+  if (email.includes("@")) {
+    const local = email.split("@")[0]?.trim();
+    if (local) return local;
+  }
+  return "Coach";
+}
+
+async function coachDisplayNamesById(coachIds: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const unique = [...new Set(coachIds.filter((id) => typeof id === "string" && id.length > 0))];
+  await Promise.all(
+    unique.map(async (id) => {
+      const res = await apiClient.requestSafe<Record<string, unknown>>(
+        `/auth/user-by-id?user_id=${encodeURIComponent(id)}`
+      );
+      map.set(id, res.success && res.data ? displayNameFromCoachUser(res.data) : "Coach");
+    })
+  );
+  return map;
 }
 
 export default function StudentMessagesView() {
@@ -26,122 +53,76 @@ export default function StudentMessagesView() {
   const [avisos, setAvisos] = useState<Aviso[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedAviso, setSelectedAviso] = useState<Aviso | null>(null);
-  const [coachName, setCoachName] = useState<string>("Coach");
 
   useEffect(() => {
     if (user) {
       loadAvisos();
-      loadCoachName();
     }
   }, [user]);
-
-  const loadCoachName = async () => {
-    if (!user) return;
-
-    const { data: alunoData } = await supabase
-      .from("alunos")
-      .select("coach_id")
-      .eq("email", user.email)
-      .single();
-
-    if (alunoData?.coach_id) {
-      const { data: userData } = await supabase.auth.admin.getUserById(alunoData.coach_id);
-      if (userData?.user?.email) {
-        setCoachName(userData.user.email.split("@")[0]);
-      }
-    }
-  };
 
   const loadAvisos = async () => {
     if (!user) return;
 
     setLoading(true);
 
-    // Buscar ID do aluno
-    const { data: alunoData } = await supabase
-      .from("alunos")
-      .select("id")
-      .eq("email", user.email)
-      .single();
+    const alunoResult = await apiClient.getMeSafe();
+    const aluno = alunoResult.success ? alunoResult.data : null;
 
-    if (!alunoData) {
+    if (!aluno) {
       setLoading(false);
       return;
     }
 
-    // Buscar avisos individuais
-    const { data: avisosIndividuais, error: errorIndividuais } = await supabase
-      .from("avisos_destinatarios")
-      .select(`
-        id,
-        lido,
-        lido_em,
-        avisos (
-          id,
-          titulo,
-          mensagem,
-          tipo,
-          anexo_url,
-          created_at,
-          coach_id
-        )
-      `)
-      .eq("aluno_id", alunoData.id)
-      .order("created_at", { ascending: false });
+    const destinatariosResult = await apiClient.requestSafe<any[]>("/api/avisos-destinatarios");
+    const avisosResult = await apiClient.requestSafe<any[]>("/api/avisos");
+    const turmasResult = await apiClient.requestSafe<any[]>("/api/turmas-alunos");
 
-    // Buscar turmas do aluno
-    const { data: turmasAluno } = await supabase
-      .from("turmas_alunos")
-      .select("turma_id")
-      .eq("aluno_id", alunoData.id);
+    const destinatarios = destinatariosResult.success && Array.isArray(destinatariosResult.data)
+      ? destinatariosResult.data
+      : [];
+    const avisosRaw = avisosResult.success && Array.isArray(avisosResult.data) ? avisosResult.data : [];
+    const turmasAluno = turmasResult.success && Array.isArray(turmasResult.data) ? turmasResult.data : [];
 
-    const turmaIds = turmasAluno?.map(t => t.turma_id) || [];
+    const avisosMap = new Map(avisosRaw.map((aviso: any) => [aviso.id, aviso]));
 
-    // Buscar avisos das turmas
-    let avisosTurma: any[] = [];
-    if (turmaIds.length > 0) {
-      const { data: avisosTurmaData } = await supabase
-        .from("avisos_destinatarios")
-        .select(`
-          id,
-          lido,
-          lido_em,
-          avisos (
-            id,
-            titulo,
-            mensagem,
-            tipo,
-            anexo_url,
-            created_at,
-            coach_id
-          )
-        `)
-        .in("turma_id", turmaIds)
-        .order("created_at", { ascending: false });
+    const avisosIndividuais = destinatarios
+      .filter((dest: any) => dest.aluno_id === aluno.id)
+      .map((dest: any) => ({ ...dest, avisos: avisosMap.get(dest.aviso_id) || null }));
 
-      avisosTurma = avisosTurmaData || [];
-    }
+    const turmaIds = turmasAluno.filter((t: any) => t.aluno_id === aluno.id).map((t: any) => t.turma_id);
+    const avisosTurma =
+      turmaIds.length > 0
+        ? destinatarios
+            .filter((dest: any) => dest.turma_id && turmaIds.includes(dest.turma_id))
+            .map((dest: any) => ({ ...dest, avisos: avisosMap.get(dest.aviso_id) || null }))
+        : [];
 
-    // Combinar e processar avisos
-    const todosAvisos = [...(avisosIndividuais || []), ...avisosTurma];
-    
-    const avisosProcessados = todosAvisos
-      .filter(item => item.avisos)
-      .map(item => ({
+    const todosAvisos = [...avisosIndividuais, ...avisosTurma];
+
+    const baseRows = todosAvisos
+      .filter((item) => item.avisos)
+      .map((item) => ({
         id: item.avisos.id,
         titulo: item.avisos.titulo,
         mensagem: item.avisos.mensagem,
         tipo: item.avisos.tipo,
         anexo_url: item.avisos.anexo_url,
         created_at: item.avisos.created_at,
-        coach_id: item.avisos.coach_id,
+        coach_id: item.avisos.coach_id as string,
         lido: item.lido,
         lido_em: item.lido_em,
         destinatario_id: item.id,
       }))
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-    setAvisos(avisosProcessados);
+    const nameByCoach = await coachDisplayNamesById(baseRows.map((r) => r.coach_id));
+
+    const withNames: Aviso[] = baseRows.map((r) => ({
+      ...r,
+      coach_display_name: nameByCoach.get(r.coach_id) || "Coach",
+    }));
+
+    setAvisos(withNames);
     setLoading(false);
   };
 
@@ -149,18 +130,30 @@ export default function StudentMessagesView() {
     setSelectedAviso(aviso);
 
     if (!aviso.lido) {
-      const { error } = await supabase
-        .from("avisos_destinatarios")
-        .update({ lido: true, lido_em: new Date().toISOString() })
-        .eq("id", aviso.destinatario_id);
+      const patch = await apiClient.requestSafe(`/api/avisos-destinatarios/${aviso.destinatario_id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          lido: true,
+          lido_em: new Date().toISOString(),
+        }),
+      });
+      if (!patch.success) {
+        toast.error(patch.error || "Não foi possível marcar como lida");
+        return;
+      }
 
-      if (!error) {
-        setAvisos(avisos.map(a => 
-          a.destinatario_id === aviso.destinatario_id 
+      setAvisos((prev) =>
+        prev.map((a) =>
+          a.destinatario_id === aviso.destinatario_id
             ? { ...a, lido: true, lido_em: new Date().toISOString() }
             : a
-        ));
-      }
+        )
+      );
+      setSelectedAviso((prev) =>
+        prev && prev.destinatario_id === aviso.destinatario_id
+          ? { ...prev, lido: true, lido_em: new Date().toISOString() }
+          : prev
+      );
     }
   };
 
@@ -200,26 +193,36 @@ export default function StudentMessagesView() {
     }
   };
 
+  const coachNamesSubtitle =
+    avisos.length > 0
+      ? [...new Set(avisos.map((a) => a.coach_display_name).filter((n) => n && n !== "Coach"))].join(", ")
+      : "";
+
   if (loading) {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold">Mensagens do Coach</h1>
+          <h1 className="text-xl font-bold sm:text-2xl">Mensagens dos coaches</h1>
           <p className="text-muted-foreground">Carregando mensagens...</p>
         </div>
       </div>
     );
   }
 
-  const avisosNaoLidos = avisos.filter(a => !a.lido).length;
+  const avisosNaoLidos = avisos.filter((a) => !a.lido).length;
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Mensagens do Coach</h1>
+        <h1 className="text-xl font-bold sm:text-2xl">Mensagens dos coaches</h1>
         <p className="text-muted-foreground">
-          Todas as mensagens e avisos enviados pelo seu coach
+          Avisos enviados pelos coaches da equipa. Cada mensagem mostra quem enviou.
         </p>
+        {coachNamesSubtitle ? (
+          <p className="text-sm text-muted-foreground mt-1">
+            <span className="font-medium text-foreground">Coaches nesta lista:</span> {coachNamesSubtitle}
+          </p>
+        ) : null}
         {avisosNaoLidos > 0 && (
           <Badge variant="default" className="mt-2">
             {avisosNaoLidos} não {avisosNaoLidos === 1 ? "lida" : "lidas"}
@@ -231,9 +234,7 @@ export default function StudentMessagesView() {
         <Card>
           <CardContent className="pt-6">
             <Alert>
-              <AlertDescription>
-                Nenhuma mensagem recebida ainda.
-              </AlertDescription>
+              <AlertDescription>Nenhuma mensagem recebida ainda.</AlertDescription>
             </Alert>
           </CardContent>
         </Card>
@@ -258,11 +259,15 @@ export default function StudentMessagesView() {
                         </Badge>
                       )}
                     </div>
-                    <CardDescription className="flex items-center gap-2 mt-1">
+                    <CardDescription className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
                       {getTypeIcon(aviso.tipo)}
                       <span>{getTypeLabel(aviso.tipo)}</span>
                       <span>•</span>
                       <span>{formatDate(aviso.created_at)}</span>
+                      <span className="hidden sm:inline">•</span>
+                      <span className="text-foreground/90 font-medium">
+                        Enviado por {aviso.coach_display_name}
+                      </span>
                     </CardDescription>
                   </div>
                 </div>
@@ -285,12 +290,19 @@ export default function StudentMessagesView() {
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>{selectedAviso?.titulo}</DialogTitle>
-            <p className="text-sm text-muted-foreground flex items-center gap-2">
-              {selectedAviso && getTypeIcon(selectedAviso.tipo)}
-              <span>{selectedAviso && getTypeLabel(selectedAviso.tipo)}</span>
-              <span>•</span>
-              <span>{selectedAviso && formatDate(selectedAviso.created_at)}</span>
-            </p>
+            <DialogDescription className="flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
+              <span className="flex items-center gap-2">
+                {selectedAviso && getTypeIcon(selectedAviso.tipo)}
+                <span>{selectedAviso && getTypeLabel(selectedAviso.tipo)}</span>
+                <span>•</span>
+                <span>{selectedAviso && formatDate(selectedAviso.created_at)}</span>
+              </span>
+              {selectedAviso ? (
+                <span className="text-foreground font-medium">
+                  Enviado por {selectedAviso.coach_display_name}
+                </span>
+              ) : null}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>
@@ -310,9 +322,7 @@ export default function StudentMessagesView() {
               </div>
             )}
             {selectedAviso?.lido_em && (
-              <p className="text-sm text-muted-foreground">
-                Lida em: {formatDate(selectedAviso.lido_em)}
-              </p>
+              <p className="text-sm text-muted-foreground">Lida em: {formatDate(selectedAviso.lido_em)}</p>
             )}
           </div>
         </DialogContent>

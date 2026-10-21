@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -51,62 +51,51 @@ export default function PaymentStatusTracker() {
   }, [user]);
 
   const loadPaymentData = async () => {
-    try {
-      setLoading(true);
+    setLoading(true);
 
-      // Buscar todos os alunos
-      const { data: alunosData, error: alunosError } = await supabase
-        .from("alunos")
-        .select("id, nome, email, plano")
-        .eq("coach_id", user?.id)
-        .order("nome");
+    const alunosResult = await apiClient.requestSafe<any[]>('/api/alunos');
+    const paymentsResult = await apiClient.requestSafe<any[]>('/api/asaas-payments');
 
-      if (alunosError) throw alunosError;
+    const alunosData = alunosResult.success && Array.isArray(alunosResult.data) ? alunosResult.data : [];
+    const paymentsData = paymentsResult.success && Array.isArray(paymentsResult.data) ? paymentsResult.data : [];
 
-      // Buscar todos os pagamentos
-      const { data: paymentsData, error: paymentsError } = await supabase
-        .from("asaas_payments")
-        .select("*")
-        .eq("coach_id", user?.id)
-        .order("created_at", { ascending: false });
+    const alunos = alunosData
+      .filter((a: any) => a.coach_id === user?.id)
+      .sort((a: any, b: any) => String(a?.nome || '').localeCompare(String(b?.nome || '')));
 
-      if (paymentsError) throw paymentsError;
+    const payments = paymentsData
+      .filter((p: any) => p.coach_id === user?.id)
+      .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+    setAllPayments(payments);
 
-      setAllPayments(paymentsData || []);
+    const studentPaymentMap = alunos.map(aluno => {
+      const alunoPayments = payments.filter(p => p.aluno_id === aluno.id);
+      
+      const pagamentosPagos = alunoPayments.filter(p => p.status === "RECEIVED");
+      const pagamentosPendentes = alunoPayments.filter(p => p.status === "PENDING");
+      const pagamentosAtrasados = alunoPayments.filter(
+        p => p.status === "PENDING" && new Date(p.due_date) < new Date()
+      );
+      
+      const ultimoPagamento = alunoPayments[0];
+      
+      const totalPago = pagamentosPagos.reduce((sum, p) => sum + Number(p.value), 0);
 
-      // Processar dados por aluno
-      const studentPaymentMap = (alunosData || []).map(aluno => {
-        const alunoPayments = (paymentsData || []).filter(p => p.aluno_id === aluno.id);
-        
-        const pagamentosPagos = alunoPayments.filter(p => p.status === "RECEIVED");
-        const pagamentosPendentes = alunoPayments.filter(p => p.status === "PENDING");
-        const pagamentosAtrasados = alunoPayments.filter(
-          p => p.status === "PENDING" && new Date(p.due_date) < new Date()
-        );
-        
-        const ultimoPagamento = alunoPayments[0];
-        
-        const totalPago = pagamentosPagos.reduce((sum, p) => sum + Number(p.value), 0);
+      return {
+        aluno_id: aluno.id,
+        aluno_nome: aluno.nome || "Sem nome",
+        aluno_email: aluno.email,
+        plano_nome: aluno.plano,
+        ultimo_pagamento: ultimoPagamento?.created_at || null,
+        status_ultimo: ultimoPagamento?.status || null,
+        total_pago: totalPago,
+        pagamentos_pendentes: pagamentosPendentes.length,
+        pagamentos_atrasados: pagamentosAtrasados.length,
+      };
+    });
 
-        return {
-          aluno_id: aluno.id,
-          aluno_nome: aluno.nome || "Sem nome",
-          aluno_email: aluno.email,
-          plano_nome: aluno.plano,
-          ultimo_pagamento: ultimoPagamento?.created_at || null,
-          status_ultimo: ultimoPagamento?.status || null,
-          total_pago: totalPago,
-          pagamentos_pendentes: pagamentosPendentes.length,
-          pagamentos_atrasados: pagamentosAtrasados.length,
-        };
-      });
-
-      setStudentPayments(studentPaymentMap);
-    } catch (error) {
-      console.error("Erro ao carregar dados de pagamento:", error);
-    } finally {
-      setLoading(false);
-    }
+    setStudentPayments(studentPaymentMap);
+    setLoading(false);
   };
 
   const getStatusBadge = (student: StudentPayment) => {
@@ -181,7 +170,7 @@ export default function PaymentStatusTracker() {
   return (
     <div className="space-y-6">
       {/* Métricas Resumidas */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">

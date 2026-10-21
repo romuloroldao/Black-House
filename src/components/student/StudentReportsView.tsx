@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { FileText, MessageSquare, TrendingUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -12,9 +12,14 @@ import { ptBR } from "date-fns/locale";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useProfileCompleteness } from "@/hooks/useProfileCompleteness";
+import ProfileCompletionWizard from "@/components/student/ProfileCompletionWizard";
+import WorkoutEvolutionSection from "@/components/student/WorkoutEvolutionSection";
+import ReportContentGuard from "@/components/report/ReportContentGuard";
 
 interface Report {
   id: string;
@@ -51,6 +56,8 @@ const StudentReportsView = () => {
   const [newFeedback, setNewFeedback] = useState("");
   const [loading, setLoading] = useState(true);
   const [alunoId, setAlunoId] = useState<string | null>(null);
+  const { status: profileStatus, refetch: refetchProfile } = useProfileCompleteness();
+  const [profileWizardOpen, setProfileWizardOpen] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -59,96 +66,92 @@ const StudentReportsView = () => {
   }, [user]);
 
   const loadReports = async () => {
-    try {
-      const { data: aluno } = await supabase
-        .from("alunos")
-        .select("id")
-        .eq("email", user?.email)
-        .maybeSingle();
+    const alunoResult = await apiClient.getMeSafe();
+    const aluno = alunoResult.success ? alunoResult.data : null;
 
-      if (aluno) {
-        setAlunoId(aluno.id);
-
-        const { data, error } = await supabase
-          .from("relatorios")
-          .select("*")
-          .eq("aluno_id", aluno.id)
-          .in("status", ["enviado", "visualizado"])
-          .order("created_at", { ascending: false });
-
-        if (error) throw error;
-        setReports(data || []);
-
-        // Mark as visualized
-        const unvisualized = data?.filter((r) => !r.visualizado_em) || [];
-        if (unvisualized.length > 0) {
-          await supabase
-            .from("relatorios")
-            .update({
-              status: "visualizado",
-              visualizado_em: new Date().toISOString(),
-            })
-            .in(
-              "id",
-              unvisualized.map((r) => r.id)
-            );
-        }
-      }
-    } catch (error: any) {
-      toast.error("Erro ao carregar relatórios: " + error.message);
-    } finally {
+    if (!aluno) {
+      setAlunoId(null);
+      setReports([]);
       setLoading(false);
+      return;
     }
+
+    setAlunoId(aluno.id);
+
+    const relatoriosResult = await apiClient.requestSafe<any[]>('/api/relatorios');
+    const relatoriosData = relatoriosResult.success && Array.isArray(relatoriosResult.data)
+      ? relatoriosResult.data
+      : [];
+
+    const reportsArray = relatoriosData
+      .filter(r => r.aluno_id === aluno.id && ["enviado", "visualizado"].includes(r.status))
+      .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+
+    setReports(reportsArray);
+
+    const unvisualized = reportsArray.filter((r) => !r.visualizado_em);
+    for (const report of unvisualized) {
+      await apiClient.requestSafe(`/api/relatorios/${report.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          status: "visualizado",
+          visualizado_em: new Date().toISOString(),
+        }),
+      });
+    }
+
+    if (!relatoriosResult.success) {
+      toast.error("Erro ao carregar relatórios: " + relatoriosResult.error);
+    }
+    setLoading(false);
   };
 
   const loadFeedbacks = async (reportId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from("relatorio_feedbacks")
-        .select("*")
-        .eq("relatorio_id", reportId)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      setFeedbacks(data || []);
-    } catch (error: any) {
-      toast.error("Erro ao carregar feedbacks: " + error.message);
+    const result = await apiClient.requestSafe<any[]>(`/api/relatorio-feedbacks?relatorio_id=${reportId}`);
+    const data = result.success && Array.isArray(result.data) ? result.data : [];
+    const ordenados = data.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+    setFeedbacks(ordenados);
+    if (!result.success) {
+      toast.error("Erro ao carregar feedbacks: " + result.error);
     }
   };
 
   const loadReportMedia = async (reportId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from("relatorio_midias")
-        .select("*")
-        .eq("relatorio_id", reportId)
-        .order("ordem");
-
-      if (error) throw error;
-      setReportMedia(data || []);
-    } catch (error: any) {
-      toast.error("Erro ao carregar mídias: " + error.message);
+    const result = await apiClient.requestSafe<any[]>(`/api/relatorio-midias?relatorio_id=${reportId}`);
+    const data = result.success && Array.isArray(result.data) ? result.data : [];
+    const ordenadas = data.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+    setReportMedia(ordenadas);
+    if (!result.success) {
+      toast.error("Erro ao carregar mídias: " + result.error);
     }
   };
 
   const handleSubmitFeedback = async () => {
     if (!selectedReport || !newFeedback.trim() || !alunoId) return;
 
-    try {
-      const { error } = await supabase.from("relatorio_feedbacks").insert({
+    const result = await apiClient.requestSafe('/api/relatorio-feedbacks', {
+      method: 'POST',
+      body: JSON.stringify({
         relatorio_id: selectedReport.id,
         aluno_id: alunoId,
         comentario: newFeedback,
-      });
+      }),
+    });
 
-      if (error) throw error;
-
-      toast.success("Feedback enviado com sucesso!");
-      setNewFeedback("");
-      loadFeedbacks(selectedReport.id);
-    } catch (error: any) {
-      toast.error("Erro ao enviar feedback: " + error.message);
+    if (!result.success) {
+      const err = result.error || "";
+      if (err.includes("PROFILE_INCOMPLETE") || err.toLowerCase().includes("perfil")) {
+        toast.error("Complete seu perfil antes de comentar no relatório.");
+        setProfileWizardOpen(true);
+        return;
+      }
+      toast.error("Erro ao enviar feedback: " + result.error);
+      return;
     }
+
+    toast.success("Feedback enviado com sucesso!");
+    setNewFeedback("");
+    loadFeedbacks(selectedReport.id);
   };
 
   const openReport = (report: Report) => {
@@ -160,7 +163,7 @@ const StudentReportsView = () => {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold mb-2">Meus Relatórios</h1>
+        <h1 className="mb-2 text-xl font-bold sm:text-2xl">Meus Relatórios</h1>
         <p className="text-muted-foreground">
           Acompanhe seu progresso através dos relatórios do seu coach
         </p>
@@ -235,15 +238,29 @@ const StudentReportsView = () => {
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{selectedReport?.titulo}</DialogTitle>
+            <DialogDescription>
+              Período, métricas, observações do coach, mídias e comentários do relatório.
+            </DialogDescription>
           </DialogHeader>
 
           {selectedReport && (
             <div className="space-y-6">
+            <ReportContentGuard>
               <div>
                 <p className="text-sm text-muted-foreground mb-4">
                   Período: {format(new Date(selectedReport.periodo_inicio), "dd/MM/yyyy", { locale: ptBR })} até{" "}
                   {format(new Date(selectedReport.periodo_fim), "dd/MM/yyyy", { locale: ptBR })}
                 </p>
+
+                {alunoId ? (
+                  <div className="mb-4">
+                    <WorkoutEvolutionSection
+                      alunoId={alunoId}
+                      asOf={selectedReport.periodo_fim}
+                      audience="aluno"
+                    />
+                  </div>
+                ) : null}
 
                 {selectedReport.metricas && Object.keys(selectedReport.metricas).length > 0 && (
                   <Card>
@@ -298,6 +315,7 @@ const StudentReportsView = () => {
                   </Card>
                 )}
               </div>
+            </ReportContentGuard>
 
               <Card>
                 <CardHeader>
@@ -337,6 +355,13 @@ const StudentReportsView = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      <ProfileCompletionWizard
+        open={profileWizardOpen}
+        onOpenChange={setProfileWizardOpen}
+        status={profileStatus}
+        onCompleted={() => void refetchProfile()}
+      />
     </div>
   );
 };

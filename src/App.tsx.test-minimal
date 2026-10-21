@@ -1,0 +1,19 @@
+// TESTE MÍNIMO - FASE 1: Render mínimo para confirmar que problema é no React render
+// Se este render funciona, o problema está em algum componente filho
+
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { AuthProvider } from "./contexts/AuthContext";
+import { DataContextProvider } from "./contexts/DataContext";
+import { BootstrapGuard } from "./components/BootstrapScreen";
+import { BootstrapAwareErrorBoundary } from "./components/ErrorBoundary";
+
+const queryClient = new QueryClient();
+
+// FASE 1: Render mínimo
+const App = () => <div>OK</div>;
+
+export default App;

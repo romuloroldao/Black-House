@@ -22,3 +22,20 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Cursor and Deno (large binaries and transcripts with secrets)
+.cursor-server/
+.deno/
+.cursor/
+
+# GitHub PAT local (scripts/create-*-pr.sh, scripts/setup-github-mcp.sh)
+.config/blackhouse/gh-token
+
+# Playwright E2E
+e2e/.env
+playwright-report/
+test-results/
+blob-report/
+
+# MediaPipe (copiado no prebuild)
+public/mediapipe/

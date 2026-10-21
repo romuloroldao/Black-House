@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -70,68 +70,53 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
   }, [formData.aluno_id]);
 
   const loadAlunos = async () => {
-    try {
-      const { data, error } = await supabase
-        .from("alunos")
-        .select("id, nome, email")
-        .eq("coach_id", user?.id)
-        .order("nome");
-
-      if (error) throw error;
-      setAlunos(data || []);
-    } catch (error: any) {
-      toast.error("Erro ao carregar alunos: " + error.message);
+    const result = await apiClient.requestSafe<any[]>('/api/alunos');
+    const data = result.success && Array.isArray(result.data) ? result.data : [];
+    const filtrados = data
+      .filter(a => a.coach_id === user?.id)
+      .sort((a, b) => String(a?.nome || '').localeCompare(String(b?.nome || '')));
+    setAlunos(filtrados);
+    if (!result.success) {
+      toast.error("Erro ao carregar alunos: " + result.error);
     }
   };
 
   const loadAlunoPhotos = async () => {
     if (!formData.aluno_id) return;
 
-    try {
-      const { data, error } = await supabase
-        .from("fotos_alunos")
-        .select("*")
-        .eq("aluno_id", formData.aluno_id)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      setAlunoPhotos(data || []);
-    } catch (error: any) {
-      toast.error("Erro ao carregar fotos: " + error.message);
+    const result = await apiClient.requestSafe<any[]>(`/api/fotos-alunos?aluno_id=${formData.aluno_id}`);
+    const data = result.success && Array.isArray(result.data) ? result.data : [];
+    const ordenadas = data.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+    setAlunoPhotos(ordenadas);
+    if (!result.success) {
+      toast.error("Erro ao carregar fotos: " + result.error);
     }
   };
 
   const loadReport = async () => {
     if (!reportId) return;
 
-    try {
-      const { data, error } = await supabase
-        .from("relatorios")
-        .select("*")
-        .eq("id", reportId)
-        .single();
+    const reportResult = await apiClient.requestSafe<any>(`/api/relatorios/${reportId}`);
+    const relatorio = reportResult.success ? reportResult.data : null;
+    
+    if (!relatorio) {
+      toast.error("Relatório não encontrado");
+      return;
+    }
 
-      if (error) throw error;
+    setFormData({
+      titulo: relatorio.titulo,
+      aluno_id: relatorio.aluno_id,
+      periodo_inicio: new Date(relatorio.periodo_inicio),
+      periodo_fim: new Date(relatorio.periodo_fim),
+      observacoes: relatorio.observacoes || "",
+    });
 
-      setFormData({
-        titulo: data.titulo,
-        aluno_id: data.aluno_id,
-        periodo_inicio: new Date(data.periodo_inicio),
-        periodo_fim: new Date(data.periodo_fim),
-        observacoes: data.observacoes || "",
-      });
-
-      // Load selected photos
-      const { data: midias } = await supabase
-        .from("relatorio_midias")
-        .select("url")
-        .eq("relatorio_id", reportId);
-
-      if (midias) {
-        setSelectedPhotos(midias.map(m => m.url));
-      }
-    } catch (error: any) {
-      toast.error("Erro ao carregar relatório: " + error.message);
+    const midiasResult = await apiClient.requestSafe<any[]>(`/api/relatorio-midias?relatorio_id=${reportId}`);
+    const midias = midiasResult.success && Array.isArray(midiasResult.data) ? midiasResult.data : [];
+    setSelectedPhotos(midias.map(m => m.url));
+    if (!midiasResult.success) {
+      toast.error("Erro ao carregar mídias: " + midiasResult.error);
     }
   };
 
@@ -147,71 +132,73 @@ const ReportForm = ({ reportId, onSuccess, onCancel }: ReportFormProps) => {
     e.preventDefault();
     setLoading(true);
 
-    try {
-      if (!formData.aluno_id) {
-        toast.error("Selecione um aluno");
+    if (!formData.aluno_id) {
+      toast.error("Selecione um aluno");
+      setLoading(false);
+      return;
+    }
+
+    const reportData = {
+      coach_id: user?.id,
+      titulo: formData.titulo,
+      aluno_id: formData.aluno_id,
+      periodo_inicio: format(formData.periodo_inicio, "yyyy-MM-dd"),
+      periodo_fim: format(formData.periodo_fim, "yyyy-MM-dd"),
+      observacoes: formData.observacoes,
+    };
+
+    let currentReportId = reportId;
+
+    if (reportId) {
+      const updateResult = await apiClient.requestSafe(`/api/relatorios/${reportId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(reportData),
+      });
+      if (!updateResult.success) {
+        toast.error("Erro ao salvar relatório: " + updateResult.error);
+        setLoading(false);
         return;
       }
 
-      const reportData = {
-        coach_id: user?.id,
-        titulo: formData.titulo,
-        aluno_id: formData.aluno_id,
-        periodo_inicio: format(formData.periodo_inicio, "yyyy-MM-dd"),
-        periodo_fim: format(formData.periodo_fim, "yyyy-MM-dd"),
-        observacoes: formData.observacoes,
-      };
+      await apiClient.requestSafe(`/api/relatorio-midias?relatorio_id=${reportId}`, { method: 'DELETE' });
+    } else {
+      const createResult = await apiClient.requestSafe<any>('/api/relatorios', {
+        method: 'POST',
+        body: JSON.stringify(reportData),
+      });
 
-      let currentReportId = reportId;
-
-      if (reportId) {
-        const { error } = await supabase
-          .from("relatorios")
-          .update(reportData)
-          .eq("id", reportId);
-
-        if (error) throw error;
-
-        // Delete existing photos and re-insert selected ones
-        await supabase
-          .from("relatorio_midias")
-          .delete()
-          .eq("relatorio_id", reportId);
-      } else {
-        const { data, error } = await supabase
-          .from("relatorios")
-          .insert(reportData)
-          .select()
-          .single();
-
-        if (error) throw error;
-        currentReportId = data.id;
+      const relatorio = createResult.success ? createResult.data : null;
+      if (!relatorio?.id) {
+        toast({
+          title: "Erro",
+          description: "Erro ao criar relatório. Tente novamente.",
+          variant: "destructive"
+        });
+        setLoading(false);
+        return;
       }
-
-      // Insert selected photos
-      if (selectedPhotos.length > 0 && currentReportId) {
-        const photoData = selectedPhotos.map((url, index) => ({
-          relatorio_id: currentReportId,
-          tipo: "foto",
-          url: url,
-          ordem: index,
-          legenda: alunoPhotos.find(p => p.url === url)?.descricao || null,
-        }));
-
-        const { error: photoError } = await supabase
-          .from("relatorio_midias")
-          .insert(photoData);
-
-        if (photoError) throw photoError;
-      }
-
-      toast.success(reportId ? "Relatório atualizado com sucesso!" : "Relatório criado com sucesso!");
-      onSuccess();
-    } catch (error: any) {
-      toast.error("Erro ao salvar relatório: " + error.message);
-    } finally {
-      setLoading(false);
+      currentReportId = relatorio.id;
     }
+
+    if (selectedPhotos.length > 0 && currentReportId) {
+      for (let index = 0; index < selectedPhotos.length; index++) {
+        const url = selectedPhotos[index];
+        await apiClient.requestSafe('/api/relatorio-midias', {
+          method: 'POST',
+          body: JSON.stringify({
+            relatorio_id: currentReportId,
+            tipo: "foto",
+            url: url,
+            ordem: index,
+            legenda: alunoPhotos.find(p => p.url === url)?.descricao || null,
+          }),
+        });
+      }
+    }
+
+    toast.success(reportId ? "Relatório atualizado com sucesso!" : "Relatório criado com sucesso!");
+    onSuccess();
+    setLoading(false);
   };
 
   return (

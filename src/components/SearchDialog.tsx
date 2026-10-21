@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -53,76 +54,63 @@ const SearchDialog = ({ open, onOpenChange, onNavigate }: SearchDialogProps) => 
     const searchResults: SearchResult[] = [];
 
     try {
-      // Buscar alunos
-      const { data: alunos } = await supabase
-        .from('alunos')
-        .select('id, nome, email')
-        .eq('coach_id', user.id)
-        .ilike('nome', `%${searchQuery}%`)
-        .limit(5);
+      const [alunosRes, treinosRes, videosRes, dietasRes] = await Promise.all([
+        apiClient.requestSafe<any[]>('/api/alunos'),
+        apiClient.requestSafe<any[]>('/api/treinos'),
+        apiClient.requestSafe<any[]>('/api/videos'),
+        apiClient.requestSafe<any[]>('/api/dietas'),
+      ]);
 
-      if (alunos) {
-        searchResults.push(...alunos.map(a => ({
-          id: a.id,
-          type: 'aluno' as const,
-          title: a.nome,
-          subtitle: a.email,
-          icon: Users
-        })));
-      }
+      const alunosData = alunosRes.success && Array.isArray(alunosRes.data) ? alunosRes.data : [];
+      const treinosData = treinosRes.success && Array.isArray(treinosRes.data) ? treinosRes.data : [];
+      const videosData = videosRes.success && Array.isArray(videosRes.data) ? videosRes.data : [];
+      const dietasData = dietasRes.success && Array.isArray(dietasRes.data) ? dietasRes.data : [];
 
-      // Buscar treinos
-      const { data: treinos } = await supabase
-        .from('treinos')
-        .select('id, nome, descricao')
-        .eq('coach_id', user.id)
-        .ilike('nome', `%${searchQuery}%`)
-        .limit(5);
+      const queryLower = searchQuery.toLowerCase();
 
-      if (treinos) {
-        searchResults.push(...treinos.map(t => ({
-          id: t.id,
-          type: 'treino' as const,
-          title: t.nome,
-          subtitle: t.descricao,
-          icon: Dumbbell
-        })));
-      }
+      const alunos = alunosData
+        .filter((a: any) => a.coach_id === user.id && String(a?.nome || '').toLowerCase().includes(queryLower))
+        .slice(0, 5);
+      searchResults.push(...alunos.map((a: any) => ({
+        id: a.id,
+        type: 'aluno' as const,
+        title: a.nome,
+        subtitle: a.email,
+        icon: Users
+      })));
 
-      // Buscar vídeos
-      const { data: videos } = await supabase
-        .from('videos')
-        .select('id, titulo, descricao')
-        .eq('coach_id', user.id)
-        .ilike('titulo', `%${searchQuery}%`)
-        .limit(5);
+      const treinos = treinosData
+        .filter((t: any) => t.coach_id === user.id && String(t?.nome || '').toLowerCase().includes(queryLower))
+        .slice(0, 5);
+      searchResults.push(...treinos.map((t: any) => ({
+        id: t.id,
+        type: 'treino' as const,
+        title: t.nome,
+        subtitle: t.descricao,
+        icon: Dumbbell
+      })));
 
-      if (videos) {
-        searchResults.push(...videos.map(v => ({
-          id: v.id,
-          type: 'video' as const,
-          title: v.titulo,
-          subtitle: v.descricao,
-          icon: Video
-        })));
-      }
+      const videos = videosData
+        .filter((v: any) => v.coach_id === user.id && String(v?.titulo || '').toLowerCase().includes(queryLower))
+        .slice(0, 5);
+      searchResults.push(...videos.map((v: any) => ({
+        id: v.id,
+        type: 'video' as const,
+        title: v.titulo,
+        subtitle: v.descricao,
+        icon: Video
+      })));
 
-      // Buscar dietas
-      const { data: dietas } = await supabase
-        .from('dietas')
-        .select('id, nome, objetivo')
-        .ilike('nome', `%${searchQuery}%`)
-        .limit(5);
-
-      if (dietas) {
-        searchResults.push(...dietas.map(d => ({
-          id: d.id,
-          type: 'dieta' as const,
-          title: d.nome,
-          subtitle: d.objetivo,
-          icon: UtensilsCrossed
-        })));
-      }
+      const dietas = dietasData
+        .filter((d: any) => String(d?.nome || '').toLowerCase().includes(queryLower))
+        .slice(0, 5);
+      searchResults.push(...dietas.map((d: any) => ({
+        id: d.id,
+        type: 'dieta' as const,
+        title: d.nome,
+        subtitle: d.objetivo,
+        icon: UtensilsCrossed
+      })));
 
       setResults(searchResults);
     } catch (error) {
@@ -176,6 +164,9 @@ const SearchDialog = ({ open, onOpenChange, onNavigate }: SearchDialogProps) => 
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Buscar</DialogTitle>
+          <DialogDescription>
+            Pesquise alunos, treinos, vídeos ou dietas por nome ou texto.
+          </DialogDescription>
         </DialogHeader>
         
         <div className="relative">

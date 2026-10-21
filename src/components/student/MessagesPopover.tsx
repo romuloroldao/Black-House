@@ -16,10 +16,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import { countIncomingUnread, isIncomingUnreadMessage } from "@/lib/message-read";
 
 interface Message {
   id: string;
@@ -43,136 +44,119 @@ const MessagesPopover = ({ unreadCount, onCountChange }: MessagesPopoverProps) =
   const [statusFilter, setStatusFilter] = useState<"all" | "unread" | "read">("all");
 
   useEffect(() => {
-    if (user && open) {
+    // DESIGN-SUPABASE-PURGE-MESSAGING-001: Apenas alunos podem acessar mensagens
+    if (user && user.role === 'aluno' && open) {
       loadMessages();
     }
   }, [user, open, sortOrder, statusFilter]);
 
   useEffect(() => {
-    if (!user) return;
+    // DESIGN-SUPABASE-PURGE-MESSAGING-001: Polling só para alunos
+    if (!user || user.role !== 'aluno' || !open) return;
 
-    const channel = supabase
-      .channel('messages-popover-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'mensagens',
-        },
-        () => {
-          loadMessages();
-        }
-      )
-      .subscribe();
+    // Polling para atualizações (substitui realtime)
+    const intervalId = setInterval(() => {
+      loadMessages();
+    }, 10000); // Atualizar a cada 10 segundos quando aberto
 
     return () => {
-      supabase.removeChannel(channel);
+      clearInterval(intervalId);
     };
-  }, [user]);
+  }, [user, open]);
 
   const loadMessages = async () => {
-    if (!user) return;
-
-    const { data: alunoData } = await supabase
-      .from("alunos")
-      .select("id")
-      .eq("email", user.email)
-      .single();
-
-    if (!alunoData) return;
-
-    const { data: conversaData } = await supabase
-      .from("conversas")
-      .select("id")
-      .eq("aluno_id", alunoData.id)
-      .single();
-
-    if (!conversaData) return;
-
-    let query = supabase
-      .from("mensagens")
-      .select("*")
-      .eq("conversa_id", conversaData.id)
-      .neq("remetente_id", user.id);
-
-    // Apply status filter
-    if (statusFilter === "unread") {
-      query = query.eq("lida", false);
-    } else if (statusFilter === "read") {
-      query = query.eq("lida", true);
+    // DESIGN-SUPABASE-PURGE-MESSAGING-001: Apenas alunos podem carregar mensagens
+    if (!user || user.role !== 'aluno') {
+      setMessages([]);
+      onCountChange(0);
+      return;
     }
 
-    // Apply sort order
-    query = query.order("created_at", { ascending: sortOrder === "asc" }).limit(20);
+    try {
+      // DESIGN-SUPABASE-PURGE-MESSAGING-001: Usar rota semântica GET /api/mensagens
+      const mensagensData = await apiClient.request('/api/mensagens');
+      const mensagens = Array.isArray(mensagensData) ? mensagensData : [];
 
-    const { data } = await query;
+      // Aplicar filtros client-side
+      let filtered = mensagens;
+      if (statusFilter === "unread") {
+        filtered = filtered.filter(m => !m.lida);
+      } else if (statusFilter === "read") {
+        filtered = filtered.filter(m => m.lida);
+      }
+      
+      // Ordenar
+      filtered.sort((a, b) => {
+        const dateA = new Date(a.created_at).getTime();
+        const dateB = new Date(b.created_at).getTime();
+        return sortOrder === "asc" ? dateA - dateB : dateB - dateA;
+      });
+      
+      // Limitar a 20
+      filtered = filtered.slice(0, 20);
 
-    if (data) {
-      setMessages(data);
-      const unread = data.filter(m => !m.lida).length;
-      onCountChange(unread);
+      setMessages(filtered);
+      onCountChange(countIncomingUnread(mensagens, user.id));
+    } catch (error) {
+      console.error("Erro ao carregar mensagens:", error);
+      setMessages([]);
+      onCountChange(0);
     }
   };
 
   const markAsRead = async (messageId: string) => {
-    const { error } = await supabase
-      .from("mensagens")
-      .update({ lida: true })
-      .eq("id", messageId);
+    // DESIGN-SUPABASE-PURGE-MESSAGING-001: Apenas alunos podem marcar mensagens como lidas
+    if (!user || user.role !== 'aluno') return;
 
-    if (error) {
+    try {
+      // DESIGN-SUPABASE-PURGE-MESSAGING-001: Usar rota semântica PATCH /api/mensagens/:id
+      await apiClient.request(`/api/mensagens/${messageId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ lida: true }),
+      });
+      loadMessages();
+    } catch (error) {
       toast({
         title: "Erro",
         description: "Não foi possível marcar a mensagem como lida.",
         variant: "destructive",
       });
-      return;
     }
-
-    loadMessages();
   };
 
   const markAllAsRead = async () => {
-    if (!user) return;
+    // DESIGN-SUPABASE-PURGE-MESSAGING-001: Apenas alunos podem marcar mensagens como lidas
+    if (!user || user.role !== 'aluno') return;
 
-    const { data: alunoData } = await supabase
-      .from("alunos")
-      .select("id")
-      .eq("email", user.email)
-      .single();
+    try {
+      // DESIGN-SUPABASE-PURGE-MESSAGING-001: Usar rota semântica GET /api/mensagens
+      const mensagensData = await apiClient.request('/api/mensagens');
+      const mensagens = Array.isArray(mensagensData) ? mensagensData : [];
+      
+      // Filtrar mensagens não lidas recebidas (schema sem destinatario_id)
+      const mensagensNaoLidas = mensagens.filter((m: any) =>
+        isIncomingUnreadMessage(m, user.id),
+      );
 
-    if (!alunoData) return;
+      if (mensagensNaoLidas.length > 0) {
+        await apiClient.request("/api/mensagens/mark-read", {
+          method: "POST",
+          body: JSON.stringify({}),
+        });
+      }
 
-    const { data: conversaData } = await supabase
-      .from("conversas")
-      .select("id")
-      .eq("aluno_id", alunoData.id)
-      .single();
-
-    if (!conversaData) return;
-
-    const { error } = await supabase
-      .from("mensagens")
-      .update({ lida: true })
-      .eq("conversa_id", conversaData.id)
-      .neq("remetente_id", user.id)
-      .eq("lida", false);
-
-    if (error) {
+      loadMessages();
+      toast({
+        title: "Sucesso",
+        description: "Todas as mensagens foram marcadas como lidas.",
+      });
+    } catch (error) {
       toast({
         title: "Erro",
         description: "Não foi possível marcar as mensagens como lidas.",
         variant: "destructive",
       });
-      return;
     }
-
-    loadMessages();
-    toast({
-      title: "Sucesso",
-      description: "Todas as mensagens foram marcadas como lidas.",
-    });
   };
 
   const handleMessageClick = (message: Message) => {

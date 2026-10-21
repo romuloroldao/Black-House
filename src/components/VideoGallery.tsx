@@ -1,6 +1,9 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
+import { useApiSafeList } from "@/hooks/useApiSafe";
+import { safeArray } from "@/lib/data-safe-utils";
 import { useToast } from "@/hooks/use-toast";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -27,8 +30,10 @@ import {
 } from "lucide-react";
 import VideoForm from "./VideoForm";
 import LiveManager from "./LiveManager";
+import { VIDEO_CATEGORIES, VIDEO_CATEGORY_FILTER_ALL } from "@/lib/video-categories";
 
 const VideoGallery = () => {
+  const { confirm } = useConfirm();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("videos");
   const [searchTerm, setSearchTerm] = useState("");
@@ -36,53 +41,60 @@ const VideoGallery = () => {
   const [showVideoForm, setShowVideoForm] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [videos, setVideos] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: videosRaw, loading: loadingVideos, error: errorVideos, refetch: refetchVideos } = useApiSafeList(
+    () => apiClient.requestSafe<any[]>('/api/videos'),
+    { autoFetch: true, endpointKey: '/api/videos' }
+  );
   const [videoToWatch, setVideoToWatch] = useState<any>(null);
 
   useEffect(() => {
-    carregarVideos();
-  }, []);
+    if (!loadingVideos) {
+      // A API já filtra por role (admin=todos, coach=próprios). Não filtrar de novo por
+      // user.id — contas admin (ex. romulo) têm id ≠ coach_id dos vídeos e a lista ficava vazia.
+      const filteredRaw = safeArray(videosRaw).sort((a: any, b: any) => {
+        const aTime = new Date(a?.created_at || 0).getTime();
+        const bTime = new Date(b?.created_at || 0).getTime();
+        return bTime - aTime;
+      });
 
-  const carregarVideos = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('videos')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      const videosFormatados = data?.map(video => ({
+      const videosFormatados = filteredRaw.map((video: any) => ({
         id: video.id,
-        title: video.titulo,
+        title: video.titulo ?? '',
         description: video.descricao || '',
         youtubeId: video.youtube_id,
-        thumbnail: `https://img.youtube.com/vi/${video.youtube_id}/maxresdefault.jpg`,
+        thumbnail: video.youtube_id
+          ? `https://img.youtube.com/vi/${video.youtube_id}/maxresdefault.jpg`
+          : '',
         duration: video.duracao || '0:00',
-        category: video.categoria,
-        visibility: video.visibilidade,
-        tags: video.tags || [],
-        uploadDate: new Date(video.created_at).toISOString().split('T')[0],
-        views: video.views,
-        likes: video.likes,
+        category: video.categoria ?? '',
+        visibility: video.visibilidade ?? 'active-students',
+        tags: safeArray(video.tags),
+        uploadDate: new Date(video.created_at || Date.now()).toISOString().split('T')[0],
+        views: video.views || 0,
+        likes: video.likes || 0,
         instructor: video.instrutor || 'Instrutor',
-        isFavorited: false // TODO: implementar favoritos quando houver usuário
-      })) || [];
+        isFavorited: false
+      }));
 
       setVideos(videosFormatados);
-    } catch (error) {
-      console.error('Erro ao carregar vídeos:', error);
-    } finally {
-      setLoading(false);
+
+      if (errorVideos) {
+        console.warn('[REACT-SUPABASE-LEGACY-PURGE-FIX-010] Erro ao carregar vídeos (fallback vazio):', errorVideos);
+      }
     }
+  }, [loadingVideos, videosRaw, errorVideos]);
+
+  const carregarVideos = () => {
+    refetchVideos();
   };
 
   const categories = [
-    { id: "all", label: "Todos", count: videos.length },
-    { id: "Técnica", label: "Técnica", count: videos.filter(v => v.category === "Técnica").length },
-    { id: "Cardio", label: "Cardio", count: videos.filter(v => v.category === "Cardio").length },
-    { id: "Mobilidade", label: "Mobilidade", count: videos.filter(v => v.category === "Mobilidade").length },
-    { id: "Força", label: "Força", count: videos.filter(v => v.category === "Força").length }
+    { id: VIDEO_CATEGORY_FILTER_ALL, label: "Todos", count: videos.length },
+    ...VIDEO_CATEGORIES.map((cat) => ({
+      id: cat,
+      label: cat,
+      count: videos.filter((v) => v.category === cat).length,
+    })),
   ];
 
   const visibilityLabels = {
@@ -93,11 +105,12 @@ const VideoGallery = () => {
   };
 
   const filteredVideos = videos.filter(video => {
-    const matchesSearch = video.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         video.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         video.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
+    const matchesSearch = (video.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         (video.description || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         safeArray(video.tags).some(tag => String(tag).toLowerCase().includes(searchTerm.toLowerCase()));
     
-    const matchesCategory = selectedCategory === "all" || video.category === selectedCategory;
+    const matchesCategory =
+      selectedCategory === VIDEO_CATEGORY_FILTER_ALL || video.category === selectedCategory;
     
     return matchesSearch && matchesCategory;
   });
@@ -113,36 +126,33 @@ const VideoGallery = () => {
   };
 
   const handleDeleteVideo = async (videoId: string) => {
-    if (!confirm("Tem certeza que deseja deletar este vídeo?")) {
+    if (!(await confirmDelete(confirm, "Este vídeo será removido da galeria."))) {
       return;
     }
 
-    try {
-      const { error } = await supabase
-        .from('videos')
-        .delete()
-        .eq('id', videoId);
-
-      if (error) throw error;
-
-      toast({
-        title: "Vídeo deletado!",
-        description: "O vídeo foi removido com sucesso.",
-      });
-
-      carregarVideos();
-    } catch (error) {
-      console.error('Erro ao deletar vídeo:', error);
+    const result = await apiClient.requestSafe(`/api/videos/${videoId}`, { method: 'DELETE' });
+    if (!result.success) {
+      console.warn('[REACT-SUPABASE-LEGACY-PURGE-FIX-010] Erro ao deletar vídeo:', result.error);
       toast({
         title: "Erro ao deletar",
         description: "Não foi possível remover o vídeo.",
         variant: "destructive",
       });
+      return;
     }
+
+    toast({
+      title: "Vídeo deletado!",
+      description: "O vídeo foi removido com sucesso.",
+    });
+
+    carregarVideos();
   };
 
   const renderVideoCard = (video: any) => {
-    const visibilityInfo = visibilityLabels[video.visibility as keyof typeof visibilityLabels];
+    const visibilityInfo =
+      visibilityLabels[video.visibility as keyof typeof visibilityLabels] ??
+      visibilityLabels['active-students'];
     const VisibilityIcon = visibilityInfo.icon;
 
     return (
@@ -269,10 +279,10 @@ const VideoGallery = () => {
     );
   }
 
-  if (loading) {
+  if (loadingVideos) {
     return (
       <div className="p-6 space-y-6">
-        <div className="animate-pulse">
+        <div className="motion-safe:animate-pulse">
           <div className="h-8 bg-muted rounded w-1/3 mb-4"></div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
             {[1, 2, 3].map(i => (
@@ -290,8 +300,11 @@ const VideoGallery = () => {
       <Dialog open={!!videoToWatch} onOpenChange={() => setVideoToWatch(null)}>
         <DialogContent className="max-w-5xl">
           <DialogHeader>
-            <DialogTitle>{videoToWatch?.title}</DialogTitle>
-            <DialogDescription>{videoToWatch?.description}</DialogDescription>
+            <DialogTitle>{videoToWatch?.title?.trim() || "Reproduzir vídeo"}</DialogTitle>
+            <DialogDescription>
+              {videoToWatch?.description?.trim() ||
+                "Reprodução do conteúdo do YouTube na plataforma."}
+            </DialogDescription>
           </DialogHeader>
           <div className="aspect-video w-full">
             <iframe
@@ -312,7 +325,7 @@ const VideoGallery = () => {
         {/* Header */}
         <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+          <h1 className="bg-gradient-primary bg-clip-text text-xl font-bold text-transparent sm:text-2xl">
             Galeria de Vídeos
           </h1>
           <p className="text-muted-foreground">
@@ -447,8 +460,9 @@ const VideoGallery = () => {
           )}
         </TabsContent>
 
-        <TabsContent value="lives">
-          <LiveManager />
+        <TabsContent value="lives" className="space-y-6">
+          {/* Só montar após abrir o tab — evita GET /api/lives bloqueado pelo contrato e pedidos inúteis na galeria */}
+          {activeTab === 'lives' ? <LiveManager /> : null}
         </TabsContent>
       </Tabs>
       </div>

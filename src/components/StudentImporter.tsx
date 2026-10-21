@@ -1,47 +1,125 @@
-import { useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { apiClient } from '@/lib/api-client';
+import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { 
-  Upload, 
-  FileText, 
-  User, 
-  Utensils, 
-  Pill, 
-  Check, 
+import {
+  Upload,
+  FileText,
+  User,
+  Utensils,
+  Pill,
+  Check,
   AlertCircle,
   ChevronRight,
   Loader2,
   Trash2,
   Plus,
-  Edit2
+  Edit2,
+  ArrowUp,
+  ArrowDown,
+  Copy,
+  Info,
+  ShieldCheck,
+  Sparkles,
+  Clock,
 } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { maskCpfCnpj, onlyNumbers } from '@/utils/MaskFormat';
+import { cn } from '@/lib/utils';
+import { getAllFoodsSafe, type Food } from '@/lib/foodService';
+import {
+  FoodNameAutocomplete,
+  findBestFoodMatch,
+} from '@/components/nutrition/FoodNameAutocomplete';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion';
+import {
+  ImportStepper,
+  ImportExtractionSummary,
+  ProtocolItemRow,
+} from '@/components/import/ImportDialogParts';
+import { ImportDestinationBanner } from '@/components/import/ImportDestinationBanner';
+import { ImportDuplicateAlert } from '@/components/import/ImportDuplicateAlert';
+import {
+  findImportDuplicateMatches,
+  type ExistingAlunoForImport,
+} from '@/lib/import-duplicate-detection';
+import { DietReturnDateFields } from '@/components/DietReturnDateFields';
+import {
+  DietRotationFields,
+  dietRotationToPayload,
+  type DietRotationFormState,
+} from '@/components/DietRotationFields';
+import { getAlunoDisplayName, getAlunoFirstName } from '@/lib/aluno-display';
+import { inferRotationFromImport } from '@/lib/diet-rotation-infer';
+import { getPlanoForToday } from '@/lib/diet-rotation';
+import {
+  inferImportMacroPlano,
+  sumImportDeclaredMacros,
+  type DietPlano,
+} from '@/lib/diet-student-utils';
+
+interface Alternativa {
+  nome: string;
+  quantidade: string;
+  alimento_id?: string | null;
+  tipo_id?: string | null;
+  tipo_nome?: string | null;
+}
+
+interface Alimento {
+  nome: string;
+  quantidade: string;
+  alimento_id?: string | null;
+  tipo_id?: string | null;
+  tipo_nome?: string | null;
+  alternativas?: Alternativa[];
+}
+
+interface Refeicao {
+  nome: string;
+  horario?: string | null;
+  observacao?: string | null;
+  dia_semana?: string | null;
+  plano?: string | null;
+  macros?: {
+    proteina?: number | null;
+    carboidrato?: number | null;
+    gordura?: number | null;
+    calorias?: number | null;
+  } | null;
+  alimentos: Alimento[];
+}
 
 interface ParsedStudentData {
   aluno: {
     nome: string;
+    email?: string;
+    telefone?: string;
     peso?: number;
     altura?: number;
     idade?: number;
     objetivo?: string;
+    cpf_cnpj?: string;
   };
   dieta?: {
     nome: string;
     objetivo?: string;
-    refeicoes: Array<{
-      nome: string;
-      alimentos: Array<{
-        nome: string;
-        quantidade: string;
-      }>;
-    }>;
+    data_retorno?: string | null;
+    refeicoes: Refeicao[];
     macros?: {
       proteina?: number;
       carboidrato?: number;
@@ -52,124 +130,595 @@ interface ParsedStudentData {
   suplementos?: Array<{
     nome: string;
     dosagem: string;
+    horario?: string | null;
     observacao?: string;
   }>;
   farmacos?: Array<{
     nome: string;
     dosagem: string;
+    horario?: string | null;
     observacao?: string;
   }>;
   orientacoes?: string;
 }
 
-interface StudentImporterProps {
-  onImportComplete?: () => void;
-  onClose?: () => void;
+interface ImportMeta {
+  aiUsed?: boolean;
+  source?: 'ai' | 'local_structured' | 'local_fallback' | 'none' | string;
+  fallback?: boolean;
+  requestId?: string;
+  numPages?: number;
+  provider?: { provider?: string; model?: string } | null;
+  confidence?: {
+    overall: number;
+    sections: {
+      aluno: number;
+      dieta: number;
+      protocolo: number | null;
+      paginas: number | null;
+    };
+    warnings: string[];
+    meta?: Record<string, unknown>;
+  };
+  fileName?: string;
 }
 
-const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) => {
+export type ImportMode = 'create' | 'enrich';
+
+export interface ImportTargetAluno {
+  id: string;
+  nome: string;
+  email?: string | null;
+}
+
+export interface ImportCompleteResult {
+  mode: ImportMode;
+  alunoId: string;
+  dietaId?: string | null;
+  alunoNome: string;
+}
+
+interface StudentImporterProps {
+  onImportComplete?: (result?: ImportCompleteResult) => void;
+  onClose?: () => void;
+  /** `enrich` = só dieta/protocolo para aluno existente (perfil ou destino escolhido). */
+  mode?: ImportMode;
+  targetAluno?: ImportTargetAluno;
+  /** Lista do coach para duplicados e selector «aluno existente». */
+  existingAlunos?: ExistingAlunoForImport[];
+  /** Passo «Para quem?» no upload (default: true quando mode !== enrich). */
+  showDestinationPicker?: boolean;
+}
+
+const normalizeAlimento = (alimento: Alimento): Alimento => ({
+  nome: String(alimento?.nome ?? '').trim(),
+  quantidade: String(alimento?.quantidade ?? '').trim(),
+  alimento_id: alimento?.alimento_id ?? null,
+  tipo_id: alimento?.tipo_id ?? null,
+  tipo_nome: alimento?.tipo_nome ?? null,
+  alternativas: (alimento?.alternativas || []).map((alt) => ({
+    nome: String(alt?.nome ?? '').trim(),
+    quantidade: String(alt?.quantidade ?? '').trim(),
+    alimento_id: alt?.alimento_id ?? null,
+    tipo_id: alt?.tipo_id ?? null,
+    tipo_nome: alt?.tipo_nome ?? null,
+  })),
+});
+
+const catalogFieldsFromFood = (food: Food) => ({
+  nome: food.name,
+  alimento_id: food.id,
+  tipo_id: food.tipo_id ?? null,
+  tipo_nome: food.tipo_nome ?? null,
+});
+
+const linkAlimentosToCatalog = (data: ParsedStudentData, foods: Food[]): ParsedStudentData => {
+  if (!data.dieta?.refeicoes?.length || foods.length === 0) return data;
+  const refeicoes = data.dieta.refeicoes.map((refeicao) => ({
+    ...refeicao,
+    alimentos: refeicao.alimentos.map((alimento) => {
+      if (alimento.alimento_id) return alimento;
+      const match = findBestFoodMatch(alimento.nome, foods);
+      if (!match) return alimento;
+      return { ...alimento, ...catalogFieldsFromFood(match) };
+    }),
+  }));
+  return { ...data, dieta: { ...data.dieta, refeicoes } };
+};
+
+const normalizeRefeicao = (refeicao: Refeicao): Refeicao => ({
+  ...refeicao,
+  nome: String(refeicao?.nome ?? '').trim() || 'Refeição',
+  horario: refeicao?.horario != null ? String(refeicao.horario) : null,
+  observacao: refeicao?.observacao != null ? String(refeicao.observacao) : null,
+  dia_semana: refeicao?.dia_semana != null ? String(refeicao.dia_semana) : null,
+  plano: refeicao?.plano != null ? String(refeicao.plano) : null,
+  alimentos: Array.isArray(refeicao?.alimentos)
+    ? refeicao.alimentos.map(normalizeAlimento)
+    : [],
+});
+
+const normalizeParsedStudentData = (data: ParsedStudentData): ParsedStudentData => ({
+  ...data,
+  aluno: {
+    ...data.aluno,
+    nome: data.aluno?.nome || '',
+    email: data.aluno?.email || '',
+    telefone: data.aluno?.telefone || '',
+    cpf_cnpj: data.aluno?.cpf_cnpj || '',
+  },
+  dieta: data.dieta
+    ? {
+        ...data.dieta,
+        nome: String(data.dieta.nome || 'Plano Alimentar Importado'),
+        refeicoes: Array.isArray(data.dieta.refeicoes)
+          ? data.dieta.refeicoes.map(normalizeRefeicao)
+          : [],
+      }
+    : undefined,
+  suplementos: data.suplementos || [],
+  farmacos: data.farmacos || [],
+});
+
+const refeicoesDisponiveis = [
+  'Café da Manhã',
+  'Lanche da Manhã',
+  'Almoço',
+  'Lanche da Tarde',
+  'Pré-Treino',
+  'Pós-Treino',
+  'Jantar',
+  'Ceia',
+];
+
+const diasDaSemana = [
+  'Todos os dias',
+  'Segunda',
+  'Terça',
+  'Quarta',
+  'Quinta',
+  'Sexta',
+  'Sábado',
+  'Domingo',
+];
+
+const parseQuantidadeNumber = (qtd: string | undefined | null): number => {
+  if (!qtd) return 0;
+  const s = String(qtd);
+  const rangeMatch = s.match(/(\d+[.,]?\d*)\s*[~\-–—]\s*(\d+[.,]?\d*)/);
+  if (rangeMatch) {
+    const a = parseFloat(rangeMatch[1].replace(',', '.'));
+    const b = parseFloat(rangeMatch[2].replace(',', '.'));
+    if (!isNaN(a) && !isNaN(b)) return (a + b) / 2;
+  }
+  const parenMatch = s.match(/\((\d+[.,]?\d*)\s*(?:g|ml)\)/i);
+  if (parenMatch) {
+    const v = parseFloat(parenMatch[1].replace(',', '.'));
+    if (!isNaN(v)) return v;
+  }
+  const m = s.match(/[\d]+[.,]?\d*/);
+  return m ? parseFloat(m[0].replace(',', '.')) : 0;
+};
+
+type DestinationChoice = 'create' | 'existing';
+
+const StudentImporter = ({
+  onImportComplete,
+  onClose,
+  mode: modeProp,
+  targetAluno: targetAlunoProp,
+  existingAlunos = [],
+  showDestinationPicker: showDestinationPickerProp,
+}: StudentImporterProps) => {
+  const { user } = useAuth();
+  const isEnrichLocked = modeProp === 'enrich' && !!targetAlunoProp?.id;
+  const showDestinationPicker =
+    showDestinationPickerProp ?? (!isEnrichLocked && existingAlunos.length > 0);
+
+  const [destinationChoice, setDestinationChoice] = useState<DestinationChoice>(
+    isEnrichLocked ? 'existing' : 'create',
+  );
+  const [selectedExistingId, setSelectedExistingId] = useState<string>(
+    targetAlunoProp?.id || '',
+  );
+  const [duplicateDismissed, setDuplicateDismissed] = useState(false);
+  const [lastCompleteResult, setLastCompleteResult] = useState<ImportCompleteResult | null>(
+    null,
+  );
+
+  const resolvedTargetAluno = useMemo((): ImportTargetAluno | null => {
+    if (isEnrichLocked && targetAlunoProp) return targetAlunoProp;
+    if (destinationChoice === 'existing' && selectedExistingId) {
+      const found = existingAlunos.find((a) => a.id === selectedExistingId);
+      if (found) {
+        return { id: found.id, nome: found.nome, email: found.email };
+      }
+    }
+    return null;
+  }, [
+    isEnrichLocked,
+    targetAlunoProp,
+    destinationChoice,
+    selectedExistingId,
+    existingAlunos,
+  ]);
+
+  const effectiveMode: ImportMode = resolvedTargetAluno ? 'enrich' : 'create';
+
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [parsedData, setParsedData] = useState<ParsedStudentData | null>(null);
   const [editableData, setEditableData] = useState<ParsedStudentData | null>(null);
+  const [importMeta, setImportMeta] = useState<ImportMeta | null>(null);
+  const [importWarnings, setImportWarnings] = useState<string[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [currentStep, setCurrentStep] = useState<'upload' | 'review' | 'complete'>('upload');
+  const [reviewTab, setReviewTab] = useState<'aluno' | 'dieta' | 'protocolo'>('aluno');
+  const [diasValidadeDieta, setDiasValidadeDieta] = useState('');
+  /** P1: substituir dieta activa em vez de acumular planos. */
+  const [replaceActiveDiet, setReplaceActiveDiet] = useState(false);
+
+  useEffect(() => {
+    if (effectiveMode === 'enrich') {
+      setReviewTab('dieta');
+    }
+  }, [effectiveMode]);
+
+  const duplicateMatches = useMemo(() => {
+    if (effectiveMode !== 'create' || !editableData) return [];
+    return findImportDuplicateMatches(editableData.aluno, existingAlunos);
+  }, [effectiveMode, editableData, existingAlunos]);
+
+  const confirmButtonLabel =
+    effectiveMode === 'enrich' && resolvedTargetAluno
+      ? `Confirmar e vincular a ${getAlunoFirstName(resolvedTargetAluno)}`
+      : 'Importar aluno';
+  const [rotacaoDieta, setRotacaoDieta] = useState<DietRotationFormState>({
+    rotacao_ativa: false,
+    blocos: [
+      { plano: 'A', dias: '3' },
+      { plano: 'B', dias: '1' },
+    ],
+    rotacao_data_inicio: '',
+  });
+  const [catalogFoods, setCatalogFoods] = useState<Food[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const catalogLinkedRef = useRef(false);
+
+  useEffect(() => {
+    if (currentStep !== 'review') return;
+    let cancelled = false;
+    (async () => {
+      setCatalogLoading(true);
+      const result = await getAllFoodsSafe();
+      if (cancelled) return;
+      if (result.success && result.data) {
+        setCatalogFoods(result.data);
+      } else {
+        toast.error('Não foi possível carregar o catálogo de alimentos para sugestões.');
+        setCatalogFoods([]);
+      }
+      setCatalogLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentStep]);
+
+  useEffect(() => {
+    if (catalogFoods.length === 0 || !editableData?.dieta || catalogLinkedRef.current) return;
+    catalogLinkedRef.current = true;
+    setEditableData((prev) => (prev ? linkAlimentosToCatalog(prev, catalogFoods) : prev));
+  }, [catalogFoods, editableData?.dieta]);
+
+  const isAcceptedImportFile = (f: File) => {
+    const name = f.name.toLowerCase();
+  const mime = (f.type || '').toLowerCase();
+    return (
+      name.endsWith('.pdf') ||
+      name.endsWith('.csv') ||
+      name.endsWith('.xlsx') ||
+      mime === 'application/pdf' ||
+      mime === 'text/csv' ||
+      mime === 'application/csv' ||
+      mime === 'text/comma-separated-values' ||
+      mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+      mime === 'application/vnd.ms-excel'
+    );
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
-      if (selectedFile.type !== 'application/pdf') {
-        toast.error('Por favor, selecione um arquivo PDF');
+      if (!isAcceptedImportFile(selectedFile)) {
+        toast.error('Selecione um arquivo PDF, CSV ou XLSX');
         return;
       }
       setFile(selectedFile);
       setParsedData(null);
       setEditableData(null);
+      setImportMeta(null);
+      setImportWarnings([]);
       setCurrentStep('upload');
+      catalogLinkedRef.current = false;
+      setCatalogFoods([]);
+      setRotacaoDieta({
+        rotacao_ativa: false,
+        blocos: [
+          { plano: 'A', dias: '3' },
+          { plano: 'B', dias: '1' },
+        ],
+        rotacao_data_inicio: '',
+      });
     }
   };
 
   const processFile = async () => {
     if (!file) return;
 
+    if (showDestinationPicker && destinationChoice === 'existing' && !selectedExistingId) {
+      toast.error('Selecione o aluno existente antes de processar a ficha');
+      return;
+    }
+
     setIsProcessing(true);
     try {
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result as string;
-          const base64Data = result.split(',')[1];
-          resolve(base64Data);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+      const token = apiClient.getToken();
+
+      if (!token) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      const formData = new FormData();
+      formData.append('pdf', file);
+
+      const response = await fetch(`${API_URL}/api/import/parse-pdf`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
       });
 
-      const { data, error } = await supabase.functions.invoke('parse-student-pdf', {
-        body: { pdfBase64: base64, fileName: file.name }
-      });
+      if (!response.ok) {
+        let errorMessage = 'Erro ao processar ficha';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorData.message || errorMessage;
+        } catch {
+          if (response.status === 413) {
+            errorMessage = 'Arquivo muito grande. Tamanho máximo: 50MB.';
+          } else {
+            const text = await response.text();
+            if (text.startsWith('<!DOCTYPE') || text.startsWith('<html')) {
+              errorMessage = `Erro do servidor (${response.status}). Tente novamente.`;
+            } else {
+              errorMessage = text.substring(0, 200) || errorMessage;
+            }
+          }
+        }
+        throw new Error(errorMessage);
+      }
 
-      if (error) throw error;
+      const data = await response.json();
       if (!data.success) throw new Error(data.error);
 
-      setParsedData(data.data);
-      setEditableData(JSON.parse(JSON.stringify(data.data))); // Deep clone
+      const meta: ImportMeta = data.meta || {};
+      setImportMeta(meta);
+      setImportWarnings(Array.isArray(data.warnings) ? data.warnings : []);
+
+      const conf = meta.confidence?.overall ?? null;
+      if (meta.source === 'local_structured' || meta.source === 'csv_blackhouse' || meta.source === 'xlsx_blackhouse') {
+        const spreadsheetMsg =
+          meta.source === 'xlsx_blackhouse'
+            ? 'Plano Excel (XLSX) Black House reconhecido — extração estruturada. Revise os dados antes de salvar.'
+            : meta.source === 'csv_blackhouse'
+              ? 'Plano CSV Black House reconhecido — extração estruturada. Revise os dados antes de salvar.'
+              : 'Plano Black House reconhecido — extração estruturada (rápida, sem IA). Revise os dados antes de salvar.';
+        toast.info(spreadsheetMsg, { duration: 5000 });
+      } else if (meta.aiUsed) {
+        if (conf !== null && conf < 70) {
+          toast.warning(`PDF processado com IA, mas a confiança está em ${conf}%. Revise atentamente.`);
+        } else {
+          toast.success('PDF processado com IA com sucesso!');
+        }
+      } else if (meta.source === 'local_fallback') {
+        toast.info(
+          'IA indisponível ou falhou — usámos o parser local. Revise os dados antes de salvar.',
+          { duration: 5000 },
+        );
+      } else {
+        toast.info('PDF processado. Revise os dados antes de salvar.', { duration: 4000 });
+      }
+
+      catalogLinkedRef.current = false;
+      setDiasValidadeDieta('');
+      const normalizedData = normalizeParsedStudentData(data.data);
+      setParsedData(normalizedData);
+      setEditableData(JSON.parse(JSON.stringify(normalizedData)));
+
+      const inferred = inferRotationFromImport({
+        refeicoes: normalizedData.dieta?.refeicoes,
+        textHints: [
+          normalizedData.orientacoes,
+          normalizedData.dieta?.nome,
+          normalizedData.dieta?.objetivo,
+        ],
+        dataRetorno: normalizedData.dieta?.data_retorno ?? null,
+      });
+      if (inferred) {
+        setRotacaoDieta(inferred.form);
+        toast.info(inferred.hint, { duration: 6000 });
+      } else {
+        setRotacaoDieta({
+          rotacao_ativa: false,
+          blocos: [
+            { plano: 'A', dias: '3' },
+            { plano: 'B', dias: '1' },
+          ],
+          rotacao_data_inicio: '',
+        });
+      }
+
+      const willEnrich =
+        isEnrichLocked || (destinationChoice === 'existing' && !!selectedExistingId);
+      setReviewTab(willEnrich ? 'dieta' : 'aluno');
+      setDuplicateDismissed(false);
       setCurrentStep('review');
-      toast.success('PDF processado com sucesso!');
     } catch (error: any) {
-      console.error('Erro ao processar PDF:', error);
-      toast.error(error.message || 'Erro ao processar PDF');
+      console.error('Erro ao processar ficha:', error);
+      toast.error(error.message || 'Erro ao processar ficha');
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // Update functions for editable data
-  const updateAluno = (field: keyof ParsedStudentData['aluno'], value: string | number) => {
+  // -------- Update helpers ---------
+  const updateAluno = (field: keyof ParsedStudentData['aluno'], value: string | number | undefined) => {
     if (!editableData) return;
     setEditableData({
       ...editableData,
-      aluno: { ...editableData.aluno, [field]: value }
+      aluno: { ...editableData.aluno, [field]: value },
     });
   };
 
-  const updateDieta = (field: 'nome' | 'objetivo', value: string) => {
+  const updateDieta = (field: 'nome' | 'objetivo' | 'data_retorno', value: string) => {
     if (!editableData?.dieta) return;
     setEditableData({
       ...editableData,
-      dieta: { ...editableData.dieta, [field]: value }
+      dieta: { ...editableData.dieta, [field]: value || null },
     });
   };
 
-  const updateRefeicao = (refeicaoIdx: number, field: 'nome', value: string) => {
+  const updateRefeicao = (
+    refeicaoIdx: number,
+    field: keyof Refeicao,
+    value: string,
+  ) => {
     if (!editableData?.dieta) return;
     const newRefeicoes = [...editableData.dieta.refeicoes];
     newRefeicoes[refeicaoIdx] = { ...newRefeicoes[refeicaoIdx], [field]: value };
     setEditableData({
       ...editableData,
-      dieta: { ...editableData.dieta, refeicoes: newRefeicoes }
+      dieta: { ...editableData.dieta, refeicoes: newRefeicoes },
     });
   };
 
-  const updateAlimento = (refeicaoIdx: number, alimentoIdx: number, field: 'nome' | 'quantidade', value: string) => {
+  const moveRefeicao = (refeicaoIdx: number, direction: -1 | 1) => {
     if (!editableData?.dieta) return;
+    const target = refeicaoIdx + direction;
+    if (target < 0 || target >= editableData.dieta.refeicoes.length) return;
     const newRefeicoes = [...editableData.dieta.refeicoes];
-    const newAlimentos = [...newRefeicoes[refeicaoIdx].alimentos];
-    newAlimentos[alimentoIdx] = { ...newAlimentos[alimentoIdx], [field]: value };
-    newRefeicoes[refeicaoIdx] = { ...newRefeicoes[refeicaoIdx], alimentos: newAlimentos };
+    const [moved] = newRefeicoes.splice(refeicaoIdx, 1);
+    newRefeicoes.splice(target, 0, moved);
     setEditableData({
       ...editableData,
-      dieta: { ...editableData.dieta, refeicoes: newRefeicoes }
+      dieta: { ...editableData.dieta, refeicoes: newRefeicoes },
+    });
+  };
+
+  const duplicateRefeicao = (refeicaoIdx: number) => {
+    if (!editableData?.dieta) return;
+    const newRefeicoes = [...editableData.dieta.refeicoes];
+    const copy = JSON.parse(JSON.stringify(newRefeicoes[refeicaoIdx])) as Refeicao;
+    newRefeicoes.splice(refeicaoIdx + 1, 0, copy);
+    setEditableData({
+      ...editableData,
+      dieta: { ...editableData.dieta, refeicoes: newRefeicoes },
+    });
+  };
+
+  const resolveFoodForAlimento = (alimento: Alimento): Food | null => {
+    if (alimento.alimento_id) {
+      return catalogFoods.find((f) => f.id === alimento.alimento_id) ?? null;
+    }
+    return findBestFoodMatch(alimento.nome, catalogFoods);
+  };
+
+  const updateAlimento = (
+    refeicaoIdx: number,
+    alimentoIdx: number,
+    field: 'nome' | 'quantidade',
+    value: string,
+  ) => {
+    setEditableData((prev) => {
+      if (!prev?.dieta?.refeicoes?.[refeicaoIdx]?.alimentos) return prev;
+      const newRefeicoes = prev.dieta.refeicoes.map((refeicao, rIdx) => {
+        if (rIdx !== refeicaoIdx) return refeicao;
+        const newAlimentos = refeicao.alimentos.map((alimento, aIdx) => {
+          if (aIdx !== alimentoIdx) return alimento;
+          if (field === 'quantidade') return { ...alimento, quantidade: value };
+          const match = findBestFoodMatch(value, catalogFoods);
+          const exact =
+            match && match.name.toLowerCase().trim() === value.toLowerCase().trim();
+          if (exact && match) {
+            return { ...alimento, nome: value, ...catalogFieldsFromFood(match) };
+          }
+          return {
+            ...alimento,
+            nome: value,
+            alimento_id: null,
+            tipo_id: null,
+            tipo_nome: null,
+          };
+        });
+        return { ...refeicao, alimentos: newAlimentos };
+      });
+      return { ...prev, dieta: { ...prev.dieta, refeicoes: newRefeicoes } };
+    });
+  };
+
+  const selectAlimentoFromCatalog = (
+    refeicaoIdx: number,
+    alimentoIdx: number,
+    food: Food,
+  ) => {
+    setEditableData((prev) => {
+      if (!prev?.dieta?.refeicoes?.[refeicaoIdx]?.alimentos) return prev;
+      const newRefeicoes = prev.dieta.refeicoes.map((refeicao, rIdx) => {
+        if (rIdx !== refeicaoIdx) return refeicao;
+        const newAlimentos = refeicao.alimentos.map((alimento, aIdx) =>
+          aIdx === alimentoIdx ? { ...alimento, ...catalogFieldsFromFood(food) } : alimento,
+        );
+        return { ...refeicao, alimentos: newAlimentos };
+      });
+      return { ...prev, dieta: { ...prev.dieta, refeicoes: newRefeicoes } };
+    });
+  };
+
+  const selectAlternativaFromCatalog = (
+    refeicaoIdx: number,
+    alimentoIdx: number,
+    altIdx: number,
+    food: Food,
+  ) => {
+    setEditableData((prev) => {
+      if (!prev?.dieta?.refeicoes?.[refeicaoIdx]?.alimentos?.[alimentoIdx]) return prev;
+      const newRefeicoes = prev.dieta.refeicoes.map((refeicao, rIdx) => {
+        if (rIdx !== refeicaoIdx) return refeicao;
+        const alimentos = refeicao.alimentos.map((alimento, aIdx) => {
+          if (aIdx !== alimentoIdx) return alimento;
+          const alts = (alimento.alternativas || []).map((alt, i) =>
+            i === altIdx ? { ...alt, ...catalogFieldsFromFood(food) } : alt,
+          );
+          return { ...alimento, alternativas: alts };
+        });
+        return { ...refeicao, alimentos };
+      });
+      return { ...prev, dieta: { ...prev.dieta, refeicoes: newRefeicoes } };
     });
   };
 
   const removeAlimento = (refeicaoIdx: number, alimentoIdx: number) => {
     if (!editableData?.dieta) return;
     const newRefeicoes = [...editableData.dieta.refeicoes];
-    newRefeicoes[refeicaoIdx].alimentos = newRefeicoes[refeicaoIdx].alimentos.filter((_, i) => i !== alimentoIdx);
+    newRefeicoes[refeicaoIdx].alimentos = newRefeicoes[refeicaoIdx].alimentos.filter(
+      (_, i) => i !== alimentoIdx,
+    );
     setEditableData({
       ...editableData,
-      dieta: { ...editableData.dieta, refeicoes: newRefeicoes }
+      dieta: { ...editableData.dieta, refeicoes: newRefeicoes },
     });
   };
 
@@ -179,11 +728,79 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
     newRefeicoes[refeicaoIdx].alimentos.push({ nome: '', quantidade: '' });
     setEditableData({
       ...editableData,
-      dieta: { ...editableData.dieta, refeicoes: newRefeicoes }
+      dieta: { ...editableData.dieta, refeicoes: newRefeicoes },
     });
   };
 
-  const updateFarmaco = (idx: number, field: 'nome' | 'dosagem' | 'observacao', value: string) => {
+  const updateAlternativa = (
+    refeicaoIdx: number,
+    alimentoIdx: number,
+    altIdx: number,
+    field: 'nome' | 'quantidade',
+    value: string,
+  ) => {
+    setEditableData((prev) => {
+      if (!prev?.dieta?.refeicoes?.[refeicaoIdx]?.alimentos?.[alimentoIdx]) return prev;
+      const newRefeicoes = prev.dieta.refeicoes.map((refeicao, rIdx) => {
+        if (rIdx !== refeicaoIdx) return refeicao;
+        const alimentos = refeicao.alimentos.map((alimento, aIdx) => {
+          if (aIdx !== alimentoIdx) return alimento;
+          const alts = (alimento.alternativas || []).map((alt, i) => {
+            if (i !== altIdx) return alt;
+            if (field === 'quantidade') return { ...alt, quantidade: value };
+            const match = findBestFoodMatch(value, catalogFoods);
+            const exact =
+              match && match.name.toLowerCase().trim() === value.toLowerCase().trim();
+            if (exact && match) {
+              return { ...alt, nome: value, ...catalogFieldsFromFood(match) };
+            }
+            return {
+              ...alt,
+              nome: value,
+              alimento_id: null,
+              tipo_id: null,
+              tipo_nome: null,
+            };
+          });
+          return { ...alimento, alternativas: alts };
+        });
+        return { ...refeicao, alimentos };
+      });
+      return { ...prev, dieta: { ...prev.dieta, refeicoes: newRefeicoes } };
+    });
+  };
+
+  const removeAlternativa = (refeicaoIdx: number, alimentoIdx: number, altIdx: number) => {
+    if (!editableData?.dieta) return;
+    const newRefeicoes = [...editableData.dieta.refeicoes];
+    const alimentos = [...newRefeicoes[refeicaoIdx].alimentos];
+    const alts = (alimentos[alimentoIdx].alternativas || []).filter((_, i) => i !== altIdx);
+    alimentos[alimentoIdx] = { ...alimentos[alimentoIdx], alternativas: alts };
+    newRefeicoes[refeicaoIdx] = { ...newRefeicoes[refeicaoIdx], alimentos };
+    setEditableData({
+      ...editableData,
+      dieta: { ...editableData.dieta, refeicoes: newRefeicoes },
+    });
+  };
+
+  const addAlternativa = (refeicaoIdx: number, alimentoIdx: number) => {
+    if (!editableData?.dieta) return;
+    const newRefeicoes = [...editableData.dieta.refeicoes];
+    const alimentos = [...newRefeicoes[refeicaoIdx].alimentos];
+    const alts = [...(alimentos[alimentoIdx].alternativas || []), { nome: '', quantidade: '' }];
+    alimentos[alimentoIdx] = { ...alimentos[alimentoIdx], alternativas: alts };
+    newRefeicoes[refeicaoIdx] = { ...newRefeicoes[refeicaoIdx], alimentos };
+    setEditableData({
+      ...editableData,
+      dieta: { ...editableData.dieta, refeicoes: newRefeicoes },
+    });
+  };
+
+  const updateFarmaco = (
+    idx: number,
+    field: 'nome' | 'dosagem' | 'observacao' | 'horario',
+    value: string,
+  ) => {
     if (!editableData?.farmacos) return;
     const newFarmacos = [...editableData.farmacos];
     newFarmacos[idx] = { ...newFarmacos[idx], [field]: value };
@@ -194,18 +811,22 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
     if (!editableData?.farmacos) return;
     setEditableData({
       ...editableData,
-      farmacos: editableData.farmacos.filter((_, i) => i !== idx)
+      farmacos: editableData.farmacos.filter((_, i) => i !== idx),
     });
   };
 
   const addFarmaco = () => {
     setEditableData({
       ...editableData!,
-      farmacos: [...(editableData?.farmacos || []), { nome: '', dosagem: '', observacao: '' }]
+      farmacos: [...(editableData?.farmacos || []), { nome: '', dosagem: '', observacao: '' }],
     });
   };
 
-  const updateSuplemento = (idx: number, field: 'nome' | 'dosagem' | 'observacao', value: string) => {
+  const updateSuplemento = (
+    idx: number,
+    field: 'nome' | 'dosagem' | 'observacao' | 'horario',
+    value: string,
+  ) => {
     if (!editableData?.suplementos) return;
     const newSupl = [...editableData.suplementos];
     newSupl[idx] = { ...newSupl[idx], [field]: value };
@@ -216,34 +837,36 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
     if (!editableData?.suplementos) return;
     setEditableData({
       ...editableData,
-      suplementos: editableData.suplementos.filter((_, i) => i !== idx)
+      suplementos: editableData.suplementos.filter((_, i) => i !== idx),
     });
   };
 
   const addSuplemento = () => {
     setEditableData({
       ...editableData!,
-      suplementos: [...(editableData?.suplementos || []), { nome: '', dosagem: '', observacao: '' }]
+      suplementos: [...(editableData?.suplementos || []), { nome: '', dosagem: '', observacao: '' }],
     });
   };
 
   const addRefeicao = () => {
     if (!editableData?.dieta) {
-      // If no diet exists yet, create one
       setEditableData({
         ...editableData!,
         dieta: {
           nome: 'Plano Alimentar',
           objetivo: '',
           refeicoes: [{ nome: '', alimentos: [{ nome: '', quantidade: '' }] }],
-          macros: {}
-        }
+          macros: {},
+        },
       });
     } else {
-      const newRefeicoes = [...editableData.dieta.refeicoes, { nome: '', alimentos: [{ nome: '', quantidade: '' }] }];
+      const newRefeicoes = [
+        ...editableData.dieta.refeicoes,
+        { nome: '', alimentos: [{ nome: '', quantidade: '' }] } as Refeicao,
+      ];
       setEditableData({
         ...editableData,
-        dieta: { ...editableData.dieta, refeicoes: newRefeicoes }
+        dieta: { ...editableData.dieta, refeicoes: newRefeicoes },
       });
     }
   };
@@ -253,527 +876,218 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
     const newRefeicoes = editableData.dieta.refeicoes.filter((_, i) => i !== refeicaoIdx);
     setEditableData({
       ...editableData,
-      dieta: { ...editableData.dieta, refeicoes: newRefeicoes }
+      dieta: { ...editableData.dieta, refeicoes: newRefeicoes },
     });
   };
 
-  // Standard meal options for quick add
-  const refeicoesDisponiveis = [
-    'Café da Manhã',
-    'Lanche da Manhã', 
-    'Almoço',
-    'Lanche da Tarde',
-    'Pré-Treino',
-    'Pós-Treino',
-    'Jantar',
-    'Ceia'
-  ];
+  // Macros declarados por refeição — soma só do plano activo (evita A+B em duplicado)
+  const macroStats = useMemo(() => {
+    if (!editableData?.dieta) return null;
+    const refeicoes = editableData.dieta.refeicoes || [];
+    const { hasMultiplosCardapios, planos } = inferImportMacroPlano(refeicoes);
+    let plano: DietPlano = planos[0] || "A";
+    if (hasMultiplosCardapios && rotacaoDieta.rotacao_ativa) {
+      const config = {
+        rotacao_ativa: true,
+        ...dietRotationToPayload(rotacaoDieta),
+        created_at: new Date().toISOString(),
+      };
+      plano = getPlanoForToday(config) ?? planos[0] ?? "A";
+    }
+    const totals = sumImportDeclaredMacros(refeicoes, plano);
+    const declared = editableData.dieta.macros || {};
+    return { totals, declared, hasMultiplosCardapios, plano };
+  }, [editableData, rotacaoDieta]);
+
+  const buildConfirmMeta = () => {
+    const nome = file?.name || importMeta?.fileName;
+    if (!nome) return undefined;
+    const lower = nome.toLowerCase();
+    let arquivo_tipo = 'outro';
+    if (lower.endsWith('.pdf')) arquivo_tipo = 'pdf';
+    else if (lower.endsWith('.csv')) arquivo_tipo = 'csv';
+    else if (lower.endsWith('.xlsx')) arquivo_tipo = 'xlsx';
+    return {
+      arquivo_nome: nome,
+      arquivo_tipo,
+      source: importMeta?.source,
+      ai_used: importMeta?.aiUsed ?? false,
+    };
+  };
+
+  const buildDietaPayload = () => {
+    if (!editableData?.dieta) return null;
+    const rawReturn = String(editableData.dieta.data_retorno || '').trim();
+    const data_retorno =
+      rawReturn && /^\d{4}-\d{2}-\d{2}/.test(rawReturn) ? rawReturn.slice(0, 10) : null;
+    return {
+      ...editableData.dieta,
+      data_retorno,
+      ...dietRotationToPayload(rotacaoDieta),
+    };
+  };
+
+  const showImportStatsToasts = (stats: Record<string, unknown> | null | undefined) => {
+    if (!stats) return;
+    const alimentos = stats.alimentos_criados;
+    if (Array.isArray(alimentos) && alimentos.length > 0) {
+      toast.info(
+        `${alimentos.length} novo(s) alimento(s): ${alimentos.slice(0, 3).join(', ')}${
+          alimentos.length > 3 ? ` e mais ${alimentos.length - 3}` : ''
+        }`,
+      );
+    }
+    if (typeof stats.itens_criados === 'number' && stats.itens_criados > 0) {
+      toast.success(`${stats.itens_criados} item(ns) de dieta criado(s)!`);
+    }
+    if (typeof stats.alternativas_criadas === 'number' && stats.alternativas_criadas > 0) {
+      toast.info(`${stats.alternativas_criadas} alternativa(s) como substituto`);
+    }
+    if (typeof stats.farmacos_criados === 'number' && stats.farmacos_criados > 0) {
+      toast.success(`${stats.farmacos_criados} fármaco(s) cadastrado(s)`);
+    }
+    if (typeof stats.suplementos_criados === 'number' && stats.suplementos_criados > 0) {
+      toast.success(`${stats.suplementos_criados} suplemento(s) cadastrado(s)`);
+    }
+  };
 
   const importStudent = async () => {
     if (!editableData) return;
 
-    // Validation
-    if (!editableData.aluno.nome.trim()) {
+    if (effectiveMode === 'enrich') {
+      if (!resolvedTargetAluno) {
+        toast.error('Selecione o aluno de destino antes de confirmar');
+        return;
+      }
+      const refeicoes = editableData.dieta?.refeicoes || [];
+      const hasMeals = refeicoes.some((r) => r.alimentos?.length > 0);
+      if (!hasMeals) {
+        toast.error('Informe ao menos uma refeição com alimentos para importar a dieta');
+        setReviewTab('dieta');
+        return;
+      }
+      const dietaPayload = buildDietaPayload();
+      if (!dietaPayload) {
+        toast.error('Nenhuma dieta para importar');
+        return;
+      }
+
+      setIsImporting(true);
+      try {
+        const result = await apiClient.importConfirmDietSafe(
+          {
+            aluno_id: resolvedTargetAluno.id,
+            replace_active_diet: replaceActiveDiet,
+            dieta: dietaPayload,
+            suplementos: editableData.suplementos || [],
+            farmacos: editableData.farmacos || [],
+          },
+          buildConfirmMeta(),
+        );
+
+        if (!result.success) {
+          throw new Error(result.error || 'Erro ao importar dieta');
+        }
+
+        const body = result.data as {
+          dieta?: { id?: string };
+          stats?: Record<string, unknown>;
+        } | null;
+
+        showImportStatsToasts(body?.stats);
+
+        const complete: ImportCompleteResult = {
+          mode: 'enrich',
+          alunoId: resolvedTargetAluno.id,
+          dietaId: body?.dieta?.id ?? null,
+          alunoNome: getAlunoDisplayName(resolvedTargetAluno),
+        };
+        setLastCompleteResult(complete);
+        setCurrentStep('complete');
+        toast.success(`Dieta vinculada a ${getAlunoDisplayName(resolvedTargetAluno)}`);
+        onImportComplete?.(complete);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Erro ao importar dieta';
+        console.error('Erro ao importar dieta:', error);
+        toast.error(message);
+      } finally {
+        setIsImporting(false);
+      }
+      return;
+    }
+
+    const alunoNome = editableData.aluno.nome?.trim() || '';
+    if (!alunoNome) {
       toast.error('Nome do aluno é obrigatório');
+      setReviewTab('aluno');
+      return;
+    }
+
+    if (duplicateMatches.length > 0 && !duplicateDismissed) {
+      toast.error('Confirme o alerta de possível duplicado ou escolha o aluno existente');
+      setReviewTab('aluno');
       return;
     }
 
     setIsImporting(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Usuário não autenticado');
 
-      const { data: aluno, error: alunoError } = await supabase
-        .from('alunos')
-        .insert({
-          nome: editableData.aluno.nome.trim(),
-          peso: editableData.aluno.peso || null,
-          objetivo: editableData.aluno.objetivo?.trim() || null,
-          coach_id: user.id,
-          email: `${editableData.aluno.nome.toLowerCase().replace(/\s+/g, '.')}@importado.temp`
-        })
-        .select()
-        .single();
-
-      if (alunoError) throw alunoError;
-
-      console.log('=== DEBUG: Verificando estrutura editableData ===');
-      console.log('editableData.dieta existe?', !!editableData.dieta);
-      console.log('editableData.dieta.refeicoes existe?', !!editableData.dieta?.refeicoes);
-      console.log('editableData.dieta.refeicoes.length:', editableData.dieta?.refeicoes?.length);
-      console.log('Refeições completas:', JSON.stringify(editableData.dieta?.refeicoes, null, 2));
-
-      if (editableData.dieta && editableData.dieta.refeicoes && editableData.dieta.refeicoes.length > 0) {
-        console.log('=== Entrando no bloco de criação da dieta ===');
-        const { data: dieta, error: dietaError } = await supabase
-          .from('dietas')
-          .insert({
-            nome: editableData.dieta.nome?.trim() || 'Plano Alimentar Importado',
-            objetivo: editableData.dieta.objetivo?.trim() || null,
-            aluno_id: aluno.id
-          })
-          .select()
-          .single();
-
-        if (dietaError) throw dietaError;
-
-        // Fetch existing foods to match
-        const { data: alimentosExistentes } = await supabase
-          .from('alimentos')
-          .select('id, nome');
-
-        const alimentosMap = new Map<string, string>();
-        const alimentosList: Array<{ id: string; nome: string; nomeNorm: string }> = [];
-        (alimentosExistentes || []).forEach(a => {
-          const nomeNorm = a.nome.toLowerCase().trim()
-            .normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // Remove acentos
-          alimentosMap.set(nomeNorm, a.id);
-          alimentosList.push({ id: a.id, nome: a.nome, nomeNorm });
-        });
-
-        // Helper function to normalize text for comparison
-        const normalizeText = (text: string): string => {
-          return text.toLowerCase().trim()
-            .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // Remove acentos
-            .replace(/[^a-z0-9\s]/g, ' ') // Remove caracteres especiais
-            .replace(/\s+/g, ' '); // Normaliza espaços
-        };
-
-        // Mapeamentos específicos para alimentos comuns que causam confusão
-        // Chave: termo normalizado do PDF → Nome normalizado no banco de dados
-        const mapeamentosEspecificos: Record<string, string> = {
-          // Ovos
-          'ovo': 'ovo inteiro',
-          'ovos': 'ovo inteiro',
-          'ovo cozido': 'ovo inteiro',
-          'ovo inteiro cozido': 'ovo inteiro',
-          // Pães
-          'pao de forma': 'pao de forma',
-          'pao de forma tradicional': 'pao de forma',
-          'pao de forma integral': 'pao de forma',
-          'pao frances': 'pao frances',
-          'pao': 'pao frances',
-          // Frango
-          'frango': 'peito de frango',
-          'peito de frango': 'peito de frango',
-          'frango grelhado': 'peito de frango',
-          // Arroz
-          'arroz': 'arroz branco',
-          'arroz branco': 'arroz branco',
-          'arroz cozido': 'arroz branco',
-          'arroz integral': 'arroz integral',
-          // Feijão - corrigido para nomes exatos do banco
-          'feijao': 'feijao carioca cozido',
-          'feijao carioca': 'feijao carioca cozido',
-          'feijao carioca cozido': 'feijao carioca cozido',
-          'feijao preto': 'feijao preto cozido',
-          'feijao preto cozido': 'feijao preto cozido',
-          // Batatas
-          'batata doce': 'batata doce',
-          'batata': 'batata inglesa',
-          // Frutas
-          'banana': 'banana prata',
-          'banana prata': 'banana prata',
-          'maca': 'maca',
-          'maça': 'maca',
-          // Cereais
-          'aveia': 'aveia',
-          // Laticínios
-          'leite': 'leite',
-          'leite desnatado': 'leite',
-          'leite integral': 'leite',
-          'queijo': 'queijo',
-          'queijo branco': 'queijo',
-          'queijo minas': 'queijo',
-          'iogurte': 'iogurte',
-          'iogurte natural': 'iogurte',
-          // Gorduras
-          'azeite': 'azeite',
-          'azeite de oliva': 'azeite',
-          // Carnes - corrigido para nomes exatos do banco
-          'carne': 'carne bovina patinho sem gordura grelhado',
-          'carne vermelha': 'carne bovina patinho sem gordura grelhado',
-          'carne vermelha magra': 'carne bovina patinho sem gordura grelhado',
-          'patinho': 'carne bovina patinho sem gordura grelhado',
-          'carne moida': 'carne bovina acem moido cozido',
-          // Peixes
-          'peixe': 'peixe',
-          'tilapia': 'tilapia',
-          'atum': 'atum',
-          // Outros
-          'mussarela': 'mussarela',
-          'requeijao': 'requeijao',
-          'whey': 'whey',
-          'whey protein': 'whey',
-          // Legumes - corrigido para nome exato do banco
-          'cenoura': 'cenoura',
-          'abobrinha': 'abobrinha italiana cozida',
-        };
-
-        // Helper function to find matching food with improved algorithm
-        // PRIORIDADE: 1) Mapeamento específico, 2) Match exato, 3) Match por proximidade
-        const findMatchingAlimento = (nomeAlimento: string): string | null => {
-          const nomeNormalizado = normalizeText(nomeAlimento);
-          
-          // 0. MAPEAMENTO ESPECÍFICO - prioridade máxima
-          if (mapeamentosEspecificos[nomeNormalizado]) {
-            const nomeMapeado = mapeamentosEspecificos[nomeNormalizado];
-            if (alimentosMap.has(nomeMapeado)) {
-              console.log(`Mapeamento específico: "${nomeAlimento}" → "${nomeMapeado}"`);
-              return alimentosMap.get(nomeMapeado)!;
+      const cleanCpf = onlyNumbers(editableData.aluno.cpf_cnpj || '');
+      const cleanTel = onlyNumbers(editableData.aluno.telefone || '');
+      const toOptionalNum = (v: unknown) => {
+        if (v === null || v === undefined) return undefined;
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0) return undefined;
+        return n;
+      };
+      const payload = {
+        ...editableData,
+        aluno: {
+          ...editableData.aluno,
+          cpf_cnpj: cleanCpf || null,
+          telefone: cleanTel || null,
+          email: editableData.aluno.email?.trim() || null,
+          peso: toOptionalNum(editableData.aluno.peso),
+          altura: toOptionalNum(editableData.aluno.altura),
+          idade: toOptionalNum(editableData.aluno.idade),
+        },
+        dieta: editableData.dieta
+          ? {
+              ...editableData.dieta,
+              ...dietRotationToPayload(rotacaoDieta),
             }
-          }
-          
-          // 1. MATCH EXATO - prioridade máxima
-          if (alimentosMap.has(nomeNormalizado)) {
-            console.log(`Match exato encontrado: "${nomeAlimento}" → id: ${alimentosMap.get(nomeNormalizado)}`);
-            return alimentosMap.get(nomeNormalizado)!;
-          }
-          
-          // 2. Busca por nome que contenha exatamente o termo (para variações como "pão de forma tradicional")
-          for (const alimento of alimentosList) {
-            // Match se o nome do banco contém exatamente o nome buscado
-            if (alimento.nomeNorm === nomeNormalizado) {
-              console.log(`Match exato por nomeNorm: "${nomeAlimento}" → "${alimento.nome}"`);
-              return alimento.id;
-            }
-          }
-          
-          // 3. Busca por nome mais específico primeiro (evita "ovo" virar "clara de ovo")
-          // O nome mais específico é aquele que contém o termo buscado E tem menos caracteres extras
-          let matchMaisEspecifico: { id: string; nome: string; diff: number } | null = null;
-          
-          for (const alimento of alimentosList) {
-            // Se o nome do banco contém o nome buscado
-            if (alimento.nomeNorm.includes(nomeNormalizado)) {
-              const diff = alimento.nomeNorm.length - nomeNormalizado.length;
-              if (!matchMaisEspecifico || diff < matchMaisEspecifico.diff) {
-                matchMaisEspecifico = { id: alimento.id, nome: alimento.nome, diff };
-              }
-            }
-            // Se o nome buscado contém o nome do banco (ex: "pão de forma tradicional" contém "pão de forma")
-            if (nomeNormalizado.includes(alimento.nomeNorm)) {
-              const diff = nomeNormalizado.length - alimento.nomeNorm.length;
-              if (!matchMaisEspecifico || diff < matchMaisEspecifico.diff) {
-                matchMaisEspecifico = { id: alimento.id, nome: alimento.nome, diff };
-              }
-            }
-          }
-          
-          if (matchMaisEspecifico && matchMaisEspecifico.diff <= 15) {
-            console.log(`Match específico: "${nomeAlimento}" → "${matchMaisEspecifico.nome}" (diff: ${matchMaisEspecifico.diff})`);
-            return matchMaisEspecifico.id;
-          }
-          
-          console.log(`Alimento não encontrado, será criado: "${nomeAlimento}"`);
-          return null;
-        };
+          : undefined,
+      };
 
-        // Função simples para obter o nome a ser salvo (mantém o nome original)
-        const encontrarAlimentoBase = (nome: string): string => {
-          return nome.trim();
-        };
+      const result = await apiClient.importConfirmSafe(payload, buildConfirmMeta());
 
-        // Map meal names to standard format: "Refeição 1", "Refeição 2", etc.
-        // Mantém nomenclatura simples para evitar problemas de mapeamento
-        const mapRefeicaoName = (nome: string): string => {
-          const nomeNormalizado = nome.toLowerCase().trim();
-          
-          // Extrai o número da refeição se existir
-          const matchNumero = nomeNormalizado.match(/(?:refeição|refeicao|ref)\s*(\d+)/);
-          if (matchNumero) {
-            return `Refeição ${matchNumero[1]}`;
-          }
-          
-          // Mapeia nomes tradicionais para números sequenciais
-          const mappingsParaNumero: Record<string, string> = {
-            'café da manhã': 'Refeição 1',
-            'cafe da manha': 'Refeição 1',
-            'lanche da manhã': 'Refeição 2',
-            'lanche da manha': 'Refeição 2',
-            'almoço': 'Refeição 3',
-            'almoco': 'Refeição 3',
-            'lanche da tarde': 'Refeição 4',
-            'lanche': 'Refeição 4',
-            'jantar': 'Refeição 5',
-            'ceia': 'Refeição 6',
-            'pré-treino': 'Refeição 7',
-            'pre treino': 'Refeição 7',
-          };
-          
-          return mappingsParaNumero[nomeNormalizado] || nome;
-        };
-
-        // Import diet items (refeicoes)
-        const itensToInsert: Array<{
-          dieta_id: string;
-          alimento_id: string;
-          quantidade: number;
-          refeicao: string;
-        }> = [];
-
-        const alimentosCadastrados: string[] = [];
-
-        // Helper to determine food type based on name
-        const inferirTipoAlimento = (nome: string): string => {
-          const nomeNorm = normalizeText(nome);
-          
-          // Proteínas
-          if (/frango|carne|peixe|atum|sardinha|ovo|peito|patinho|file|tilapia|salmao|camarao|lagosta|porco|peru|chester|linguica|bacon|presunto|mortadela|salsicha|whey|albumina|caseina/.test(nomeNorm)) {
-            return '33acba74-bbc2-446a-8476-401693c56baf'; // Proteínas
-          }
-          
-          // Carboidratos
-          if (/arroz|batata|macarrao|pao|aveia|tapioca|mandioca|inhame|milho|cereal|granola|biscoito|bolacha|torrada|cuscuz|quinoa|feijao|lentilha|grao de bico/.test(nomeNorm)) {
-            return 'dea776a3-f586-40bb-a945-6f466b8c3e31'; // Carboidratos
-          }
-          
-          // Lipídeos
-          if (/azeite|oleo|manteiga|castanha|amendoim|nozes|amendoa|abacate|coco|linhaça|chia|gergelim|pasta de amendoim|oleaginosa/.test(nomeNorm)) {
-            return 'e5863a2d-695d-46a7-9ef5-d7e3cf87ee1c'; // Lipídeos
-          }
-          
-          // Frutas
-          if (/banana|maca|laranja|morango|uva|manga|mamao|melao|melancia|abacaxi|pera|pessego|kiwi|limao|acerola|goiaba|maracuja|framboesa|mirtilo|amora|fruta/.test(nomeNorm)) {
-            return 'c0a07056-794b-424a-acd6-14215b9be248'; // Frutas
-          }
-          
-          // Vegetais
-          if (/alface|tomate|cenoura|brocolis|couve|espinafre|pepino|abobrinha|berinjela|pimentao|cebola|alho|rucula|agriã|repolho|beterraba|vegetal|legume|salada|verdura/.test(nomeNorm)) {
-            return '92b02101-c685-4fd7-956d-51fd21673690'; // Vegetais
-          }
-          
-          // Laticínios
-          if (/leite|queijo|iogurte|requeijao|cream cheese|ricota|cottage|nata|creme de leite/.test(nomeNorm)) {
-            return 'b46fa5f1-7333-4313-a747-9ea6efbfe3a7'; // Laticínios
-          }
-          
-          // Default: Carboidratos (mais comum em dietas)
-          return 'dea776a3-f586-40bb-a945-6f466b8c3e31';
-        };
-
-        // Helper to infer protein origin - IMPORTANTE: valores devem ser 'Animal', 'Vegetal' ou 'Mista'
-        const inferirOrigemPtn = (nome: string): string => {
-          const nomeNorm = normalizeText(nome);
-          
-          if (/frango|carne|peixe|ovo|atum|sardinha|peito|patinho|file|tilapia|salmao|camarao|porco|peru|presunto|whey|albumina|caseina|leite|queijo|iogurte/.test(nomeNorm)) {
-            return 'Animal';
-          }
-          
-          if (/feijao|lentilha|grao de bico|soja|tofu|quinoa|ervilha|amendoim|castanha/.test(nomeNorm)) {
-            return 'Vegetal';
-          }
-          
-          return 'Mista';
-        };
-
-        // Valores nutricionais estimados por tipo de alimento (por 100g)
-        const valoresNutricionaisEstimados: Record<string, { kcal: number; ptn: number; cho: number; lip: number }> = {
-          'proteinas': { kcal: 165, ptn: 31, cho: 0, lip: 3.6 }, // Frango
-          'carboidratos': { kcal: 130, ptn: 2.7, cho: 28, lip: 0.3 }, // Arroz
-          'lipideos': { kcal: 884, ptn: 0, cho: 0, lip: 100 }, // Azeite
-          'frutas': { kcal: 52, ptn: 0.3, cho: 14, lip: 0.2 }, // Maçã
-          'vegetais': { kcal: 25, ptn: 2, cho: 4, lip: 0.4 }, // Brócolis
-          'laticinios': { kcal: 42, ptn: 3.4, cho: 5, lip: 1 }, // Leite
-          'default': { kcal: 100, ptn: 10, cho: 10, lip: 5 }
-        };
-
-        // Function to create new food automatically with better nutritional estimates
-        const criarAlimentoAutomatico = async (nomeAlimento: string, quantidade: string): Promise<string | null> => {
-          try {
-            // Usa o nome base normalizado para evitar duplicatas
-            const nomeBase = encontrarAlimentoBase(nomeAlimento);
-            const nomeParaSalvar = nomeBase !== nomeAlimento ? nomeBase : nomeAlimento.trim();
-            
-            const tipoId = inferirTipoAlimento(nomeParaSalvar);
-            const origemPtn = inferirOrigemPtn(nomeParaSalvar);
-            
-            // Determina valores nutricionais baseados no tipo
-            let valoresNutr = valoresNutricionaisEstimados['default'];
-            const nomeNorm = normalizeText(nomeParaSalvar);
-            
-            if (/frango|carne|peixe|ovo|atum|whey|peito/.test(nomeNorm)) {
-              valoresNutr = valoresNutricionaisEstimados['proteinas'];
-            } else if (/arroz|batata|pao|macarrao|aveia|tapioca/.test(nomeNorm)) {
-              valoresNutr = valoresNutricionaisEstimados['carboidratos'];
-            } else if (/azeite|oleo|manteiga|castanha|amendoim/.test(nomeNorm)) {
-              valoresNutr = valoresNutricionaisEstimados['lipideos'];
-            } else if (/banana|maca|laranja|fruta|morango/.test(nomeNorm)) {
-              valoresNutr = valoresNutricionaisEstimados['frutas'];
-            } else if (/alface|tomate|brocolis|cenoura|vegetal/.test(nomeNorm)) {
-              valoresNutr = valoresNutricionaisEstimados['vegetais'];
-            } else if (/leite|queijo|iogurte|requeijao/.test(nomeNorm)) {
-              valoresNutr = valoresNutricionaisEstimados['laticinios'];
-            }
-            
-            // Verifica se já existe um alimento com nome similar antes de criar
-            const { data: existente } = await supabase
-              .from('alimentos')
-              .select('id')
-              .ilike('nome', `%${nomeParaSalvar}%`)
-              .limit(1);
-            
-            if (existente && existente.length > 0) {
-              console.log(`Alimento similar já existe: "${nomeParaSalvar}", usando ID existente`);
-              return existente[0].id;
-            }
-            
-            // Cria o novo alimento com valores estimados
-            const { data: novoAlimento, error } = await supabase
-              .from('alimentos')
-              .insert({
-                nome: nomeParaSalvar,
-                tipo_id: tipoId,
-                origem_ptn: origemPtn,
-                quantidade_referencia_g: 100, // Sempre 100g como referência
-                kcal_por_referencia: valoresNutr.kcal,
-                ptn_por_referencia: valoresNutr.ptn,
-                cho_por_referencia: valoresNutr.cho,
-                lip_por_referencia: valoresNutr.lip,
-                info_adicional: `Cadastrado automaticamente via importação de PDF. Valores nutricionais estimados - revisar.`,
-                autor: user.id
-              })
-              .select('id')
-              .single();
-
-            if (error) {
-              console.error('Erro ao criar alimento:', nomeParaSalvar, error);
-              return null;
-            }
-
-            alimentosCadastrados.push(nomeParaSalvar);
-            console.log(`Novo alimento criado: "${nomeParaSalvar}" com valores estimados`);
-            return novoAlimento.id;
-          } catch (err) {
-            console.error('Erro ao criar alimento automaticamente:', err);
-            return null;
-          }
-        };
-
-        console.log('=== DEBUG: Refeições para processar ===');
-        console.log('Total de refeições:', editableData.dieta.refeicoes.length);
-        editableData.dieta.refeicoes.forEach((ref, idx) => {
-          console.log(`Refeição ${idx + 1}: "${ref.nome}" - ${ref.alimentos.length} alimentos`);
-        });
-        
-        for (const refeicao of editableData.dieta.refeicoes) {
-          console.log(`Processando refeição: "${refeicao.nome}" com ${refeicao.alimentos.length} alimentos`);
-          
-          // Skip empty meals
-          if (!refeicao.alimentos || refeicao.alimentos.length === 0) {
-            console.log(`Pulando refeição vazia: "${refeicao.nome}"`);
-            continue;
-          }
-          
-          const refeicaoNome = mapRefeicaoName(refeicao.nome);
-          console.log(`Nome mapeado: "${refeicao.nome}" → "${refeicaoNome}"`);
-          
-          for (const alimento of refeicao.alimentos) {
-            if (!alimento.nome.trim()) continue;
-            
-            let alimentoId = findMatchingAlimento(alimento.nome);
-            
-            // Se não encontrou, cria automaticamente
-            if (!alimentoId) {
-              alimentoId = await criarAlimentoAutomatico(alimento.nome, alimento.quantidade);
-            }
-            
-            if (alimentoId) {
-              // Parse quantity - extract number from string like "100g" or "2 unidades"
-              const qtdMatch = alimento.quantidade.match(/[\d.,]+/);
-              const quantidade = qtdMatch ? parseFloat(qtdMatch[0].replace(',', '.')) : 100;
-              
-              itensToInsert.push({
-                dieta_id: dieta.id,
-                alimento_id: alimentoId,
-                quantidade: quantidade,
-                refeicao: refeicaoNome
-              });
-            }
-          }
-        }
-
-        console.log('=== DEBUG: itensToInsert ===');
-        console.log('Total de itens para inserir:', itensToInsert.length);
-        console.log('Itens:', JSON.stringify(itensToInsert, null, 2));
-        
-        if (itensToInsert.length > 0) {
-          console.log('Inserindo itens no banco de dados...');
-          const { data: insertedItens, error: itensError } = await supabase
-            .from('itens_dieta')
-            .insert(itensToInsert)
-            .select();
-          
-          if (itensError) {
-            console.error('Erro ao inserir itens da dieta:', itensError);
-            console.error('Detalhes do erro:', JSON.stringify(itensError, null, 2));
-            toast.error('Erro ao salvar alguns itens da dieta: ' + itensError.message);
-          } else {
-            console.log('Itens inseridos com sucesso:', insertedItens?.length);
-          }
-        } else {
-          console.warn('ATENÇÃO: Nenhum item para inserir!');
-        }
-
-        // Import farmacos
-        if (editableData.farmacos && editableData.farmacos.length > 0) {
-          const farmacosInsert = editableData.farmacos
-            .filter(f => f.nome.trim())
-            .map(f => ({
-              dieta_id: dieta.id,
-              nome: f.nome.trim(),
-              dosagem: f.dosagem.trim(),
-              observacao: f.observacao?.trim() || null
-            }));
-
-          if (farmacosInsert.length > 0) {
-            await supabase.from('dieta_farmacos').insert(farmacosInsert);
-          }
-        }
-
-        // Import suplementos
-        if (editableData.suplementos && editableData.suplementos.length > 0) {
-          const suplementosInsert = editableData.suplementos
-            .filter(s => s.nome.trim())
-            .map(s => ({
-              dieta_id: dieta.id,
-              nome: s.nome.trim(),
-              dosagem: s.dosagem.trim(),
-              observacao: s.observacao?.trim() || 'Suplemento'
-            }));
-
-          if (suplementosInsert.length > 0) {
-            await supabase.from('dieta_farmacos').insert(suplementosInsert);
-          }
-        }
-
-        // Show detailed feedback
-        const totalAlimentos = editableData.dieta.refeicoes.reduce(
-          (acc, r) => acc + r.alimentos.filter(a => a.nome.trim()).length, 0
-        );
-        const importados = itensToInsert.length;
-        
-        if (alimentosCadastrados.length > 0) {
-          toast.info(
-            `${alimentosCadastrados.length} novo(s) alimento(s) cadastrado(s): ${alimentosCadastrados.slice(0, 3).join(', ')}${alimentosCadastrados.length > 3 ? ` e mais ${alimentosCadastrados.length - 3}` : ''}`
-          );
-        }
-        
-        if (importados === totalAlimentos) {
-          toast.success(`Todos os ${totalAlimentos} alimentos foram importados!`);
-        } else if (importados > 0) {
-          toast.success(`${importados} de ${totalAlimentos} alimentos importados com sucesso!`);
-        } else if (totalAlimentos > 0) {
-          toast.error('Erro ao importar alimentos da dieta.');
-        }
+      if (!result.success) {
+        throw new Error(result.error || 'Erro ao importar aluno');
       }
 
+      const body = result.data as {
+        aluno?: { id?: string; nome?: string };
+        dieta?: { id?: string };
+        stats?: Record<string, unknown>;
+      } | null;
+
+      showImportStatsToasts(body?.stats);
+
+      const complete: ImportCompleteResult = {
+        mode: 'create',
+        alunoId: body?.aluno?.id || '',
+        dietaId: body?.dieta?.id ?? null,
+        alunoNome: body?.aluno?.nome || alunoNome,
+      };
+      setLastCompleteResult(complete);
       setCurrentStep('complete');
-      toast.success(`Aluno "${editableData.aluno.nome}" importado com sucesso!`);
-      onImportComplete?.();
-    } catch (error: any) {
+      toast.success(`Aluno "${complete.alunoNome}" importado com sucesso!`);
+      onImportComplete?.(complete);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Erro ao importar aluno';
       console.error('Erro ao importar:', error);
-      toast.error(error.message || 'Erro ao importar aluno');
+      toast.error(message);
     } finally {
       setIsImporting(false);
     }
@@ -783,52 +1097,148 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
     setFile(null);
     setParsedData(null);
     setEditableData(null);
+    setImportMeta(null);
+    setImportWarnings([]);
     setCurrentStep('upload');
+    setReviewTab(effectiveMode === 'enrich' ? 'dieta' : 'aluno');
+    setDuplicateDismissed(false);
+    setLastCompleteResult(null);
+    setDiasValidadeDieta('');
+    setRotacaoDieta({
+      rotacao_ativa: false,
+      blocos: [
+        { plano: 'A', dias: '3' },
+        { plano: 'B', dias: '1' },
+      ],
+      rotacao_data_inicio: '',
+    });
+    if (!isEnrichLocked) {
+      setDestinationChoice('create');
+      setSelectedExistingId('');
+    }
   };
 
-  return (
-    <div className="space-y-6">
-      {/* Steps indicator */}
-      <div className="flex items-center gap-4">
-        <div className={`flex items-center gap-2 ${currentStep === 'upload' ? 'text-primary' : 'text-muted-foreground'}`}>
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${currentStep === 'upload' ? 'bg-primary text-primary-foreground' : 'bg-green-500 text-white'}`}>
-            {currentStep === 'upload' ? '1' : <Check className="w-4 h-4" />}
-          </div>
-          <span className="font-medium text-sm">Upload</span>
-        </div>
-        <ChevronRight className="w-4 h-4 text-muted-foreground" />
-        <div className={`flex items-center gap-2 ${currentStep === 'review' ? 'text-primary' : 'text-muted-foreground'}`}>
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${currentStep === 'review' ? 'bg-primary text-primary-foreground' : currentStep === 'complete' ? 'bg-green-500 text-white' : 'bg-muted'}`}>
-            {currentStep === 'complete' ? <Check className="w-4 h-4" /> : '2'}
-          </div>
-          <span className="font-medium text-sm">Revisar</span>
-        </div>
-        <ChevronRight className="w-4 h-4 text-muted-foreground" />
-        <div className={`flex items-center gap-2 ${currentStep === 'complete' ? 'text-primary' : 'text-muted-foreground'}`}>
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${currentStep === 'complete' ? 'bg-green-500 text-white' : 'bg-muted'}`}>
-            {currentStep === 'complete' ? <Check className="w-4 h-4" /> : '3'}
-          </div>
-          <span className="font-medium text-sm">Concluído</span>
-        </div>
-      </div>
+  const handleUseExistingFromDuplicate = (alunoId: string) => {
+    setDestinationChoice('existing');
+    setSelectedExistingId(alunoId);
+    setDuplicateDismissed(true);
+    setReviewTab('dieta');
+    toast.info('Destino alterado para o aluno existente. Revise a dieta e confirme.');
+  };
 
-      {/* Upload Step */}
+  const handleCpfCnpjChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const masked = maskCpfCnpj(e.target.value);
+    updateAluno('cpf_cnpj', masked);
+  };
+
+  const confidence = importMeta?.confidence;
+  const confColor =
+    !confidence
+      ? 'bg-muted text-muted-foreground'
+      : confidence.overall >= 85
+      ? 'bg-green-500/10 text-green-600 border-green-500/30 dark:text-green-400'
+      : confidence.overall >= 70
+      ? 'bg-amber-500/10 text-amber-600 border-amber-500/30 dark:text-amber-400'
+      : 'bg-red-500/10 text-red-600 border-red-500/30 dark:text-red-400';
+
+  const extractionLabel =
+    importMeta?.source === 'xlsx_blackhouse'
+      ? 'Excel Black House'
+      : importMeta?.source === 'csv_blackhouse'
+      ? 'CSV Black House'
+      : importMeta?.source === 'local_structured'
+      ? 'Parser estruturado'
+      : importMeta?.aiUsed
+        ? `IA (${importMeta.provider?.provider || 'configurada'})`
+        : importMeta?.source === 'local_fallback'
+          ? 'Parser local (fallback)'
+          : 'Parser local';
+
+  return (
+    <div
+      className={cn(
+        'space-y-4',
+        currentStep === 'review' && 'flex flex-col flex-1 min-h-0 overflow-hidden',
+      )}
+    >
+      <ImportStepper currentStep={currentStep} />
       {currentStep === 'upload' && (
-        <Card>
+        <Card className="border-dashed shadow-none">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Upload className="w-5 h-5" />
-              Upload do PDF
+              Upload da ficha
             </CardTitle>
             <CardDescription>
-              Faça upload da ficha do aluno em formato PDF. O sistema irá extrair automaticamente os dados usando IA.
+              {effectiveMode === 'enrich'
+                ? 'Envie a ficha para importar dieta e protocolo ao aluno seleccionado.'
+                : 'Envie a ficha em PDF, CSV ou Excel (XLSX). O modelo Black House é lido directamente — aba A ou B.'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {resolvedTargetAluno ? (
+              <ImportDestinationBanner
+                nome={getAlunoDisplayName(resolvedTargetAluno)}
+                email={resolvedTargetAluno.email}
+                locked={isEnrichLocked || destinationChoice === 'existing'}
+              />
+            ) : null}
+
+            {showDestinationPicker && !isEnrichLocked ? (
+              <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
+                <Label className="text-sm font-medium">Para quem é esta ficha?</Label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={destinationChoice === 'create' ? 'default' : 'outline'}
+                    className="flex-1"
+                    onClick={() => {
+                      setDestinationChoice('create');
+                      setSelectedExistingId('');
+                      setDuplicateDismissed(false);
+                    }}
+                  >
+                    Criar novo aluno
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={destinationChoice === 'existing' ? 'default' : 'outline'}
+                    className="flex-1"
+                    onClick={() => setDestinationChoice('existing')}
+                  >
+                    Aluno existente
+                  </Button>
+                </div>
+                {destinationChoice === 'existing' ? (
+                  <Select
+                    value={selectedExistingId || undefined}
+                    onValueChange={(value) => {
+                      setSelectedExistingId(value);
+                      setDuplicateDismissed(false);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione o aluno..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {existingAlunos.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.nome}
+                          {a.email ? ` · ${a.email}` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-8 text-center hover:border-primary/50 transition-colors">
               <input
                 type="file"
-                accept=".pdf"
+                accept=".pdf,.csv,.xlsx"
                 onChange={handleFileChange}
                 className="hidden"
                 id="pdf-upload"
@@ -837,15 +1247,17 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
               <label htmlFor="pdf-upload" className="cursor-pointer">
                 {isProcessing ? (
                   <div className="flex flex-col items-center gap-4">
-                    <Loader2 className="w-12 h-12 text-primary animate-spin" />
-                    <p className="text-muted-foreground">Processando PDF com IA...</p>
+                    <Loader2 className="w-12 h-12 text-primary motion-safe:animate-spin" />
+                    <p className="text-muted-foreground">Processando ficha...</p>
                   </div>
                 ) : (
                   <div className="flex flex-col items-center gap-4">
                     <FileText className="w-12 h-12 text-muted-foreground" />
                     <div>
-                      <p className="font-medium">Clique para selecionar ou arraste o PDF</p>
-                      <p className="text-sm text-muted-foreground">Apenas arquivos PDF são aceitos</p>
+                      <p className="font-medium">Clique para selecionar ou arraste o ficheiro</p>
+                      <p className="text-sm text-muted-foreground">
+                        PDF, CSV ou XLSX (modelo Black House) · até 50MB
+                      </p>
                     </div>
                   </div>
                 )}
@@ -858,43 +1270,112 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                   <FileText className="h-4 w-4 text-muted-foreground" />
                   <span className="text-sm font-medium">{file.name}</span>
                 </div>
-                <Button onClick={processFile} size="sm">
-                  Processar PDF
+                <Button
+                  onClick={processFile}
+                  size="sm"
+                  disabled={
+                    showDestinationPicker &&
+                    destinationChoice === 'existing' &&
+                    !selectedExistingId
+                  }
+                >
+                  Processar ficha
                 </Button>
               </div>
             )}
 
             <div className="flex items-center gap-2 p-4 bg-muted/50 rounded-lg text-sm text-muted-foreground">
               <AlertCircle className="h-4 w-4 flex-shrink-0" />
-              <span>O sistema extrai automaticamente: dados do aluno, dieta, refeições, suplementos e fármacos.</span>
+              <span>
+                Extraímos: dados do aluno, dieta, refeições com horário/observação, substitutos, fármacos, suplementos e orientações.
+              </span>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Review Step */}
       {currentStep === 'review' && editableData && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Edit2 className="h-5 w-5 text-primary" />
-              Revisar e Editar Dados
-            </CardTitle>
-            <CardDescription>
-              Revise e corrija os dados extraídos antes de importar
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea className="h-[450px] pr-4">
-              <div className="space-y-6">
-                {/* Student Info */}
+        <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          {resolvedTargetAluno ? (
+            <ImportDestinationBanner
+              className="shrink-0 mb-2"
+              nome={getAlunoDisplayName(resolvedTargetAluno)}
+              email={resolvedTargetAluno.email}
+              locked
+            />
+          ) : null}
+          <p className="shrink-0 text-sm text-muted-foreground">
+            {effectiveMode === 'enrich'
+              ? 'Revise a dieta e o protocolo antes de confirmar o vínculo.'
+              : (
+                <>
+                  Revise os dados extraídos. Apenas o{' '}
+                  <strong className="text-foreground">nome</strong> é obrigatório.
+                </>
+              )}
+          </p>
+          {effectiveMode === 'create' ? (
+            <ImportDuplicateAlert
+              matches={duplicateMatches}
+              dismissed={duplicateDismissed}
+              onUseExisting={handleUseExistingFromDuplicate}
+              onContinueAnyway={() => setDuplicateDismissed(true)}
+            />
+          ) : null}
+          <div className="flex flex-col flex-1 min-h-0 overflow-hidden pt-0">
+            {importMeta && (
+              <div className="mt-3 shrink-0">
+                <ImportExtractionSummary
+                  confidence={confidence}
+                  extractionLabel={extractionLabel}
+                  numPages={importMeta.numPages}
+                  confColor={confColor}
+                  warnings={importWarnings}
+                />
+              </div>
+            )}
+
+            <Tabs
+              value={reviewTab}
+              onValueChange={(v) => setReviewTab(v as typeof reviewTab)}
+              className="mt-3 flex flex-col flex-1 min-h-0 overflow-hidden"
+            >
+              <TabsList
+                className={cn(
+                  'shrink-0 grid h-10 w-full',
+                  effectiveMode === 'enrich' ? 'grid-cols-2' : 'grid-cols-3',
+                )}
+              >
+                {effectiveMode !== 'enrich' ? (
+                  <TabsTrigger value="aluno" className="text-xs sm:text-sm">
+                    Aluno
+                  </TabsTrigger>
+                ) : null}
+                <TabsTrigger value="dieta" className="gap-1.5 text-xs sm:text-sm">
+                  Dieta
+                  {editableData.dieta?.refeicoes?.length ? (
+                    <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                      {editableData.dieta.refeicoes.length}
+                    </Badge>
+                  ) : null}
+                </TabsTrigger>
+                <TabsTrigger value="protocolo" className="text-xs sm:text-sm">Protocolo</TabsTrigger>
+              </TabsList>
+              <div
+                className="mt-3 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain touch-pan-y pr-1 -mr-1"
+                onWheel={(e) => e.stopPropagation()}
+              >
+                <TabsContent value="aluno" className="mt-0 space-y-3 focus-visible:outline-none">
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">
                     <User className="h-4 w-4 text-primary" />
                     <h4 className="font-medium">Dados do Aluno</h4>
+                    <Badge variant="outline" className="text-[10px] ml-2">
+                      apenas <span className="font-semibold mx-1">Nome</span> é obrigatório
+                    </Badge>
                   </div>
-                  <div className="grid grid-cols-2 gap-3 p-4 bg-muted/50 rounded-lg">
-                    <div className="col-span-2 space-y-1">
+                  <div className="grid grid-cols-1 gap-3 rounded-lg bg-muted/40 p-4 sm:grid-cols-2">
+                    <div className="space-y-1">
                       <Label className="text-xs">Nome *</Label>
                       <Input
                         value={editableData.aluno.nome}
@@ -903,11 +1384,46 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                       />
                     </div>
                     <div className="space-y-1">
+                      <Label className="text-xs">CPF/CNPJ</Label>
+                      <Input
+                        value={editableData.aluno.cpf_cnpj || ''}
+                        onChange={handleCpfCnpjChange}
+                        placeholder="Opcional"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Email</Label>
+                      <Input
+                        value={editableData.aluno.email || ''}
+                        onChange={(e) => updateAluno('email', e.target.value)}
+                        placeholder="Opcional (gerado se vazio)"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Objetivo</Label>
+                      <Select
+                        value={editableData.aluno.objetivo || ''}
+                        onValueChange={(value) => updateAluno('objetivo', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Emagrecimento">Emagrecimento</SelectItem>
+                          <SelectItem value="Hipertrofia">Hipertrofia</SelectItem>
+                          <SelectItem value="Condicionamento">Condicionamento</SelectItem>
+                          <SelectItem value="Reabilitação">Reabilitação</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
                       <Label className="text-xs">Peso (kg)</Label>
                       <Input
                         type="number"
                         value={editableData.aluno.peso || ''}
-                        onChange={(e) => updateAluno('peso', e.target.value ? Number(e.target.value) : 0)}
+                        onChange={(e) =>
+                          updateAluno('peso', e.target.value ? Number(e.target.value) : undefined)
+                        }
                         placeholder="Peso"
                       />
                     </div>
@@ -916,25 +1432,18 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                       <Input
                         type="number"
                         value={editableData.aluno.altura || ''}
-                        onChange={(e) => updateAluno('altura', e.target.value ? Number(e.target.value) : 0)}
+                        onChange={(e) =>
+                          updateAluno('altura', e.target.value ? Number(e.target.value) : undefined)
+                        }
                         placeholder="Altura"
-                      />
-                    </div>
-                    <div className="col-span-2 space-y-1">
-                      <Label className="text-xs">Objetivo</Label>
-                      <Textarea
-                        value={editableData.aluno.objetivo || ''}
-                        onChange={(e) => updateAluno('objetivo', e.target.value)}
-                        placeholder="Objetivo do aluno"
-                        rows={2}
                       />
                     </div>
                   </div>
                 </div>
 
-                <Separator />
+                </TabsContent>
 
-                {/* Diet Info */}
+                <TabsContent value="dieta" className="mt-0 space-y-4 focus-visible:outline-none">
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -942,7 +1451,7 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                       <h4 className="font-medium">Dieta</h4>
                       {editableData.dieta && editableData.dieta.refeicoes.length > 0 && (
                         <Badge variant="secondary" className="ml-2">
-                          {editableData.dieta.refeicoes.length} refeição(ões) detectada(s)
+                          {editableData.dieta.refeicoes.length} refeição(ões)
                         </Badge>
                       )}
                     </div>
@@ -951,46 +1460,50 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                     </Button>
                   </div>
 
-                  {/* Warning if few meals detected */}
                   {editableData.dieta && editableData.dieta.refeicoes.length < 4 && editableData.dieta.refeicoes.length > 0 && (
                     <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-sm text-amber-700 dark:text-amber-400">
                       <AlertCircle className="h-4 w-4 flex-shrink-0" />
                       <span>
-                        Apenas {editableData.dieta.refeicoes.length} refeição(ões) detectada(s). 
-                        Se houver mais refeições no plano, adicione manualmente clicando em "Adicionar Refeição".
+                        Apenas {editableData.dieta.refeicoes.length} refeição(ões) detectada(s). Se a ficha tem mais, clique em "Adicionar Refeição".
                       </span>
                     </div>
                   )}
 
-                  {/* Quick add meal buttons */}
                   {editableData.dieta && (
                     <div className="flex flex-wrap gap-2">
                       {refeicoesDisponiveis
-                        .filter(ref => !editableData.dieta?.refeicoes.some(r => 
-                          r.nome.toLowerCase().includes(ref.toLowerCase().split(' ')[0])
-                        ))
+                        .filter(
+                          (ref) =>
+                            !editableData.dieta?.refeicoes.some((r) => {
+                              const mealName = (r.nome ?? '').toLowerCase();
+                              const refKey = (ref ?? '').toLowerCase().split(/\s+/)[0] ?? '';
+                              return refKey ? mealName.includes(refKey) : false;
+                            }),
+                        )
                         .slice(0, 4)
-                        .map(ref => (
-                          <Button 
-                            key={ref} 
-                            variant="ghost" 
-                            size="sm" 
+                        .map((ref) => (
+                          <Button
+                            key={ref}
+                            variant="ghost"
+                            size="sm"
                             className="h-7 text-xs"
                             onClick={() => {
-                              const newRefeicoes = [...editableData.dieta!.refeicoes, { nome: ref, alimentos: [{ nome: '', quantidade: '' }] }];
+                              const newRefeicoes = [
+                                ...editableData.dieta!.refeicoes,
+                                { nome: ref, alimentos: [{ nome: '', quantidade: '' }] } as Refeicao,
+                              ];
                               setEditableData({
                                 ...editableData,
-                                dieta: { ...editableData.dieta!, refeicoes: newRefeicoes }
+                                dieta: { ...editableData.dieta!, refeicoes: newRefeicoes },
                               });
                             }}
                           >
                             <Plus className="h-3 w-3 mr-1" /> {ref}
                           </Button>
-                        ))
-                      }
+                        ))}
                     </div>
                   )}
-                  
+
                   {editableData.dieta && (
                     <div className="p-4 bg-muted/50 rounded-lg space-y-3">
                       <div className="space-y-1">
@@ -1002,30 +1515,76 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                         />
                       </div>
 
+                      <DietReturnDateFields
+                        dataRetorno={editableData.dieta.data_retorno || ''}
+                        diasValidade={diasValidadeDieta}
+                        onDataRetornoChange={(iso) => updateDieta('data_retorno', iso)}
+                        onDiasValidadeChange={setDiasValidadeDieta}
+                      />
+
+                      <DietRotationFields value={rotacaoDieta} onChange={setRotacaoDieta} />
+
+                      {effectiveMode === 'enrich' ? (
+                        <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+                          <Checkbox
+                            id="replace-active-diet"
+                            checked={replaceActiveDiet}
+                            onCheckedChange={(v) => setReplaceActiveDiet(v === true)}
+                          />
+                          <div className="space-y-1">
+                            <Label
+                              htmlFor="replace-active-diet"
+                              className="cursor-pointer text-sm font-medium leading-snug"
+                            >
+                              Substituir dieta activa
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                              Desactiva o plano actual do aluno e torna este import o plano activo.
+                              Sem marcar, o import adiciona um novo plano (comportamento anterior).
+                            </p>
+                          </div>
+                        </div>
+                      ) : null}
+
                       {editableData.dieta.macros && (
                         <div className="flex gap-2 flex-wrap">
-                          {editableData.dieta.macros.calorias && (
+                          {editableData.dieta.macros.calorias ? (
                             <Badge variant="outline">{editableData.dieta.macros.calorias} kcal</Badge>
-                          )}
-                          {editableData.dieta.macros.proteina && (
+                          ) : null}
+                          {editableData.dieta.macros.proteina ? (
                             <Badge variant="outline">P: {editableData.dieta.macros.proteina}g</Badge>
-                          )}
-                          {editableData.dieta.macros.carboidrato && (
+                          ) : null}
+                          {editableData.dieta.macros.carboidrato ? (
                             <Badge variant="outline">C: {editableData.dieta.macros.carboidrato}g</Badge>
-                          )}
-                          {editableData.dieta.macros.gordura && (
+                          ) : null}
+                          {editableData.dieta.macros.gordura ? (
                             <Badge variant="outline">G: {editableData.dieta.macros.gordura}g</Badge>
-                          )}
+                          ) : null}
+                          {macroStats && macroStats.totals.calorias > 0 && macroStats.declared.calorias ? (
+                            <Badge variant="outline" className="border-blue-500/40 text-blue-600 dark:text-blue-400">
+                              Soma refeições
+                              {macroStats.hasMultiplosCardapios ? ` (Plano ${macroStats.plano})` : ""}:{" "}
+                              {Math.round(macroStats.totals.calorias)} kcal
+                            </Badge>
+                          ) : null}
                         </div>
                       )}
                     </div>
                   )}
 
-                  {/* Meals */}
                   {editableData.dieta && editableData.dieta.refeicoes.length > 0 && (
-                    <div className="space-y-3">
+                    <Accordion type="multiple" defaultValue={['meal-0']} className="w-full space-y-2">
                       {editableData.dieta.refeicoes.map((refeicao, rIdx) => (
-                        <div key={rIdx} className="p-4 bg-muted/50 rounded-lg space-y-3 relative">
+                        <AccordionItem key={rIdx} value={`meal-${rIdx}`} className="rounded-lg border bg-muted/30 px-3">
+                          <AccordionTrigger className="py-3 hover:no-underline [&[data-state=open]]:pb-2">
+                            <span className="flex flex-1 items-center gap-2 text-left text-sm font-medium">
+                              {refeicao.nome || `Refeição ${rIdx + 1}`}
+                              <Badge variant="secondary" className="text-[10px] font-normal">
+                                {refeicao.alimentos.length} item(ns)
+                              </Badge>
+                            </span>
+                          </AccordionTrigger>
+                          <AccordionContent className="space-y-3 pb-4 pt-0">
                           <div className="flex items-center gap-2">
                             <Input
                               value={refeicao.nome}
@@ -1036,6 +1595,33 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                             <Button
                               variant="ghost"
                               size="icon"
+                              className="h-8 w-8 flex-shrink-0"
+                              title="Mover para cima"
+                              onClick={() => moveRefeicao(rIdx, -1)}
+                            >
+                              <ArrowUp className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 flex-shrink-0"
+                              title="Mover para baixo"
+                              onClick={() => moveRefeicao(rIdx, 1)}
+                            >
+                              <ArrowDown className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 flex-shrink-0"
+                              title="Duplicar refeição"
+                              onClick={() => duplicateRefeicao(rIdx)}
+                            >
+                              <Copy className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               onClick={() => removeRefeicao(rIdx)}
                               className="h-8 w-8 text-destructive flex-shrink-0"
                               title="Remover refeição"
@@ -1043,58 +1629,174 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
+
+                          {/* Metadados opcionais */}
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                            <div className="space-y-1">
+                              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground inline-flex items-center gap-1">
+                                <Clock className="h-3 w-3" /> Horário
+                              </Label>
+                              <Input
+                                value={refeicao.horario || ''}
+                                onChange={(e) => updateRefeicao(rIdx, 'horario', e.target.value)}
+                                placeholder="ex: 07:00"
+                                className="h-8"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Dia da semana</Label>
+                              <Select
+                                value={refeicao.dia_semana || ''}
+                                onValueChange={(v) => updateRefeicao(rIdx, 'dia_semana', v)}
+                              >
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="—" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {diasDaSemana.map((d) => (
+                                    <SelectItem key={d} value={d}>
+                                      {d}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Plano/Fase</Label>
+                              <Input
+                                value={refeicao.plano || ''}
+                                onChange={(e) => updateRefeicao(rIdx, 'plano', e.target.value)}
+                                placeholder="ex: Cutting, Treino"
+                                className="h-8"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Observação</Label>
+                            <Textarea
+                              value={refeicao.observacao || ''}
+                              onChange={(e) => updateRefeicao(rIdx, 'observacao', e.target.value)}
+                              placeholder="Observações da refeição (ex: tomar 30 min antes do treino)"
+                              className="min-h-[44px] text-sm"
+                            />
+                          </div>
+
                           <div className="space-y-2">
                             {refeicao.alimentos.map((alimento, aIdx) => (
-                              <div key={aIdx} className="flex gap-2 items-center">
-                                <Input
-                                  value={alimento.nome}
-                                  onChange={(e) => updateAlimento(rIdx, aIdx, 'nome', e.target.value)}
-                                  placeholder="Nome do alimento"
-                                  className="flex-1"
-                                />
-                                <Input
-                                  value={alimento.quantidade}
-                                  onChange={(e) => updateAlimento(rIdx, aIdx, 'quantidade', e.target.value)}
-                                  placeholder="Qtd (ex: 100g)"
-                                  className="w-28"
-                                />
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => removeAlimento(rIdx, aIdx)}
-                                  className="h-8 w-8 text-destructive"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
+                              <div
+                                key={aIdx}
+                                className={cn(
+                                  "space-y-1",
+                                  refeicao.alimentos.length > 40 && "bh-list-virtual-row",
+                                )}
+                              >
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center min-w-0">
+                                  <FoodNameAutocomplete
+                                    foods={catalogFoods}
+                                    value={String(alimento.nome ?? '')}
+                                    onValueChange={(nome) => updateAlimento(rIdx, aIdx, 'nome', nome)}
+                                    onFoodSelect={(food) =>
+                                      selectAlimentoFromCatalog(rIdx, aIdx, food)
+                                    }
+                                    disabled={catalogLoading}
+                                    placeholder={
+                                      catalogLoading
+                                        ? 'A carregar catálogo…'
+                                        : 'Nome do alimento'
+                                    }
+                                    className="flex-1"
+                                  />
+                                  <Input
+                                    type="text"
+                                    value={String(alimento.quantidade ?? '')}
+                                    onChange={(e) => updateAlimento(rIdx, aIdx, 'quantidade', e.target.value)}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    placeholder="Qtd (ex: 100g)"
+                                    className="w-32"
+                                  />
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    title="Adicionar substituto"
+                                    onClick={() => addAlternativa(rIdx, aIdx)}
+                                  >
+                                    <Plus className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => removeAlimento(rIdx, aIdx)}
+                                    className="h-8 w-8 text-destructive"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                                {alimento.alternativas && alimento.alternativas.length > 0 && (
+                                  <div className="pl-4 border-l-2 border-muted-foreground/20 space-y-1">
+                                    {alimento.alternativas.map((alt, altIdx) => (
+                                      <div key={altIdx} className="flex gap-2 items-center">
+                                        <Badge variant="outline" className="text-[10px] shrink-0">
+                                          substituto
+                                        </Badge>
+                                        <FoodNameAutocomplete
+                                          foods={catalogFoods}
+                                          value={alt.nome}
+                                          onValueChange={(nome) =>
+                                            updateAlternativa(rIdx, aIdx, altIdx, 'nome', nome)
+                                          }
+                                          onFoodSelect={(food) =>
+                                            selectAlternativaFromCatalog(rIdx, aIdx, altIdx, food)
+                                          }
+                                          grupoReferencia={resolveFoodForAlimento(alimento)}
+                                          disabled={catalogLoading}
+                                          placeholder="Substituto (mesmo grupo)"
+                                          className="flex-1"
+                                        />
+                                        <Input
+                                          value={alt.quantidade}
+                                          onChange={(e) => updateAlternativa(rIdx, aIdx, altIdx, 'quantidade', e.target.value)}
+                                          placeholder="Qtd"
+                                          className="w-28 h-8"
+                                        />
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          onClick={() => removeAlternativa(rIdx, aIdx, altIdx)}
+                                          className="h-7 w-7 text-destructive"
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </Button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                             ))}
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => addAlimento(rIdx)}
-                              className="w-full"
-                            >
+                            <Button variant="outline" size="sm" onClick={() => addAlimento(rIdx)} className="w-full">
                               <Plus className="h-4 w-4 mr-1" /> Adicionar Alimento
                             </Button>
                           </div>
-                        </div>
+                          </AccordionContent>
+                        </AccordionItem>
                       ))}
-                    </div>
+                    </Accordion>
                   )}
 
-                  {/* Empty state for diet */}
                   {(!editableData.dieta || editableData.dieta.refeicoes.length === 0) && (
                     <div className="p-6 bg-muted/30 rounded-lg text-center space-y-3">
                       <Utensils className="h-8 w-8 text-muted-foreground mx-auto" />
                       <p className="text-sm text-muted-foreground">
-                        Nenhuma refeição detectada no PDF. Clique em "Adicionar Refeição" para criar manualmente.
+                        Nenhuma refeição detectada na ficha. Clique em "Adicionar Refeição" para criar manualmente.
                       </p>
                     </div>
                   )}
                 </div>
 
-                {/* Supplements/Pharma */}
-                <Separator />
+                </TabsContent>
+
+                <TabsContent value="protocolo" className="mt-0 space-y-6 focus-visible:outline-none">
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -1107,28 +1809,18 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                   </div>
                   <div className="space-y-2">
                     {editableData.farmacos?.map((farmaco, idx) => (
-                      <div key={idx} className="flex gap-2 items-center p-2 bg-muted/50 rounded">
-                        <Input
-                          value={farmaco.nome}
-                          onChange={(e) => updateFarmaco(idx, 'nome', e.target.value)}
-                          placeholder="Nome"
-                          className="flex-1"
-                        />
-                        <Input
-                          value={farmaco.dosagem}
-                          onChange={(e) => updateFarmaco(idx, 'dosagem', e.target.value)}
-                          placeholder="Dosagem"
-                          className="w-32"
-                        />
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removeFarmaco(idx)}
-                          className="h-8 w-8 text-destructive"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
+                      <ProtocolItemRow
+                        key={idx}
+                        nome={farmaco.nome}
+                        dosagem={farmaco.dosagem}
+                        horario={farmaco.horario || ''}
+                        observacao={farmaco.observacao || ''}
+                        onNome={(v) => updateFarmaco(idx, 'nome', v)}
+                        onDosagem={(v) => updateFarmaco(idx, 'dosagem', v)}
+                        onHorario={(v) => updateFarmaco(idx, 'horario', v)}
+                        onObservacao={(v) => updateFarmaco(idx, 'observacao', v)}
+                        onRemove={() => removeFarmaco(idx)}
+                      />
                     ))}
                     {(!editableData.farmacos || editableData.farmacos.length === 0) && (
                       <p className="text-sm text-muted-foreground text-center py-2">Nenhum fármaco</p>
@@ -1148,57 +1840,65 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                   </div>
                   <div className="space-y-2">
                     {editableData.suplementos?.map((sup, idx) => (
-                      <div key={idx} className="flex gap-2 items-center p-2 bg-muted/50 rounded">
-                        <Input
-                          value={sup.nome}
-                          onChange={(e) => updateSuplemento(idx, 'nome', e.target.value)}
-                          placeholder="Nome"
-                          className="flex-1"
-                        />
-                        <Input
-                          value={sup.dosagem}
-                          onChange={(e) => updateSuplemento(idx, 'dosagem', e.target.value)}
-                          placeholder="Dosagem"
-                          className="w-32"
-                        />
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removeSuplemento(idx)}
-                          className="h-8 w-8 text-destructive"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
+                      <ProtocolItemRow
+                        key={idx}
+                        nome={sup.nome}
+                        dosagem={sup.dosagem}
+                        horario={sup.horario || ''}
+                        observacao={sup.observacao || ''}
+                        onNome={(v) => updateSuplemento(idx, 'nome', v)}
+                        onDosagem={(v) => updateSuplemento(idx, 'dosagem', v)}
+                        onHorario={(v) => updateSuplemento(idx, 'horario', v)}
+                        onObservacao={(v) => updateSuplemento(idx, 'observacao', v)}
+                        onRemove={() => removeSuplemento(idx)}
+                      />
                     ))}
                     {(!editableData.suplementos || editableData.suplementos.length === 0) && (
                       <p className="text-sm text-muted-foreground text-center py-2">Nenhum suplemento</p>
                     )}
                   </div>
                 </div>
-              </div>
-            </ScrollArea>
 
-            <div className="flex justify-between gap-2 mt-4 pt-4 border-t">
+                {editableData.orientacoes && (
+                  <>
+                    <Separator />
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Info className="h-4 w-4 text-primary" />
+                        <h4 className="font-medium">Orientações</h4>
+                      </div>
+                      <Textarea
+                        value={editableData.orientacoes || ''}
+                        onChange={(e) => setEditableData({ ...editableData, orientacoes: e.target.value })}
+                        placeholder="Orientações gerais"
+                        className="min-h-[80px]"
+                      />
+                    </div>
+                  </>
+                )}
+                </TabsContent>
+              </div>
+            </Tabs>
+
+            <div className="flex shrink-0 justify-between gap-2 mt-3 pt-3 border-t bg-background sticky bottom-0 z-10">
               <Button variant="outline" onClick={resetImporter}>
                 Voltar
               </Button>
               <Button onClick={importStudent} disabled={isImporting}>
                 {isImporting ? (
                   <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    <Loader2 className="h-4 w-4 mr-2 motion-safe:animate-spin" />
                     Importando...
                   </>
                 ) : (
-                  'Importar Aluno'
+                  confirmButtonLabel
                 )}
               </Button>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
 
-      {/* Complete Step */}
       {currentStep === 'complete' && (
         <Card>
           <CardContent className="pt-6">
@@ -1207,18 +1907,18 @@ const StudentImporter = ({ onImportComplete, onClose }: StudentImporterProps) =>
                 <Check className="w-8 h-8 text-green-600" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold">Importação Concluída!</h3>
+                <h3 className="text-lg font-semibold">Importação concluída</h3>
                 <p className="text-muted-foreground">
-                  O aluno "{editableData?.aluno.nome}" foi importado com sucesso.
+                  {lastCompleteResult?.mode === 'enrich'
+                    ? `Dieta vinculada a ${lastCompleteResult.alunoNome}.`
+                    : `O aluno "${lastCompleteResult?.alunoNome || editableData?.aluno.nome}" foi importado com sucesso.`}
                 </p>
               </div>
-              <div className="flex gap-2 justify-center">
+              <div className="flex flex-wrap gap-2 justify-center">
                 <Button variant="outline" onClick={resetImporter}>
-                  Importar Outro
+                  Importar outro
                 </Button>
-                <Button onClick={onClose}>
-                  Fechar
-                </Button>
+                <Button onClick={onClose}>Fechar</Button>
               </div>
             </div>
           </CardContent>

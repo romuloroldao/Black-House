@@ -1,297 +1,565 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Utensils, Replace, Pill } from "lucide-react";
+import { Utensils, Pill, Camera } from "lucide-react";
 import FoodSubstitutionDialog from "@/components/nutrition/FoodSubstitutionDialog";
+import { Food, getAllFoodsSafe } from "@/lib/foodService";
+import {
+  buildMealGroups,
+  calcularMacros,
+  countCompletedMeals,
+  dietHasMultiplosCardapios,
+  getItemsForPlano,
+  getPlanosFromGroups,
+  pickActiveDieta,
+  mealCheckDateKey,
+  readMealDone,
+  writeMealDone,
+  hydrateMealDoneFromServer,
+  type DietItemWithFood,
+  type DietPlano,
+  type MealGroup,
+} from "@/lib/diet-student-utils";
+import { MacroRingsRow } from "@/components/student/diet/MacroRing";
+import MealTimelineItem from "@/components/student/diet/MealTimelineItem";
+import MealDetailSheet from "@/components/student/diet/MealDetailSheet";
+import PremiumEmptyState from "@/components/student/PremiumEmptyState";
+import DietRotationBanner from "@/components/student/diet/DietRotationBanner";
+import StudentRefeicaoLivreCard from "@/components/student/StudentRefeicaoLivreCard";
+import MealPhotoLogSheet from "@/components/student/meal-photo/MealPhotoLogSheet";
+import RefeicoesRegistradasList from "@/components/student/meal-photo/RefeicoesRegistradasList";
+import type { EducationalContent } from "@/lib/educational-content";
+import {
+  getRotationForDate,
+  isRotationEnabled,
+  type DietRotationConfig,
+} from "@/lib/diet-rotation";
+import { STUDENT_REALTIME_EVENT, type StudentRealtimeDetail } from "@/hooks/useStudentPortalRealtime";
 
 const StudentDietView = () => {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [loading, setLoading] = useState(true);
   const [dieta, setDieta] = useState<any>(null);
-  const [itensDieta, setItensDieta] = useState<any[]>([]);
+  const [itensDieta, setItensDieta] = useState<DietItemWithFood[]>([]);
   const [farmacos, setFarmacos] = useState<any[]>([]);
-  const [todosAlimentos, setTodosAlimentos] = useState<any[]>([]);
+  const [todosAlimentos, setTodosAlimentos] = useState<Food[]>([]);
+  const [planoAtivo, setPlanoAtivo] = useState<DietPlano>("A");
+  const [checkTick, setCheckTick] = useState(0);
+  const [serverDoneKeys, setServerDoneKeys] = useState<Set<string>>(() => new Set());
+  const mealDayRef = useRef(mealCheckDateKey());
+  const [detailMeal, setDetailMeal] = useState<MealGroup | null>(null);
+  const [refeicaoLivreContent, setRefeicaoLivreContent] = useState<EducationalContent | null>(null);
+  const [mealPhotoOpen, setMealPhotoOpen] = useState(false);
+  const [mealHistoryKey, setMealHistoryKey] = useState(0);
+
+  /** Deep-link do Daily Agent: ?meal_photo=1 */
+  useEffect(() => {
+    if (searchParams.get("meal_photo") === "1") {
+      setMealPhotoOpen(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete("meal_photo");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  /** Reinicia o checklist quando muda o dia (dieta diária). */
+  useEffect(() => {
+    const syncDay = () => {
+      const today = mealCheckDateKey();
+      if (mealDayRef.current !== today) {
+        mealDayRef.current = today;
+        setCheckTick((t) => t + 1);
+      }
+    };
+    syncDay();
+    document.addEventListener("visibilitychange", syncDay);
+    const interval = window.setInterval(syncDay, 60_000);
+    return () => {
+      document.removeEventListener("visibilitychange", syncDay);
+      window.clearInterval(interval);
+    };
+  }, []);
   const [substitutionDialog, setSubstitutionDialog] = useState<{
     open: boolean;
     alimentoAtual: any;
     quantidadeAtual: number;
+    unidadeQuantidade: string;
     itemId: string;
   }>({
     open: false,
     alimentoAtual: null,
     quantidadeAtual: 0,
-    itemId: ''
+    unidadeQuantidade: "g",
+    itemId: "",
   });
+
+  const loadDietData = useCallback(async () => {
+    setLoading(true);
+    const alimentosResult = await getAllFoodsSafe();
+    const alimentosData =
+      alimentosResult.success && Array.isArray(alimentosResult.data) ? alimentosResult.data : [];
+    const alimentosOrdenados = alimentosData.sort((a, b) => a.name.localeCompare(b.name));
+    setTodosAlimentos(alimentosOrdenados);
+
+    const alunoResult = await apiClient.getMeSafe();
+    const aluno = alunoResult.success ? alunoResult.data : null;
+
+    if (!aluno) {
+      setDieta(null);
+      setItensDieta([]);
+      setFarmacos([]);
+      setLoading(false);
+      return;
+    }
+
+    const dietasResult = await apiClient.requestSafe<any[]>("/api/dietas");
+    const dietas = dietasResult.success && Array.isArray(dietasResult.data) ? dietasResult.data : [];
+    const dietaData = pickActiveDieta(dietas, aluno.id);
+
+    if (!dietaData) {
+      setDieta(null);
+      setItensDieta([]);
+      setFarmacos([]);
+      setLoading(false);
+      return;
+    }
+
+    setDieta(dietaData);
+
+    if (dietaData.refeicao_livre_ativa && dietaData.refeicao_livre_content_id) {
+      const contentRes = await apiClient.requestSafe<EducationalContent>(
+        `/api/educational-contents/${dietaData.refeicao_livre_content_id}`,
+      );
+      setRefeicaoLivreContent(contentRes.success ? contentRes.data ?? null : null);
+    } else {
+      setRefeicaoLivreContent(null);
+    }
+
+    const [itensRes, farmacosRes] = await Promise.all([
+      apiClient.requestSafe<any[]>(`/api/itens-dieta?dieta_id=${dietaData.id}`),
+      apiClient.requestSafe<any[]>(`/api/dieta-farmacos?dieta_id=${dietaData.id}`),
+    ]);
+
+    const itensArray = itensRes.success && Array.isArray(itensRes.data) ? itensRes.data : [];
+    const farmacosArray = farmacosRes.success && Array.isArray(farmacosRes.data) ? farmacosRes.data : [];
+
+    const alimentosMap = new Map(alimentosData.map((a: Food) => [a.id, a]));
+    let itensComAlimentos = itensArray.map((item: any) => ({
+      ...item,
+      alimentos: alimentosMap.get(item.alimento_id) || null,
+    }));
+
+    // Phase 4: aplicar overrides de substituição do dia (sem mutar o plano do coach)
+    const substRes = await apiClient.getRefeicaoSubstituicoesSafe({
+      date: mealCheckDateKey(),
+      dieta_id: dietaData.id,
+    });
+    if (substRes.success && Array.isArray(substRes.data?.items)) {
+      const byItem = new Map(
+        substRes.data.items.map((s: any) => [String(s.item_dieta_id), s]),
+      );
+      itensComAlimentos = itensComAlimentos.map((item: any) => {
+        const sub = byItem.get(String(item.id));
+        if (!sub) return item;
+        const food = alimentosMap.get(sub.alimento_substituto_id) || null;
+        return {
+          ...item,
+          alimento_id: sub.alimento_substituto_id,
+          quantidade: Number(sub.quantidade_substituto),
+          unidade_quantidade: sub.unidade_substituto || item.unidade_quantidade,
+          alimentos: food,
+          _substituicao: {
+            id: sub.id,
+            alimento_original_id: sub.alimento_original_id,
+            quantidade_original: sub.quantidade_original,
+          },
+        };
+      });
+    }
+
+    setItensDieta(itensComAlimentos);
+    setFarmacos(farmacosArray);
+
+    // Phase 1a: carregar conclusões do servidor (fallback localStorage)
+    const conclusoesRes = await apiClient.getRefeicaoConclusoesSafe(mealCheckDateKey());
+    if (conclusoesRes.success && conclusoesRes.data?.items) {
+      const keys = hydrateMealDoneFromServer(
+        dietaData.id,
+        conclusoesRes.data.items,
+        conclusoesRes.data.data_ref || mealCheckDateKey(),
+      );
+      setServerDoneKeys(keys);
+    }
+
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
     if (user) {
-      loadDietData();
+      void loadDietData();
     }
-  }, [user]);
+  }, [user, loadDietData]);
 
-  const loadDietData = async () => {
-    try {
-      // Carregar todos os alimentos para substituições
-      const { data: alimentosData } = await supabase
-        .from("alimentos")
-        .select("*")
-        .order("nome");
-      
-      setTodosAlimentos(alimentosData || []);
-
-      const { data: aluno } = await supabase
-        .from("alunos")
-        .select("id")
-        .eq("email", user?.email)
-        .maybeSingle();
-
-      if (aluno) {
-        const { data: dietaData } = await supabase
-          .from("dietas")
-          .select("*")
-          .eq("aluno_id", aluno.id)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (dietaData) {
-          setDieta(dietaData);
-
-          const [{ data: itens }, { data: farmacosData }] = await Promise.all([
-            supabase
-              .from("itens_dieta")
-              .select("*, alimentos(*)")
-              .eq("dieta_id", dietaData.id),
-            supabase
-              .from("dieta_farmacos")
-              .select("*")
-              .eq("dieta_id", dietaData.id)
-          ]);
-
-          setItensDieta(itens || []);
-          setFarmacos(farmacosData || []);
-        }
+  useEffect(() => {
+    const onRealtime = (ev: Event) => {
+      const detail = (ev as CustomEvent<StudentRealtimeDetail>).detail;
+      if (detail?.type === 'dieta_atualizada') {
+        void loadDietData();
       }
-    } catch (error) {
-      console.error("Erro ao carregar dieta:", error);
+    };
+    window.addEventListener(STUDENT_REALTIME_EVENT, onRealtime);
+    return () => window.removeEventListener(STUDENT_REALTIME_EVENT, onRealtime);
+  }, [loadDietData]);
+
+  const mealGroups = useMemo(() => buildMealGroups(itensDieta), [itensDieta]);
+  const planosCardapio = useMemo(() => getPlanosFromGroups(mealGroups), [mealGroups]);
+  const hasMultiplosCardapios = useMemo(
+    () => dietHasMultiplosCardapios(mealGroups),
+    [mealGroups],
+  );
+  const rotationConfig = useMemo((): DietRotationConfig | null => {
+    if (!dieta) return null;
+    return {
+      rotacao_ativa: dieta.rotacao_ativa,
+      rotacao_sequencia: dieta.rotacao_sequencia,
+      rotacao_dias_plano_a: dieta.rotacao_dias_plano_a,
+      rotacao_dias_plano_b: dieta.rotacao_dias_plano_b,
+      rotacao_plano_inicial: dieta.rotacao_plano_inicial,
+      rotacao_data_inicio: dieta.rotacao_data_inicio,
+      created_at: dieta.created_at,
+    };
+  }, [dieta]);
+
+  const rotationToday = useMemo(
+    () => (rotationConfig ? getRotationForDate(rotationConfig) : null),
+    [rotationConfig],
+  );
+
+  const rotationActive = Boolean(rotationConfig && isRotationEnabled(rotationConfig));
+  const showPlanoTabs = useMemo(
+    () => !rotationActive && planosCardapio.length >= 2,
+    [planosCardapio.length, rotationActive],
+  );
+
+  useEffect(() => {
+    if (rotationToday?.plano) {
+      setPlanoAtivo(rotationToday.plano);
     }
-  };
+  }, [rotationToday?.plano]);
 
-  const agruparPorRefeicao = (itens: any[]) => {
-    const refeicoes: { [key: string]: any[] } = {};
-    itens.forEach(item => {
-      if (!refeicoes[item.refeicao]) {
-        refeicoes[item.refeicao] = [];
-      }
-      refeicoes[item.refeicao].push(item);
+  const visibleGroups = useMemo(
+    () =>
+      mealGroups.filter(
+        (g) => getItemsForPlano(g, planoAtivo, { dietHasMultiplosCardapios: hasMultiplosCardapios }).length > 0,
+      ),
+    [mealGroups, planoAtivo, hasMultiplosCardapios],
+  );
+
+  const macrosPlano = useMemo(() => {
+    const itens = visibleGroups.flatMap((g) =>
+      getItemsForPlano(g, planoAtivo, { dietHasMultiplosCardapios: hasMultiplosCardapios }),
+    );
+    return calcularMacros(itens);
+  }, [visibleGroups, planoAtivo, hasMultiplosCardapios]);
+
+  const completedCount = useMemo(() => {
+    if (!dieta?.id) return 0;
+    void checkTick;
+    return countCompletedMeals(dieta.id, visibleGroups, planoAtivo, serverDoneKeys);
+  }, [dieta?.id, visibleGroups, planoAtivo, checkTick, serverDoneKeys]);
+
+  const progressPct =
+    visibleGroups.length > 0 ? Math.round((completedCount / visibleGroups.length) * 100) : 0;
+
+  const firstPendingIdx = useMemo(() => {
+    if (!dieta?.id) return 0;
+    return visibleGroups.findIndex((g) => {
+      if (serverDoneKeys.has(`${g.key}::${planoAtivo}`)) return false;
+      return !readMealDone(dieta.id, g.key, planoAtivo);
     });
-    return refeicoes;
+  }, [dieta?.id, visibleGroups, planoAtivo, checkTick, serverDoneKeys]);
+
+  const toggleMealDone = (group: MealGroup) => {
+    if (!dieta?.id) return;
+    const key = `${group.key}::${planoAtivo}`;
+    const current =
+      serverDoneKeys.has(key) || readMealDone(dieta.id, group.key, planoAtivo);
+    const next = !current;
+    writeMealDone(dieta.id, group.key, planoAtivo, next);
+    setServerDoneKeys((prev) => {
+      const copy = new Set(prev);
+      if (next) copy.add(key);
+      else copy.delete(key);
+      return copy;
+    });
+    setCheckTick((t) => t + 1);
+
+    void apiClient
+      .putRefeicaoConclusaoSafe({
+        dieta_id: dieta.id,
+        meal_key: group.key,
+        plano: planoAtivo,
+        concluido: next,
+        data_ref: mealCheckDateKey(),
+        origem: "ui",
+      })
+      .then((res) => {
+        if (!res.success) {
+          // reverte cache optimista em falha
+          writeMealDone(dieta.id, group.key, planoAtivo, current);
+          setServerDoneKeys((prev) => {
+            const copy = new Set(prev);
+            if (current) copy.add(key);
+            else copy.delete(key);
+            return copy;
+          });
+          setCheckTick((t) => t + 1);
+        }
+      });
   };
 
-  const calcularMacros = (itens: any[]) => {
-    return itens.reduce((total, item) => {
-      if (!item.alimentos) return total;
-      
-      const fator = item.quantidade / item.alimentos.quantidade_referencia_g;
-      return {
-        totalCalorias: total.totalCalorias + (item.alimentos.kcal_por_referencia * fator),
-        totalProteinas: total.totalProteinas + (item.alimentos.ptn_por_referencia * fator),
-        totalCarboidratos: total.totalCarboidratos + (item.alimentos.cho_por_referencia * fator),
-        totalLipidios: total.totalLipidios + (item.alimentos.lip_por_referencia * fator)
-      };
-    }, { totalCalorias: 0, totalProteinas: 0, totalCarboidratos: 0, totalLipidios: 0 });
-  };
-
-  const handleVerSubstitutos = (item: any) => {
+  const handleVerSubstitutos = (item: DietItemWithFood) => {
     setSubstitutionDialog({
       open: true,
       alimentoAtual: item.alimentos,
       quantidadeAtual: item.quantidade,
-      itemId: item.id
+      unidadeQuantidade: item.unidade_quantidade || "g",
+      itemId: item.id,
     });
   };
 
   const handleSubstituir = async (novoAlimentoId: string, novaQuantidade: number) => {
-    // Aqui você pode implementar a lógica de salvar a substituição no banco se quiser
-    // Por enquanto, vamos apenas atualizar localmente
-    const novosItens = itensDieta.map(item => {
-      if (item.id === substitutionDialog.itemId) {
-        const novoAlimento = todosAlimentos.find(a => a.id === novoAlimentoId);
+    const itemId = substitutionDialog.itemId;
+    const itemOriginal = itensDieta.find((i) => i.id === itemId);
+    const novosItens = itensDieta.map((item) => {
+      if (item.id === itemId) {
+        const novoAlimento = todosAlimentos.find((a) => a.id === novoAlimentoId);
         return {
           ...item,
           alimento_id: novoAlimentoId,
           quantidade: novaQuantidade,
-          alimentos: novoAlimento
+          alimentos: novoAlimento ?? item.alimentos,
+          _substituicao: {
+            alimento_original_id:
+              (item as any)._substituicao?.alimento_original_id || itemOriginal?.alimento_id,
+            quantidade_original:
+              (item as any)._substituicao?.quantidade_original ?? itemOriginal?.quantidade,
+          },
         };
       }
       return item;
     });
     setItensDieta(novosItens);
+
+    if (dieta?.id && itemId) {
+      const res = await apiClient.putRefeicaoSubstituicaoSafe({
+        dieta_id: dieta.id,
+        item_dieta_id: itemId,
+        alimento_substituto_id: novoAlimentoId,
+        quantidade_substituto: novaQuantidade,
+        unidade_substituto: substitutionDialog.unidadeQuantidade || "g",
+        quantidade_original: substitutionDialog.quantidadeAtual,
+        unidade_original: substitutionDialog.unidadeQuantidade || "g",
+        plano: planoAtivo,
+        data_ref: mealCheckDateKey(),
+        origem: "ui",
+      });
+      if (!res.success) {
+        // reverte UI em falha
+        void loadDietData();
+      }
+    }
   };
 
-  if (!dieta) {
+  if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <Utensils className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-          <h3 className="text-lg font-semibold mb-2">Nenhuma dieta atribuída</h3>
-          <p className="text-muted-foreground">
-            Entre em contato com seu coach para receber sua dieta personalizada
-          </p>
-        </div>
+      <div className="min-w-0 space-y-4">
+        <Skeleton className="h-10 w-48" />
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-16 w-full" />
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-32 w-full" />
       </div>
     );
   }
 
-  const refeicoes = agruparPorRefeicao(itensDieta);
-  const macros = calcularMacros(itensDieta);
+  if (!dieta) {
+    return (
+      <PremiumEmptyState
+        icon={Utensils}
+        title="Nenhuma dieta atribuída"
+        description="Quando o seu coach publicar o plano, ele aparece aqui com refeições, macros e checklist do dia."
+      />
+    );
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-5">
       <div>
-        <h1 className="text-3xl font-bold mb-2">Minha Dieta</h1>
+        <h1 className="mb-1 text-xl font-bold sm:text-2xl">Minha dieta</h1>
         <p className="text-muted-foreground">{dieta.nome}</p>
+        {dieta.data_retorno && (
+          <p className="mt-1 text-sm text-primary/90">
+            Retorno{" "}
+            {new Date(String(dieta.data_retorno).slice(0, 10) + "T12:00:00").toLocaleDateString("pt-BR")}
+          </p>
+        )}
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Informações da Dieta</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
+      {rotationToday && <DietRotationBanner info={rotationToday} />}
+
+      {/* Um bloco: regras + um CTA de foto + histórico (sem cartões/CTAs duplicados). */}
+      {dieta.refeicao_livre_ativa ? (
+        <StudentRefeicaoLivreCard
+          observacao={dieta.refeicao_livre_observacao}
+          contentId={dieta.refeicao_livre_content_id}
+          contentTitle={refeicaoLivreContent?.title}
+          onPhotograph={() => setMealPhotoOpen(true)}
+          history={<RefeicoesRegistradasList refreshKey={mealHistoryKey} />}
+        />
+      ) : (
+        <div className="space-y-3 rounded-xl border border-border/60 p-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <span className="font-medium">Objetivo:</span>{" "}
-              <span className="text-muted-foreground">{dieta.objetivo || "Não especificado"}</span>
+              <p className="text-sm font-medium">Registo por foto</p>
+              <p className="text-xs text-muted-foreground">
+                Estimativa aproximada — útil para refeições fora do plano.
+              </p>
             </div>
-            <div>
-              <span className="font-medium">Criada em:</span>{" "}
-              <span className="text-muted-foreground">
-                {new Date(dieta.created_at).toLocaleDateString("pt-BR")}
-              </span>
-            </div>
+            <Button
+              variant="outline"
+              className="h-10 w-full shrink-0 sm:w-auto"
+              onClick={() => setMealPhotoOpen(true)}
+            >
+              <Camera className="mr-2 h-4 w-4" aria-hidden />
+              Fotografar
+            </Button>
           </div>
+          <RefeicoesRegistradasList refreshKey={mealHistoryKey} />
+        </div>
+      )}
+
+      <MealPhotoLogSheet
+        open={mealPhotoOpen}
+        onOpenChange={setMealPhotoOpen}
+        highlight={!!dieta.refeicao_livre_ativa}
+        onSaved={() => setMealHistoryKey((k) => k + 1)}
+      />
+
+      {showPlanoTabs && (
+        <Tabs
+          value={planoAtivo}
+          onValueChange={(v) => setPlanoAtivo(v as DietPlano)}
+          className="w-full max-w-full"
+        >
+          <TabsList
+            className="grid h-auto w-full gap-1"
+            style={{ gridTemplateColumns: `repeat(${Math.min(planosCardapio.length, 6)}, minmax(0, 1fr))` }}
+          >
+            {planosCardapio.map((p) => (
+              <TabsTrigger key={p} value={p} className="text-xs sm:text-sm">
+                Plano {p}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      )}
+
+      <Card className="shadow-card">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-base">Progresso do dia</CardTitle>
+            <Badge variant="premium">
+              {completedCount}/{visibleGroups.length} refeições
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Progress value={progressPct} className="h-2" />
+          <MacroRingsRow macros={macrosPlano} />
         </CardContent>
       </Card>
 
-      {/* Resumo Nutricional */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Resumo Nutricional Total</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-            <div>
-              <div className="text-2xl font-bold text-primary">
-                {Math.round(macros.totalCalorias)}
-              </div>
-              <div className="text-sm text-muted-foreground">Calorias</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-primary">
-                {Math.round(macros.totalProteinas)}g
-              </div>
-              <div className="text-sm text-muted-foreground">Proteínas</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-warning">
-                {Math.round(macros.totalCarboidratos)}g
-              </div>
-              <div className="text-sm text-muted-foreground">Carboidratos</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-destructive">
-                {Math.round(macros.totalLipidios)}g
-              </div>
-              <div className="text-sm text-muted-foreground">Gorduras</div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {dieta.objetivo && (
+        <p className="text-sm text-muted-foreground">
+          <span className="font-medium text-foreground">Objetivo:</span> {dieta.objetivo}
+        </p>
+      )}
 
-      {/* Fármacos */}
+      <div className="min-w-0">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Refeições de hoje
+        </h2>
+        {visibleGroups.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Nenhum item neste plano.</p>
+        ) : (
+          visibleGroups.map((group, idx) => (
+            <MealTimelineItem
+              key={`${group.key}-${planoAtivo}`}
+              group={group}
+              plano={planoAtivo}
+              dietHasMultiplosCardapios={hasMultiplosCardapios}
+              done={
+                serverDoneKeys.has(`${group.key}::${planoAtivo}`) ||
+                readMealDone(dieta.id, group.key, planoAtivo)
+              }
+              isLast={idx === visibleGroups.length - 1}
+              isCurrent={idx === firstPendingIdx}
+              onToggleDone={() => toggleMealDone(group)}
+              onOpenDetail={() => setDetailMeal(group)}
+            />
+          ))
+        )}
+      </div>
+
       {farmacos.length > 0 && (
-        <Card>
+        <Card className="shadow-card">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
+            <CardTitle className="flex items-center gap-2 text-base">
               <Pill className="h-5 w-5 text-primary" />
-              Fármacos e Suplementos
+              Fármacos e suplementos
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {farmacos.map((farmaco) => (
-                <div key={farmaco.id} className="border rounded-lg p-4 space-y-2">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="font-semibold text-lg">{farmaco.nome}</div>
-                      <div className="text-muted-foreground">{farmaco.dosagem}</div>
-                    </div>
-                  </div>
-                  {farmaco.observacao && (
-                    <div className="text-sm text-muted-foreground bg-muted/50 p-2 rounded">
-                      {farmaco.observacao}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+          <CardContent className="space-y-3">
+            {farmacos.map((farmaco) => (
+              <div key={farmaco.id} className="rounded-lg border border-border/60 p-3">
+                <p className="font-semibold">{farmaco.nome}</p>
+                <p className="text-sm text-muted-foreground">{farmaco.dosagem}</p>
+                {farmaco.observacao && (
+                  <p className="mt-2 text-xs text-muted-foreground bg-muted/40 rounded p-2">
+                    {farmaco.observacao}
+                  </p>
+                )}
+              </div>
+            ))}
           </CardContent>
         </Card>
       )}
 
-      {/* Refeições */}
-      <div className="space-y-4">
-        {Object.entries(refeicoes).map(([refeicao, itensRefeicao]) => (
-          <Card key={refeicao}>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Utensils className="h-5 w-5 text-primary" />
-                {refeicao}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {itensRefeicao.map((item: any) => {
-                  const fator = item.quantidade / item.alimentos.quantidade_referencia_g;
-                  const calorias = Math.round(item.alimentos.kcal_por_referencia * fator);
-                  
-                  return (
-                    <div key={item.id} className="flex items-center justify-between p-4 rounded-lg border bg-card">
-                      <div className="flex-1">
-                        <div className="font-medium text-lg">{item.alimentos.nome}</div>
-                        <div className="text-sm text-muted-foreground mt-1">
-                          {item.quantidade}g
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <Badge variant="outline" className="text-sm">
-                          {calorias} kcal
-                        </Badge>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleVerSubstitutos(item)}
-                        >
-                          <Replace className="w-4 h-4 mr-2" />
-                          Ver Substitutos
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      <MealDetailSheet
+        open={detailMeal != null}
+        onOpenChange={(open) => !open && setDetailMeal(null)}
+        mealName={detailMeal?.displayName ?? ""}
+        group={detailMeal}
+        plano={planoAtivo}
+        dietHasMultiplosCardapios={hasMultiplosCardapios}
+        onSubstituir={handleVerSubstitutos}
+      />
 
       <FoodSubstitutionDialog
         open={substitutionDialog.open}
         onOpenChange={(open) => setSubstitutionDialog({ ...substitutionDialog, open })}
         alimentoAtual={substitutionDialog.alimentoAtual}
         quantidadeAtual={substitutionDialog.quantidadeAtual}
+        unidadeQuantidade={substitutionDialog.unidadeQuantidade}
         alimentosDisponiveis={todosAlimentos}
         onSubstituir={handleSubstituir}
       />

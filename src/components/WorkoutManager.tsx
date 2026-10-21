@@ -1,6 +1,9 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
+import { useApiSafeList } from "@/hooks/useApiSafe";
+import { safeArray } from "@/lib/data-safe-utils";
 import { useToast } from "@/hooks/use-toast";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,14 +12,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { 
   Plus, 
   Search, 
-  Filter, 
   Copy, 
   Edit3, 
   Trash2, 
   Clock, 
-  Target, 
   Users,
-  Play,
   Star,
   Calendar,
   Dumbbell,
@@ -24,50 +24,73 @@ import {
 } from "lucide-react";
 import WorkoutForm from "./WorkoutForm";
 import WorkoutTemplates from "./WorkoutTemplates";
+import WorkoutTemplateAssignmentsSheet, {
+  type WorkoutTemplateSummary,
+} from "./WorkoutTemplateAssignmentsSheet";
+import WorkoutTemplatePreviewSheet, {
+  type WorkoutTemplatePreview,
+} from "./WorkoutTemplatePreviewSheet";
+import { mapTreinoApiToWorkoutForm } from "@/lib/treino-form-mapper";
 import { exportWorkoutToPdf, exportMultipleWorkoutsToPdf } from "@/utils/workoutPdfExport";
 
 const WorkoutManager = () => {
+  const { confirm } = useConfirm();
   const { toast } = useToast();
   const [activeView, setActiveView] = useState("list");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedWorkout, setSelectedWorkout] = useState(null);
+  const [assignmentsTemplate, setAssignmentsTemplate] = useState<WorkoutTemplateSummary | null>(null);
+  const [assignmentsOpen, setAssignmentsOpen] = useState(false);
+  const [previewTemplate, setPreviewTemplate] = useState<WorkoutTemplatePreview | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [workouts, setWorkouts] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [formLoading, setFormLoading] = useState(false);
+  const { data: treinosRaw, loading: loadingTreinos, error: errorTreinos, refetch: refetchTreinos } = useApiSafeList(
+    () => apiClient.requestSafe<any[]>('/api/treinos'),
+    { autoFetch: true, endpointKey: '/api/treinos' }
+  );
 
   useEffect(() => {
-    carregarTreinos();
-  }, []);
+    if (!loadingTreinos) {
+      const seen = new Set<string>();
+      const treinosFiltrados = safeArray(treinosRaw)
+        .filter((treino: any) => {
+          if (!treino || treino.aluno_id) return false;
+          if (seen.has(treino.id)) return false;
+          seen.add(treino.id);
+          return true;
+        })
+        .sort((a: any, b: any) => {
+          const aTime = new Date(a?.created_at || 0).getTime();
+          const bTime = new Date(b?.created_at || 0).getTime();
+          return bTime - aTime;
+        });
 
-  const carregarTreinos = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('treinos')
-        .select('*')
-        .eq('is_template', false)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      const treinosFormatados = data?.map(treino => ({
+      const treinosFormatados = treinosFiltrados.map((treino: any) => ({
         id: treino.id,
         name: treino.nome,
         description: treino.descricao || '',
         duration: treino.duracao,
         difficulty: treino.dificuldade,
-        exercises: treino.num_exercicios,
-        studentsAssigned: 0, // TODO: implementar quando houver relação com alunos
+        exerciseCount: treino.num_exercicios ?? 0,
+        studentsAssigned: treino.alunos_ativos ?? 0,
+        studentsCustomized: treino.alunos_com_personalizacao ?? 0,
         category: treino.categoria,
-        lastModified: new Date(treino.updated_at).toISOString().split('T')[0],
+        lastModified: new Date(treino.updated_at || Date.now()).toISOString().split('T')[0],
         isTemplate: treino.is_template,
-        tags: treino.tags || []
-      })) || [];
+        tags: safeArray(treino.tags)
+      }));
 
       setWorkouts(treinosFormatados);
-    } catch (error) {
-      console.error('Erro ao carregar treinos:', error);
-    } finally {
-      setLoading(false);
+
+      if (errorTreinos) {
+        console.warn('[REACT-SUPABASE-LEGACY-PURGE-FIX-010] Erro ao carregar treinos (fallback vazio):', errorTreinos);
+      }
     }
+  }, [loadingTreinos, treinosRaw, errorTreinos]);
+
+  const carregarTreinos = () => {
+    refetchTreinos();
   };
 
   const filteredWorkouts = workouts.filter(workout =>
@@ -85,9 +108,31 @@ const WorkoutManager = () => {
     }
   };
 
-  const handleEditWorkout = (workout: any) => {
-    setSelectedWorkout(workout);
+  const handleEditWorkout = async (workout: { id?: string } | null) => {
+    if (!workout?.id) {
+      setSelectedWorkout(null);
+      setFormLoading(false);
+      setActiveView("form");
+      return;
+    }
+
+    setFormLoading(true);
     setActiveView("form");
+    setSelectedWorkout(null);
+
+    const result = await apiClient.requestSafe<any>(`/api/treinos/${workout.id}`);
+    if (result.success && result.data) {
+      setSelectedWorkout(mapTreinoApiToWorkoutForm(result.data));
+    } else {
+      toast({
+        title: "Erro ao carregar treino",
+        description: result.error || "Não foi possível carregar os exercícios.",
+        variant: "destructive",
+      });
+      setActiveView("list");
+      setSelectedWorkout(null);
+    }
+    setFormLoading(false);
   };
 
   const handleCreateNew = () => {
@@ -95,105 +140,83 @@ const WorkoutManager = () => {
     setActiveView("form");
   };
 
+  const handleViewStudents = (workout: WorkoutTemplateSummary) => {
+    setAssignmentsTemplate(workout);
+    setAssignmentsOpen(true);
+  };
+
   const handleDeleteWorkout = async (workoutId: string) => {
-    if (!confirm("Tem certeza que deseja deletar este treino?")) {
+    if (!(await confirmDelete(confirm, "Este treino será removido permanentemente."))) {
       return;
     }
 
-    try {
-      const { error } = await supabase
-        .from('treinos')
-        .delete()
-        .eq('id', workoutId);
-
-      if (error) throw error;
-
-      toast({
-        title: "Treino deletado!",
-        description: "O treino foi removido com sucesso.",
-      });
-
-      carregarTreinos();
-    } catch (error) {
-      console.error('Erro ao deletar treino:', error);
+    const result = await apiClient.requestSafe(`/api/treinos/${workoutId}`, { method: 'DELETE' });
+    if (!result.success) {
+      console.warn('[REACT-SUPABASE-LEGACY-PURGE-FIX-010] Erro ao deletar treino:', result.error);
       toast({
         title: "Erro ao deletar",
         description: "Não foi possível remover o treino.",
         variant: "destructive",
       });
+      return;
     }
+
+    toast({
+      title: "Treino deletado!",
+      description: "O treino foi removido com sucesso.",
+    });
+
+    carregarTreinos();
   };
 
   const handleExportPdf = async (workoutId: string) => {
-    try {
-      const { data: treino, error } = await supabase
-        .from('treinos')
-        .select('*')
-        .eq('id', workoutId)
-        .single();
-
-      if (error) throw error;
-
-      exportWorkoutToPdf({
-        id: treino.id,
-        nome: treino.nome,
-        descricao: treino.descricao || '',
-        categoria: treino.categoria,
-        dificuldade: treino.dificuldade,
-        duracao: treino.duracao,
-        exercicios: treino.exercicios as any[] || [],
-        tags: treino.tags || [],
-      });
-
+    const treino = safeArray(treinosRaw).find((t: any) => t?.id === workoutId) || null;
+    if (!treino) {
       toast({
-        title: "PDF exportado!",
-        description: "O treino foi exportado com sucesso.",
+        title: "Erro",
+        description: "Treino não encontrado",
+        variant: "destructive"
       });
-    } catch (error) {
-      console.error('Erro ao exportar PDF:', error);
-      toast({
-        title: "Erro ao exportar",
-        description: "Não foi possível exportar o treino.",
-        variant: "destructive",
-      });
+      return;
     }
+
+    await exportWorkoutToPdf({
+      id: treino.id,
+      nome: treino.nome,
+      descricao: treino.descricao || '',
+      categoria: treino.categoria,
+      dificuldade: treino.dificuldade,
+      duracao: treino.duracao,
+      exercicios: (treino.exercicios as any[]) || [],
+      tags: safeArray(treino.tags),
+    });
+
+    toast({
+      title: "PDF exportado!",
+      description: "O treino foi exportado com sucesso.",
+    });
   };
 
   const handleExportAllPdf = async () => {
-    try {
-      const { data: treinos, error } = await supabase
-        .from('treinos')
-        .select('*')
-        .eq('is_template', false)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      const treinosFormatados = treinos?.map(t => ({
+    const treinosFormatados = safeArray(treinosRaw)
+      .filter((t: any) => t && t.is_template === false)
+      .map((t: any) => ({
         id: t.id,
         nome: t.nome,
         descricao: t.descricao || '',
         categoria: t.categoria,
         dificuldade: t.dificuldade,
         duracao: t.duracao,
-        exercicios: t.exercicios as any[] || [],
-        tags: t.tags || [],
-      })) || [];
+        exercicios: (t.exercicios as any[]) || [],
+        tags: safeArray(t.tags),
+      }));
 
-      exportMultipleWorkoutsToPdf(treinosFormatados);
+    await exportMultipleWorkoutsToPdf(treinosFormatados);
 
-      toast({
-        title: "PDF exportado!",
-        description: `${treinosFormatados.length} treinos exportados com sucesso.`,
-      });
-    } catch (error) {
-      console.error('Erro ao exportar PDFs:', error);
-      toast({
-        title: "Erro ao exportar",
-        description: "Não foi possível exportar os treinos.",
-        variant: "destructive",
-      });
-    }
+    toast({
+      title: "PDF exportado!",
+      description: `${treinosFormatados.length} treinos exportados com sucesso.`,
+    });
   };
 
   const renderWorkoutCard = (workout: any) => (
@@ -265,11 +288,16 @@ const WorkoutManager = () => {
             </div>
             <div className="flex items-center gap-2 text-muted-foreground">
               <Dumbbell className="w-4 h-4" />
-              <span>{workout.exercises} exercícios</span>
+              <span>{workout.exerciseCount} exercícios</span>
             </div>
             <div className="flex items-center gap-2 text-muted-foreground">
               <Users className="w-4 h-4" />
               <span>{workout.studentsAssigned} alunos</span>
+              {workout.studentsCustomized > 0 && (
+                <Badge variant="secondary" className="text-xs bg-warning/10 text-warning border-warning/20">
+                  {workout.studentsCustomized} c/ ajustes
+                </Badge>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <Badge className={getDifficultyColor(workout.difficulty)} variant="outline">
@@ -278,14 +306,30 @@ const WorkoutManager = () => {
             </div>
           </div>
           
-          <div className="flex items-center justify-between pt-2 border-t border-border">
+          <div className="flex items-center justify-between pt-2 border-t border-border gap-2">
             <span className="text-xs text-muted-foreground">
               Atualizado em {new Date(workout.lastModified).toLocaleDateString('pt-BR')}
             </span>
-            <Button variant="outline" size="sm" className="h-8">
-              <Play className="w-3 h-3 mr-1" />
-              Visualizar
-            </Button>
+            <div className="flex gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                onClick={() => handleViewStudents(workout)}
+              >
+                <Users className="w-3 h-3 mr-1" />
+                Alunos
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                onClick={() => handleEditWorkout(workout)}
+              >
+                <Edit3 className="w-3 h-3 mr-1" />
+                Editar
+              </Button>
+            </div>
           </div>
         </div>
       </CardContent>
@@ -293,8 +337,18 @@ const WorkoutManager = () => {
   );
 
   if (activeView === "form") {
+    if (formLoading) {
+      return (
+        <div className="p-6 space-y-4">
+          <div className="h-10 w-64 rounded bg-muted motion-safe:animate-pulse" />
+          <div className="h-96 w-full rounded bg-muted motion-safe:animate-pulse" />
+        </div>
+      );
+    }
+
     return (
       <WorkoutForm 
+        key={selectedWorkout?.id ?? "new"}
         workout={selectedWorkout}
         onBack={() => setActiveView("list")}
         onSave={() => {
@@ -305,10 +359,10 @@ const WorkoutManager = () => {
     );
   }
 
-  if (loading) {
+  if (loadingTreinos) {
     return (
       <div className="p-6 space-y-6">
-        <div className="animate-pulse">
+        <div className="motion-safe:animate-pulse">
           <div className="h-8 bg-muted rounded w-1/3 mb-4"></div>
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
             {[1, 2, 3].map(i => (
@@ -325,11 +379,11 @@ const WorkoutManager = () => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+          <h1 className="bg-gradient-primary bg-clip-text text-xl font-bold text-transparent sm:text-2xl">
             Gerenciar Treinos
           </h1>
           <p className="text-muted-foreground">
-            Crie, edite e organize seus treinos personalizados
+            Biblioteca do coach — cada treino pode ser atribuído a vários alunos sem duplicar
           </p>
         </div>
         <div className="flex gap-2">
@@ -346,7 +400,7 @@ const WorkoutManager = () => {
 
       <Tabs defaultValue="workouts" className="space-y-6">
         <TabsList className="grid w-full grid-cols-2 lg:w-[400px]">
-          <TabsTrigger value="workouts">Meus Treinos</TabsTrigger>
+          <TabsTrigger value="workouts">Biblioteca</TabsTrigger>
           <TabsTrigger value="templates">Templates</TabsTrigger>
         </TabsList>
 
@@ -364,10 +418,10 @@ const WorkoutManager = () => {
                     className="pl-10"
                   />
                 </div>
-                <Button variant="outline" className="shrink-0">
+                {/* <Button variant="outline" className="shrink-0">
                   <Filter className="w-4 h-4 mr-2" />
                   Filtros
-                </Button>
+                </Button> */}
               </div>
             </CardContent>
           </Card>
@@ -389,10 +443,10 @@ const WorkoutManager = () => {
             <Card>
               <CardContent className="p-6">
                 <div className="flex items-center space-x-2">
-                  <Star className="w-5 h-5 text-warning" />
+                  <Users className="w-5 h-5 text-primary" />
                   <div>
-                    <p className="text-2xl font-bold">{workouts.filter(w => w.isTemplate).length}</p>
-                    <p className="text-xs text-muted-foreground">Templates</p>
+                    <p className="text-2xl font-bold">{workouts.reduce((acc, w) => acc + w.studentsAssigned, 0)}</p>
+                    <p className="text-xs text-muted-foreground">Atribuições</p>
                   </div>
                 </div>
               </CardContent>
@@ -401,10 +455,12 @@ const WorkoutManager = () => {
             <Card>
               <CardContent className="p-6">
                 <div className="flex items-center space-x-2">
-                  <Users className="w-5 h-5 text-primary" />
+                  <Users className="w-5 h-5 text-warning" />
                   <div>
-                    <p className="text-2xl font-bold">{workouts.reduce((acc, w) => acc + w.studentsAssigned, 0)}</p>
-                    <p className="text-xs text-muted-foreground">Atribuições</p>
+                    <p className="text-2xl font-bold">
+                      {workouts.reduce((acc, w) => acc + (w.studentsCustomized ?? 0), 0)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">Com personalizações</p>
                   </div>
                 </div>
               </CardContent>
@@ -432,9 +488,29 @@ const WorkoutManager = () => {
         </TabsContent>
 
         <TabsContent value="templates">
-          <WorkoutTemplates onUseTemplate={handleEditWorkout} />
+          <WorkoutTemplates
+            onUseTemplate={handleEditWorkout}
+            onPreview={(template) => {
+              setPreviewTemplate(template);
+              setPreviewOpen(true);
+            }}
+            onViewStudents={handleViewStudents}
+          />
         </TabsContent>
       </Tabs>
+
+      <WorkoutTemplatePreviewSheet
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        template={previewTemplate}
+        onEdit={handleEditWorkout}
+      />
+
+      <WorkoutTemplateAssignmentsSheet
+        open={assignmentsOpen}
+        onOpenChange={setAssignmentsOpen}
+        template={assignmentsTemplate}
+      />
     </div>
   );
 };

@@ -2,16 +2,19 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { supabase } from "@/integrations/supabase/client";
+import { DateInputBR } from "@/components/ui/date-input-br";
+import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDataContext } from "@/contexts/DataContext";
 import { DollarSign, CreditCard, Calendar, Plus, AlertCircle, Clock, CheckCircle, Download, Copy, Trash2, Edit } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
 interface Props {
   studentId: string;
@@ -19,7 +22,9 @@ interface Props {
 }
 
 const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
+  const { confirm } = useConfirm();
   const { user } = useAuth();
+  const { isReady } = useDataContext();
   const { toast } = useToast();
   
   const [pagamentos, setPagamentos] = useState<any[]>([]);
@@ -59,220 +64,217 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
   });
 
   useEffect(() => {
-    loadFinancialData();
-  }, [studentId]);
+    if (isReady) {
+      loadFinancialData();
+    }
+  }, [isReady, studentId]);
+
+  // DESIGN-022: Componente só renderiza quando DataContext === READY
+  if (!isReady) {
+    return null;
+  }
 
   const loadFinancialData = async () => {
-    try {
-      setLoading(true);
-      
-      // Carregar pagamentos
-      const { data: pagamentosData } = await supabase
-        .from("asaas_payments")
-        .select("*")
-        .eq("aluno_id", studentId)
-        .order("due_date", { ascending: false });
-      
-      setPagamentos(pagamentosData || []);
-      
-      // Carregar planos de pagamento
-      const { data: planosData } = await supabase
-        .from("payment_plans")
-        .select("*")
-        .eq("coach_id", user?.id)
-        .eq("ativo", true);
-      
-      setPlanos(planosData || []);
-      
-      // Carregar exceções financeiras
-      const { data: excecoesData } = await supabase
-        .from("financial_exceptions")
-        .select("*")
-        .eq("aluno_id", studentId)
-        .eq("ativo", true);
-      
-      setExcecoes(excecoesData || []);
-      
-      // Carregar configuração de cobrança recorrente
-      const { data: configData } = await supabase
-        .from("recurring_charges_config")
-        .select("*, payment_plans(*)")
-        .eq("aluno_id", studentId)
-        .maybeSingle();
-      
-      setConfigCobranca(configData);
-    } catch (error) {
-      console.error("Erro ao carregar dados financeiros:", error);
-      toast({
-        title: "Erro",
-        description: "Não foi possível carregar os dados financeiros",
-        variant: "destructive",
+    setLoading(true);
+
+    const pagamentosResult = await apiClient.requestSafe<any[]>('/api/asaas-payments');
+    const pagamentosData = pagamentosResult.success && Array.isArray(pagamentosResult.data) ? pagamentosResult.data : [];
+    const pagamentosFiltrados = pagamentosData
+      .filter(p => p.aluno_id === studentId)
+      .sort((a, b) => new Date(b.due_date || 0).getTime() - new Date(a.due_date || 0).getTime());
+    setPagamentos(pagamentosFiltrados);
+
+    const planosResult = await apiClient.requestSafe<any[]>('/api/payment-plans');
+    const planosData = planosResult.success && Array.isArray(planosResult.data) ? planosResult.data : [];
+    setPlanos(planosData);
+
+    const excecoesResult = await apiClient.requestSafe<any[]>('/api/financial-exceptions');
+    const excecoesData = excecoesResult.success && Array.isArray(excecoesResult.data) ? excecoesResult.data : [];
+    const excecoesFiltradas = excecoesData.filter(e => e.aluno_id === studentId && e.ativo === true);
+    setExcecoes(excecoesFiltradas);
+
+    const configsResult = await apiClient.requestSafe<any[]>('/api/recurring-charges-config');
+    const configs = configsResult.success && Array.isArray(configsResult.data) ? configsResult.data : [];
+    const configData = configs.find(c => c.aluno_id === studentId) || null;
+    setConfigCobranca(configData);
+    if (configData) {
+      setRecurringForm({
+        payment_plan_id: configData.payment_plan_id || "",
+        dia_vencimento_customizado: configData.dia_vencimento_customizado ? String(configData.dia_vencimento_customizado) : "",
+        valor_customizado: configData.valor_customizado ? String(configData.valor_customizado) : "",
+        ativo: configData.ativo !== false,
       });
-    } finally {
-      setLoading(false);
     }
+
+    if (!pagamentosResult.success || !planosResult.success || !excecoesResult.success || !configsResult.success) {
+      toast({
+        title: "Aviso",
+        description: "Dados financeiros carregados com fallback seguro.",
+      });
+    }
+    setLoading(false);
   };
 
   const handleCreatePayment = async () => {
-    try {
-      const { data, error } = await supabase.functions.invoke('create-asaas-payment', {
-        body: {
-          alunoId: studentId,
-          value: parseFloat(paymentForm.value),
-          billingType: paymentForm.billingType,
-          dueDate: paymentForm.dueDate,
-          description: paymentForm.description,
-        },
-      });
+    const result = await apiClient.requestSafe('/api/payments/create-asaas', {
+      method: 'POST',
+      body: JSON.stringify({
+        alunoId: studentId,
+        value: parseFloat(paymentForm.value),
+        billingType: paymentForm.billingType,
+        dueDate: paymentForm.dueDate,
+        description: paymentForm.description,
+      }),
+    });
 
-      if (error) throw error;
-
-      toast({
-        title: "Sucesso",
-        description: "Pagamento criado com sucesso",
-      });
-      
-      setIsPaymentDialogOpen(false);
-      setPaymentForm({ value: "", billingType: "PIX", dueDate: "", description: "" });
-      loadFinancialData();
-    } catch (error: any) {
+    if (!result.success) {
       toast({
         title: "Erro",
-        description: error.message || "Erro ao criar pagamento",
+        description: result.error || "Erro ao criar pagamento",
         variant: "destructive",
       });
+      return;
     }
+
+    toast({
+      title: "Sucesso",
+      description: "Pagamento criado com sucesso",
+    });
+    
+    setIsPaymentDialogOpen(false);
+    setPaymentForm({ value: "", billingType: "PIX", dueDate: "", description: "" });
+    loadFinancialData();
   };
 
   const handleCreateException = async () => {
-    try {
-      const { error } = await supabase
-        .from("financial_exceptions")
-        .insert({
-          aluno_id: studentId,
-          coach_id: user?.id,
-          ...exceptionForm,
-          percentual_desconto: exceptionForm.percentual_desconto ? parseFloat(exceptionForm.percentual_desconto) : null,
-          valor_desconto: exceptionForm.valor_desconto ? parseFloat(exceptionForm.valor_desconto) : null,
-        });
+    const result = await apiClient.requestSafe('/api/financial-exceptions', {
+      method: 'POST',
+      body: JSON.stringify({
+        aluno_id: studentId,
+        coach_id: user?.id,
+        ...exceptionForm,
+        percentual_desconto: exceptionForm.percentual_desconto ? parseFloat(exceptionForm.percentual_desconto) : null,
+        valor_desconto: exceptionForm.valor_desconto ? parseFloat(exceptionForm.valor_desconto) : null,
+      }),
+    });
 
-      if (error) throw error;
-
-      toast({
-        title: "Sucesso",
-        description: "Exceção financeira criada",
-      });
-      
-      setIsExceptionDialogOpen(false);
-      setExceptionForm({
-        tipo: "desconto",
-        motivo: "",
-        percentual_desconto: "",
-        valor_desconto: "",
-        data_inicio: "",
-        data_fim: "",
-        observacoes: "",
-      });
-      loadFinancialData();
-    } catch (error: any) {
+    if (!result.success) {
       toast({
         title: "Erro",
-        description: error.message || "Erro ao criar exceção",
+        description: result.error || "Erro ao criar exceção",
         variant: "destructive",
       });
+      return;
     }
+
+    toast({
+      title: "Sucesso",
+      description: "Exceção financeira criada",
+    });
+    
+    setIsExceptionDialogOpen(false);
+    setExceptionForm({
+      tipo: "desconto",
+      motivo: "",
+      percentual_desconto: "",
+      valor_desconto: "",
+      data_inicio: "",
+      data_fim: "",
+      observacoes: "",
+    });
+    loadFinancialData();
   };
 
   const handleSaveRecurring = async () => {
-    try {
-      const data: any = {
-        aluno_id: studentId,
-        coach_id: user?.id,
-        payment_plan_id: recurringForm.payment_plan_id || null,
-        dia_vencimento_customizado: recurringForm.dia_vencimento_customizado ? parseInt(recurringForm.dia_vencimento_customizado) : null,
-        valor_customizado: recurringForm.valor_customizado ? parseFloat(recurringForm.valor_customizado) : null,
-        ativo: recurringForm.ativo,
-      };
+    const data: any = {
+      aluno_id: studentId,
+      coach_id: user?.id,
+      payment_plan_id: recurringForm.payment_plan_id || null,
+      dia_vencimento_customizado: recurringForm.dia_vencimento_customizado ? parseInt(recurringForm.dia_vencimento_customizado) : null,
+      valor_customizado: recurringForm.valor_customizado ? parseFloat(recurringForm.valor_customizado) : null,
+      ativo: recurringForm.ativo,
+    };
 
-      if (configCobranca) {
-        const { error } = await supabase
-          .from("recurring_charges_config")
-          .update(data)
-          .eq("id", configCobranca.id);
-        
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from("recurring_charges_config")
-          .insert(data);
-        
-        if (error) throw error;
-      }
+    const endpoint = configCobranca ? `/api/recurring-charges-config/${configCobranca.id}` : '/api/recurring-charges-config';
+    const method = configCobranca ? 'PATCH' : 'POST';
+    const result = await apiClient.requestSafe(endpoint, { method, body: JSON.stringify(data) });
 
-      toast({
-        title: "Sucesso",
-        description: "Configuração de cobrança salva",
-      });
-      
-      setIsRecurringDialogOpen(false);
-      loadFinancialData();
-    } catch (error: any) {
+    if (!result.success) {
       toast({
         title: "Erro",
-        description: error.message || "Erro ao salvar configuração",
+        description: result.error || "Erro ao salvar configuração",
         variant: "destructive",
       });
+      return;
     }
+
+    toast({
+      title: "Sucesso",
+      description: "Configuração de cobrança salva",
+    });
+    
+    setIsRecurringDialogOpen(false);
+    loadFinancialData();
   };
 
   const handleRemoveRecurring = async () => {
-    try {
-      if (!configCobranca) return;
+    if (!configCobranca) return;
 
-      const { error } = await supabase
-        .from("recurring_charges_config")
-        .update({ ativo: false })
-        .eq("id", configCobranca.id);
+    if (
+      !(await confirmDelete(
+        confirm,
+        "A cobrança recorrente deste aluno será desactivada.",
+        "Confirmar remoção",
+      ))
+    ) {
+      return;
+    }
 
-      if (error) throw error;
+    const result = await apiClient.requestSafe(`/api/recurring-charges-config/${configCobranca.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ ativo: false }),
+    });
 
-      toast({
-        title: "Sucesso",
-        description: "Cobrança recorrente removida",
-      });
-      
-      loadFinancialData();
-    } catch (error: any) {
+    if (!result.success) {
       toast({
         title: "Erro",
         description: "Erro ao remover cobrança recorrente",
         variant: "destructive",
       });
+      return;
     }
+
+    toast({
+      title: "Sucesso",
+      description: "Cobrança recorrente removida",
+    });
+    
+    loadFinancialData();
   };
 
   const handleDeleteException = async (id: string) => {
-    try {
-      const { error } = await supabase
-        .from("financial_exceptions")
-        .update({ ativo: false })
-        .eq("id", id);
+    if (!(await confirmDelete(confirm, "Esta exceção financeira será removida."))) return;
 
-      if (error) throw error;
+    const result = await apiClient.requestSafe(`/api/financial-exceptions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ ativo: false }),
+    });
 
-      toast({
-        title: "Sucesso",
-        description: "Exceção removida",
-      });
-      
-      loadFinancialData();
-    } catch (error: any) {
+    if (!result.success) {
       toast({
         title: "Erro",
         description: "Erro ao remover exceção",
         variant: "destructive",
       });
+      return;
     }
+
+    toast({
+      title: "Sucesso",
+      description: "Exceção removida",
+    });
+    
+    loadFinancialData();
   };
 
   const getStatusBadge = (status: string) => {
@@ -377,6 +379,9 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Criar Pagamento para {studentName}</DialogTitle>
+                <DialogDescription>
+                  Defina valor, forma de pagamento, vencimento e descrição da cobrança.
+                </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
                 <div>
@@ -403,10 +408,9 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
                 </div>
                 <div>
                   <Label>Data de Vencimento</Label>
-                  <Input
-                    type="date"
+                  <DateInputBR
                     value={paymentForm.dueDate}
-                    onChange={(e) => setPaymentForm({ ...paymentForm, dueDate: e.target.value })}
+                    onChange={(value) => setPaymentForm({ ...paymentForm, dueDate: value })}
                   />
                 </div>
                 <div>
@@ -433,6 +437,9 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Configurar Cobrança Recorrente</DialogTitle>
+                <DialogDescription>
+                  Associe um plano de pagamento e ajuste vencimento ou valor conforme necessário.
+                </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
                 <div>
@@ -442,11 +449,17 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
                       <SelectValue placeholder="Selecione um plano" />
                     </SelectTrigger>
                     <SelectContent>
-                      {planos.map((plano) => (
-                        <SelectItem key={plano.id} value={plano.id}>
-                          {plano.nome} - R$ {plano.valor}
-                        </SelectItem>
-                      ))}
+                      {planos.length > 0 ? (
+                        planos.map((plano) => (
+                          <SelectItem key={plano.id} value={plano.id}>
+                            {plano.nome} - R$ {Number(plano.valor || 0).toFixed(2)}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <div className="px-2 py-2 text-sm text-muted-foreground">
+                          Nenhum plano cadastrado
+                        </div>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -488,6 +501,9 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Criar Exceção Financeira</DialogTitle>
+                <DialogDescription>
+                  Registe desconto, isenção, bolsa ou plano personalizado com datas e valores.
+                </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
                 <div>
@@ -498,9 +514,9 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="desconto">Desconto</SelectItem>
-                      <SelectItem value="isencao">Isenção</SelectItem>
+                      <SelectItem value="isento">Isenção</SelectItem>
                       <SelectItem value="bolsa">Bolsa</SelectItem>
-                      <SelectItem value="plano_personalizado">Plano Personalizado</SelectItem>
+                      <SelectItem value="acordo_pagamento">Acordo de Pagamento</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -534,18 +550,16 @@ const StudentFinancialManagement = ({ studentId, studentName }: Props) => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label>Data Início</Label>
-                    <Input
-                      type="date"
+                    <DateInputBR
                       value={exceptionForm.data_inicio}
-                      onChange={(e) => setExceptionForm({ ...exceptionForm, data_inicio: e.target.value })}
+                      onChange={(value) => setExceptionForm({ ...exceptionForm, data_inicio: value })}
                     />
                   </div>
                   <div>
                     <Label>Data Fim</Label>
-                    <Input
-                      type="date"
+                    <DateInputBR
                       value={exceptionForm.data_fim}
-                      onChange={(e) => setExceptionForm({ ...exceptionForm, data_fim: e.target.value })}
+                      onChange={(value) => setExceptionForm({ ...exceptionForm, data_fim: value })}
                     />
                   </div>
                 </div>

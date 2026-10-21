@@ -1,0 +1,15 @@
+[Unit]
+Description=Black House Watchdog (health check one-shot)
+After=network-online.target nginx.service pm2-root.service postgresql@15-main.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/blackhouse/ops/watchdog.sh
+Nice=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=blackhouse-watchdog
+
+[Install]
+WantedBy=multi-user.target

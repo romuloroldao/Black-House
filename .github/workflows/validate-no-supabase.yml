@@ -1,0 +1,62 @@
+name: Validate No Supabase
+
+on:
+  pull_request:
+    branches: [main, master, develop]
+  push:
+    branches: [main, master, develop]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - name: Validate No Supabase
+        run: |
+          chmod +x scripts/validate-no-supabase.sh
+          npm run validate:no-supabase
+      
+      - name: Check for Supabase imports
+        run: |
+          if grep -r "import.*supabase\|require.*supabase\|from.*supabase" src/ --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" 2>/dev/null | grep -v "supabase.ts" | grep -v "DESIGN-SUPABASE"; then
+            echo "❌ ERRO: Imports de Supabase encontrados!"
+            exit 1
+          fi
+      
+      - name: Check for kill switch
+        run: |
+          if [ ! -f "src/lib/supabase.ts" ]; then
+            echo "❌ ERRO: Kill switch (src/lib/supabase.ts) não encontrado!"
+            exit 1
+          fi
+      
+      - name: Check node_modules
+        run: |
+          if [ -d "node_modules/@supabase" ]; then
+            echo "❌ ERRO: @supabase encontrado em node_modules!"
+            exit 1
+          fi
+      
+      - name: Check for apiClient.from() usage
+        run: |
+          FROM_COUNT=$(grep -r "apiClient\.from(" src/ --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" 2>/dev/null | grep -v "api-client.ts" | grep -v "// NÃO USE" | wc -l)
+          if [ "$FROM_COUNT" -gt 0 ]; then
+            echo "❌ ERRO: Uso de apiClient.from() encontrado!"
+            grep -r "apiClient\.from(" src/ --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" 2>/dev/null | grep -v "api-client.ts" | grep -v "// NÃO USE"
+            exit 1
+          fi
+      
+      - name: Check for PostgREST syntax
+        run: |
+          if grep -r "select=\|\.eq(\|\.neq(\|\.in(\|\.gt(\|\.lt(" src/ --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" 2>/dev/null | grep -v "api-client.ts" | grep -v "// DESIGN" | grep -v "// NÃO USE"; then
+            echo "❌ ERRO: Sintaxe PostgREST encontrada!"
+            exit 1
+          fi

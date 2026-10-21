@@ -25,8 +25,14 @@ const ChartContext = React.createContext<ChartContextProps | null>(null)
 function useChart() {
   const context = React.useContext(ChartContext)
 
+  // DESIGN-ROOT-RENDER-UNBLOCK-001: Não lançar erro durante render - retornar valores seguros
   if (!context) {
-    throw new Error("useChart must be used within a <ChartContainer />")
+    console.warn('[DESIGN-ROOT-RENDER-UNBLOCK-001] useChart usado fora de <ChartContainer />. Retornando valores padrão.');
+    return {
+      xAxis: { orientation: 'bottom' },
+      yAxis: { orientation: 'left' },
+      config: {},
+    };
   }
 
   return context

@@ -28,8 +28,8 @@ interface ComboboxProps {
 }
 
 // Função para normalizar texto (remover acentos e caracteres especiais)
-const normalizeText = (text: string) => {
-  return text
+const normalizeText = (text: string | null | undefined) => {
+  return String(text ?? '')
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "") // Remove acentos
@@ -69,9 +69,15 @@ export function Combobox({
 
   const selectedOption = options.find((option) => option.value === value)
 
-  const filteredOptions = options.filter((option) =>
+  const MAX_OPTIONS_NO_SEARCH = 60
+  const MAX_OPTIONS_WITH_SEARCH = 100
+
+  const filteredAll = options.filter((option) =>
     flexibleSearch(searchValue, option.label, option.description)
   )
+  const limit = searchValue.trim() ? MAX_OPTIONS_WITH_SEARCH : MAX_OPTIONS_NO_SEARCH
+  const filteredOptions = filteredAll.slice(0, limit)
+  const hasMoreResults = filteredAll.length > filteredOptions.length
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -88,7 +94,7 @@ export function Combobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-        <Command>
+        <Command shouldFilter={false}>
           <CommandInput 
             placeholder={searchPlaceholder} 
             value={searchValue}
@@ -123,6 +129,11 @@ export function Combobox({
                 </CommandItem>
               ))}
             </CommandGroup>
+            {hasMoreResults && (
+              <p className="px-3 py-2 text-xs text-muted-foreground border-t">
+                Mostrando {filteredOptions.length} de {filteredAll.length}. Refine a busca para ver mais.
+              </p>
+            )}
           </CommandList>
         </Command>
       </PopoverContent>

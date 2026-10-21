@@ -1,0 +1,246 @@
+/**
+ * Google Gemini Provider (Secundário)
+ * Implementação isolada do provider Gemini
+ * Nenhum código fora deste arquivo deve importar '@google/generative-ai' diretamente
+ */
+
+const logger = require('../../../utils/logger');
+
+class GeminiProvider {
+    constructor(apiKey, model = 'gemini-2.5-pro') {
+        this.apiKey = apiKey;
+        this.model = model;
+        this.client = null;
+    }
+
+    /**
+     * Inicializa o cliente Gemini
+     * @throws {Error} Se o SDK não estiver instalado ou API key inválida
+     */
+    initialize() {
+        try {
+            const { GoogleGenerativeAI } = require('@google/generative-ai');
+            this.client = new GoogleGenerativeAI(this.apiKey);
+            logger.info('Gemini provider inicializado', { model: this.model });
+            return true;
+        } catch (error) {
+            if (error.code === 'MODULE_NOT_FOUND') {
+                throw new Error(
+                    'SDK do Gemini não está instalado. Execute: npm install @google/generative-ai'
+                );
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Extrai dados estruturados do texto do PDF ou do PDF original quando disponível
+     * @param {string} pdfText - Texto extraído do PDF
+     * @param {string} systemPrompt - Prompt do sistema
+     * @param {string} userPrompt - Prompt do usuário
+     * @param {Buffer|null} pdfBuffer - PDF original para análise multimodal/layout-aware
+     * @returns {Promise<Object>} Dados estruturados
+     */
+    async extractStructuredData(pdfText, systemPrompt, userPrompt, pdfBuffer = null) {
+        if (!this.client) {
+            this.initialize();
+        }
+
+        try {
+            const model = this.client.getGenerativeModel({ 
+                model: this.model,
+                generationConfig: {
+                    temperature: 0.05, // Reduzido para respostas mais consistentes
+                    maxOutputTokens: 32000, // Aumentado para suportar documentos maiores
+                    responseMimeType: 'application/json'
+                }
+            });
+
+            const fullPrompt = pdfBuffer
+                ? `${systemPrompt}\n\nAnalise o PDF anexado preservando a ordem visual das tabelas. Use o texto extraído abaixo apenas como apoio caso necessário:\n\n${pdfText}`
+                : `${systemPrompt}\n\n${userPrompt}`;
+
+            const parts = pdfBuffer
+                ? [
+                    { text: fullPrompt },
+                    {
+                        inlineData: {
+                            mimeType: 'application/pdf',
+                            data: pdfBuffer.toString('base64')
+                        }
+                    }
+                ]
+                : fullPrompt;
+
+            const result = await model.generateContent(parts);
+            const response = await result.response;
+            const content = response.text();
+            
+            // Parse do JSON retornado
+            let parsedData;
+            try {
+                parsedData = JSON.parse(content);
+            } catch (parseError) {
+                // Tentar extrair JSON se vier com markdown ou texto
+                const jsonMatch = content.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    try {
+                        parsedData = JSON.parse(jsonMatch[0]);
+                    } catch (e) {
+                        throw new Error(
+                            `Resposta da IA não contém JSON válido. Erro: ${e.message}. ` +
+                            `Conteúdo: ${content.substring(0, 500)}`
+                        );
+                    }
+                } else {
+                    throw new Error(
+                        `Resposta da IA não contém JSON válido. ` +
+                        `Conteúdo recebido: ${content.substring(0, 500)}`
+                    );
+                }
+            }
+            
+            logger.info('Dados extraídos pela IA (Gemini)', {
+                model: this.model,
+                dataKeys: Object.keys(parsedData)
+            });
+            
+            return parsedData;
+        } catch (error) {
+            logger.error('Erro ao extrair dados com Gemini', {
+                error: error.message,
+                model: this.model,
+                statusCode: error.status,
+                stack: error.stack
+            });
+            
+            // Mensagens de erro mais claras
+            if (error.status === 429) {
+                throw new Error('Cota da API Gemini excedida. Verifique seu plano e faturamento na Google.');
+            } else if (error.status === 401) {
+                throw new Error('API Key da Gemini inválida. Verifique a configuração de AI_API_KEY.');
+            } else if (error.status === 403) {
+                throw new Error('Acesso negado pela Gemini. Verifique permissões da API Key.');
+            } else if (error.message) {
+                throw new Error(error.message);
+            } else {
+                throw new Error(`Erro ao processar PDF com Gemini: ${error.message || 'Erro desconhecido'}`);
+            }
+        }
+    }
+
+    /**
+     * Extrai JSON estruturado a partir de uma imagem (vision).
+     * @param {Buffer} imageBuffer
+     * @param {string} mimeType
+     * @param {string} systemPrompt
+     * @param {string} userPrompt
+     * @param {{ timeoutMs?: number }} [options]
+     */
+    async extractStructuredDataFromImage(
+        imageBuffer,
+        mimeType = 'image/jpeg',
+        systemPrompt,
+        userPrompt,
+        options = {},
+    ) {
+        if (!this.client) {
+            this.initialize();
+        }
+        if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) {
+            throw new Error('imageBuffer inválido');
+        }
+
+        const timeoutMs = options.timeoutMs || 55000;
+        const model = this.client.getGenerativeModel({
+            model: this.model,
+            generationConfig: {
+                temperature: 0.2,
+                maxOutputTokens: 8192,
+                responseMimeType: 'application/json',
+            },
+        });
+
+        const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+        const parts = [
+            { text: fullPrompt },
+            {
+                inlineData: {
+                    mimeType: mimeType || 'image/jpeg',
+                    data: imageBuffer.toString('base64'),
+                },
+            },
+        ];
+
+        const generatePromise = this._generateWithRetries(model, parts, timeoutMs);
+
+        let timeoutId;
+        const timeoutPromise = new Promise((_, reject) => {
+            timeoutId = setTimeout(() => {
+                const err = new Error('Timeout na análise de imagem (Gemini)');
+                err.code = 'AI_TIMEOUT';
+                reject(err);
+            }, timeoutMs);
+        });
+
+        let content;
+        try {
+            content = await Promise.race([generatePromise, timeoutPromise]);
+        } finally {
+            if (timeoutId) clearTimeout(timeoutId);
+        }
+
+        let parsedData;
+        try {
+            parsedData = JSON.parse(content);
+        } catch (parseError) {
+            const jsonMatch = content.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                parsedData = JSON.parse(jsonMatch[0]);
+            } else {
+                throw new Error(
+                    `Resposta da IA (vision) sem JSON válido. Conteúdo: ${String(content).substring(0, 400)}`,
+                );
+            }
+        }
+
+        logger.info('Dados extraídos pela IA vision (Gemini)', {
+            model: this.model,
+            dataKeys: Object.keys(parsedData || {}),
+        });
+        return parsedData;
+    }
+
+    /**
+     * Gera conteúdo com retry exponencial para erros transitórios (429/503).
+     */
+    async _generateWithRetries(model, parts, timeoutMs, maxAttempts = 3) {
+        const { classifyVisionError } = require('../../../utils/pose-vision-errors');
+        let lastError;
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+            try {
+                const result = await model.generateContent(parts);
+                const response = await result.response;
+                return response.text();
+            } catch (error) {
+                lastError = error;
+                const kind = classifyVisionError(error);
+                const dailyQuota = /PerDay/i.test(String(error?.message || ''));
+                if (kind !== 'transient' || dailyQuota || attempt >= maxAttempts) {
+                    throw error;
+                }
+                const delayMs = Math.min(30_000, 1000 * 2 ** (attempt - 1));
+                logger.warn('Gemini vision retry', {
+                    model: this.model,
+                    attempt,
+                    delayMs,
+                    error: error.message,
+                });
+                await new Promise((r) => setTimeout(r, delayMs));
+            }
+        }
+        throw lastError;
+    }
+}
+
+module.exports = GeminiProvider;

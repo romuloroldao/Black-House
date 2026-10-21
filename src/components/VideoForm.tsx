@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
+import { apiClient } from "@/lib/api-client";
+import { API_CONTRACT } from "@/contracts/api-contract";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,6 +21,7 @@ import {
   ExternalLink,
   CheckCircle2
 } from "lucide-react";
+import { VIDEO_CATEGORIES } from "@/lib/video-categories";
 
 interface VideoFormProps {
   video?: any;
@@ -29,7 +30,6 @@ interface VideoFormProps {
 }
 
 const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
-  const { user } = useAuth();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
@@ -49,16 +49,7 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
   const [youtubeData, setYoutubeData] = useState(null);
   const [isValidating, setIsValidating] = useState(false);
 
-  const categories = [
-    "Técnica",
-    "Cardio", 
-    "Força",
-    "Mobilidade",
-    "Funcional",
-    "Reabilitação",
-    "Nutrição",
-    "Motivacional"
-  ];
+  const categories = [...VIDEO_CATEGORIES];
 
   const visibilityOptions = [
     { value: "active-students", label: "Alunos Ativos", description: "Apenas alunos com planos ativos" },
@@ -67,11 +58,18 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
     { value: "everyone", label: "Público", description: "Todos os usuários" }
   ];
 
-  // Função para extrair ID do YouTube da URL
+  // Função para extrair ID do YouTube da URL (incluindo Shorts)
   const extractYouTubeId = (url: string) => {
-    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+    // Suporte para YouTube Shorts: /shorts/VIDEO_ID
+    const shortsMatch = url.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/);
+    if (shortsMatch) {
+      return shortsMatch[1];
+    }
+    
+    // Suporte para URLs padrão do YouTube
+    const regExp = /^.*(youtu\.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
     const match = url.match(regExp);
-    return (match && match[2].length === 11) ? match[2] : null;
+    return (match && match[2] && match[2].length === 11) ? match[2] : null;
   };
 
   // Função para validar URL do YouTube
@@ -144,7 +142,8 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
     try {
       setSaving(true);
 
-      if (!formData.title || !formData.youtubeId || !formData.category) {
+      // Validar campos obrigatórios
+      if (!formData.title || !formData.youtubeUrl || !formData.category) {
         toast({
           title: "Erro",
           description: "Título, URL do YouTube e categoria são obrigatórios",
@@ -154,38 +153,75 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
         return;
       }
 
+      // Extrair youtubeId se ainda não foi extraído
+      let youtubeId = formData.youtubeId;
+      if (!youtubeId && formData.youtubeUrl) {
+        const extractedId = extractYouTubeId(formData.youtubeUrl);
+        if (!extractedId) {
+          toast({
+            title: "Erro",
+            description: "URL do YouTube inválida. Verifique o link e tente novamente.",
+            variant: "destructive",
+          });
+          setSaving(false);
+          return;
+        }
+        youtubeId = extractedId;
+        setFormData((prev) => ({ ...prev, youtubeId: extractedId }));
+      }
+
+      if (!youtubeId) {
+        toast({
+          title: "Erro",
+          description: "Não foi possível extrair o ID do vídeo do YouTube. Verifique a URL.",
+          variant: "destructive",
+        });
+        setSaving(false);
+        return;
+      }
+
       const videoData = {
-        titulo: formData.title,
-        descricao: formData.description,
-        youtube_id: formData.youtubeId,
+        titulo: formData.title.trim(),
+        descricao: formData.description?.trim() || null,
+        youtube_id: youtubeId,
         categoria: formData.category,
         visibilidade: formData.visibility,
-        tags: formData.tags,
-        duracao: formData.duration,
-        coach_id: user?.id,
+        tags: Array.isArray(formData.tags) ? formData.tags : [],
+        duracao: formData.duration?.trim() || null,
       };
 
       if (video?.id) {
-        // Update existing video
-        const { error } = await supabase
-          .from('videos')
-          .update(videoData)
-          .eq('id', video.id);
-
-        if (error) throw error;
-
+        const updateResult = await apiClient.requestSafe(API_CONTRACT.videos.byId(video.id), {
+          method: 'PATCH',
+          body: JSON.stringify(videoData),
+        });
+        if (!updateResult.success) {
+          toast({
+            title: "Erro ao salvar",
+            description: updateResult.error || "Não foi possível salvar o vídeo.",
+            variant: "destructive",
+          });
+          setSaving(false);
+          return;
+        }
         toast({
           title: "Vídeo atualizado!",
           description: "As alterações foram salvas com sucesso.",
         });
       } else {
-        // Create new video
-        const { error } = await supabase
-          .from('videos')
-          .insert([videoData]);
-
-        if (error) throw error;
-
+        const createResult = await apiClient.requestSafe(API_CONTRACT.videos.list(), {
+          method: 'POST',
+          body: JSON.stringify(videoData),
+        });
+        if (!createResult.success) {
+          toast({
+            title: "Erro ao salvar",
+            description: createResult.error || "Não foi possível salvar o vídeo.",
+            variant: "destructive",
+          });
+          setSaving(false);
+          return;
+        }
         toast({
           title: "Vídeo adicionado!",
           description: "O novo vídeo foi cadastrado com sucesso.",
@@ -215,7 +251,7 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
           <ArrowLeft className="w-5 h-5" />
         </Button>
         <div className="flex-1">
-          <h1 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+          <h1 className="bg-gradient-primary bg-clip-text text-xl font-bold text-transparent sm:text-2xl">
             {video ? "Editar Vídeo" : "Novo Vídeo"}
           </h1>
           <p className="text-muted-foreground">
@@ -229,7 +265,7 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
           <Button onClick={handleSave} className="shadow-glow" disabled={saving}>
             {saving ? (
               <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full motion-safe:animate-spin mr-2" />
                 Salvando...
               </>
             ) : (
@@ -276,7 +312,7 @@ const VideoForm = ({ video, onBack, onSave }: VideoFormProps) => {
                 
                 {isValidating && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full motion-safe:animate-spin" />
                     Validando vídeo do YouTube...
                   </div>
                 )}

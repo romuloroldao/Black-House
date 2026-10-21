@@ -1,18 +1,57 @@
-import { createClient } from '@supabase/supabase-js';
 import * as fs from 'fs';
 import * as path from 'path';
 
-// Configurações do Supabase
-const SUPABASE_URL = 'https://cghzttbggklhuyqxzabq.supabase.co';
-const SUPABASE_KEY = process.env.SUPABASE_KEY || '';
+// Configurações da API
+const API_URL = process.env.VITE_API_URL || 'http://localhost:3001';
+const API_EMAIL = process.env.API_EMAIL || '';
+const API_PASSWORD = process.env.API_PASSWORD || '';
 
-if (!SUPABASE_KEY) {
-  console.error('❌ SUPABASE_KEY não configurada');
-  console.log('Use: SUPABASE_KEY=sua_chave npm run import-taco');
-  process.exit(1);
+// Função para fazer login e obter token
+async function obterToken(): Promise<string> {
+  if (!API_EMAIL || !API_PASSWORD) {
+    console.error('❌ API_EMAIL e API_PASSWORD devem ser configurados');
+    console.log('Use: API_EMAIL=email API_PASSWORD=senha npx tsx src/scripts/import-taco-foods.ts');
+    process.exit(1);
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: API_EMAIL, password: API_PASSWORD })
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Erro ao fazer login' }));
+      throw new Error(error.error || 'Erro ao fazer login');
+    }
+
+    const data = await response.json();
+    return data.token;
+  } catch (error: any) {
+    console.error('❌ Erro ao obter token:', error.message);
+    process.exit(1);
+  }
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+// Função para fazer requisição autenticada
+async function apiRequest(endpoint: string, options: RequestInit = {}, token: string) {
+  const response = await fetch(`${API_URL}${endpoint}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      ...options.headers as Record<string, string>
+    }
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Erro na requisição' }));
+    throw new Error(error.error || `Erro ${response.status}: ${response.statusText}`);
+  }
+
+  return response.json();
+}
 
 interface TacoFood {
   alimento: string;
@@ -117,7 +156,7 @@ function determinarTipo(nomeAlimento: string, proteina: number, carboidrato: num
   // Carboidratos (arroz, pães, massas, frutas, tubérculos)
   if (nome.includes('arroz') || nome.includes('pão') || nome.includes('macarrão') || 
       nome.includes('batata') || nome.includes('mandioca') || nome.includes('inhame') ||
-      nome.includes('cará') || nome.includes('polenta') || nome.includes('farinha') ||
+      nome.includes('cará') || nome.includes('polvilha') || nome.includes('farinha') ||
       nome.includes('tapioca') || nome.includes('aveia') || nome.includes('granola') ||
       nome.includes('cereal') || nome.includes('biscoito') || nome.includes('bolo') ||
       nome.includes('fruta') || nome.includes('banana') || nome.includes('maçã') ||
@@ -132,9 +171,14 @@ function determinarTipo(nomeAlimento: string, proteina: number, carboidrato: num
 }
 
 async function importarTacoFoods() {
-  console.log('🚀 Iniciando importação de alimentos da TACO...\n');
+  console.log('🚀 Iniciando importação de alimentos da TACO via API REST...\n');
   
   try {
+    // Obter token de autenticação
+    console.log('🔐 Autenticando...');
+    const token = await obterToken();
+    console.log('✅ Autenticação realizada\n');
+    
     // Procurar o arquivo parseado mais recente
     const toolResultsDir = path.join(__dirname, '../../tool-results/document--parse_document');
     let parsedContent = '';
@@ -156,6 +200,7 @@ async function importarTacoFoods() {
       console.log('💡 Execute o parse do documento Excel primeiro ou use os dados inline.');
       process.exit(1);
     }
+    
     const lines = parsedContent.split('\n');
     
     // Processar as linhas da tabela
@@ -221,20 +266,37 @@ async function importarTacoFoods() {
     const tiposMap = new Map<string, string>();
     
     for (const tipo of Array.from(tiposUnicos)) {
-      const { data, error } = await supabase
-        .from('tipos_alimentos')
-        .upsert(
-          { nome_tipo: tipo },
-          { onConflict: 'nome_tipo' }
-        )
-        .select()
-        .single();
-      
-      if (error) {
+      try {
+        // Tentar buscar tipo existente
+        const existing = await apiRequest(
+          `/rest/v1/tipos_alimentos?nome_tipo.eq=${encodeURIComponent(tipo)}&select=id`,
+          { method: 'GET' },
+          token
+        ).catch(() => null);
+        
+        const existingRecord = Array.isArray(existing) ? existing[0] : existing;
+        
+        if (existingRecord && existingRecord.id) {
+          tiposMap.set(tipo, existingRecord.id);
+          console.log(`✅ Tipo: ${tipo} (já existe)`);
+        } else {
+          // Criar novo tipo
+          const result = await apiRequest(
+            '/rest/v1/tipos_alimentos',
+            {
+              method: 'POST',
+              body: JSON.stringify({ nome_tipo: tipo })
+            },
+            token
+          );
+          
+          if (result && result.id) {
+            tiposMap.set(tipo, result.id);
+            console.log(`✅ Tipo: ${tipo}`);
+          }
+        }
+      } catch (error: any) {
         console.error(`❌ Erro ao inserir tipo ${tipo}:`, error.message);
-      } else if (data) {
-        tiposMap.set(tipo, data.id);
-        console.log(`✅ Tipo: ${tipo}`);
       }
     }
     
@@ -265,31 +327,53 @@ async function importarTacoFoods() {
           origem_ptn,
           tipo_id: tipo_id || null,
           info_adicional: food.fibra ? `Fibra: ${food.fibra}g | Fonte: TACO` : 'Fonte: TACO',
-          autor: null // Será preenchido automaticamente pelo sistema
+          autor: null
         };
         
         try {
-          const { error } = await supabase
-            .from('alimentos')
-            .upsert(alimentoData, { onConflict: 'nome' })
-            .select();
+          // Tentar buscar se existe
+          const existing = await apiRequest(
+            `/rest/v1/alimentos?nome.eq=${encodeURIComponent(food.alimento)}&select=id`,
+            { method: 'GET' },
+            token
+          ).catch(() => null);
           
-          if (error) {
-            if (error.message.includes('duplicate key')) {
-              duplicatasIgnoradas++;
-            } else {
-              console.error(`❌ Erro ao importar ${food.alimento}:`, error.message);
-              erros++;
-            }
+          const existingRecord = Array.isArray(existing) ? existing[0] : existing;
+          
+          if (existingRecord && existingRecord.id) {
+            // UPDATE
+            await apiRequest(
+              '/rest/v1/alimentos',
+              {
+                method: 'PATCH',
+                body: JSON.stringify({ id: existingRecord.id, ...alimentoData })
+              },
+              token
+            );
+            atualizados++;
           } else {
+            // INSERT
+            await apiRequest(
+              '/rest/v1/alimentos',
+              {
+                method: 'POST',
+                body: JSON.stringify(alimentoData)
+              },
+              token
+            );
             importados++;
-            if ((importados + atualizados) % 50 === 0) {
-              console.log(`✅ Progresso: ${importados + atualizados}/${foods.length}`);
-            }
           }
-        } catch (err) {
-          console.error(`❌ Exceção ao importar ${food.alimento}:`, err);
-          erros++;
+          
+          if ((importados + atualizados) % 50 === 0) {
+            console.log(`✅ Progresso: ${importados + atualizados}/${foods.length}`);
+          }
+        } catch (error: any) {
+          if (error.message.includes('duplicate') || error.message.includes('23505')) {
+            duplicatasIgnoradas++;
+          } else {
+            console.error(`❌ Erro ao importar ${food.alimento}:`, error.message);
+            erros++;
+          }
         }
       }
     }
@@ -304,8 +388,8 @@ async function importarTacoFoods() {
     console.log('='.repeat(60));
     console.log('\n✨ Importação concluída!');
     
-  } catch (error) {
-    console.error('❌ Erro geral na importação:', error);
+  } catch (error: any) {
+    console.error('❌ Erro geral na importação:', error.message || error);
     process.exit(1);
   }
 }

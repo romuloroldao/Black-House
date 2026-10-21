@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,19 +9,19 @@ import {
   Star, 
   Clock, 
   Dumbbell, 
-  Target, 
   Copy,
-  Heart,
   TrendingUp,
-  Zap,
-  Activity
+  Users,
 } from "lucide-react";
+import type { WorkoutTemplateSummary } from "./WorkoutTemplateAssignmentsSheet";
 
 interface WorkoutTemplatesProps {
-  onUseTemplate: (template: any) => void;
+  onUseTemplate: (template: { id: string }) => void;
+  onPreview?: (template: { id: string; name: string }) => void;
+  onViewStudents?: (template: WorkoutTemplateSummary) => void;
 }
 
-const WorkoutTemplates = ({ onUseTemplate }: WorkoutTemplatesProps) => {
+const WorkoutTemplates = ({ onUseTemplate, onPreview, onViewStudents }: WorkoutTemplatesProps) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [templates, setTemplates] = useState<any[]>([]);
@@ -32,36 +32,36 @@ const WorkoutTemplates = ({ onUseTemplate }: WorkoutTemplatesProps) => {
   }, []);
 
   const carregarTemplates = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('treinos')
-        .select('*')
-        .eq('is_template', true)
-        .order('created_at', { ascending: false });
+    const result = await apiClient.requestSafe<any[]>('/api/treinos');
+    const data = result.success && Array.isArray(result.data) ? result.data : [];
+    const seen = new Set<string>();
+    const filtrados = data
+      .filter((t: any) => {
+        if (!t || t.aluno_id) return false;
+        if (seen.has(t.id)) return false;
+        seen.add(t.id);
+        return t.is_template === true;
+      })
+      .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
-      if (error) throw error;
+    const templatesFormatados = filtrados.map((template: any) => ({
+      id: template.id,
+      name: template.nome,
+      description: template.descricao || '',
+      category: template.categoria,
+      difficulty: template.dificuldade,
+      duration: template.duracao,
+      exerciseCount: template.num_exercicios ?? 0,
+      rating: 4.5,
+      uses: template.alunos_ativos ?? 0,
+      customized: template.alunos_com_personalizacao ?? 0,
+      tags: Array.isArray(template.tags) ? template.tags : [],
+      icon: TrendingUp,
+      color: 'bg-primary'
+    }));
 
-      const templatesFormatados = data?.map(template => ({
-        id: template.id,
-        name: template.nome,
-        description: template.descricao || '',
-        category: template.categoria,
-        difficulty: template.dificuldade,
-        duration: template.duracao,
-        exercises: template.num_exercicios,
-        rating: 4.5, // TODO: implementar avaliações
-        uses: 0, // TODO: implementar contador de usos
-        tags: template.tags || [],
-        icon: TrendingUp,
-        color: 'bg-primary'
-      })) || [];
-
-      setTemplates(templatesFormatados);
-    } catch (error) {
-      console.error('Erro ao carregar templates:', error);
-    } finally {
-      setLoading(false);
-    }
+    setTemplates(templatesFormatados);
+    setLoading(false);
   };
 
   const categories = [
@@ -107,7 +107,7 @@ const WorkoutTemplates = ({ onUseTemplate }: WorkoutTemplatesProps) => {
   if (loading) {
     return (
       <div className="space-y-6">
-        <div className="animate-pulse">
+        <div className="motion-safe:animate-pulse">
           <div className="h-8 bg-muted rounded w-1/3 mb-4"></div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[1, 2, 3].map(i => (
@@ -175,8 +175,16 @@ const WorkoutTemplates = ({ onUseTemplate }: WorkoutTemplatesProps) => {
                         <div className="flex items-center gap-1 mt-1">
                           {renderStars(template.rating)}
                           <span className="text-xs text-muted-foreground ml-1">
-                            ({template.uses} usos)
+                            ({template.uses} aluno{template.uses === 1 ? "" : "s"})
                           </span>
+                          {template.customized > 0 && (
+                            <Badge
+                              variant="secondary"
+                              className="ml-1 text-[10px] h-5 bg-warning/10 text-warning border-warning/20"
+                            >
+                              {template.customized} c/ ajustes
+                            </Badge>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -207,7 +215,7 @@ const WorkoutTemplates = ({ onUseTemplate }: WorkoutTemplatesProps) => {
                     </div>
                     <div className="flex items-center gap-1">
                       <Dumbbell className="w-3 h-3" />
-                      <span className="text-xs">{template.exercises} ex.</span>
+                      <span className="text-xs">{template.exerciseCount} ex.</span>
                     </div>
                     <Badge className={getDifficultyColor(template.difficulty)} variant="outline">
                       <span className="text-xs">{template.difficulty}</span>
@@ -219,19 +227,39 @@ const WorkoutTemplates = ({ onUseTemplate }: WorkoutTemplatesProps) => {
                       variant="outline"
                       size="sm"
                       className="flex-1"
-                      onClick={() => {/* Preview functionality */}}
+                      onClick={() =>
+                        onPreview?.({ id: template.id, name: template.name })
+                      }
                     >
                       Visualizar
                     </Button>
                     <Button
                       size="sm"
                       className="flex-1"
-                      onClick={() => onUseTemplate(template)}
+                      onClick={() => onUseTemplate({ id: template.id })}
                     >
                       <Copy className="w-3 h-3 mr-1" />
                       Usar Template
                     </Button>
                   </div>
+                  {onViewStudents && template.uses > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full text-xs text-muted-foreground"
+                      onClick={() =>
+                        onViewStudents({
+                          id: template.id,
+                          name: template.name,
+                          studentsAssigned: template.uses,
+                          studentsCustomized: template.customized,
+                        })
+                      }
+                    >
+                      <Users className="w-3 h-3 mr-1" />
+                      {template.uses} aluno{template.uses === 1 ? "" : "s"} vinculado{template.uses === 1 ? "" : "s"}
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             );

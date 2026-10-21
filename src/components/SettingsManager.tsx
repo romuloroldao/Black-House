@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
 import {
   Card,
@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { User, Bell, Key, Palette, Eye, EyeOff, Camera, Loader2, Shield } from "lucide-react";
+import { User, Bell, Key, Palette, Eye, EyeOff, Camera, Loader2, Shield, BookOpen } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -27,13 +27,21 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import UserRolesManager from "./UserRolesManager";
+import CoachRulesManager from "./coach/CoachRulesManager";
+import { ModeToggle } from "@/components/ui/mode-toggle";
+import { API_CONTRACT } from "@/contracts/api-contract";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
 const SettingsManager = () => {
+  const { confirm } = useConfirm();
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [asaasConfig, setAsaasConfig] = useState<any>(null);
+  const [asaasApiKey, setAsaasApiKey] = useState("");
+  /** Alinhado com o servidor: true = sandbox Asaas */
+  const [asaasIsSandbox, setAsaasIsSandbox] = useState(true);
   const [twilioConfig, setTwilioConfig] = useState<any>(null);
   
   // Profile state
@@ -51,6 +59,10 @@ const SettingsManager = () => {
     newMessages: true,
     eventReminders: true,
   });
+  const [agendaCoachEmail, setAgendaCoachEmail] = useState(true);
+  const [teamEmail, setTeamEmail] = useState("");
+  const [teamRole, setTeamRole] = useState<"assistant" | "viewer">("assistant");
+  const [teamMembers, setTeamMembers] = useState<any[]>([]);
 
   // Password change dialog state
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
@@ -67,32 +79,47 @@ const SettingsManager = () => {
     loadAsaasConfig();
     loadTwilioConfig();
     loadProfile();
+    loadCoachAgendaNotificationPrefs();
+    loadTeamMembers();
   }, [user]);
+
+  const loadTeamMembers = async () => {
+    const res = await apiClient.requestSafe<any[]>(API_CONTRACT.coach.teamMembers());
+    if (res.success && Array.isArray(res.data)) {
+      setTeamMembers(res.data.filter((m) => m.ativo !== false));
+    }
+  };
+
+  const loadCoachAgendaNotificationPrefs = async () => {
+    const res = await apiClient.requestSafe<{ notification_channel: string }>(
+      API_CONTRACT.coach.notificationPreferences(),
+    );
+    if (res.success && res.data?.notification_channel) {
+      setAgendaCoachEmail(res.data.notification_channel === "in_app_and_email");
+    }
+  };
+
+  useEffect(() => {
+    if (asaasConfig && typeof asaasConfig.is_sandbox === "boolean") {
+      setAsaasIsSandbox(!!asaasConfig.is_sandbox);
+    }
+    if (!asaasConfig) {
+      setAsaasIsSandbox(true);
+    }
+  }, [asaasConfig]);
 
   const loadProfile = async () => {
     if (!user) return;
     
     // Load avatar from profiles table
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('avatar_url')
-      .eq('id', user.id)
-      .single();
-    
-    if (profile?.avatar_url) {
-      setAvatarUrl(profile.avatar_url);
+    const profileResult = await apiClient.requestSafe<any>('/api/profiles/me');
+    if (profileResult.success && profileResult.data?.avatar_url) {
+      setAvatarUrl(profileResult.data.avatar_url);
     }
     
-    // Load display name from user metadata
-    const { data: userData } = await supabase.auth.getUser();
-    if (userData?.user?.user_metadata) {
-      const metadata = userData.user.user_metadata;
-      setProfileData(prev => ({
-        ...prev,
-        displayName: metadata.display_name || metadata.full_name || metadata.name || "",
-        phone: metadata.phone || "",
-      }));
-    }
+    // Load display name from user metadata (se disponível na tabela users)
+    // Nota: user_metadata pode não estar disponível no apiClient
+    // Por enquanto, usar dados do perfil se disponível
   };
 
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -118,29 +145,20 @@ const SettingsManager = () => {
       const fileName = `${user.id}/avatar.${fileExt}`;
 
       // Upload to storage
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(fileName, file, { upsert: true });
+      // Upload usando rota canônica /api/avatar 
+      const uploadResult = await apiClient.uploadFile('avatars', fileName, file);
+      const publicUrl = uploadResult.url || `${apiClient.getPublicUrl('avatars', fileName)}?t=${Date.now()}`;
 
-      if (uploadError) throw uploadError;
-
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('avatars')
-        .getPublicUrl(fileName);
-
-      const publicUrl = `${urlData.publicUrl}?t=${Date.now()}`; // Add cache buster
-
-      // Upsert profile with avatar URL
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .upsert({
-          id: user.id,
+      const profileResult = await apiClient.requestSafe('/api/profiles/me', {
+        method: 'PATCH',
+        body: JSON.stringify({
           avatar_url: publicUrl,
           updated_at: new Date().toISOString(),
-        });
-
-      if (profileError) throw profileError;
+        }),
+      });
+      if (!profileResult.success) {
+        throw new Error(profileResult.error || 'Erro ao atualizar avatar');
+      }
 
       setAvatarUrl(publicUrl);
       toast.success("Avatar atualizado com sucesso!");
@@ -155,55 +173,39 @@ const SettingsManager = () => {
   const loadAsaasConfig = async () => {
     if (!user) return;
 
-    try {
-      const { data, error } = await supabase
-        .from("asaas_config")
-        .select("*")
-        .eq("coach_id", user.id)
-        .single();
-
-      if (error && error.code !== "PGRST116") {
-        throw error;
-      }
-
-      setAsaasConfig(data);
-    } catch (error) {
-      console.error("Erro ao carregar configurações Asaas:", error);
-    }
+    const q = user.role === "admin" ? `?coach_id=${encodeURIComponent(user.id)}` : "";
+    const result = await apiClient.requestSafe<any[]>(`/api/asaas-config${q}`);
+    const data = result.success && Array.isArray(result.data) ? result.data : [];
+    const config = data.length > 0 ? data[0] : null;
+    setAsaasConfig(config);
   };
 
   const loadTwilioConfig = async () => {
     if (!user) return;
 
-    try {
-      const { data, error } = await supabase
-        .from("twilio_config")
-        .select("*")
-        .eq("coach_id", user.id)
-        .single();
-
-      if (error && error.code !== "PGRST116") {
-        throw error;
-      }
-
-      setTwilioConfig(data);
-    } catch (error) {
-      console.error("Erro ao carregar configurações Twilio:", error);
-    }
+    const result = await apiClient.requestSafe<any[]>(`/api/twilio-config?coach_id=${user.id}`);
+    const data = result.success && Array.isArray(result.data) ? result.data : [];
+    const config = data.length > 0 ? data[0] : null;
+    setTwilioConfig(config);
   };
 
   const handleSaveProfile = async () => {
     setLoading(true);
     try {
-      // Update user metadata
-      const { error } = await supabase.auth.updateUser({
-        data: {
+      // Nota: Atualização de metadata do usuário pode precisar de endpoint específico
+      // Por enquanto, salvar em tabela profiles ou alunos se aplicável
+      // TODO: Implementar endpoint /auth/update-user no backend se necessário
+      
+      const profileResult = await apiClient.requestSafe('/api/profiles/me', {
+        method: 'PATCH',
+        body: JSON.stringify({
           phone: profileData.phone,
           display_name: profileData.displayName,
-        },
+        }),
       });
-
-      if (error) throw error;
+      if (!profileResult.success) {
+        throw new Error(profileResult.error || 'Erro ao atualizar perfil');
+      }
 
       toast.success("Perfil atualizado com sucesso!");
     } catch (error: any) {
@@ -216,7 +218,14 @@ const SettingsManager = () => {
   const handleSaveNotifications = async () => {
     setLoading(true);
     try {
-      // Save notification preferences (could be stored in a separate table)
+      const channel = agendaCoachEmail ? "in_app_and_email" : "in_app_only";
+      const result = await apiClient.requestSafe(API_CONTRACT.coach.notificationPreferences(), {
+        method: "PATCH",
+        body: JSON.stringify({ notification_channel: channel }),
+      });
+      if (!result.success) {
+        throw new Error(result.error || "Erro ao salvar preferências da Agenda");
+      }
       toast.success("Preferências de notificação atualizadas!");
     } catch (error: any) {
       toast.error("Erro ao salvar preferências: " + error.message);
@@ -225,23 +234,138 @@ const SettingsManager = () => {
     }
   };
 
-  const handleAsaasToggle = async () => {
+  const persistAsaasSandbox = async (sandbox: boolean) => {
+    if (!asaasConfig?.id) {
+      setAsaasIsSandbox(sandbox);
+      return;
+    }
     setLoading(true);
     try {
-      if (asaasConfig) {
-        // Update existing config
-        const { error } = await supabase
-          .from("asaas_config")
-          .update({ is_sandbox: !asaasConfig.is_sandbox })
-          .eq("id", asaasConfig.id);
-
-        if (error) throw error;
-
-        setAsaasConfig({ ...asaasConfig, is_sandbox: !asaasConfig.is_sandbox });
-        toast.success("Configuração Asaas atualizada!");
+      const result = await apiClient.requestSafe(`/api/asaas-config/${asaasConfig.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_sandbox: sandbox }),
+      });
+      if (!result.success) {
+        throw new Error(result.error || "Erro ao atualizar ambiente Asaas");
       }
+      setAsaasIsSandbox(sandbox);
+      setAsaasConfig((prev: any) => (prev ? { ...prev, is_sandbox: sandbox } : prev));
+      toast.success(sandbox ? "Modo sandbox ativo." : "Modo produção ativo.");
     } catch (error: any) {
-      toast.error("Erro ao atualizar Asaas: " + error.message);
+      toast.error(error?.message || "Erro ao atualizar ambiente Asaas");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyAsaasConnection = async () => {
+    if (!user) return;
+
+    const trimmed = asaasApiKey.trim();
+
+    const body: Record<string, unknown> = { is_sandbox: asaasIsSandbox };
+
+    if (user.role === "admin") {
+      body.coach_id = user.id;
+    }
+
+    if (trimmed) {
+      body.asaas_api_key = trimmed;
+    } else if (!asaasConfig?.has_api_key) {
+      toast.error("Cole uma chave API ou configure e guarde primeiro.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      type VerifyPayload = { ok?: boolean; environment?: string };
+      const result = await apiClient.requestSafe<VerifyPayload>(
+        API_CONTRACT.asaasConfig.verifyConnection(),
+        { method: "POST", body: JSON.stringify(body) },
+      );
+
+      if (!result.success) {
+        toast.error(result.error || "Erro ao testar conexão");
+        return;
+      }
+
+      if (result.data?.ok === true) {
+        const prod = result.data.environment === "production";
+        toast.success(
+          prod ? "Ligação OK com Asaas (produção)." : "Ligação OK com Asaas (sandbox).",
+        );
+        return;
+      }
+
+      toast.error("Validação incompleta. Confirme chave API e modo sandbox.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveAsaasConfig = async () => {
+    if (!user) return;
+    const key = asaasApiKey.trim();
+    if (!key) {
+      toast.error("Cole a chave API do Asaas (sandbox ou produção).");
+      return;
+    }
+    setLoading(true);
+    try {
+      const body: Record<string, unknown> = {
+        asaas_api_key: key,
+        is_sandbox: asaasIsSandbox,
+      };
+      if (user.role === "admin") {
+        body.coach_id = user.id;
+      }
+
+      const result = await apiClient.requestSafe<any>("/api/asaas-config", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      if (!result.success) {
+        throw new Error(result.error || "Erro ao guardar Asaas");
+      }
+      setAsaasApiKey("");
+      if (result.data && typeof result.data === "object") {
+        setAsaasConfig(result.data);
+      } else {
+        await loadAsaasConfig();
+      }
+      toast.success("Asaas configurado. Os pagamentos usarão esta chave.");
+    } catch (error: any) {
+      toast.error(error?.message || "Erro ao configurar Asaas");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateAsaasApiKey = async () => {
+    if (!user || !asaasConfig?.id) return;
+    const key = asaasApiKey.trim();
+    if (!key) {
+      toast.error("Introduza a nova chave API.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await apiClient.requestSafe(`/api/asaas-config/${asaasConfig.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ asaas_api_key: key }),
+      });
+      if (!result.success) {
+        throw new Error(result.error || "Erro ao atualizar chave");
+      }
+      setAsaasApiKey("");
+      if (result.data && typeof result.data === "object") {
+        setAsaasConfig(result.data);
+      } else {
+        await loadAsaasConfig();
+      }
+      toast.success("Chave API atualizada.");
+    } catch (error: any) {
+      toast.error(error?.message || "Erro ao atualizar chave");
     } finally {
       setLoading(false);
     }
@@ -252,32 +376,33 @@ const SettingsManager = () => {
     try {
       if (twilioConfig) {
         // Update existing config
-        const { error } = await supabase
-          .from("twilio_config")
-          .update({
+        const result = await apiClient.requestSafe(`/api/twilio-config/${twilioConfig.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
             account_sid: accountSid,
             auth_token: authToken,
             whatsapp_from: whatsappFrom,
-          })
-          .eq("id", twilioConfig.id);
-
-        if (error) throw error;
+          }),
+        });
+        if (!result.success) {
+          throw new Error(result.error || 'Erro ao salvar Twilio');
+        }
 
         toast.success("Configuração Twilio atualizada!");
       } else {
         // Create new config
-        const { error } = await supabase
-          .from("twilio_config")
-          .insert([
-            {
-              coach_id: user?.id,
-              account_sid: accountSid,
-              auth_token: authToken,
-              whatsapp_from: whatsappFrom,
-            },
-          ]);
-
-        if (error) throw error;
+        const result = await apiClient.requestSafe('/api/twilio-config', {
+          method: 'POST',
+          body: JSON.stringify({
+            coach_id: user?.id,
+            account_sid: accountSid,
+            auth_token: authToken,
+            whatsapp_from: whatsappFrom,
+          }),
+        });
+        if (!result.success) {
+          throw new Error(result.error || 'Erro ao salvar Twilio');
+        }
 
         toast.success("Configuração Twilio criada!");
       }
@@ -309,13 +434,7 @@ const SettingsManager = () => {
 
     setLoading(true);
     try {
-      // Atualizar senha
-      const { error } = await supabase.auth.updateUser({
-        password: passwordData.newPassword,
-      });
-
-      if (error) throw error;
-
+      await apiClient.changePassword(passwordData.currentPassword, passwordData.newPassword);
       toast.success("Senha alterada com sucesso!");
       setPasswordDialogOpen(false);
       setPasswordData({
@@ -324,7 +443,7 @@ const SettingsManager = () => {
         confirmPassword: "",
       });
     } catch (error: any) {
-      toast.error("Erro ao alterar senha: " + error.message);
+      toast.error(error?.message || "Erro ao alterar senha");
     } finally {
       setLoading(false);
     }
@@ -333,14 +452,14 @@ const SettingsManager = () => {
   return (
     <div className="container max-w-5xl py-6">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold tracking-tight">Configurações</h1>
+        <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Configurações</h1>
         <p className="text-muted-foreground">
           Gerencie suas preferências e configurações do sistema
         </p>
       </div>
 
       <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5 lg:w-[620px]">
+        <TabsList className="grid w-full grid-cols-3 sm:grid-cols-6 lg:w-auto">
           <TabsTrigger value="profile" className="gap-2">
             <User className="h-4 w-4" />
             <span className="hidden sm:inline">Perfil</span>
@@ -348,6 +467,10 @@ const SettingsManager = () => {
           <TabsTrigger value="users" className="gap-2">
             <Shield className="h-4 w-4" />
             <span className="hidden sm:inline">Usuários</span>
+          </TabsTrigger>
+          <TabsTrigger value="method" className="gap-2">
+            <BookOpen className="h-4 w-4" />
+            <span className="hidden sm:inline">Método</span>
           </TabsTrigger>
           <TabsTrigger value="notifications" className="gap-2">
             <Bell className="h-4 w-4" />
@@ -365,6 +488,10 @@ const SettingsManager = () => {
 
         <TabsContent value="users">
           <UserRolesManager />
+        </TabsContent>
+
+        <TabsContent value="method">
+          <CoachRulesManager />
         </TabsContent>
 
         <TabsContent value="profile" className="space-y-4">
@@ -389,7 +516,7 @@ const SettingsManager = () => {
                     className="absolute bottom-0 right-0 p-1.5 bg-primary text-primary-foreground rounded-full cursor-pointer hover:bg-primary/90 transition-colors"
                   >
                     {uploadingAvatar ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <Loader2 className="h-4 w-4 motion-safe:animate-spin" />
                     ) : (
                       <Camera className="h-4 w-4" />
                     )}
@@ -589,9 +716,118 @@ const SettingsManager = () => {
 
               <Separator />
 
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label htmlFor="agenda-coach-email">Lembretes da Agenda por e-mail</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Retornos de alunos (2 dias antes, véspera e no dia). O sininho na plataforma é sempre enviado.
+                  </p>
+                </div>
+                <Switch
+                  id="agenda-coach-email"
+                  checked={agendaCoachEmail}
+                  onCheckedChange={setAgendaCoachEmail}
+                />
+              </div>
+
+              <Separator />
+
               <Button onClick={handleSaveNotifications} disabled={loading}>
                 {loading ? "Salvando..." : "Salvar Preferências"}
               </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Equipa (assistentes)</CardTitle>
+              <CardDescription>
+                Assistentes com acesso à sua Agenda e alunos. Visualizadores só consultam.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="team-email">Email do assistente</Label>
+                  <Input
+                    id="team-email"
+                    type="email"
+                    placeholder="assistente@email.com"
+                    value={teamEmail}
+                    onChange={(e) => setTeamEmail(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Permissão</Label>
+                  <select
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={teamRole}
+                    onChange={(e) => setTeamRole(e.target.value as "assistant" | "viewer")}
+                  >
+                    <option value="assistant">Assistente (editar Agenda)</option>
+                    <option value="viewer">Visualizador (só leitura)</option>
+                  </select>
+                </div>
+              </div>
+              <Button
+                variant="secondary"
+                disabled={loading || !teamEmail.trim()}
+                onClick={async () => {
+                  setLoading(true);
+                  try {
+                    const res = await apiClient.requestSafe(API_CONTRACT.coach.teamMembers(), {
+                      method: "POST",
+                      body: JSON.stringify({ member_email: teamEmail.trim(), team_role: teamRole }),
+                    });
+                    if (!res.success) throw new Error(res.error);
+                    setTeamEmail("");
+                    await loadTeamMembers();
+                    toast.success("Membro adicionado à equipa");
+                  } catch (e: any) {
+                    toast.error(e.message || "Erro ao adicionar");
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+              >
+                Adicionar à equipa
+              </Button>
+              {teamMembers.length > 0 && (
+                <ul className="space-y-2 text-sm border-t pt-4">
+                  {teamMembers.map((m) => (
+                    <li key={m.id} className="flex justify-between items-center gap-2">
+                      <span>
+                        {m.member_nome || m.member_email} — {m.team_role === "assistant" ? "Assistente" : "Visualizador"}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={async () => {
+                          if (
+                            !(await confirmDelete(
+                              confirm,
+                              `Remover ${m.member_nome || m.member_email} da equipa?`,
+                              "Confirmar remoção",
+                            ))
+                          ) {
+                            return;
+                          }
+                          const res = await apiClient.requestSafe(
+                            API_CONTRACT.coach.teamMemberById(m.id),
+                            { method: "DELETE" },
+                          );
+                          if (res.success) {
+                            await loadTeamMembers();
+                            toast.success("Removido da equipa");
+                          }
+                        }}
+                      >
+                        Remover
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -617,24 +853,108 @@ const SettingsManager = () => {
                   </div>
                   <p className="text-sm text-muted-foreground">
                     {asaasConfig
-                      ? "Integração configurada e ativa"
-                      : "Configure sua chave API do Asaas"}
+                      ? asaasConfig.has_api_key
+                        ? "Integração com chave API guardada (pagamentos usam esta conta)."
+                        : "Registo Asaas sem chave API — adicione uma chave abaixo."
+                      : "Configure sua chave API do Asaas (sandbox ou produção)."}
                   </p>
                 </div>
-                {asaasConfig && (
-                  <Button variant="outline" onClick={handleAsaasToggle} disabled={loading}>
-                    Alternar Modo
+                <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleVerifyAsaasConnection}
+                    disabled={loading || (!asaasApiKey.trim() && !asaasConfig?.has_api_key)}
+                  >
+                    Testar ligação
                   </Button>
-                )}
+                </div>
               </div>
+
+              <div className="flex items-center justify-between rounded-lg border p-4">
+                <div className="space-y-0.5">
+                  <Label htmlFor="asaas-sandbox">Sandbox (ambiente de testes Asaas)</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Desligue apenas com chave API de produção. O modo ativo aparece na etiqueta ao lado do título.
+                  </p>
+                </div>
+                <Switch
+                  id="asaas-sandbox"
+                  checked={asaasIsSandbox}
+                  onCheckedChange={(checked) => void persistAsaasSandbox(checked)}
+                  disabled={loading}
+                />
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                A chave é armazenada cifrada no servidor (AES-256-GCM) quando{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-[11px]">ASAAS_COACH_SECRETS_KEY</code>{" "}
+                está definido no backend (obrigatório em produção). Nunca é enviada de volta ao browser.
+              </p>
 
               {!asaasConfig && (
                 <>
                   <Separator />
                   <div className="space-y-2">
-                    <Label>Chave API Asaas</Label>
-                    <Input placeholder="Cole sua chave API aqui" type="password" />
-                    <Button className="mt-2">Configurar Asaas</Button>
+                    <Label htmlFor="asaas-api-key">Chave API Asaas</Label>
+                    <Input
+                      id="asaas-api-key"
+                      placeholder="Cole sua chave API aqui"
+                      type="password"
+                      autoComplete="off"
+                      value={asaasApiKey}
+                      onChange={(e) => setAsaasApiKey(e.target.value)}
+                    />
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      <Button
+                        type="button"
+                        onClick={handleVerifyAsaasConnection}
+                        disabled={loading || !asaasApiKey.trim()}
+                        variant="outline"
+                      >
+                        Testar antes de guardar
+                      </Button>
+                      <Button type="button" onClick={handleSaveAsaasConfig} disabled={loading}>
+                        {loading ? "A guardar…" : "Configurar Asaas"}
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
+              {asaasConfig && (
+                <>
+                  <Separator />
+                  <div className="space-y-2">
+                    <Label htmlFor="asaas-api-key-rotate">Nova chave API (opcional)</Label>
+                    <Input
+                      id="asaas-api-key-rotate"
+                      placeholder="Deixe vazio para manter a chave atual"
+                      type="password"
+                      autoComplete="off"
+                      value={asaasApiKey}
+                      onChange={(e) => setAsaasApiKey(e.target.value)}
+                    />
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleVerifyAsaasConnection}
+                        disabled={
+                          loading ||
+                          (!asaasConfig.has_api_key && !asaasApiKey.trim())
+                        }
+                      >
+                        Testar ligação
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={handleUpdateAsaasApiKey}
+                        disabled={loading || !asaasApiKey.trim()}
+                      >
+                        Atualizar chave API
+                      </Button>
+                    </div>
                   </div>
                 </>
               )}
@@ -718,8 +1038,9 @@ const SettingsManager = () => {
               <div className="space-y-2">
                 <Label>Tema</Label>
                 <p className="text-sm text-muted-foreground">
-                  O tema escuro/claro é detectado automaticamente do seu sistema
+                  Escolha claro, escuro ou seguir o sistema operativo.
                 </p>
+                <ModeToggle />
               </div>
               
               <Separator />

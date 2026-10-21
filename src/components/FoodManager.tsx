@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
+import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,29 +14,15 @@ import { toast } from "sonner";
 import { Plus, Search, Edit, Trash2, Apple, AlertCircle, Calculator, Upload, Download, FileSpreadsheet, ClipboardCheck, Merge } from "lucide-react";
 import FoodReviewManager from "./FoodReviewManager";
 import * as XLSX from 'xlsx';
+import { Food, getAllFoodsSafe, getMacroGroup, kcalFromMacrosFood } from "@/lib/foodService";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
-interface TipoAlimento {
-  id: string;
-  nome_tipo: string;
-}
-
-interface Alimento {
-  id: string;
-  nome: string;
-  tipo_id: string | null;
-  quantidade_referencia_g: number;
-  kcal_por_referencia: number;
-  cho_por_referencia: number;
-  ptn_por_referencia: number;
-  lip_por_referencia: number;
-  origem_ptn: string;
-  autor: string | null;
-  info_adicional: string | null;
-}
+type Alimento = Food;
 
 export default function FoodManager() {
+  const { user } = useAuth();
+  const { confirm } = useConfirm();
   const [alimentos, setAlimentos] = useState<Alimento[]>([]);
-  const [tipos, setTipos] = useState<TipoAlimento[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingFood, setEditingFood] = useState<Alimento | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -43,7 +30,6 @@ export default function FoodManager() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
   const [loading, setLoading] = useState(true);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
@@ -52,42 +38,30 @@ export default function FoodManager() {
   const [showReviewManager, setShowReviewManager] = useState(false);
 
   const [formData, setFormData] = useState({
-    nome: "",
-    tipo_id: "",
-    quantidade_referencia_g: "100",
-    kcal_por_referencia: "",
-    cho_por_referencia: "",
-    ptn_por_referencia: "",
-    lip_por_referencia: "",
-    origem_ptn: "mista",
-    info_adicional: "",
+    name: "",
+    portion: "100",
+    calories: "",
+    carbs: "",
+    protein: "",
+    fat: "",
   });
 
   useEffect(() => {
-    const inicializar = async () => {
-      await carregarUsuario();
-      await carregarDados();
-    };
-    inicializar();
+    carregarDados();
   }, []);
-
-  const carregarUsuario = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    setCurrentUserId(user?.id || null);
-  };
 
   // Calcula calorias baseado nos macros (CHO: 4kcal/g, PTN: 4kcal/g, LIP: 9kcal/g)
   const calcularCaloriasDosMacros = () => {
-    const cho = parseFloat(formData.cho_por_referencia) || 0;
-    const ptn = parseFloat(formData.ptn_por_referencia) || 0;
-    const lip = parseFloat(formData.lip_por_referencia) || 0;
+    const cho = parseFloat(formData.carbs) || 0;
+    const ptn = parseFloat(formData.protein) || 0;
+    const lip = parseFloat(formData.fat) || 0;
     
-    return (cho * 4) + (ptn * 4) + (lip * 9);
+    return kcalFromMacrosFood(ptn, cho, lip, 0);
   };
 
   // Verifica se há inconsistência entre calorias informadas e calculadas
   const verificarInconsistencia = () => {
-    const kcalInformada = parseFloat(formData.kcal_por_referencia) || 0;
+    const kcalInformada = parseFloat(formData.calories) || 0;
     const kcalCalculada = calcularCaloriasDosMacros();
     
     if (kcalInformada === 0 || kcalCalculada === 0) return null;
@@ -109,15 +83,15 @@ export default function FoodManager() {
 
   const ajustarCaloriasAutomaticamente = () => {
     const kcalCalculada = calcularCaloriasDosMacros();
-    setFormData({ ...formData, kcal_por_referencia: kcalCalculada.toFixed(1) });
+    setFormData({ ...formData, calories: kcalCalculada.toFixed(1) });
     toast.success("Calorias ajustadas automaticamente!");
   };
 
   const downloadTemplate = () => {
-    const csvContent = `nome,categoria,quantidade_referencia_g,kcal_por_referencia,cho_por_referencia,ptn_por_referencia,lip_por_referencia,origem_ptn,info_adicional
-Frango grelhado,Proteínas,100,165,0,31,3.6,animal,Rico em proteína magra
-Arroz branco cozido,Carboidratos,100,130,28,2.7,0.3,vegetal,Fonte de energia
-Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
+    const csvContent = `name,portion,calories,carbs,protein,fat
+Frango grelhado,100,165,0,31,3.6
+Arroz branco cozido,100,130,28,2.7,0.3
+Batata doce,100,86,20,1.6,0.1`;
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
@@ -130,50 +104,47 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
   // Determinar tipo automaticamente
   const determinarTipo = (nome: string, proteina: number, carboidrato: number, gordura: number): string => {
     const nomeLower = nome.toLowerCase();
-    
-    // Frutas
-    const frutas = ['banana', 'maçã', 'laranja', 'limão', 'manga', 'mamão', 'melão', 'melancia', 'uva', 
-                    'morango', 'abacaxi', 'pêra', 'pêssego', 'ameixa', 'acerola', 'kiwi', 'goiaba',
-                    'maracujá', 'tangerina', 'mexerica', 'graviola', 'jabuticaba', 'jaca', 'caju'];
-    if (frutas.some(f => nomeLower.includes(f))) {
+
+    if (['óleo', 'azeite', 'margarina'].some((k) => nomeLower.includes(k)) || gordura >= 80) {
+      return 'Óleos e Gorduras';
+    }
+    if (['castanha', 'amendoim', 'noz', 'semente', 'chia', 'linhaça', 'pistache', 'avelã'].some((k) => nomeLower.includes(k))) {
+      return 'Oleaginosas e Sementes';
+    }
+    if (['feijão', 'lentilha', 'grão de bico', 'ervilha', 'feijao'].some((k) => nomeLower.includes(k))) {
+      return 'Feijão e Leguminosas';
+    }
+    if (['leite', 'queijo', 'iogurte', 'requeijão', 'ricota', 'whey'].some((k) => nomeLower.includes(k))) {
+      return 'Leite e Derivados';
+    }
+    if (['pão', 'pao ', 'macarr', 'tapioca', 'cuscuz', 'pipoca', 'torrada'].some((k) => nomeLower.includes(k))) {
+      return 'Pães e Variedades';
+    }
+    if (['aveia', 'granola', 'farelo'].some((k) => nomeLower.includes(k))) {
+      return 'Fibras A';
+    }
+    if (['abacate', 'coco'].some((k) => nomeLower.includes(k)) && gordura > 8) {
+      return 'Frutas Oleosas';
+    }
+    if (['banana', 'maçã', 'maca', 'laranja', 'manga', 'uva', 'morango', 'abacaxi', 'melão', 'melancia'].some((k) => nomeLower.includes(k))) {
       return 'Frutas';
     }
-    
-    // Vegetais e Legumes
-    const vegetais = ['alface', 'brócolis', 'couve', 'espinafre', 'repolho', 'rúcula', 'agrião', 
-                      'tomate', 'cenoura', 'beterraba', 'pepino', 'cebola', 'alho', 'pimentão',
-                      'abobrinha', 'berinjela', 'quiabo', 'vagem', 'chuchu', 'jiló', 'palmito',
-                      'abóbora', 'acelga', 'chicória', 'almeirão'];
-    if (vegetais.some(v => nomeLower.includes(v))) {
-      return 'Vegetais';
+    if (['suco'].some((k) => nomeLower.includes(k))) {
+      return 'Sucos Naturais e Integrais';
     }
-    
-    // Laticínios
-    const laticinios = ['leite', 'queijo', 'iogurte', 'requeijão', 'manteiga', 'creme de leite',
-                        'ricota', 'mussarela', 'cottage', 'petit suisse', 'doce de leite'];
-    if (laticinios.some(l => nomeLower.includes(l))) {
-      return 'Laticínios';
+    if (['alface', 'tomate', 'pepino', 'rúcula', 'agrião', 'repolho', 'couve', 'espinafre'].some((k) => nomeLower.includes(k))) {
+      return 'Vegetais A (livres para consumo)';
     }
-    
-    // Proteínas (carnes, peixes, ovos)
-    const proteinas = ['carne', 'frango', 'peixe', 'atum', 'salmão', 'camarão', 'sardinha', 
-                       'ovo', 'peru', 'lingüiça', 'linguiça', 'hambúrguer', 'bacon', 'presunto',
-                       'salame', 'fígado', 'coração', 'moela', 'lombo', 'filé', 'peito',
-                       'coxa', 'sobrecoxa', 'acém', 'patinho', 'alcatra', 'picanha', 'costela',
-                       'lagarto', 'maminha', 'cupim', 'músculo', 'whey'];
-    if (proteinas.some(p => nomeLower.includes(p)) || (proteina > 15 && carboidrato < 10)) {
-      return 'Proteínas';
+    if (['cenoura', 'beterraba', 'abóbora', 'abobrinha', 'berinjela', 'brócolis', 'vagem'].some((k) => nomeLower.includes(k))) {
+      return 'Vegetais B';
     }
-    
-    // Lipídios (gorduras, óleos, oleaginosas)
-    const lipidios = ['óleo', 'azeite', 'margarina', 'castanha', 'amendoim', 'abacate',
-                      'gergelim', 'linhaça', 'amêndoa', 'coco', 'pasta de amendoim'];
-    if (lipidios.some(l => nomeLower.includes(l)) || gordura > 40) {
-      return 'Lipídeos';
+    if (['carne', 'frango', 'peixe', 'ovo', 'presunto', 'peru', 'whey', 'atum', 'salmão'].some((k) => nomeLower.includes(k)) || (proteina > 15 && carboidrato < 10)) {
+      return 'Carnes e Proteínas';
     }
-    
-    // Carboidratos (default - pães, arroz, massas, tubérculos)
-    return 'Carboidratos';
+    if (['arroz', 'batata', 'mandioca', 'milho', 'macarr', 'inhame', 'mandioquinha'].some((k) => nomeLower.includes(k))) {
+      return 'Cereais, Raízes, Tubérculos e Frutos';
+    }
+    return 'Cereais, Raízes, Tubérculos e Frutos';
   };
 
   // Determinar origem da proteína
@@ -230,20 +201,14 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
             // Aceitar alimentos mesmo com 0 calorias (água, chá, etc.)
             if (!nome) continue;
             
-            const tipoNome = determinarTipo(nome, proteina, carboidrato, gordura);
-            const tipo = tipos.find(t => t.nome_tipo === tipoNome);
-            
             processed.push({
-              nome,
-              tipo_id: tipo?.id || tipos[0]?.id,
-              tipo_nome: tipoNome,
-              quantidade_referencia_g: 100,
-              kcal_por_referencia: calorias,
-              cho_por_referencia: carboidrato,
-              ptn_por_referencia: proteina,
-              lip_por_referencia: gordura,
-              origem_ptn: determinarOrigemProteina(nome),
-              info_adicional: fibra ? `Fibra: ${fibra}g | Fonte: TACO` : 'Fonte: TACO'
+              name: nome,
+              portion: 100,
+              calories: calorias,
+              carbs: carboidrato,
+              protein: proteina,
+              fat: gordura,
+              note: fibra ? `Fibra: ${fibra}g | Fonte: TACO` : 'Fonte: TACO'
             });
           }
         }
@@ -258,24 +223,16 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
         
         for (let i = 1; i < lines.length; i++) {
           const values = lines[i].split(',').map(v => v.trim());
-          if (values.length < 8) continue;
+          if (values.length < 6) continue;
           
-          const [nome, categoriaNome, qtdRef, kcal, cho, ptn, lip, origem, info] = values;
-          const tipo = tipos.find(t => t.nome_tipo.toLowerCase() === categoriaNome.toLowerCase());
-          
-          if (!tipo) continue;
-          
+          const [name, portion, calories, carbs, protein, fat] = values;
           processed.push({
-            nome,
-            tipo_id: tipo.id,
-            tipo_nome: tipo.nome_tipo,
-            quantidade_referencia_g: parseFloat(qtdRef) || 100,
-            kcal_por_referencia: parseFloat(kcal) || 0,
-            cho_por_referencia: parseFloat(cho) || 0,
-            ptn_por_referencia: parseFloat(ptn) || 0,
-            lip_por_referencia: parseFloat(lip) || 0,
-            origem_ptn: origem || 'Mista',
-            info_adicional: info || null
+            name,
+            portion: parseFloat(portion) || 100,
+            calories: parseFloat(calories) || 0,
+            carbs: parseFloat(carbs) || 0,
+            protein: parseFloat(protein) || 0,
+            fat: parseFloat(fat) || 0
           });
         }
         
@@ -314,7 +271,6 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
     setImporting(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         toast.error("Você precisa estar autenticado");
         setImporting(false);
@@ -322,15 +278,13 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
       }
 
       // Buscar alimentos existentes para evitar duplicatas
-      const { data: existingFoods } = await supabase
-        .from("alimentos")
-        .select("nome");
-      
-      const existingNames = new Set((existingFoods || []).map(f => f.nome.toLowerCase()));
+      const existingResult = await getAllFoodsSafe();
+      const existingFoods = existingResult.success && Array.isArray(existingResult.data) ? existingResult.data : [];
+      const existingNames = new Set(existingFoods.map(f => String(f.name || '').toLowerCase()));
 
       // Filtrar apenas alimentos novos
       const novosAlimentos = importPreview.filter(item => 
-        !existingNames.has(item.nome.toLowerCase())
+        !existingNames.has(String(item.name || '').toLowerCase())
       );
 
       if (novosAlimentos.length === 0) {
@@ -340,13 +294,10 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
         return;
       }
 
-      const alimentosParaInserir = novosAlimentos.map(item => {
-        const { tipo_nome, ...resto } = item;
-        return {
-          ...resto,
-          autor: user.id
-        };
-      });
+      const alimentosParaInserir = novosAlimentos.map(item => ({
+        ...item,
+        author: user.id
+      }));
 
       console.log(`Inserindo ${alimentosParaInserir.length} novos alimentos`);
 
@@ -357,16 +308,15 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
       
       for (let i = 0; i < alimentosParaInserir.length; i += batchSize) {
         const batch = alimentosParaInserir.slice(i, i + batchSize);
-        const { data, error } = await supabase
-          .from("alimentos")
-          .insert(batch)
-          .select();
-
-        if (error) {
+        try {
+          const result = await apiClient.requestSafe<any[]>('/api/alimentos', {
+            method: 'POST',
+            body: JSON.stringify(batch),
+          });
+          importados += result.success && Array.isArray(result.data) ? result.data.length : 0;
+        } catch (error) {
           console.error('Erro no lote:', error);
           erros += batch.length;
-        } else {
-          importados += data?.length || 0;
         }
       }
 
@@ -393,16 +343,8 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
   const carregarDados = async () => {
     setLoading(true);
     try {
-      const [alimentosData, tiposData] = await Promise.all([
-        supabase.from("alimentos").select("*").order("nome"),
-        supabase.from("tipos_alimentos").select("*").order("nome_tipo"),
-      ]);
-
-      if (alimentosData.error) throw alimentosData.error;
-      if (tiposData.error) throw tiposData.error;
-
-      setAlimentos(alimentosData.data || []);
-      setTipos(tiposData.data || []);
+      const alimentosRes = await getAllFoodsSafe();
+      setAlimentos(alimentosRes.success && Array.isArray(alimentosRes.data) ? alimentosRes.data : []);
     } catch (error) {
       console.error("Erro ao carregar dados:", error);
       toast.error("Erro ao carregar alimentos");
@@ -413,15 +355,12 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
 
   const resetForm = () => {
     setFormData({
-      nome: "",
-      tipo_id: "",
-      quantidade_referencia_g: "100",
-      kcal_por_referencia: "",
-      cho_por_referencia: "",
-      ptn_por_referencia: "",
-      lip_por_referencia: "",
-      origem_ptn: "mista",
-      info_adicional: "",
+      name: "",
+      portion: "100",
+      calories: "",
+      carbs: "",
+      protein: "",
+      fat: "",
     });
     setEditingFood(null);
   };
@@ -429,7 +368,7 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
   const handleSave = async () => {
     try {
       // Validação básica
-      if (!formData.nome || !formData.tipo_id) {
+      if (!formData.name) {
         toast.error("Preencha os campos obrigatórios");
         return;
       }
@@ -437,45 +376,46 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
       // Verificar inconsistência e avisar
       const inconsistencia = verificarInconsistencia();
       if (inconsistencia) {
-        const confirmar = confirm(
-          `Atenção: As calorias informadas (${formData.kcal_por_referencia} kcal) diferem das calculadas (${inconsistencia.kcalCalculada} kcal) em ${inconsistencia.percentual}%.\n\nDeseja continuar mesmo assim?`
-        );
+        const confirmar = await confirm({
+          title: "Calorias divergentes",
+          description: `As calorias informadas (${formData.calories} kcal) diferem das calculadas (${inconsistencia.kcalCalculada} kcal) em ${inconsistencia.percentual}%.\n\nDeseja continuar mesmo assim?`,
+          confirmLabel: "Continuar",
+        });
         if (!confirmar) return;
       }
 
-      const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         toast.error("Você precisa estar autenticado");
         return;
       }
 
       const alimentoData = {
-        nome: formData.nome.trim(),
-        tipo_id: formData.tipo_id,
-        quantidade_referencia_g: parseFloat(formData.quantidade_referencia_g) || 100,
-        kcal_por_referencia: parseFloat(formData.kcal_por_referencia) || 0,
-        cho_por_referencia: parseFloat(formData.cho_por_referencia) || 0,
-        ptn_por_referencia: parseFloat(formData.ptn_por_referencia) || 0,
-        lip_por_referencia: parseFloat(formData.lip_por_referencia) || 0,
-        origem_ptn: formData.origem_ptn,
-        info_adicional: formData.info_adicional || null,
-        autor: user.id,
+        name: formData.name.trim(),
+        portion: parseFloat(formData.portion) || 100,
+        calories: parseFloat(formData.calories) || 0,
+        carbs: parseFloat(formData.carbs) || 0,
+        protein: parseFloat(formData.protein) || 0,
+        fat: parseFloat(formData.fat) || 0,
+        author: user.id,
       };
 
       if (editingFood) {
-        const { error } = await supabase
-          .from("alimentos")
-          .update(alimentoData)
-          .eq("id", editingFood.id);
-
-        if (error) throw error;
+        const result = await apiClient.requestSafe(`/api/alimentos/${editingFood.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(alimentoData),
+        });
+        if (!result.success) {
+          throw new Error(result.error || 'Erro ao atualizar alimento');
+        }
         toast.success("Alimento atualizado com sucesso!");
       } else {
-        const { error } = await supabase
-          .from("alimentos")
-          .insert([alimentoData]);
-
-        if (error) throw error;
+        const result = await apiClient.requestSafe('/api/alimentos', {
+          method: 'POST',
+          body: JSON.stringify(alimentoData),
+        });
+        if (!result.success) {
+          throw new Error(result.error || 'Erro ao cadastrar alimento');
+        }
         toast.success("Alimento cadastrado com sucesso!");
       }
 
@@ -491,27 +431,32 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
   const handleEdit = (alimento: Alimento) => {
     setEditingFood(alimento);
     setFormData({
-      nome: alimento.nome,
-      tipo_id: alimento.tipo_id || "",
-      quantidade_referencia_g: alimento.quantidade_referencia_g.toString(),
-      kcal_por_referencia: alimento.kcal_por_referencia.toString(),
-      cho_por_referencia: alimento.cho_por_referencia.toString(),
-      ptn_por_referencia: alimento.ptn_por_referencia.toString(),
-      lip_por_referencia: alimento.lip_por_referencia.toString(),
-      origem_ptn: alimento.origem_ptn,
-      info_adicional: alimento.info_adicional || "",
+      name: alimento.name,
+      portion: alimento.portion.toString(),
+      calories: alimento.calories.toString(),
+      carbs: alimento.carbs.toString(),
+      protein: alimento.protein.toString(),
+      fat: alimento.fat.toString(),
     });
     setIsDialogOpen(true);
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Tem certeza que deseja excluir este alimento?")) return;
+    if (!(await confirmDelete(confirm, "Este alimento será removido do catálogo."))) return;
 
     try {
-      const { error } = await supabase.from("alimentos").delete().eq("id", id);
-      if (error) throw error;
+      const result = (await apiClient.request(`/api/alimentos/${id}`, {
+        method: "DELETE",
+      })) as { soft_deleted?: boolean; message?: string; diet_items?: number };
 
-      toast.success("Alimento excluído com sucesso!");
+      if (result?.soft_deleted) {
+        toast.success(
+          result.message ||
+            "Alimento arquivado (está em dietas existentes) e saiu do catálogo.",
+        );
+      } else {
+        toast.success(result?.message || "Alimento excluído com sucesso!");
+      }
       carregarDados();
     } catch (error: any) {
       console.error("Erro ao excluir alimento:", error);
@@ -520,8 +465,8 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
   };
 
   const filteredAlimentos = alimentos.filter((alimento) => {
-    const matchesSearch = alimento.nome.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = selectedCategory === "all" || alimento.tipo_id === selectedCategory;
+    const matchesSearch = String(alimento.name || '').toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesCategory = selectedCategory === "all" || getMacroGroup(alimento) === selectedCategory;
     return matchesSearch && matchesCategory;
   });
 
@@ -541,9 +486,12 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
     setCurrentPage(1);
   };
 
-  const getTipoNome = (tipoId: string | null) => {
-    const tipo = tipos.find((t) => t.id === tipoId);
-    return tipo?.nome_tipo || "Sem categoria";
+  const getTipoNome = (alimento: Alimento) => {
+    const group = getMacroGroup(alimento);
+    if (group === 'protein') return 'Proteínas';
+    if (group === 'carb') return 'Carboidratos';
+    if (group === 'fat') return 'Lipídios';
+    return 'Misto';
   };
 
   // Se estiver mostrando o gerenciador de revisão, renderiza apenas ele
@@ -559,7 +507,7 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
     <div className="container mx-auto p-6 max-w-7xl">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
+          <h1 className="flex items-center gap-2 text-xl font-bold sm:text-2xl">
             <Apple className="w-8 h-8 text-primary" />
             Gerenciar Alimentos
           </h1>
@@ -641,14 +589,14 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
                         <tbody>
                           {importPreview.slice(0, 5).map((item, idx) => (
                             <tr key={idx} className="border-t">
-                              <td className="p-2">{item.nome}</td>
+                              <td className="p-2">{item.name}</td>
                               <td className="p-2">
-                                <Badge variant="outline" className="text-xs">{item.tipo_nome}</Badge>
+                                <Badge variant="outline" className="text-xs">{getTipoNome(item)}</Badge>
                               </td>
-                              <td className="p-2 text-right">{item.kcal_por_referencia}</td>
-                              <td className="p-2 text-right">{item.ptn_por_referencia}g</td>
-                              <td className="p-2 text-right">{item.cho_por_referencia}g</td>
-                              <td className="p-2 text-right">{item.lip_por_referencia}g</td>
+                              <td className="p-2 text-right">{item.calories}</td>
+                              <td className="p-2 text-right">{item.protein}g</td>
+                              <td className="p-2 text-right">{item.carbs}g</td>
+                              <td className="p-2 text-right">{item.fat}g</td>
                             </tr>
                           ))}
                         </tbody>
@@ -714,62 +662,24 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
             <div className="grid gap-4 py-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="nome">Nome do Alimento *</Label>
+                  <Label htmlFor="name">Nome do Alimento *</Label>
                   <Input
-                    id="nome"
-                    value={formData.nome}
-                    onChange={(e) => setFormData({ ...formData, nome: e.target.value })}
+                    id="name"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     placeholder="Ex: Frango grelhado"
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="tipo">Categoria *</Label>
-                  <Select
-                    value={formData.tipo_id}
-                    onValueChange={(value) => setFormData({ ...formData, tipo_id: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {tipos.map((tipo) => (
-                        <SelectItem key={tipo.id} value={tipo.id}>
-                          {tipo.nome_tipo}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="quantidade_ref">Quantidade Referência (g)</Label>
+                  <Label htmlFor="portion">Porção padrão (g)</Label>
                   <Input
-                    id="quantidade_ref"
+                    id="portion"
                     type="number"
-                    value={formData.quantidade_referencia_g}
-                    onChange={(e) => setFormData({ ...formData, quantidade_referencia_g: e.target.value })}
+                    value={formData.portion}
+                    onChange={(e) => setFormData({ ...formData, portion: e.target.value })}
                   />
                   <p className="text-xs text-muted-foreground">Padrão: 100g</p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="origem_ptn">Origem da Proteína</Label>
-                  <Select
-                    value={formData.origem_ptn}
-                    onValueChange={(value) => setFormData({ ...formData, origem_ptn: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="animal">Animal</SelectItem>
-                      <SelectItem value="vegetal">Vegetal</SelectItem>
-                      <SelectItem value="mista">Mista</SelectItem>
-                    </SelectContent>
-                  </Select>
                 </div>
               </div>
 
@@ -793,7 +703,7 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
                     <AlertCircle className="h-4 w-4 text-amber-600" />
                     <AlertDescription className="text-sm text-amber-800">
                       <strong>Inconsistência detectada:</strong> As calorias informadas (
-                      {formData.kcal_por_referencia} kcal) diferem das calculadas pelos macros (
+                      {formData.calories} kcal) diferem das calculadas pelos macros (
                       {verificarInconsistencia()?.kcalCalculada} kcal) em{" "}
                       {verificarInconsistencia()?.percentual}%. Clique em "Auto-calcular" para ajustar.
                     </AlertDescription>
@@ -802,13 +712,13 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
                 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="kcal">Calorias (kcal)</Label>
+                    <Label htmlFor="calories">Calorias (kcal)</Label>
                     <Input
-                      id="kcal"
+                      id="calories"
                       type="number"
                       step="0.1"
-                      value={formData.kcal_por_referencia}
-                      onChange={(e) => setFormData({ ...formData, kcal_por_referencia: e.target.value })}
+                      value={formData.calories}
+                      onChange={(e) => setFormData({ ...formData, calories: e.target.value })}
                     />
                     <p className="text-xs text-muted-foreground">
                       Baseado nos macros: {calcularCaloriasDosMacros().toFixed(1)} kcal
@@ -816,48 +726,49 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="cho">Carboidratos (g)</Label>
+                    <Label htmlFor="carbs">Carboidratos (g)</Label>
                     <Input
-                      id="cho"
+                      id="carbs"
                       type="number"
                       step="0.1"
-                      value={formData.cho_por_referencia}
-                      onChange={(e) => setFormData({ ...formData, cho_por_referencia: e.target.value })}
+                      value={formData.carbs}
+                      onChange={(e) => setFormData({ ...formData, carbs: e.target.value })}
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="ptn">Proteínas (g)</Label>
+                    <Label htmlFor="protein">Proteínas (g)</Label>
                     <Input
-                      id="ptn"
+                      id="protein"
                       type="number"
                       step="0.1"
-                      value={formData.ptn_por_referencia}
-                      onChange={(e) => setFormData({ ...formData, ptn_por_referencia: e.target.value })}
+                      value={formData.protein}
+                      onChange={(e) => setFormData({ ...formData, protein: e.target.value })}
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="lip">Lipídios (g)</Label>
+                    <Label htmlFor="fat">Lipídios (g)</Label>
                     <Input
-                      id="lip"
+                      id="fat"
                       type="number"
                       step="0.1"
-                      value={formData.lip_por_referencia}
-                      onChange={(e) => setFormData({ ...formData, lip_por_referencia: e.target.value })}
+                      value={formData.fat}
+                      onChange={(e) => setFormData({ ...formData, fat: e.target.value })}
                     />
                   </div>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="info">Informações Adicionais</Label>
+                <Label htmlFor="info">Observações</Label>
                 <Textarea
                   id="info"
-                  value={formData.info_adicional}
-                  onChange={(e) => setFormData({ ...formData, info_adicional: e.target.value })}
-                  placeholder="Ex: Rico em ômega-3, fonte de ferro..."
+                  value=""
+                  onChange={() => {}}
+                  placeholder="Observações opcionais (não persistidas)"
                   rows={3}
+                  disabled
                 />
               </div>
             </div>
@@ -892,11 +803,10 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todas categorias</SelectItem>
-              {tipos.map((tipo) => (
-                <SelectItem key={tipo.id} value={tipo.id}>
-                  {tipo.nome_tipo}
-                </SelectItem>
-              ))}
+              <SelectItem value="protein">Proteínas</SelectItem>
+              <SelectItem value="carb">Carboidratos</SelectItem>
+              <SelectItem value="fat">Lipídios</SelectItem>
+              <SelectItem value="mixed">Misto</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -912,7 +822,7 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
       ) : (
         <div className="grid gap-4">
           {paginatedAlimentos.map((alimento) => {
-            const isAutor = alimento.autor === currentUserId;
+            const isAutor = alimento.autor === user?.id;
             
             return (
               <Card key={alimento.id}>
@@ -920,7 +830,7 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <CardTitle className="text-lg flex items-center gap-2">
-                        {alimento.nome}
+                        {alimento.name}
                         {isAutor && (
                           <Badge variant="secondary" className="text-xs">
                             Seu alimento
@@ -928,10 +838,10 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
                         )}
                       </CardTitle>
                       <CardDescription className="mt-1">
-                        <Badge variant="outline">{getTipoNome(alimento.tipo_id)}</Badge>
+                        <Badge variant="outline">{getTipoNome(alimento)}</Badge>
                         <span className="mx-2">•</span>
                         <span className="text-xs">
-                          Origem proteína: <span className="font-medium">{alimento.origem_ptn}</span>
+                          Grupo: <span className="font-medium">{getTipoNome(alimento)}</span>
                         </span>
                       </CardDescription>
                     </div>
@@ -959,30 +869,25 @@ Batata doce,Carboidratos,100,86,20,1.6,0.1,vegetal,Rico em fibras e vitaminas`;
                   <div className="grid grid-cols-5 gap-4 text-sm">
                     <div>
                       <p className="text-muted-foreground">Porção</p>
-                      <p className="font-semibold">{alimento.quantidade_referencia_g}g</p>
+                      <p className="font-semibold">{alimento.portion}g</p>
                     </div>
                     <div>
                       <p className="text-muted-foreground">Calorias</p>
-                      <p className="font-semibold">{alimento.kcal_por_referencia} kcal</p>
+                      <p className="font-semibold">{alimento.calories} kcal</p>
                     </div>
                     <div>
                       <p className="text-muted-foreground">Carboidratos</p>
-                      <p className="font-semibold">{alimento.cho_por_referencia}g</p>
+                      <p className="font-semibold">{alimento.carbs}g</p>
                     </div>
                     <div>
                       <p className="text-muted-foreground">Proteínas</p>
-                      <p className="font-semibold">{alimento.ptn_por_referencia}g</p>
+                      <p className="font-semibold">{alimento.protein}g</p>
                     </div>
                     <div>
                       <p className="text-muted-foreground">Lipídios</p>
-                      <p className="font-semibold">{alimento.lip_por_referencia}g</p>
+                      <p className="font-semibold">{alimento.fat}g</p>
                     </div>
                   </div>
-                  {alimento.info_adicional && (
-                    <p className="text-sm text-muted-foreground mt-3 pt-3 border-t">
-                      {alimento.info_adicional}
-                    </p>
-                  )}
                 </CardContent>
               </Card>
             );

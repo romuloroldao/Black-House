@@ -1,152 +1,388 @@
 import { useState } from "react";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
+import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import escalaBristol from "@/assets/escala-bristol.jpg";
+import StudentCoachCheckinFeedback from "@/components/student/StudentCoachCheckinFeedback";
+import CheckinStepHeader from "@/components/student/checkin/CheckinStepHeader";
+import {
+  CHECKIN_SECTIONS,
+  countCompletedSections,
+  getCheckinSectionDescId,
+  getCheckinSectionTitleId,
+  getSectionMissingLabels,
+  type CheckinSectionId,
+} from "@/lib/checkin-sections";
+import { CHECKIN_FIELD_LABELS, INITIAL_CHECKIN_FORM, type CheckinFormData } from "@/lib/checkin-types";
+import { buildCheckinPayload, type CheckinSubmitExtras } from "@/lib/checkin-payload";
+import { startOfNextCalendarWeek, type CheckinStreakInfo } from "@/lib/checkin-streak";
+import {
+  MIN_CHECKIN_PHOTOS,
+  parsePesoKgInput,
+  type CheckinPhotoDraft,
+} from "@/lib/checkin-weekly-rules";
+import CheckinPhotosWeightStep, {
+  revokeCheckinPhotoDrafts,
+} from "@/components/student/checkin/CheckinPhotosWeightStep";
+import { Skeleton } from "@/components/ui/skeleton";
+import ProfileCompletenessBanner from "@/components/student/ProfileCompletenessBanner";
+import WorkoutEvolutionSection from "@/components/student/WorkoutEvolutionSection";
+import type { ProfileCompletenessStatus } from "@/types/profile-completeness";
 
-export default function StudentWeeklyCheckin() {
+const SECTION_IDS: CheckinSectionId[] = CHECKIN_SECTIONS.map((s) => s.id);
+
+type StudentWeeklyCheckinProps = {
+  checkinStreak?: CheckinStreakInfo | null;
+  checkinLoading?: boolean;
+  onCheckinSubmitted?: () => void;
+  profileStatus?: ProfileCompletenessStatus | null;
+  onRequireProfile?: () => void;
+};
+
+export default function StudentWeeklyCheckin({
+  checkinStreak = null,
+  checkinLoading = false,
+  onCheckinSubmitted,
+  profileStatus = null,
+  onRequireProfile,
+}: StudentWeeklyCheckinProps) {
+  const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    beliscou_fora_plano: "",
-    seguiu_plano_nota: 3,
-    apetite: "",
-    treinou_todas_sessoes: "",
-    desafiou_treinos: "",
-    fez_cardio: "",
-    seguiu_suplementacao: "",
-    recursos_hormonais: "",
-    ingeriu_agua_minima: "",
-    exposicao_sol: "",
-    pressao_arterial: "",
-    glicemia: "",
-    media_horas_sono: "",
-    dificuldade_adormecer: "",
-    acordou_noite: "",
-    estresse_semana: "",
-    lida_desafios: "",
-    convivio_familiar: "",
-    convivio_trabalho: "",
-    postura_problemas: "",
-    higiene_sono: "",
-    autoestima: 3,
-    media_evacuacoes: "",
-    formato_fezes: "",
-    nao_cumpriu_porque: "",
+  const [step, setStep] = useState(() => {
+    const raw = Number(searchParams.get("checkin_step"));
+    return raw >= 0 && raw < CHECKIN_SECTIONS.length ? raw : 0;
   });
+  const [formData, setFormData] = useState<CheckinFormData>(INITIAL_CHECKIN_FORM);
+  const [pesoKg, setPesoKg] = useState("");
+  const [photoDrafts, setPhotoDrafts] = useState<CheckinPhotoDraft[]>([]);
+
+  const corpoExtras = {
+    pesoKg,
+    photoCount: photoDrafts.length,
+    minPhotos: MIN_CHECKIN_PHOTOS,
+  };
+
+  const completedSections = countCompletedSections(formData, CHECKIN_FIELD_LABELS, corpoExtras);
+  const currentSectionId = SECTION_IDS[step];
+
+  const syncStepToUrl = (next: number) => {
+    setStep(next);
+    const params = new URLSearchParams(searchParams);
+    params.set("tab", "checkin");
+    if (next > 0) params.set("checkin_step", String(next));
+    else params.delete("checkin_step");
+    setSearchParams(params, { replace: true });
+  };
+
+  const goNext = () => {
+    const missing = getSectionMissingLabels(
+      formData,
+      currentSectionId,
+      CHECKIN_FIELD_LABELS,
+      corpoExtras,
+    );
+    if (missing.length > 0) {
+      const preview = missing.slice(0, 3).join(", ");
+      const extra = missing.length > 3 ? ` e mais ${missing.length - 3}` : "";
+      toast.error(`Complete este bloco: ${preview}${extra}.`);
+      return;
+    }
+    if (step < CHECKIN_SECTIONS.length - 1) syncStepToUrl(step + 1);
+  };
+
+  const goPrev = () => {
+    if (step > 0) syncStepToUrl(step - 1);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (step < CHECKIN_SECTIONS.length - 1) {
+      goNext();
+      return;
+    }
+
+    const missingLabels = getSectionMissingLabels(formData, "bem_estar", CHECKIN_FIELD_LABELS);
+    const allMissing = SECTION_IDS.flatMap((id) =>
+      getSectionMissingLabels(formData, id, CHECKIN_FIELD_LABELS, corpoExtras),
+    );
+    if (allMissing.length > 0) {
+      const preview = allMissing.slice(0, 4).join(", ");
+      const extra = allMissing.length > 4 ? ` e mais ${allMissing.length - 4}` : "";
+      toast.error(`Preencha todas as perguntas obrigatórias antes de enviar: ${preview}${extra}.`);
+      const firstIncomplete = SECTION_IDS.findIndex(
+        (id) => getSectionMissingLabels(formData, id, CHECKIN_FIELD_LABELS, corpoExtras).length > 0,
+      );
+      if (firstIncomplete >= 0) syncStepToUrl(firstIncomplete);
+      return;
+    }
+    if (missingLabels.length > 0) {
+      syncStepToUrl(SECTION_IDS.indexOf("bem_estar"));
+      return;
+    }
+
+    const pesoParsed = parsePesoKgInput(pesoKg);
+    if (pesoParsed == null) {
+      toast.error("Informe um peso válido (30 a 350 kg).");
+      syncStepToUrl(0);
+      return;
+    }
+    if (photoDrafts.length < MIN_CHECKIN_PHOTOS) {
+      toast.error(
+        `Envie pelo menos ${MIN_CHECKIN_PHOTOS} fotos (frente e costas) antes de concluir.`,
+      );
+      syncStepToUrl(0);
+      return;
+    }
+
+    if (profileStatus?.hard_gate_active && !profileStatus.is_complete) {
+      toast.error("Complete seu perfil antes de enviar o check-in.");
+      onRequireProfile?.();
+      return;
+    }
+
     setLoading(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Usuário não autenticado");
+      if (!user?.id) {
+        toast.error("Usuário não autenticado. Por favor, faça login novamente.");
+        setLoading(false);
+        return;
+      }
 
-      const { data: aluno } = await supabase
-        .from("alunos")
-        .select("id")
-        .eq("email", user.email)
-        .single();
+      const me = await apiClient.getMeSafe();
+      const alunoId = me.data?.id;
+      if (!alunoId) {
+        toast.error("Perfil de aluno não encontrado.");
+        setLoading(false);
+        return;
+      }
 
-      if (!aluno) throw new Error("Aluno não encontrado");
+      const fotosPayload: CheckinSubmitExtras["fotos"] = [];
+      // Ordem canónica dos slots; descricao = orientação sugerida (pose_aluno no servidor).
+      // pose_client vem do MediaPipe no dispositivo; o servidor só aceita acima do limiar.
+      const { getPoseDetection } = await import("@/lib/pose-detect");
+      const orderedDrafts = [...photoDrafts].sort((a, b) => {
+        const order = ["frente", "costas", "lado_esquerdo", "lado_direito"] as const;
+        return order.indexOf(a.descricao as (typeof order)[number]) -
+          order.indexOf(b.descricao as (typeof order)[number]);
+      });
+      for (let i = 0; i < orderedDrafts.length; i++) {
+        const draft = orderedDrafts[i];
+        const fileName = `${Date.now()}-${i}-${draft.file.name}`;
+        const uploadResult = await apiClient.uploadFile(
+          "progress-photos",
+          `${alunoId}/${fileName}`,
+          draft.file,
+        );
+        const publicUrl =
+          uploadResult?.url ||
+          apiClient.getPublicUrl("progress-photos", `${alunoId}/${fileName}`);
+        const detected = await getPoseDetection(draft.file, 3000);
+        fotosPayload.push({
+          url: publicUrl,
+          // Orientação do slot do guia visual → pose_aluno (auditoria apenas)
+          descricao: draft.descricao || null,
+          ...(detected
+            ? { pose_client: detected.pose, pose_client_confidence: detected.confidence }
+            : {}),
+        });
+      }
 
-      const { error } = await supabase.from("weekly_checkins").insert({
-        aluno_id: aluno.id,
-        beliscou_fora_plano: formData.beliscou_fora_plano,
-        seguiu_plano_nota: formData.seguiu_plano_nota,
-        apetite: formData.apetite,
-        treinou_todas_sessoes: formData.treinou_todas_sessoes === "sim",
-        desafiou_treinos: formData.desafiou_treinos === "sim",
-        fez_cardio: formData.fez_cardio === "sim",
-        seguiu_suplementacao: formData.seguiu_suplementacao === "sim",
-        recursos_hormonais: formData.recursos_hormonais,
-        ingeriu_agua_minima: formData.ingeriu_agua_minima === "sim",
-        exposicao_sol: formData.exposicao_sol === "sim",
-        pressao_arterial: formData.pressao_arterial || null,
-        glicemia: formData.glicemia || null,
-        media_horas_sono: formData.media_horas_sono,
-        dificuldade_adormecer: formData.dificuldade_adormecer === "sim",
-        acordou_noite: formData.acordou_noite || null,
-        estresse_semana: formData.estresse_semana === "sim",
-        lida_desafios: formData.lida_desafios,
-        convivio_familiar: formData.convivio_familiar,
-        convivio_trabalho: formData.convivio_trabalho,
-        postura_problemas: formData.postura_problemas,
-        higiene_sono: formData.higiene_sono === "sim",
-        autoestima: formData.autoestima,
-        media_evacuacoes: formData.media_evacuacoes,
-        formato_fezes: formData.formato_fezes,
-        nao_cumpriu_porque: formData.nao_cumpriu_porque || null,
+      const response = await apiClient.requestSafe<{ success?: boolean }>("/api/checkins", {
+        method: "POST",
+        body: JSON.stringify(
+          buildCheckinPayload(formData, { pesoKg: pesoParsed, fotos: fotosPayload }),
+        ),
       });
 
-      if (error) throw error;
+      if (!response.success) {
+        const errText = response.error || "";
+        if (errText.includes("CHECKIN_ALREADY_THIS_WEEK")) {
+          toast.info("Você já enviou o check-in desta semana.");
+          onCheckinSubmitted?.();
+        } else if (
+          errText.includes("CHECKIN_PHOTOS_REQUIRED") ||
+          errText.includes("CHECKIN_PESO_INVALID")
+        ) {
+          toast.error(
+            errText.includes("CHECKIN_PHOTOS")
+              ? `Envie pelo menos ${MIN_CHECKIN_PHOTOS} fotos no check-in.`
+              : "Informe um peso válido (30 a 350 kg).",
+          );
+          syncStepToUrl(0);
+        } else if (
+          errText.includes("CHECKIN_VALIDATION") ||
+          errText.includes("violates check constraint")
+        ) {
+          toast.error(
+            "Alguns valores do check-in são inválidos. Volte às perguntas anteriores e confira as respostas.",
+          );
+        } else if (errText.includes("PROFILE_INCOMPLETE")) {
+          toast.error("Complete seu perfil antes de enviar o check-in.");
+          onRequireProfile?.();
+        } else if (errText.includes("CHECKIN_CREATE_ERROR")) {
+          toast.error("Erro ao guardar o check-in. Tente novamente ou contacte seu coach.");
+        } else {
+          toast.error(errText || "Erro ao enviar check-in. Tente novamente.");
+        }
+        setLoading(false);
+        return;
+      }
 
       toast.success("Check-in enviado com sucesso! Seu coach já pode visualizar suas respostas.");
-      
-      // Reset form
-      setFormData({
-        beliscou_fora_plano: "",
-        seguiu_plano_nota: 3,
-        apetite: "",
-        treinou_todas_sessoes: "",
-        desafiou_treinos: "",
-        fez_cardio: "",
-        seguiu_suplementacao: "",
-        recursos_hormonais: "",
-        ingeriu_agua_minima: "",
-        exposicao_sol: "",
-        pressao_arterial: "",
-        glicemia: "",
-        media_horas_sono: "",
-        dificuldade_adormecer: "",
-        acordou_noite: "",
-        estresse_semana: "",
-        lida_desafios: "",
-        convivio_familiar: "",
-        convivio_trabalho: "",
-        postura_problemas: "",
-        higiene_sono: "",
-        autoestima: 3,
-        media_evacuacoes: "",
-        formato_fezes: "",
-        nao_cumpriu_porque: "",
-      });
-    } catch (error: any) {
+      onCheckinSubmitted?.();
+      revokeCheckinPhotoDrafts(photoDrafts);
+      setPhotoDrafts([]);
+      setPesoKg("");
+      setFormData(INITIAL_CHECKIN_FORM);
+      syncStepToUrl(0);
+    } catch (error: unknown) {
       console.error("Erro ao enviar check-in:", error);
-      
-      // Mensagens amigáveis para erros comuns
+
       let mensagemErro = "Não foi possível enviar o check-in. Por favor, tente novamente.";
-      
-      if (error.message?.includes("apetite") || error.code === "23514") {
-        mensagemErro = "Por favor, preencha todos os campos obrigatórios antes de enviar.";
-      } else if (error.message?.includes("Usuário não autenticado")) {
+
+      const err = error as {
+        message?: string;
+        missing_fields?: string[];
+        code?: string;
+        status?: number;
+      };
+
+      if (err.message && err.message.trim() && !err.message.includes("Failed to fetch")) {
+        mensagemErro = err.message.trim();
+      } else if (err.status === 401 || err.message?.includes("401") || err.message?.includes("Token")) {
         mensagemErro = "Sua sessão expirou. Por favor, faça login novamente.";
-      } else if (error.message?.includes("Aluno não encontrado")) {
-        mensagemErro = "Perfil não encontrado. Entre em contato com seu coach.";
+      } else if (err.message?.includes("Failed to fetch") || err.message?.includes("conexão") || err.message?.includes("Erro de conexão")) {
+        mensagemErro =
+          "Erro de conexão ao enviar fotos ou check-in. Verifique a internet e tente de novo (Wi‑Fi recomendado).";
       }
-      
+
+      const apiMissing = Array.isArray(err.missing_fields) ? err.missing_fields : [];
+      if (apiMissing.length > 0) {
+        const labels = apiMissing.map((k) => CHECKIN_FIELD_LABELS[k] || k);
+        const preview = labels.slice(0, 4).join(", ");
+        const extra = labels.length > 4 ? ` e mais ${labels.length - 4}` : "";
+        mensagemErro = `Preencha as perguntas em falta: ${preview}${extra}.`;
+      } else if (
+        err.message?.includes("CHECKIN_MISSING_FIELDS") ||
+        err.message?.includes("apetite") ||
+        err.code === "23514"
+      ) {
+        mensagemErro =
+          "Por favor, preencha todas as perguntas obrigatórias (opções Sim/Não e listas) antes de enviar.";
+      } else if (err.message?.includes("Usuário não autenticado")) {
+        mensagemErro = "Sua sessão expirou. Por favor, faça login novamente.";
+      } else if (
+        err.message?.includes("Aluno não encontrado") ||
+        err.message?.includes("ALUNO_NOT_LINKED")
+      ) {
+        mensagemErro = "Perfil não encontrado. Entre em contato com seu coach.";
+      } else if (
+        err.message?.includes("foto") ||
+        err.message?.includes("imagem") ||
+        err.message?.includes("upload") ||
+        err.message?.includes("IMAGE_TOO_LARGE")
+      ) {
+        mensagemErro = err.message.trim();
+      } else if (
+        err.message?.includes("Erro desconhecido") ||
+        !err.message?.trim()
+      ) {
+        mensagemErro =
+          "Falha ao enviar fotos ou check-in. Verifique a internet, feche e abra o app de novo, ou faça login outra vez.";
+      }
+
       toast.error(mensagemErro);
     } finally {
       setLoading(false);
     }
   };
 
+  const jaEnviouEstaSemana = checkinStreak?.fez_esta_semana === true;
+  const proximoEnvio = format(startOfNextCalendarWeek(), "EEEE, d 'de' MMMM", { locale: ptBR });
+
+  if (checkinLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-10 w-64" />
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-96 w-full" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-3xl font-bold tracking-tight">Check-in Semanal</h2>
+        <h2 className="text-xl font-bold tracking-tight sm:text-2xl">Check-in Semanal</h2>
         <p className="text-muted-foreground mt-2">
-          Preencha seu check-in semanal para acompanhar seu progresso
+          Um envio por semana — peso, fotos (mín. {MIN_CHECKIN_PHOTOS}) e questionário nos blocos
+          seguintes
         </p>
       </div>
 
+      <StudentCoachCheckinFeedback limit={1} showHistoryAction />
+
+      {profileStatus && !profileStatus.is_complete && onRequireProfile && (
+        <ProfileCompletenessBanner
+          status={profileStatus}
+          onComplete={onRequireProfile}
+          compact={profileStatus.hard_gate_active}
+        />
+      )}
+
+      {jaEnviouEstaSemana ? (
+        <Card className="border-primary/30 bg-primary/5">
+          <CardContent className="flex flex-col gap-3 p-6 sm:flex-row sm:items-start">
+            <CheckCircle2 className="h-10 w-10 shrink-0 text-primary" aria-hidden />
+            <div className="space-y-1">
+              <p className="text-lg font-semibold">Check-in desta semana já enviado</p>
+              <p className="text-sm text-muted-foreground">
+                Só é possível um check-in por semana. O próximo ficará disponível na{" "}
+                <span className="font-medium text-foreground">{proximoEnvio}</span>.
+              </p>
+              {checkinStreak && checkinStreak.semanas_consecutivas > 0 && (
+                <p className="text-sm text-muted-foreground pt-1">
+                  Sequência atual: {checkinStreak.semanas_consecutivas}{" "}
+                  {checkinStreak.semanas_consecutivas === 1 ? "semana seguida" : "semanas seguidas"}.
+                </p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
       <form onSubmit={handleSubmit} className="space-y-6">
+        <CheckinStepHeader step={step} completedSections={completedSections} />
+
+        <div
+          role="region"
+          aria-labelledby={getCheckinSectionTitleId(currentSectionId)}
+          aria-describedby={getCheckinSectionDescId(currentSectionId)}
+        >
+        {currentSectionId === "corpo" && (
+          <CheckinPhotosWeightStep
+            pesoKg={pesoKg}
+            onPesoKgChange={setPesoKg}
+            photos={photoDrafts}
+            onPhotosChange={setPhotoDrafts}
+            disabled={loading}
+          />
+        )}
+
+        {currentSectionId === "nutricao" && (
+        <>
         {/* Nutrição e Dieta */}
         <Card>
           <CardHeader>
@@ -216,8 +452,117 @@ export default function StudentWeeklyCheckin() {
             </div>
           </CardContent>
         </Card>
+        {/* Suplementação — mesmo bloco Nutrição */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Suplementação e Recursos</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="space-y-3">
+              <Label>7. Seguiu a suplementação e manipulados?</Label>
+              <RadioGroup
+                value={formData.seguiu_suplementacao}
+                onValueChange={(value) => setFormData({ ...formData, seguiu_suplementacao: value })}
+                required
+              >
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="sim" id="supl-sim" />
+                  <Label htmlFor="supl-sim" className="font-normal cursor-pointer">Sim</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="nao" id="supl-nao" />
+                  <Label htmlFor="supl-nao" className="font-normal cursor-pointer">Não</Label>
+                </div>
+              </RadioGroup>
+            </div>
 
-        {/* Treino */}
+            <div className="space-y-3">
+              <Label>8. Recursos hormonais</Label>
+              <RadioGroup
+                value={formData.recursos_hormonais}
+                onValueChange={(value) => setFormData({ ...formData, recursos_hormonais: value })}
+                required
+              >
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="sim" id="horm-sim" />
+                  <Label htmlFor="horm-sim" className="font-normal cursor-pointer">Sim</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="nao" id="horm-nao" />
+                  <Label htmlFor="horm-nao" className="font-normal cursor-pointer">Não</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="nao_uso" id="horm-nao-uso" />
+                  <Label htmlFor="horm-nao-uso" className="font-normal cursor-pointer">Não uso</Label>
+                </div>
+              </RadioGroup>
+            </div>
+
+            <div className="space-y-3">
+              <Label>9. Ingeriu a quantidade mínima de água?</Label>
+              <RadioGroup
+                value={formData.ingeriu_agua_minima}
+                onValueChange={(value) => setFormData({ ...formData, ingeriu_agua_minima: value })}
+                required
+              >
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="sim" id="agua-sim" />
+                  <Label htmlFor="agua-sim" className="font-normal cursor-pointer">Sim</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="nao" id="agua-nao" />
+                  <Label htmlFor="agua-nao" className="font-normal cursor-pointer">Não</Label>
+                </div>
+              </RadioGroup>
+            </div>
+
+            <div className="space-y-3">
+              <Label>10. Exposição ao sol?</Label>
+              <RadioGroup
+                value={formData.exposicao_sol}
+                onValueChange={(value) => setFormData({ ...formData, exposicao_sol: value })}
+                required
+              >
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="sim" id="sol-sim" />
+                  <Label htmlFor="sol-sim" className="font-normal cursor-pointer">Sim</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="nao" id="sol-nao" />
+                  <Label htmlFor="sol-nao" className="font-normal cursor-pointer">Não</Label>
+                </div>
+              </RadioGroup>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="pressao">11. Pressão arterial (opcional)</Label>
+              <Textarea
+                id="pressao"
+                value={formData.pressao_arterial}
+                onChange={(e) => setFormData({ ...formData, pressao_arterial: e.target.value })}
+                placeholder="Ex: 12/8 em repouso"
+                rows={2}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="glicemia">12. Glicemia (opcional)</Label>
+              <Textarea
+                id="glicemia"
+                value={formData.glicemia}
+                onChange={(e) => setFormData({ ...formData, glicemia: e.target.value })}
+                placeholder="Ex: Jejum 85 mg/dL, Pós 110 mg/dL"
+                rows={2}
+              />
+            </div>
+          </CardContent>
+        </Card>
+        </>
+        )}
+
+        {currentSectionId === "treino" && (
+        <>
+        <WorkoutEvolutionSection compact />
         <Card>
           <CardHeader>
             <CardTitle>Treino e Exercícios</CardTitle>
@@ -278,132 +623,10 @@ export default function StudentWeeklyCheckin() {
             </div>
           </CardContent>
         </Card>
+        </>
+        )}
 
-        {/* Suplementação */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Suplementação e Recursos</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-3">
-              <Label>7. Seguiu a suplementação e manipulados?</Label>
-              <RadioGroup
-                value={formData.seguiu_suplementacao}
-                onValueChange={(value) => setFormData({ ...formData, seguiu_suplementacao: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="sim" id="supl-sim" />
-                  <Label htmlFor="supl-sim" className="font-normal cursor-pointer">Sim</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="nao" id="supl-nao" />
-                  <Label htmlFor="supl-nao" className="font-normal cursor-pointer">Não</Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            <div className="space-y-3">
-              <Label>8. Recursos hormonais</Label>
-              <RadioGroup
-                value={formData.recursos_hormonais}
-                onValueChange={(value) => setFormData({ ...formData, recursos_hormonais: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="sim" id="hormonal-sim" />
-                  <Label htmlFor="hormonal-sim" className="font-normal cursor-pointer">Sim</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="nao" id="hormonal-nao" />
-                  <Label htmlFor="hormonal-nao" className="font-normal cursor-pointer">Não</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="nao_uso" id="hormonal-nao-uso" />
-                  <Label htmlFor="hormonal-nao-uso" className="font-normal cursor-pointer">
-                    Não faço uso
-                  </Label>
-                </div>
-              </RadioGroup>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Hidratação e Sol */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Hidratação e Exposição Solar</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-3">
-              <Label>9. Ingeriu água mínima (peso x 0,035)?</Label>
-              <RadioGroup
-                value={formData.ingeriu_agua_minima}
-                onValueChange={(value) => setFormData({ ...formData, ingeriu_agua_minima: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="sim" id="agua-sim" />
-                  <Label htmlFor="agua-sim" className="font-normal cursor-pointer">Sim</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="nao" id="agua-nao" />
-                  <Label htmlFor="agua-nao" className="font-normal cursor-pointer">Não</Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            <div className="space-y-3">
-              <Label>10. Exposição ao sol 15min/dia?</Label>
-              <RadioGroup
-                value={formData.exposicao_sol}
-                onValueChange={(value) => setFormData({ ...formData, exposicao_sol: value })}
-                required
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="sim" id="sol-sim" />
-                  <Label htmlFor="sol-sim" className="font-normal cursor-pointer">Sim</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="nao" id="sol-nao" />
-                  <Label htmlFor="sol-nao" className="font-normal cursor-pointer">Não</Label>
-                </div>
-              </RadioGroup>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Saúde Física */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Saúde Física</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="pressao">11. Pressão arterial (opcional)</Label>
-              <Textarea
-                id="pressao"
-                value={formData.pressao_arterial}
-                onChange={(e) => setFormData({ ...formData, pressao_arterial: e.target.value })}
-                placeholder="Ex: 120/80"
-                rows={2}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="glicemia">12. Glicemia em jejum e pós-prandial (opcional)</Label>
-              <Textarea
-                id="glicemia"
-                value={formData.glicemia}
-                onChange={(e) => setFormData({ ...formData, glicemia: e.target.value })}
-                placeholder="Ex: Jejum 85 mg/dL, Pós 110 mg/dL"
-                rows={2}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Sono */}
+        {currentSectionId === "sono" && (
         <Card>
           <CardHeader>
             <CardTitle>Qualidade do Sono</CardTitle>
@@ -450,7 +673,7 @@ export default function StudentWeeklyCheckin() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="acordou">15. Acordou à noite? Quantas vezes?</Label>
+              <Label htmlFor="acordou">15. Acordou à noite? Quantas vezes? (opcional)</Label>
               <Textarea
                 id="acordou"
                 value={formData.acordou_noite}
@@ -479,7 +702,10 @@ export default function StudentWeeklyCheckin() {
             </div>
           </CardContent>
         </Card>
+        )}
 
+        {currentSectionId === "bem_estar" && (
+        <>
         {/* Mental e Emocional */}
         <Card>
           <CardHeader>
@@ -607,6 +833,7 @@ export default function StudentWeeklyCheckin() {
                 max={5}
                 step={1}
                 className="w-full"
+                aria-label="Autoestima da semana, nota de 1 a 5"
               />
               <div className="flex justify-between text-xs text-muted-foreground">
                 <span>1 - Muito baixa</span>
@@ -660,7 +887,7 @@ export default function StudentWeeklyCheckin() {
                 <img 
                   src={escalaBristol} 
                   alt="Escala de Bristol - Tipos de fezes de 1 a 7" 
-                  className="w-full max-w-md mx-auto"
+                  className="mx-auto h-auto w-full max-w-md object-contain"
                 />
               </div>
               <RadioGroup
@@ -681,36 +908,59 @@ export default function StudentWeeklyCheckin() {
           </CardContent>
         </Card>
 
-        {/* Observações */}
+        {/* Observações — opcional */}
         <Card>
           <CardHeader>
             <CardTitle>Observações Finais</CardTitle>
+            <CardDescription>Campo opcional. Use só se quiser comentar algo à parte do check-in.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              <Label htmlFor="observacoes">25. O que não cumpriu? Por quê?</Label>
+              <Label htmlFor="observacoes">25. O que não cumpriu? Por quê? (opcional)</Label>
               <Textarea
                 id="observacoes"
                 value={formData.nao_cumpriu_porque}
                 onChange={(e) => setFormData({ ...formData, nao_cumpriu_porque: e.target.value })}
-                placeholder="Descreva os desafios enfrentados durante a semana..."
+                placeholder="Opcional — descreva desafios ou pendências da semana, se desejar"
                 rows={4}
               />
             </div>
           </CardContent>
         </Card>
+        </>
+        )}
 
-        <Button type="submit" size="lg" className="w-full" disabled={loading}>
-          {loading ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Enviando...
-            </>
+        </div>
+
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+          {step > 0 ? (
+            <Button type="button" variant="outline" onClick={goPrev} disabled={loading}>
+              <ChevronLeft className="mr-2 h-4 w-4" />
+              Anterior
+            </Button>
           ) : (
-            "Enviar Check-in Semanal"
+            <span />
           )}
-        </Button>
+          {step < CHECKIN_SECTIONS.length - 1 ? (
+            <Button type="button" className="sm:ml-auto" onClick={goNext}>
+              Próximo
+              <ChevronRight className="ml-2 h-4 w-4" />
+            </Button>
+          ) : (
+            <Button type="submit" size="lg" className="w-full sm:ml-auto sm:w-auto" disabled={loading}>
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
+                  Enviando...
+                </>
+              ) : (
+                "Enviar check-in"
+              )}
+            </Button>
+          )}
+        </div>
       </form>
+      )}
     </div>
   );
 }

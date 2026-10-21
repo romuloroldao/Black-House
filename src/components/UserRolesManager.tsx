@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
 import {
   Card,
@@ -37,16 +37,36 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Loader2, Search, Shield, Trash2, User, Users } from "lucide-react";
+import { Loader2, Search, Shield, Trash2, User, Users, UserCog } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+
+type UserRole = "coach" | "aluno" | "assistant" | "admin";
 
 interface UserWithRole {
   id: string;
+  user_role_id: string;
   email: string;
-  role: "coach" | "aluno";
+  role: UserRole;
   created_at: string;
   avatar_url?: string;
   display_name?: string;
+}
+
+const ROLE_LABELS: Record<UserRole, string> = {
+  coach: "Coach",
+  aluno: "Aluno",
+  assistant: "Assistente",
+  admin: "Admin",
+};
+
+function formatRoleDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
 }
 
 const UserRolesManager = () => {
@@ -65,62 +85,67 @@ const UserRolesManager = () => {
   const loadUsers = async () => {
     try {
       setLoading(true);
-      
-      // Get all users with roles using the database function (includes auth.users emails)
-      const { data: usersData, error: usersError } = await supabase
-        .rpc("get_users_with_roles");
+      const rolesResult = await apiClient.requestSafe<
+        Array<{
+          id: string;
+          user_id: string;
+          role: UserRole;
+          created_at?: string;
+          email?: string;
+          avatar_url?: string;
+          display_name?: string;
+        }>
+      >("/api/user-roles");
 
-      if (usersError) throw usersError;
+      const roles = rolesResult.success && Array.isArray(rolesResult.data) ? rolesResult.data : [];
 
-      // Get profiles for avatars
-      const { data: profilesData } = await supabase
-        .from("profiles")
-        .select("id, avatar_url");
-
-      const profilesMap = new Map(
-        profilesData?.map((p) => [p.id, p.avatar_url]) || []
-      );
-
-      // Get alunos data for display names
-      const { data: alunosData } = await supabase
-        .from("alunos")
-        .select("id, email, nome");
-
-      const alunosNameMap = new Map(
-        alunosData?.map((a) => [a.email, a.nome]) || []
-      );
-
-      // Map users data
-      const usersWithRoles: UserWithRole[] = (usersData || []).map((u: any) => {
-        return {
-          id: u.user_id,
-          email: u.email,
-          role: u.role,
-          created_at: u.created_at,
-          avatar_url: profilesMap.get(u.user_id) || undefined,
-          display_name: alunosNameMap.get(u.email) || undefined,
-        };
-      });
+      const usersWithRoles: UserWithRole[] = roles.map((role) => ({
+        id: role.user_id,
+        user_role_id: role.id,
+        email: role.email?.trim() || "email@não.encontrado",
+        role: role.role,
+        created_at: role.created_at || new Date().toISOString(),
+        avatar_url: role.avatar_url || undefined,
+        display_name: role.display_name?.trim() || undefined,
+      }));
 
       setUsers(usersWithRoles);
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error("Error loading users:", error);
-      toast.error("Erro ao carregar usuários: " + error.message);
+      toast.error("Erro ao carregar usuários: " + message);
     } finally {
       setLoading(false);
     }
   };
 
   const handleRoleChange = async (userId: string, newRole: "coach" | "aluno") => {
-    // Prevent changing own role
     if (userId === user?.id) {
       toast.error("Você não pode alterar seu próprio papel");
       return;
     }
 
-    // Prevent demoting the last coach
     const currentUser = users.find((u) => u.id === userId);
-    if (currentUser?.role === "coach" && newRole === "aluno") {
+    if (!currentUser) {
+      toast.error("Usuário não encontrado");
+      return;
+    }
+
+    if (currentUser.role === newRole) {
+      return;
+    }
+
+    if (currentUser.role === "admin") {
+      toast.error("Papel de admin só pode ser alterado por outro super admin");
+      return;
+    }
+
+    if (currentUser.role === "assistant") {
+      toast.error("Assistentes são geridos em Configurações → Equipa. Promova a Coach aqui após remover da equipa.");
+      return;
+    }
+
+    if (currentUser.role === "coach" && newRole === "aluno") {
       const coachesCount = users.filter((u) => u.role === "coach").length;
       if (coachesCount <= 1) {
         toast.error("Não é possível rebaixar o último coach do sistema. Promova outro usuário a coach primeiro.");
@@ -130,23 +155,31 @@ const UserRolesManager = () => {
 
     setUpdating(userId);
     try {
-      const { error } = await supabase
-        .from("user_roles")
-        .update({ role: newRole })
-        .eq("user_id", userId);
+      const updateResult = await apiClient.requestSafe(`/api/user-roles/${currentUser.user_role_id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ role: newRole }),
+      });
+      if (!updateResult.success) {
+        throw new Error(updateResult.error || "Erro ao atualizar papel");
+      }
 
-      if (error) throw error;
+      const payload = updateResult.data as { aluno_conflict?: boolean } | undefined;
+      if (payload?.aluno_conflict) {
+        toast.warning(
+          "Papel alterado, mas ainda existe ficha de aluno com este email. Remova-a na Gestão de Alunos.",
+        );
+      }
 
-      setUsers((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
-      );
+      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u)));
 
       toast.success(
-        `Papel alterado para ${newRole === "coach" ? "Coach" : "Aluno"} com sucesso!`
+        `Papel alterado para ${ROLE_LABELS[newRole]}.${
+          newRole === "coach" ? " O utilizador deve sair e voltar a entrar para aplicar o acesso ao painel." : ""
+        }`,
       );
-    } catch (error: any) {
-      console.error("Error updating role:", error);
-      toast.error("Erro ao atualizar papel: " + error.message);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
+      toast.error("Erro ao atualizar papel: " + message);
     } finally {
       setUpdating(null);
     }
@@ -155,14 +188,12 @@ const UserRolesManager = () => {
   const handleDeleteUser = async () => {
     if (!userToDelete) return;
 
-    // Prevent deleting yourself
     if (userToDelete.id === user?.id) {
       toast.error("Você não pode excluir a si mesmo");
       setUserToDelete(null);
       return;
     }
 
-    // Prevent deleting the last coach
     if (userToDelete.role === "coach") {
       const coachesCount = users.filter((u) => u.role === "coach").length;
       if (coachesCount <= 1) {
@@ -172,35 +203,26 @@ const UserRolesManager = () => {
       }
     }
 
+    if (userToDelete.role === "admin") {
+      toast.error("Não é possível excluir um administrador por esta tela.");
+      setUserToDelete(null);
+      return;
+    }
+
     setDeleting(userToDelete.id);
     try {
-      // Delete user role
-      const { error: roleError } = await supabase
-        .from("user_roles")
-        .delete()
-        .eq("user_id", userToDelete.id);
-
-      if (roleError) throw roleError;
-
-      // Delete profile if exists
-      await supabase
-        .from("profiles")
-        .delete()
-        .eq("id", userToDelete.id);
-
-      // Delete aluno record if exists (by email)
-      if (userToDelete.email) {
-        await supabase
-          .from("alunos")
-          .delete()
-          .eq("email", userToDelete.email);
+      const deleteResult = await apiClient.requestSafe(`/api/user-roles/${userToDelete.user_role_id}`, {
+        method: "DELETE",
+      });
+      if (!deleteResult.success) {
+        throw new Error(deleteResult.error || "Erro ao excluir usuário");
       }
 
       setUsers((prev) => prev.filter((u) => u.id !== userToDelete.id));
       toast.success(`Usuário "${userToDelete.display_name || userToDelete.email}" excluído com sucesso!`);
-    } catch (error: any) {
-      console.error("Error deleting user:", error);
-      toast.error("Erro ao excluir usuário: " + error.message);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error("Erro ao excluir usuário: " + message);
     } finally {
       setDeleting(null);
       setUserToDelete(null);
@@ -210,16 +232,80 @@ const UserRolesManager = () => {
   const filteredUsers = users.filter(
     (u) =>
       u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      u.display_name?.toLowerCase().includes(searchTerm.toLowerCase())
+      u.display_name?.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
-  const coachCount = users.filter((u) => u.role === "coach").length;
-  const alunoCount = users.filter((u) => u.role === "aluno").length;
+  const stats = useMemo(() => {
+    const coachCount = users.filter((u) => u.role === "coach").length;
+    const alunoCount = users.filter((u) => u.role === "aluno").length;
+    const assistantCount = users.filter((u) => u.role === "assistant").length;
+    const adminCount = users.filter((u) => u.role === "admin").length;
+    return { coachCount, alunoCount, assistantCount, adminCount, total: users.length };
+  }, [users]);
+
+  const renderRoleControl = (u: UserWithRole) => {
+    if (u.id === user?.id) {
+      return (
+        <span className="text-sm text-muted-foreground">
+          {ROLE_LABELS[u.role]} (você)
+        </span>
+      );
+    }
+
+    if (u.role === "admin") {
+      return <span className="text-sm text-muted-foreground">Protegido</span>;
+    }
+
+    if (u.role === "assistant") {
+      return (
+        <span className="text-sm text-muted-foreground">
+          Gerido em Equipa
+        </span>
+      );
+    }
+
+    return (
+      <Select
+        value={u.role === "coach" || u.role === "aluno" ? u.role : "aluno"}
+        onValueChange={(value: "coach" | "aluno") => handleRoleChange(u.id, value)}
+        disabled={updating === u.id}
+      >
+        <SelectTrigger className="w-[140px]">
+          {updating === u.id ? (
+            <Loader2 className="h-4 w-4 motion-safe:animate-spin" />
+          ) : (
+            <SelectValue />
+          )}
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="coach">
+            <div className="flex items-center gap-2">
+              <Shield className="h-3 w-3" />
+              Coach
+            </div>
+          </SelectItem>
+          <SelectItem value="aluno">
+            <div className="flex items-center gap-2">
+              <User className="h-3 w-3" />
+              Aluno
+            </div>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    );
+  };
+
+  const roleBadgeVariant = (role: UserRole) => {
+    if (role === "coach") return "default";
+    if (role === "admin") return "default";
+    if (role === "assistant") return "outline";
+    return "secondary";
+  };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <Loader2 className="h-8 w-8 motion-safe:animate-spin text-primary" />
       </div>
     );
   }
@@ -229,19 +315,29 @@ const UserRolesManager = () => {
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Gerenciar Papéis de Usuários</h2>
         <p className="text-muted-foreground">
-          Defina quem é coach (administrador) e quem é aluno no sistema
+          Defina quem é coach titular e quem é aluno. Assistentes de equipa são geridos em{" "}
+          <span className="text-foreground">Configurações → Equipa</span>.
         </p>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className={`grid gap-4 ${stats.adminCount > 0 || stats.assistantCount > 0 ? "md:grid-cols-4" : "md:grid-cols-3"}`}>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total de Usuários</CardTitle>
+            <CardTitle className="text-sm font-medium">Total</CardTitle>
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{users.length}</div>
+            <div className="text-2xl font-bold">{stats.total}</div>
+            {(stats.adminCount > 0 || stats.assistantCount > 0) && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {[
+                  stats.adminCount > 0 ? `${stats.adminCount} admin` : null,
+                  stats.assistantCount > 0 ? `${stats.assistantCount} assistente(s)` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -250,9 +346,9 @@ const UserRolesManager = () => {
             <Shield className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-primary">{coachCount}</div>
+            <div className="text-2xl font-bold text-primary">{stats.coachCount}</div>
             <p className="text-xs text-muted-foreground">
-              Podem gerenciar alunos, dietas, treinos e pagamentos
+              Acesso completo ao painel administrativo
             </p>
           </CardContent>
         </Card>
@@ -262,20 +358,35 @@ const UserRolesManager = () => {
             <User className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{alunoCount}</div>
-            <p className="text-xs text-muted-foreground">
-              Acesso ao portal do aluno
-            </p>
+            <div className="text-2xl font-bold">{stats.alunoCount}</div>
+            <p className="text-xs text-muted-foreground">Portal do aluno</p>
           </CardContent>
         </Card>
+        {(stats.adminCount > 0 || stats.assistantCount > 0) && (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Outros papéis</CardTitle>
+              <UserCog className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {stats.adminCount + stats.assistantCount}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Admin e assistentes de equipa
+              </p>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
-      {/* Users Table */}
       <Card>
         <CardHeader>
           <CardTitle>Usuários do Sistema</CardTitle>
           <CardDescription>
-            Altere o papel de cada usuário para definir suas permissões
+            {filteredUsers.length === users.length
+              ? `${users.length} utilizadores com papel definido`
+              : `${filteredUsers.length} de ${users.length} utilizadores`}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -291,14 +402,14 @@ const UserRolesManager = () => {
             </div>
           </div>
 
-          <div className="rounded-md border">
+          <div className="rounded-md border overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Usuário</TableHead>
-                  <TableHead>Papel Atual</TableHead>
-                  <TableHead>Alterar Para</TableHead>
-                  <TableHead>Desde</TableHead>
+                  <TableHead>Papel</TableHead>
+                  <TableHead>Alterar papel</TableHead>
+                  <TableHead>Papel desde</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
@@ -315,91 +426,59 @@ const UserRolesManager = () => {
                   filteredUsers.map((u) => (
                     <TableRow key={u.id}>
                       <TableCell>
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-8 w-8">
+                        <div className="flex items-center gap-3 min-w-[200px]">
+                          <Avatar className="h-8 w-8 shrink-0">
                             <AvatarImage src={u.avatar_url} />
                             <AvatarFallback className="bg-primary/10 text-primary text-xs">
                               {u.display_name?.charAt(0)?.toUpperCase() ||
-                                u.email.charAt(0).toUpperCase()}
+                                u.email?.charAt(0)?.toUpperCase() ||
+                                "?"}
                             </AvatarFallback>
                           </Avatar>
-                          <div>
-                            <p className="font-medium text-sm">
-                              {u.display_name || u.email}
+                          <div className="min-w-0">
+                            <p className="font-medium text-sm truncate">
+                              {u.display_name ||
+                                (u.email.includes("@") ? u.email.split("@")[0] : u.email)}
                               {u.id === user?.id && (
-                                <Badge variant="outline" className="ml-2 text-xs">
+                                <Badge variant="outline" className="ml-2 text-xs shrink-0">
                                   Você
                                 </Badge>
                               )}
                             </p>
-                            {u.display_name && (
-                              <p className="text-xs text-muted-foreground">{u.email}</p>
+                            {u.email.includes("@") && (
+                              <p className="text-xs text-muted-foreground truncate">{u.email}</p>
                             )}
                           </div>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge
-                          variant={u.role === "coach" ? "default" : "secondary"}
-                          className="gap-1"
-                        >
-                          {u.role === "coach" ? (
-                            <>
-                              <Shield className="h-3 w-3" />
-                              Coach
-                            </>
+                        <Badge variant={roleBadgeVariant(u.role)} className="gap-1 whitespace-nowrap">
+                          {u.role === "coach" || u.role === "admin" || u.role === "assistant" ? (
+                            <Shield className="h-3 w-3" />
                           ) : (
-                            <>
-                              <User className="h-3 w-3" />
-                              Aluno
-                            </>
+                            <User className="h-3 w-3" />
                           )}
+                          {ROLE_LABELS[u.role]}
                         </Badge>
                       </TableCell>
-                      <TableCell>
-                        <Select
-                          value={u.role}
-                          onValueChange={(value: "coach" | "aluno") =>
-                            handleRoleChange(u.id, value)
-                          }
-                          disabled={updating === u.id || u.id === user?.id}
-                        >
-                          <SelectTrigger className="w-32">
-                            {updating === u.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <SelectValue />
-                            )}
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="coach">
-                              <div className="flex items-center gap-2">
-                                <Shield className="h-3 w-3" />
-                                Coach
-                              </div>
-                            </SelectItem>
-                            <SelectItem value="aluno">
-                              <div className="flex items-center gap-2">
-                                <User className="h-3 w-3" />
-                                Aluno
-                              </div>
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {new Date(u.created_at).toLocaleDateString("pt-BR")}
+                      <TableCell>{renderRoleControl(u)}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                        {formatRoleDate(u.created_at)}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                          disabled={u.id === user?.id || deleting === u.id}
+                          disabled={
+                            u.id === user?.id ||
+                            deleting === u.id ||
+                            u.role === "admin"
+                          }
                           onClick={() => setUserToDelete(u)}
                         >
                           {deleting === u.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <Loader2 className="h-4 w-4 motion-safe:animate-spin" />
                           ) : (
                             <Trash2 className="h-4 w-4" />
                           )}
@@ -414,7 +493,6 @@ const UserRolesManager = () => {
         </CardContent>
       </Card>
 
-      {/* Info Card */}
       <Card className="border-primary/20 bg-primary/5">
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
@@ -423,18 +501,25 @@ const UserRolesManager = () => {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             <div className="space-y-2">
               <h4 className="font-medium flex items-center gap-2">
                 <Badge>Coach</Badge>
               </h4>
               <ul className="text-sm text-muted-foreground space-y-1 ml-4 list-disc">
-                <li>Gerenciar alunos</li>
-                <li>Criar e editar dietas</li>
-                <li>Criar e atribuir treinos</li>
-                <li>Gerenciar planos de pagamento</li>
-                <li>Acessar dashboard administrativo</li>
-                <li>Enviar mensagens e avisos</li>
+                <li>Painel administrativo completo</li>
+                <li>Gestão dos próprios alunos</li>
+                <li>Dietas, treinos e pagamentos</li>
+              </ul>
+            </div>
+            <div className="space-y-2">
+              <h4 className="font-medium flex items-center gap-2">
+                <Badge variant="outline">Assistente</Badge>
+              </h4>
+              <ul className="text-sm text-muted-foreground space-y-1 ml-4 list-disc">
+                <li>Adicionado em Configurações → Equipa</li>
+                <li>Acesso partilhado ao coach titular</li>
+                <li>Para titular, promova a Coach nesta tela</li>
               </ul>
             </div>
             <div className="space-y-2">
@@ -442,19 +527,14 @@ const UserRolesManager = () => {
                 <Badge variant="secondary">Aluno</Badge>
               </h4>
               <ul className="text-sm text-muted-foreground space-y-1 ml-4 list-disc">
-                <li>Visualizar seus treinos</li>
-                <li>Visualizar sua dieta</li>
-                <li>Enviar check-ins semanais</li>
-                <li>Visualizar seus pagamentos</li>
-                <li>Enviar mensagens ao coach</li>
-                <li>Acessar vídeos educativos</li>
+                <li>Portal do aluno (treinos, dieta, check-ins)</li>
+                <li>Sem acesso ao painel do coach</li>
               </ul>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Delete Confirmation Dialog */}
       <AlertDialog open={!!userToDelete} onOpenChange={() => setUserToDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -462,13 +542,10 @@ const UserRolesManager = () => {
             <AlertDialogDescription>
               Tem certeza que deseja excluir o usuário{" "}
               <strong>{userToDelete?.display_name || userToDelete?.email}</strong>?
-              <br /><br />
-              Esta ação irá remover:
-              <ul className="list-disc ml-4 mt-2">
-                <li>Papel do usuário no sistema</li>
-                <li>Perfil e avatar</li>
-                <li>Dados do aluno (se aplicável)</li>
-              </ul>
+              <br />
+              <br />
+              Esta ação irá remover o papel, perfil e dados de aluno associados.
+              <br />
               <br />
               <strong className="text-destructive">Esta ação não pode ser desfeita.</strong>
             </AlertDialogDescription>

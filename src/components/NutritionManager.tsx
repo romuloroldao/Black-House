@@ -1,33 +1,24 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import {
+  getAllFoodsSafe,
+  Food,
+  getSubstitutionCategoryLabel,
+} from '@/lib/foodService';
+import { listarSubstituicoesIsocaloricas } from '@/lib/foodEquivalence';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Calculator } from 'lucide-react';
 
-interface Alimento {
-  id: string;
-  nome: string;
-  quantidade_referencia_g: number;
-  kcal_por_referencia: number;
-  cho_por_referencia: number;
-  ptn_por_referencia: number;
-  lip_por_referencia: number;
-  origem_ptn: string;
-  tipo_id: string;
-  autor?: string;
-  info_adicional?: string;
-}
-
 interface Substituto {
   nome: string;
   quantidade: string;
-  nutrienteDominante: string;
+  kcal: string;
 }
 
 const NutritionManager = () => {
-  const [alimentos, setAlimentos] = useState<Alimento[]>([]);
+  const [alimentos, setAlimentos] = useState<Food[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,13 +28,17 @@ const NutritionManager = () => {
 
   async function carregarAlimentos() {
     try {
-      const { data, error } = await supabase
-        .from('alimentos')
-        .select('*')
-        .order('nome');
-
-      if (error) throw error;
-      setAlimentos(data || []);
+      const result = await getAllFoodsSafe();
+      if (!result.success) {
+        setError(result.error || 'Erro ao carregar alimentos');
+        setAlimentos([]);
+        return;
+      }
+      const data = Array.isArray(result.data) ? result.data : [];
+      const ordenados = [...data].sort((a, b) =>
+        String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR'),
+      );
+      setAlimentos(ordenados);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao carregar alimentos');
     } finally {
@@ -51,44 +46,30 @@ const NutritionManager = () => {
     }
   }
 
-  function calcularSubstituicoes(alimentoSelecionado: Alimento): Substituto[] {
-    // Usar KCAL como base de substituição (igual à planilha)
-    const kcalOriginalPor100g = (alimentoSelecionado.kcal_por_referencia / alimentoSelecionado.quantidade_referencia_g) * 100;
-    
-    if (kcalOriginalPor100g === 0) return [];
-
-    return alimentos
-      .filter(a => 
-        a.tipo_id === alimentoSelecionado.tipo_id && 
-        a.nome !== alimentoSelecionado.nome &&
-        a.kcal_por_referencia > 0
-      )
-      .map(sub => {
-        // Fórmula: Qtd_B = Qtd_A × (kcal_A / kcal_B)
-        // Para 100g do alimento original, quanto do substituto é necessário?
-        const kcalSubPor100g = (sub.kcal_por_referencia / sub.quantidade_referencia_g) * 100;
-        const qtdEquivalente = (kcalOriginalPor100g / kcalSubPor100g) * 100;
-        
-        return {
-          nome: sub.nome,
-          quantidade: qtdEquivalente.toFixed(0),
-          nutrienteDominante: 'Kcal'
-        };
-      })
-      .sort((a, b) => Math.abs(parseFloat(a.quantidade) - 100) - Math.abs(parseFloat(b.quantidade) - 100))
-      .slice(0, 3); // Limitar a 3 substitutos
+  function calcularSubstituicoes(alimentoSelecionado: Food): Substituto[] {
+    return listarSubstituicoesIsocaloricas(
+      alimentoSelecionado,
+      100,
+      'g',
+      alimentos,
+      { limit: 3 },
+    ).map((s) => ({
+      nome: s.alimento.name,
+      quantidade: s.quantidadeEquivalente.toFixed(0),
+      kcal: s.kcalEquivalente.toFixed(0),
+    }));
   }
 
-  function getNutrienteBadgeColor(alimento: Alimento) {
+  function getNutrienteBadgeColor(alimento: Food) {
     const maxMacro = Math.max(
-      alimento.ptn_por_referencia,
-      alimento.cho_por_referencia,
-      alimento.lip_por_referencia
+      alimento.protein,
+      alimento.carbs,
+      alimento.fat
     );
     
-    if (maxMacro === alimento.ptn_por_referencia) {
+    if (maxMacro === alimento.protein) {
       return 'bg-primary/20 text-primary border-primary/30';
-    } else if (maxMacro === alimento.cho_por_referencia) {
+    } else if (maxMacro === alimento.carbs) {
       return 'bg-warning/20 text-warning border-warning/30';
     } else {
       return 'bg-destructive/20 text-destructive border-destructive/30';
@@ -138,11 +119,11 @@ const NutritionManager = () => {
   return (
     <div className="p-6 space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-foreground">
+        <h1 className="text-xl font-bold text-foreground sm:text-2xl">
           Lista de Alimentos e Substituições
         </h1>
         <p className="text-muted-foreground mt-2">
-          Alimentos com equivalências nutricionais automaticamente calculadas
+          Substituição isocalórica por grupo alimentar (planilha de equivalência)
         </p>
       </div>
 
@@ -155,20 +136,20 @@ const NutritionManager = () => {
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-lg font-semibold text-card-foreground">
-                    {alimento.nome}
+                    {alimento.name}
                   </CardTitle>
-                  <Badge 
-                    variant="outline" 
+                  <Badge
+                    variant="outline"
                     className={getNutrienteBadgeColor(alimento)}
                   >
-                    {alimento.origem_ptn}
+                    {getSubstitutionCategoryLabel('', alimento)}
                   </Badge>
                 </div>
                 <div className="flex gap-4 text-sm text-muted-foreground">
-                  <span>{alimento.kcal_por_referencia} kcal</span>
-                  <span>{alimento.ptn_por_referencia}g proteínas</span>
-                  <span>{alimento.cho_por_referencia}g carb</span>
-                  <span>{alimento.lip_por_referencia}g lip</span>
+                  <span>{alimento.calories} kcal</span>
+                  <span>{alimento.protein}g proteínas</span>
+                  <span>{alimento.carbs}g carb</span>
+                  <span>{alimento.fat}g lip</span>
                 </div>
               </CardHeader>
               
@@ -193,7 +174,7 @@ const NutritionManager = () => {
                               {sub.quantidade} g/ml
                             </span>
                             <span className="text-xs text-muted-foreground">
-                              ({sub.nutrienteDominante})
+                              ({sub.kcal} kcal)
                             </span>
                           </div>
                         </div>

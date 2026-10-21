@@ -1,29 +1,36 @@
 # Importação de Alimentos TACO
 
-Este script importa alimentos da Tabela TACO (Tabela Brasileira de Composição de Alimentos) para a base de dados.
+Este script importa alimentos da Tabela TACO (Tabela Brasileira de Composição de Alimentos) para a base de dados via API REST.
 
 ## Pré-requisitos
 
 1. Ter o arquivo Excel parseado
-2. Ter a chave do Supabase (service_role key)
+2. Ter credenciais de um usuário coach (email e senha)
+3. Backend API rodando (localhost:3001 ou configurado via VITE_API_URL)
 
 ## Como Executar
 
-### Passo 1: Obter a Service Role Key
+### Passo 1: Configurar Credenciais
 
-1. Acesse o painel do Supabase: https://supabase.com/dashboard/project/cghzttbggklhuyqxzabq/settings/api
-2. Copie a `service_role` key (não a `anon` key)
-3. **⚠️ IMPORTANTE**: Esta chave é secreta e tem privilégios totais. Não compartilhe!
+Use credenciais de um usuário coach existente no sistema.
 
 ### Passo 2: Executar o Script
 
 No terminal, execute:
 
 ```bash
-SUPABASE_KEY=sua_service_role_key_aqui npx tsx src/scripts/import-taco-foods.ts
+API_EMAIL=seu_email@exemplo.com API_PASSWORD=sua_senha npx tsx src/scripts/import-taco-foods.ts
 ```
 
-Substitua `sua_service_role_key_aqui` pela chave que você copiou.
+OU configure via variáveis de ambiente no `.env`:
+
+```bash
+export API_EMAIL=seu_email@exemplo.com
+export API_PASSWORD=sua_senha
+npx tsx src/scripts/import-taco-foods.ts
+```
+
+**⚠️ IMPORTANTE**: Use credenciais de um coach (não de aluno) para ter permissões de inserção.
 
 ## O que o Script Faz
 

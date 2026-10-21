@@ -1,0 +1,200 @@
+{
+  "table_name": "alimentos",
+  "schema": "public",
+  "description": "Tabela de alimentos do sistema BlackHouse contendo informações nutricionais e categorização",
+  "columns": [
+    {
+      "name": "id",
+      "type": "UUID",
+      "nullable": false,
+      "primary_key": true,
+      "default": "gen_random_uuid()",
+      "description": "Identificador único do alimento (UUID)",
+      "auto_generated": true
+    },
+    {
+      "name": "nome",
+      "type": "TEXT",
+      "nullable": false,
+      "unique": true,
+      "description": "Nome do alimento (ex: 'Frango grelhado', 'Arroz branco')",
+      "constraints": ["NOT NULL", "UNIQUE"]
+    },
+    {
+      "name": "quantidade_referencia_g",
+      "type": "NUMERIC(10,2)",
+      "nullable": false,
+      "default": 100,
+      "description": "Quantidade de referência em gramas para os valores nutricionais (padrão: 100g)",
+      "unit": "gramas"
+    },
+    {
+      "name": "kcal_por_referencia",
+      "type": "NUMERIC(10,2)",
+      "nullable": false,
+      "description": "Quantidade de calorias (kcal) por quantidade_referencia_g",
+      "unit": "kcal"
+    },
+    {
+      "name": "cho_por_referencia",
+      "type": "NUMERIC(10,2)",
+      "nullable": false,
+      "description": "Quantidade de carboidratos (CHO) em gramas por quantidade_referencia_g",
+      "unit": "gramas"
+    },
+    {
+      "name": "ptn_por_referencia",
+      "type": "NUMERIC(10,2)",
+      "nullable": false,
+      "description": "Quantidade de proteínas (PTN) em gramas por quantidade_referencia_g",
+      "unit": "gramas"
+    },
+    {
+      "name": "lip_por_referencia",
+      "type": "NUMERIC(10,2)",
+      "nullable": false,
+      "description": "Quantidade de lipídios (LIP) em gramas por quantidade_referencia_g",
+      "unit": "gramas"
+    },
+    {
+      "name": "origem_ptn",
+      "type": "TEXT",
+      "nullable": false,
+      "description": "Origem da proteína do alimento",
+      "check_constraint": {
+        "name": "origem_ptn_check",
+        "values": ["Vegetal", "Animal", "Mista", "N/A"],
+        "description": "Restringe origem_ptn aos valores permitidos"
+      }
+    },
+    {
+      "name": "tipo_id",
+      "type": "UUID",
+      "nullable": true,
+      "description": "Chave estrangeira para tipos_alimentos(id) - categorização do alimento",
+      "foreign_key": {
+        "table": "tipos_alimentos",
+        "column": "id",
+        "on_delete": "NO ACTION",
+        "on_update": "NO ACTION"
+      }
+    },
+    {
+      "name": "info_adicional",
+      "type": "TEXT",
+      "nullable": true,
+      "description": "Informações adicionais sobre o alimento (observações, fonte dos dados, etc.)"
+    },
+    {
+      "name": "autor",
+      "type": "TEXT",
+      "nullable": true,
+      "description": "Identificador do usuário/autor que criou ou importou o alimento"
+    },
+    {
+      "name": "created_at",
+      "type": "TIMESTAMP WITH TIME ZONE",
+      "nullable": false,
+      "default": "NOW()",
+      "description": "Data e hora de criação do registro no banco",
+      "auto_generated": true
+    }
+  ],
+  "indexes": [
+    {
+      "name": "idx_alimentos_tipo_id",
+      "columns": ["tipo_id"],
+      "type": "B-TREE",
+      "description": "Índice para busca por tipo de alimento"
+    },
+    {
+      "name": "idx_alimentos_nome",
+      "columns": ["nome"],
+      "type": "B-TREE",
+      "description": "Índice para busca por nome (otimização de queries)"
+    },
+    {
+      "name": "alimentos_nome_key",
+      "columns": ["nome"],
+      "type": "UNIQUE",
+      "description": "Constraint UNIQUE implícito na coluna nome"
+    },
+    {
+      "name": "alimentos_pkey",
+      "columns": ["id"],
+      "type": "PRIMARY KEY",
+      "description": "Primary key constraint"
+    }
+  ],
+  "constraints": [
+    {
+      "name": "alimentos_pkey",
+      "type": "PRIMARY KEY",
+      "columns": ["id"]
+    },
+    {
+      "name": "alimentos_nome_key",
+      "type": "UNIQUE",
+      "columns": ["nome"]
+    },
+    {
+      "name": "origem_ptn_check",
+      "type": "CHECK",
+      "condition": "origem_ptn IN ('Vegetal', 'Animal', 'Mista', 'N/A')"
+    },
+    {
+      "name": "alimentos_tipo_id_fkey",
+      "type": "FOREIGN KEY",
+      "columns": ["tipo_id"],
+      "references": {
+        "table": "tipos_alimentos",
+        "column": "id"
+      }
+    }
+  ],
+  "security": {
+    "row_level_security": true,
+    "policies": [
+      {
+        "name": "Anyone can view alimentos",
+        "operation": "SELECT",
+        "definition": "USING (true)",
+        "description": "Permite que qualquer usuário visualize alimentos"
+      }
+    ]
+  },
+  "relationships": [
+    {
+      "type": "many-to-one",
+      "table": "tipos_alimentos",
+      "column": "tipo_id",
+      "description": "Um alimento pertence a um tipo de alimento (Proteínas, Carboidratos, etc.)"
+    },
+    {
+      "type": "one-to-many",
+      "table": "itens_dieta",
+      "column": "alimento_id",
+      "description": "Um alimento pode aparecer em múltiplos itens de dieta"
+    }
+  ],
+  "notes": [
+    "Valores nutricionais são sempre por quantidade_referencia_g (padrão: 100g)",
+    "Para calcular valores para outras quantidades, use a função calcular_nutrientes()",
+    "A coluna nome deve ser única e é case-sensitive (normalização é feita em aplicação)",
+    "A coluna tipo_id é obrigatória para integridade referencial (GUARD-01)"
+  ],
+  "example_record": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "nome": "Frango grelhado",
+    "quantidade_referencia_g": 100,
+    "kcal_por_referencia": 165.00,
+    "cho_por_referencia": 0.00,
+    "ptn_por_referencia": 31.00,
+    "lip_por_referencia": 3.60,
+    "origem_ptn": "Animal",
+    "tipo_id": "33acba74-bbc2-446a-8476-401693c56baf",
+    "info_adicional": "Criado automaticamente via importação de ficha",
+    "autor": "user-123",
+    "created_at": "2026-01-15T17:00:00.000Z"
+  }
+}

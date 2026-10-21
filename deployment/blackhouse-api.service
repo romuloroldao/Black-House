@@ -1,0 +1,21 @@
+[Unit]
+Description=BlackHouse API
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/var/www/blackhouse/server
+ExecStart=/usr/bin/node index.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+EnvironmentFile=/var/www/blackhouse/server/.env
+
+# Logs
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=blackhouse-api
+
+[Install]
+WantedBy=multi-user.target

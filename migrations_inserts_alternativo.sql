@@ -1,0 +1,65 @@
+-- ============================================================================
+-- INSERTS ALTERNATIVO PARA supabase_migrations.schema_migrations
+-- Use este se a estrutura da tabela for: version, name, statements, inserted_at
+-- ============================================================================
+
+-- Se a tabela usar 'version' como chave primária (text) em vez de 'id' (integer),
+-- use este script. O 'version' será gerado a partir do 'name'.
+
+INSERT INTO supabase_migrations.schema_migrations (
+    version,
+    name,
+    statements,
+    inserted_at
+) VALUES
+('20250807194452', 'create-migrations-table', ARRAY['-- Migration create-migrations-table'], '2025-08-07 19:44:52.873227'::timestamptz),
+('20250807194452_1', 'initialmigration', ARRAY['-- Migration initialmigration'], '2025-08-07 19:44:52.900711'::timestamptz),
+('20250807194452_2', 'storage-schema', ARRAY['-- Migration storage-schema'], '2025-08-07 19:44:52.907594'::timestamptz),
+('20250807194452_3', 'pathtoken-column', ARRAY['-- Migration pathtoken-column'], '2025-08-07 19:44:52.972241'::timestamptz),
+('20250807194453_4', 'add-migrations-rls', ARRAY['-- Migration add-migrations-rls'], '2025-08-07 19:44:53.059183'::timestamptz),
+('20250807194453_5', 'add-size-functions', ARRAY['-- Migration add-size-functions'], '2025-08-07 19:44:53.063012'::timestamptz),
+('20250807194453_6', 'change-column-name-in-get-size', ARRAY['-- Migration change-column-name-in-get-size'], '2025-08-07 19:44:53.073141'::timestamptz),
+('20250807194453_7', 'add-rls-to-buckets', ARRAY['-- Migration add-rls-to-buckets'], '2025-08-07 19:44:53.077171'::timestamptz),
+('20250807194453_8', 'add-public-to-buckets', ARRAY['-- Migration add-public-to-buckets'], '2025-08-07 19:44:53.080759'::timestamptz),
+('20250807194453_9', 'fix-search-function', ARRAY['-- Migration fix-search-function'], '2025-08-07 19:44:53.084096'::timestamptz),
+('20250807194453_10', 'search-files-search-function', ARRAY['-- Migration search-files-search-function'], '2025-08-07 19:44:53.088522'::timestamptz),
+('20250807194453_11', 'add-trigger-to-auto-update-updated_at-column', ARRAY['-- Migration add-trigger-to-auto-update-updated_at-column'], '2025-08-07 19:44:53.093046'::timestamptz),
+('20250807194453_12', 'add-automatic-avif-detection-flag', ARRAY['-- Migration add-automatic-avif-detection-flag'], '2025-08-07 19:44:53.103016'::timestamptz),
+('20250807194453_13', 'add-bucket-custom-limits', ARRAY['-- Migration add-bucket-custom-limits'], '2025-08-07 19:44:53.106464'::timestamptz),
+('20250807194453_14', 'use-bytes-for-max-size', ARRAY['-- Migration use-bytes-for-max-size'], '2025-08-07 19:44:53.110211'::timestamptz),
+('20250807194453_15', 'add-can-insert-object-function', ARRAY['-- Migration add-can-insert-object-function'], '2025-08-07 19:44:53.144161'::timestamptz),
+('20250807194453_16', 'add-version', ARRAY['-- Migration add-version'], '2025-08-07 19:44:53.149336'::timestamptz),
+('20250807194453_17', 'drop-owner-foreign-key', ARRAY['-- Migration drop-owner-foreign-key'], '2025-08-07 19:44:53.156477'::timestamptz),
+('20250807194453_18', 'add_owner_id_column_deprecate_owner', ARRAY['-- Migration add_owner_id_column_deprecate_owner'], '2025-08-07 19:44:53.166089'::timestamptz),
+('20250807194453_19', 'alter-default-value-objects-id', ARRAY['-- Migration alter-default-value-objects-id'], '2025-08-07 19:44:53.178602'::timestamptz),
+('20250807194453_20', 'list-objects-with-delimiter', ARRAY['-- Migration list-objects-with-delimiter'], '2025-08-07 19:44:53.183004'::timestamptz),
+('20250807194453_21', 's3-multipart-uploads', ARRAY['-- Migration s3-multipart-uploads'], '2025-08-07 19:44:53.191081'::timestamptz),
+('20250807194453_22', 's3-multipart-uploads-big-ints', ARRAY['-- Migration s3-multipart-uploads-big-ints'], '2025-08-07 19:44:53.210999'::timestamptz),
+('20250807194453_23', 'optimize-search-function', ARRAY['-- Migration optimize-search-function'], '2025-08-07 19:44:53.23648'::timestamptz),
+('20250807194453_24', 'operation-function', ARRAY['-- Migration operation-function'], '2025-08-07 19:44:53.251396'::timestamptz),
+('20250807194453_25', 'custom-metadata', ARRAY['-- Migration custom-metadata'], '2025-08-07 19:44:53.256079'::timestamptz),
+('20250827181644_26', 'objects-prefixes', ARRAY['-- Migration objects-prefixes'], '2025-08-27 18:16:44.38913'::timestamptz),
+('20250827181644_27', 'search-v2', ARRAY['-- Migration search-v2'], '2025-08-27 18:16:44.68558'::timestamptz),
+('20250827181644_28', 'object-bucket-name-sorting', ARRAY['-- Migration object-bucket-name-sorting'], '2025-08-27 18:16:44.712158'::timestamptz),
+('20250827181644_29', 'create-prefixes', ARRAY['-- Migration create-prefixes'], '2025-08-27 18:16:44.822907'::timestamptz),
+('20250827181644_30', 'update-object-levels', ARRAY['-- Migration update-object-levels'], '2025-08-27 18:16:44.8969'::timestamptz),
+('20250827181644_31', 'objects-level-index', ARRAY['-- Migration objects-level-index'], '2025-08-27 18:16:44.907302'::timestamptz),
+('20250827181644_32', 'backward-compatible-index-on-objects', ARRAY['-- Migration backward-compatible-index-on-objects'], '2025-08-27 18:16:44.921284'::timestamptz),
+('20250827181645_33', 'backward-compatible-index-on-prefixes', ARRAY['-- Migration backward-compatible-index-on-prefixes'], '2025-08-27 18:16:45.896705'::timestamptz),
+('20250827181645_34', 'optimize-search-function-v1', ARRAY['-- Migration optimize-search-function-v1'], '2025-08-27 18:16:45.899672'::timestamptz),
+('20250827181645_35', 'add-insert-trigger-prefixes', ARRAY['-- Migration add-insert-trigger-prefixes'], '2025-08-27 18:16:45.91'::timestamptz),
+('20250827181645_36', 'optimise-existing-functions', ARRAY['-- Migration optimise-existing-functions'], '2025-08-27 18:16:45.918004'::timestamptz),
+('20250827181645_37', 'add-bucket-name-length-trigger', ARRAY['-- Migration add-bucket-name-length-trigger'], '2025-08-27 18:16:45.933189'::timestamptz),
+('20250827181645_38', 'iceberg-catalog-flag-on-buckets', ARRAY['-- Migration iceberg-catalog-flag-on-buckets'], '2025-08-27 18:16:45.942778'::timestamptz),
+('20251015203603_39', 'add-search-v2-sort-support', ARRAY['-- Migration add-search-v2-sort-support'], '2025-10-15 20:36:03.070564'::timestamptz),
+('20251015203603_40', 'fix-prefix-race-conditions-optimized', ARRAY['-- Migration fix-prefix-race-conditions-optimized'], '2025-10-15 20:36:03.115334'::timestamptz),
+('20251015203603_41', 'add-object-level-update-trigger', ARRAY['-- Migration add-object-level-update-trigger'], '2025-10-15 20:36:03.143299'::timestamptz),
+('20251015203603_42', 'rollback-prefix-triggers', ARRAY['-- Migration rollback-prefix-triggers'], '2025-10-15 20:36:03.149426'::timestamptz),
+('20251015203603_43', 'fix-object-level', ARRAY['-- Migration fix-object-level'], '2025-10-15 20:36:03.157499'::timestamptz),
+('20251118174001_44', 'vector-bucket-type', ARRAY['-- Migration vector-bucket-type'], '2025-11-18 17:40:01.589508'::timestamptz),
+('20251118174001_45', 'vector-buckets', ARRAY['-- Migration vector-buckets'], '2025-11-18 17:40:01.637548'::timestamptz),
+('20251118174001_46', 'buckets-objects-grants', ARRAY['-- Migration buckets-objects-grants'], '2025-11-18 17:40:01.742106'::timestamptz),
+('20251118174001_47', 'iceberg-table-metadata', ARRAY['-- Migration iceberg-table-metadata'], '2025-11-18 17:40:01.753415'::timestamptz),
+('20251118174001_48', 'iceberg-catalog-ids', ARRAY['-- Migration iceberg-catalog-ids'], '2025-11-18 17:40:01.763528'::timestamptz),
+('20251222184452_49', 'buckets-objects-grants-postgres', ARRAY['-- Migration buckets-objects-grants-postgres'], '2025-12-22 18:44:52.185166'::timestamptz)
+ON CONFLICT (version) DO NOTHING;

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,8 +7,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DateInputBR } from "@/components/ui/date-input-br";
 import { toast } from "sonner";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import { Plus, Pencil, Trash2, TrendingDown, Clock, CheckCircle, XCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
@@ -28,6 +30,7 @@ interface Expense {
 }
 
 export default function ExpenseManager() {
+  const { confirm } = useConfirm();
   const { user } = useAuth();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,13 +71,16 @@ export default function ExpenseManager() {
   const loadExpenses = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('expenses')
-        .select('*')
-        .order('data_vencimento', { ascending: false });
+      const result = await apiClient.requestSafe<any[]>('/api/expenses');
+      const data = result.success && Array.isArray(result.data) ? result.data : [];
 
-      if (error) throw error;
-      setExpenses((data || []) as Expense[]);
+      // Converter valor para número se vier como string
+      const expensesData = data.map((expense: any) => ({
+        ...expense,
+        valor: typeof expense.valor === 'string' ? parseFloat(expense.valor) || 0 : (expense.valor || 0),
+      }));
+
+      setExpenses(expensesData as Expense[]);
     } catch (error: any) {
       console.error('Erro ao carregar despesas:', error);
       toast.error("Erro ao carregar despesas");
@@ -102,19 +108,22 @@ export default function ExpenseManager() {
       };
 
       if (editingId) {
-        const { error } = await supabase
-          .from('expenses')
-          .update(payload)
-          .eq('id', editingId);
-
-        if (error) throw error;
+        const result = await apiClient.requestSafe(`/api/expenses/${editingId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
+        if (!result.success) {
+          throw new Error(result.error || 'Erro ao atualizar despesa');
+        }
         toast.success("Despesa atualizada com sucesso!");
       } else {
-        const { error } = await supabase
-          .from('expenses')
-          .insert([payload]);
-
-        if (error) throw error;
+        const result = await apiClient.requestSafe('/api/expenses', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        if (!result.success) {
+          throw new Error(result.error || 'Erro ao criar despesa');
+        }
         toast.success("Despesa criada com sucesso!");
       }
 
@@ -144,15 +153,13 @@ export default function ExpenseManager() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Tem certeza que deseja excluir esta despesa?")) return;
+    if (!(await confirmDelete(confirm, "Esta despesa será removida permanentemente."))) return;
 
     try {
-      const { error } = await supabase
-        .from('expenses')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
+      const result = await apiClient.requestSafe(`/api/expenses/${id}`, { method: 'DELETE' });
+      if (!result.success) {
+        throw new Error(result.error || 'Erro ao excluir despesa');
+      }
       toast.success("Despesa excluída com sucesso!");
       loadExpenses();
     } catch (error: any) {
@@ -193,8 +200,20 @@ export default function ExpenseManager() {
     return expense.status === filter;
   });
 
-  const totalPendente = expenses.filter(e => e.status === 'pendente').reduce((sum, e) => sum + e.valor, 0);
-  const totalPago = expenses.filter(e => e.status === 'pago').reduce((sum, e) => sum + e.valor, 0);
+  // Garantir que valores sejam números antes de calcular totais
+  const totalPendente = expenses
+    .filter(e => e.status === 'pendente')
+    .reduce((sum, e) => {
+      const valor = typeof e.valor === 'string' ? parseFloat(e.valor) || 0 : (e.valor || 0);
+      return sum + valor;
+    }, 0);
+  
+  const totalPago = expenses
+    .filter(e => e.status === 'pago')
+    .reduce((sum, e) => {
+      const valor = typeof e.valor === 'string' ? parseFloat(e.valor) || 0 : (e.valor || 0);
+      return sum + valor;
+    }, 0);
 
   if (loading) {
     return <div className="flex items-center justify-center p-8">Carregando...</div>;
@@ -290,7 +309,10 @@ export default function ExpenseManager() {
               <CardContent>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
-                    <span><strong>Valor:</strong> R$ {expense.valor.toFixed(2)}</span>
+                    <span><strong>Valor:</strong> R$ {(() => {
+                      const valor = typeof expense.valor === 'string' ? parseFloat(expense.valor) || 0 : (expense.valor || 0);
+                      return valor.toFixed(2);
+                    })()}</span>
                     <span><strong>Categoria:</strong> {expense.categoria}</span>
                   </div>
                   <div className="flex justify-between">
@@ -316,6 +338,9 @@ export default function ExpenseManager() {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingId ? 'Editar' : 'Nova'} Despesa</DialogTitle>
+            <DialogDescription>
+              Registe categoria, valor, data e observações da despesa.
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
@@ -355,21 +380,19 @@ export default function ExpenseManager() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="data_vencimento">Data Vencimento *</Label>
-                <Input
+                <DateInputBR
                   id="data_vencimento"
-                  type="date"
                   value={formData.data_vencimento}
-                  onChange={(e) => setFormData({...formData, data_vencimento: e.target.value})}
+                  onChange={(value) => setFormData({...formData, data_vencimento: value})}
                   required
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="data_pagamento">Data Pagamento</Label>
-                <Input
+                <DateInputBR
                   id="data_pagamento"
-                  type="date"
                   value={formData.data_pagamento}
-                  onChange={(e) => setFormData({...formData, data_pagamento: e.target.value})}
+                  onChange={(value) => setFormData({...formData, data_pagamento: value})}
                 />
               </div>
             </div>

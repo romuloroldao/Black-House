@@ -24,6 +24,18 @@ export default tseslint.config(
         { allowConstantExport: true },
       ],
       "@typescript-eslint/no-unused-vars": "off",
+      // DESIGN-SUPABASE-KILL-SWITCH-DEFENSIVE-001: Bloquear imports de Supabase
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@supabase/supabase-js", "@supabase/*", "supabase"],
+              message: "DESIGN-SUPABASE-KILL-SWITCH-DEFENSIVE-001: Supabase é FORBIDDEN. Use apiClient do @/lib/api-client ao invés.",
+            },
+          ],
+        },
+      ],
     },
   }
 );

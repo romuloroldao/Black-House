@@ -1,16 +1,16 @@
-import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useState, useEffect, useRef } from "react";
+import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Checkbox } from "./ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 import { toast } from "sonner";
-import { Megaphone, Plus, Users, User } from "lucide-react";
+import { Loader2, Megaphone, Plus, Users, User } from "lucide-react";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Badge } from "./ui/badge";
 
@@ -50,6 +50,7 @@ export function AnnouncementManager() {
   });
   const [selectedTurmas, setSelectedTurmas] = useState<string[]>([]);
   const [selectedAlunos, setSelectedAlunos] = useState<string[]>([]);
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     loadAvisos();
@@ -60,58 +61,73 @@ export function AnnouncementManager() {
   const loadAvisos = async () => {
     if (!user) return;
 
-    const { data, error } = await supabase
-      .from("avisos")
-      .select("*")
-      .eq("coach_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(20);
-
-    if (error) {
+    try {
+      const result = await apiClient.requestSafe<any[]>('/api/avisos');
+      const data = result.success && Array.isArray(result.data) ? result.data : [];
+      const filtrados = data
+        .filter((a: any) => a.coach_id === user.id)
+        .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
+        .slice(0, 20);
+      setAvisos(filtrados);
+    } catch (error) {
+      console.error("Erro ao carregar avisos:", error);
       toast.error("Erro ao carregar avisos");
-      return;
     }
-
-    setAvisos(data || []);
   };
 
   const loadTurmas = async () => {
     if (!user) return;
 
-    const { data, error } = await supabase
-      .from("turmas")
-      .select("id, nome, cor")
-      .eq("coach_id", user.id)
-      .eq("ativo", true);
-
-    if (error) {
+    try {
+      const result = await apiClient.requestSafe<any[]>('/api/turmas');
+      const data = result.success && Array.isArray(result.data) ? result.data : [];
+      const filtrados = data.filter((t: any) => t.coach_id === user.id && t.ativo === true);
+      setTurmas(filtrados);
+    } catch (error) {
+      console.error("Erro ao carregar turmas:", error);
       toast.error("Erro ao carregar turmas");
-      return;
     }
-
-    setTurmas(data || []);
   };
 
   const loadAlunos = async () => {
     if (!user) return;
 
-    const { data, error } = await supabase
-      .from("alunos")
-      .select("id, nome, email")
-      .eq("coach_id", user.id)
-      .order("nome");
-
-    if (error) {
+    try {
+      const result = await apiClient.requestSafe<any[]>('/api/alunos');
+      const data = result.success && Array.isArray(result.data) ? result.data : [];
+      const filtrados = data
+        .filter((a: any) => a.coach_id === user.id)
+        .sort((a: any, b: any) => String(a?.nome || '').localeCompare(String(b?.nome || '')));
+      setAlunos(filtrados);
+    } catch (error) {
+      console.error("Erro ao carregar alunos:", error);
       toast.error("Erro ao carregar alunos");
-      return;
     }
+  };
 
-    setAlunos(data || []);
+  const notifyAlunos = async (alunoIds: Iterable<string>) => {
+    const notified = new Set<string>();
+    for (const alunoId of alunoIds) {
+      if (!alunoId || notified.has(alunoId)) continue;
+      notified.add(alunoId);
+      await apiClient.requestSafe("/api/notificacoes", {
+        method: "POST",
+        body: JSON.stringify({
+          coach_id: user!.id,
+          aluno_id: alunoId,
+          tipo: "aviso",
+          titulo: formData.titulo,
+          mensagem: formData.mensagem,
+          link: "messages",
+        }),
+      });
+    }
+    return notified.size;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user || submittingRef.current || loading) return;
 
     if (tipoEnvio === "individual" && selectedAlunos.length === 0) {
       toast.error("Selecione pelo menos um aluno");
@@ -123,128 +139,101 @@ export function AnnouncementManager() {
       return;
     }
 
+    submittingRef.current = true;
     setLoading(true);
 
-    // Criar o aviso
-    const { data: aviso, error: avisoError } = await supabase
-      .from("avisos")
-      .insert([{
-        coach_id: user.id,
-        titulo: formData.titulo,
-        mensagem: formData.mensagem,
-        tipo: tipoEnvio,
-        anexo_url: formData.anexo_url || null,
-      }])
-      .select()
-      .single();
+    try {
+      const avisoResult = await apiClient.requestSafe<any>("/api/avisos", {
+        method: "POST",
+        body: JSON.stringify({
+          coach_id: user.id,
+          titulo: formData.titulo,
+          mensagem: formData.mensagem,
+          tipo: tipoEnvio,
+          anexo_url: formData.anexo_url || null,
+        }),
+      });
 
-    if (avisoError || !aviso) {
-      toast.error("Erro ao criar aviso");
-      setLoading(false);
-      return;
-    }
-
-    // Criar destinatários
-    const destinatarios = [];
-
-    if (tipoEnvio === "individual") {
-      for (const alunoId of selectedAlunos) {
-        destinatarios.push({
-          aviso_id: aviso.id,
-          aluno_id: alunoId,
-          turma_id: null,
-        });
-      }
-    } else if (tipoEnvio === "turma") {
-      for (const turmaId of selectedTurmas) {
-        destinatarios.push({
-          aviso_id: aviso.id,
-          aluno_id: null,
-          turma_id: turmaId,
-        });
-
-        // Buscar alunos da turma para criar notificações
-        const { data: membros } = await supabase
-          .from("turmas_alunos")
-          .select("aluno_id")
-          .eq("turma_id", turmaId);
-
-        if (membros) {
-          for (const membro of membros) {
-            await supabase
-              .from("notificacoes")
-              .insert({
-                coach_id: user.id,
-                aluno_id: membro.aluno_id,
-                tipo: "aviso",
-                titulo: formData.titulo,
-                mensagem: formData.mensagem,
-                link: "/student-portal?tab=messages",
-              });
-          }
-        }
-      }
-    } else if (tipoEnvio === "massa") {
-      // Enviar para todos os alunos
-      for (const aluno of alunos) {
-        destinatarios.push({
-          aviso_id: aviso.id,
-          aluno_id: aluno.id,
-          turma_id: null,
-        });
-
-        await supabase
-          .from("notificacoes")
-          .insert({
-            coach_id: user.id,
-            aluno_id: aluno.id,
-            tipo: "aviso",
-            titulo: formData.titulo,
-            mensagem: formData.mensagem,
-            link: "/student-portal?tab=messages",
-          });
-      }
-    }
-
-    if (destinatarios.length > 0) {
-      const { error: destError } = await supabase
-        .from("avisos_destinatarios")
-        .insert(destinatarios);
-
-      if (destError) {
-        toast.error("Erro ao enviar avisos");
-        setLoading(false);
+      const aviso = avisoResult.success ? avisoResult.data : null;
+      if (!aviso?.id) {
+        toast.error("Erro ao criar aviso");
         return;
       }
-    }
 
-    // Criar notificações individuais se necessário
-    if (tipoEnvio === "individual") {
-      for (const alunoId of selectedAlunos) {
-        await supabase
-          .from("notificacoes")
-          .insert({
-            coach_id: user.id,
+      const destinatarios: Array<{
+        aviso_id: string;
+        aluno_id: string | null;
+        turma_id: string | null;
+      }> = [];
+      const alunoIdsParaNotificar = new Set<string>();
+
+      if (tipoEnvio === "individual") {
+        for (const alunoId of selectedAlunos) {
+          destinatarios.push({
+            aviso_id: aviso.id,
             aluno_id: alunoId,
-            tipo: "aviso",
-            titulo: formData.titulo,
-            mensagem: formData.mensagem,
-            link: "/student-portal?tab=messages",
+            turma_id: null,
           });
+          alunoIdsParaNotificar.add(alunoId);
+        }
+      } else if (tipoEnvio === "turma") {
+        const turmaIds = [...new Set(selectedTurmas)];
+        for (const turmaId of turmaIds) {
+          destinatarios.push({
+            aviso_id: aviso.id,
+            aluno_id: null,
+            turma_id: turmaId,
+          });
+          const membrosResult = await apiClient.requestSafe<any[]>(
+            `/api/turmas-alunos?turma_id=${turmaId}`,
+          );
+          const membros =
+            membrosResult.success && Array.isArray(membrosResult.data)
+              ? membrosResult.data
+              : [];
+          for (const membro of membros) {
+            if (membro?.aluno_id) alunoIdsParaNotificar.add(membro.aluno_id);
+          }
+        }
+      } else if (tipoEnvio === "massa") {
+        for (const aluno of alunos) {
+          destinatarios.push({
+            aviso_id: aviso.id,
+            aluno_id: aluno.id,
+            turma_id: null,
+          });
+          alunoIdsParaNotificar.add(aluno.id);
+        }
       }
+
+      for (const destinatario of destinatarios) {
+        await apiClient.requestSafe("/api/avisos-destinatarios", {
+          method: "POST",
+          body: JSON.stringify(destinatario),
+        });
+      }
+
+      const totalAlunos = await notifyAlunos(alunoIdsParaNotificar);
+
+      if (tipoEnvio === "turma") {
+        const turmaCount = [...new Set(selectedTurmas)].length;
+        toast.success(
+          `Aviso enviado para ${totalAlunos} aluno(s) em ${turmaCount} turma(s)!`,
+        );
+      } else {
+        toast.success(`Aviso enviado para ${totalAlunos} aluno(s)!`);
+      }
+
+      setIsDialogOpen(false);
+      resetForm();
+      loadAvisos();
+    } catch (error) {
+      console.error("Erro ao enviar aviso:", error);
+      toast.error("Erro ao enviar aviso");
+    } finally {
+      submittingRef.current = false;
+      setLoading(false);
     }
-
-    const totalDestinatarios = tipoEnvio === "massa" 
-      ? alunos.length 
-      : tipoEnvio === "individual" 
-        ? selectedAlunos.length 
-        : destinatarios.length;
-
-    toast.success(`Aviso enviado para ${totalDestinatarios} destinatário(s)!`);
-    setLoading(false);
-    setIsDialogOpen(false);
-    resetForm();
-    loadAvisos();
   };
 
   const resetForm = () => {
@@ -268,14 +257,20 @@ export function AnnouncementManager() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold">Avisos em Massa</h2>
+          <h2 className="text-xl font-bold sm:text-2xl">Avisos em Massa</h2>
           <p className="text-muted-foreground">
             Envie comunicados para seus alunos e turmas
           </p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <Dialog
+          open={isDialogOpen}
+          onOpenChange={(open) => {
+            if (loading) return;
+            setIsDialogOpen(open);
+          }}
+        >
           <DialogTrigger asChild>
-            <Button onClick={() => resetForm()}>
+            <Button onClick={() => resetForm()} disabled={loading}>
               <Plus className="mr-2 h-4 w-4" />
               Novo Aviso
             </Button>
@@ -283,11 +278,18 @@ export function AnnouncementManager() {
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Criar Novo Aviso</DialogTitle>
+              <DialogDescription>
+                Escolha o público (alunos, turmas ou todos), redija título e mensagem e opcionalmente um anexo.
+              </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <Label>Tipo de Envio</Label>
-                <RadioGroup value={tipoEnvio} onValueChange={(v: any) => setTipoEnvio(v)}>
+                <RadioGroup
+                  value={tipoEnvio}
+                  onValueChange={(v: any) => setTipoEnvio(v)}
+                  disabled={loading}
+                >
                   <div className="flex items-center space-x-2">
                     <RadioGroupItem value="individual" id="individual" />
                     <Label htmlFor="individual" className="font-normal cursor-pointer">
@@ -373,6 +375,7 @@ export function AnnouncementManager() {
                   onChange={(e) => setFormData({ ...formData, titulo: e.target.value })}
                   placeholder="Título do aviso"
                   required
+                  disabled={loading}
                 />
               </div>
 
@@ -385,6 +388,7 @@ export function AnnouncementManager() {
                   placeholder="Escreva sua mensagem..."
                   rows={6}
                   required
+                  disabled={loading}
                 />
               </div>
 
@@ -395,11 +399,25 @@ export function AnnouncementManager() {
                   value={formData.anexo_url}
                   onChange={(e) => setFormData({ ...formData, anexo_url: e.target.value })}
                   placeholder="https://..."
+                  disabled={loading}
                 />
               </div>
 
+              {loading && (
+                <p className="text-xs text-muted-foreground text-center">
+                  A enviar… não feche esta janela até concluir.
+                </p>
+              )}
+
               <Button type="submit" disabled={loading} className="w-full">
-                {loading ? "Enviando..." : "Enviar Aviso"}
+                {loading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Enviando…
+                  </>
+                ) : (
+                  "Enviar Aviso"
+                )}
               </Button>
             </form>
           </DialogContent>

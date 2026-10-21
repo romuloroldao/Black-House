@@ -1,16 +1,17 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, Calendar, DollarSign } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
 interface RecurringConfig {
   id: string;
@@ -40,6 +41,7 @@ interface PaymentPlan {
 
 export default function RecurringChargesConfig() {
   const { user } = useAuth();
+  const { confirm } = useConfirm();
   const [configs, setConfigs] = useState<RecurringConfig[]>([]);
   const [alunos, setAlunos] = useState<Aluno[]>([]);
   const [plans, setPlans] = useState<PaymentPlan[]>([]);
@@ -72,39 +74,45 @@ export default function RecurringChargesConfig() {
   }, [user]);
 
   const loadData = async () => {
-    try {
-      setLoading(true);
-      
-      const [configsRes, alunosRes, plansRes] = await Promise.all([
-        supabase
-          .from('recurring_charges_config')
-          .select('*, alunos(nome, email), payment_plans(nome, valor, dia_vencimento)')
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('alunos')
-          .select('id, nome, email')
-          .eq('coach_id', user?.id)
-          .order('nome'),
-        supabase
-          .from('payment_plans')
-          .select('id, nome, valor, dia_vencimento')
-          .eq('ativo', true)
-          .order('nome'),
-      ]);
+    setLoading(true);
+    
+    const [configsRes, alunosRes, plansRes] = await Promise.all([
+      apiClient.requestSafe<any[]>('/api/recurring-charges-config'),
+      apiClient.requestSafe<any[]>('/api/alunos'),
+      apiClient.requestSafe<any[]>('/api/payment-plans'),
+    ]);
 
-      if (configsRes.error) throw configsRes.error;
-      if (alunosRes.error) throw alunosRes.error;
-      if (plansRes.error) throw plansRes.error;
+    const configs = configsRes.success && Array.isArray(configsRes.data) ? configsRes.data : [];
+    const alunos = alunosRes.success && Array.isArray(alunosRes.data) ? alunosRes.data : [];
+    const plans = plansRes.success && Array.isArray(plansRes.data) ? plansRes.data : [];
 
-      setConfigs((configsRes.data || []) as RecurringConfig[]);
-      setAlunos((alunosRes.data || []) as Aluno[]);
-      setPlans((plansRes.data || []) as PaymentPlan[]);
-    } catch (error: any) {
-      console.error('Erro ao carregar dados:', error);
+    const alunosFiltrados = alunos
+      .filter((a: any) => a.coach_id === user?.id)
+      .sort((a: any, b: any) => String(a?.nome || '').localeCompare(String(b?.nome || '')));
+    const plansFiltrados = plans
+      .filter((p: any) => p.ativo === true)
+      .sort((a: any, b: any) => String(a?.nome || '').localeCompare(String(b?.nome || '')));
+
+    const alunosMap = new Map(alunosFiltrados.map((a: any) => [a.id, a]));
+    const plansMap = new Map(plansFiltrados.map((p: any) => [p.id, p]));
+
+    const configsCompletas = configs.map((config: any) => {
+      const aluno = alunosMap.get(config.aluno_id) || { nome: 'Aluno não encontrado', email: '' };
+      const plan = config.payment_plan_id ? plansMap.get(config.payment_plan_id) : undefined;
+      return {
+        ...config,
+        alunos: aluno,
+        payment_plans: plan || undefined
+      };
+    });
+
+    setConfigs(configsCompletas as RecurringConfig[]);
+    setAlunos(alunosFiltrados);
+    setPlans(plansFiltrados);
+    if (!configsRes.success || !alunosRes.success || !plansRes.success) {
       toast.error("Erro ao carregar dados");
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -123,19 +131,22 @@ export default function RecurringChargesConfig() {
       };
 
       if (editingId) {
-        const { error } = await supabase
-          .from('recurring_charges_config')
-          .update(payload)
-          .eq('id', editingId);
-
-        if (error) throw error;
+        const result = await apiClient.requestSafe(`/api/recurring-charges-config/${editingId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
+        if (!result.success) {
+          throw new Error(result.error || 'Erro ao atualizar configuração');
+        }
         toast.success("Configuração atualizada com sucesso!");
       } else {
-        const { error } = await supabase
-          .from('recurring_charges_config')
-          .insert([payload]);
-
-        if (error) throw error;
+        const result = await apiClient.requestSafe('/api/recurring-charges-config', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        if (!result.success) {
+          throw new Error(result.error || 'Erro ao criar configuração');
+        }
         toast.success("Configuração criada com sucesso!");
       }
 
@@ -162,15 +173,13 @@ export default function RecurringChargesConfig() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Tem certeza que deseja excluir esta configuração?")) return;
+    if (!(await confirmDelete(confirm, "Esta configuração de cobrança será removida."))) return;
 
     try {
-      const { error } = await supabase
-        .from('recurring_charges_config')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
+      const result = await apiClient.requestSafe(`/api/recurring-charges-config/${id}`, { method: 'DELETE' });
+      if (!result.success) {
+        throw new Error(result.error || 'Erro ao excluir configuração');
+      }
       toast.success("Configuração excluída com sucesso!");
       loadData();
     } catch (error: any) {
@@ -267,6 +276,9 @@ export default function RecurringChargesConfig() {
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>{editingId ? 'Editar' : 'Nova'} Configuração</DialogTitle>
+            <DialogDescription>
+              Configure aluno, plano, valores, lembretes e se a cobrança recorrente está ativa.
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">

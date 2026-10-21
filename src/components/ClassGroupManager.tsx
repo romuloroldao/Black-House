@@ -1,15 +1,16 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Checkbox } from "./ui/checkbox";
 import { toast } from "sonner";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import { Users, Plus, Trash2, Edit, UserPlus } from "lucide-react";
 import { Alert, AlertDescription } from "./ui/alert";
 
@@ -34,6 +35,7 @@ interface TurmaAluno {
 }
 
 export function ClassGroupManager() {
+  const { confirm } = useConfirm();
   const { user } = useAuth();
   const [turmas, setTurmas] = useState<Turma[]>([]);
   const [alunos, setAlunos] = useState<Aluno[]>([]);
@@ -57,53 +59,58 @@ export function ClassGroupManager() {
   const loadTurmas = async () => {
     if (!user) return;
 
-    const { data, error } = await supabase
-      .from("turmas")
-      .select("*")
-      .eq("coach_id", user.id)
-      .eq("ativo", true)
-      .order("created_at", { ascending: false });
-
-    if (error) {
+    try {
+      const result = await apiClient.requestSafe<any[]>('/api/turmas');
+      const data = result.success && Array.isArray(result.data) ? result.data : [];
+      const filtrados = data
+        .filter((t: any) => t.coach_id === user.id && t.ativo === true)
+        .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+      setTurmas(filtrados);
+    } catch (error) {
+      console.error("Erro ao carregar turmas:", error);
       toast.error("Erro ao carregar turmas");
-      return;
     }
-
-    setTurmas(data || []);
   };
 
   const loadAlunos = async () => {
     if (!user) return;
 
-    const { data, error } = await supabase
-      .from("alunos")
-      .select("id, nome, email")
-      .eq("coach_id", user.id)
-      .order("nome");
-
-    if (error) {
+    try {
+      const result = await apiClient.requestSafe<any[]>('/api/alunos');
+      const data = result.success && Array.isArray(result.data) ? result.data : [];
+      const filtrados = data
+        .filter((a: any) => a.coach_id === user.id)
+        .sort((a: any, b: any) => String(a?.nome || '').localeCompare(String(b?.nome || '')));
+      setAlunos(filtrados);
+    } catch (error) {
+      console.error("Erro ao carregar alunos:", error);
       toast.error("Erro ao carregar alunos");
-      return;
     }
-
-    setAlunos(data || []);
   };
 
   const loadMembros = async (turmaId: string) => {
-    const { data, error } = await supabase
-      .from("turmas_alunos")
-      .select(`
-        aluno_id,
-        alunos:aluno_id(id, nome, email)
-      `)
-      .eq("turma_id", turmaId);
+    try {
+      // Buscar membros da turma
+      const membrosRes = await apiClient.requestSafe<any[]>(`/api/turmas-alunos?turma_id=${turmaId}`);
+      const membrosTurma = membrosRes.success && Array.isArray(membrosRes.data) ? membrosRes.data : [];
+      
+      // Buscar dados dos alunos para cada membro
+      const alunosRes = await apiClient.requestSafe<any[]>('/api/alunos');
+      const alunosData = alunosRes.success && Array.isArray(alunosRes.data) ? alunosRes.data : [];
+      const alunosMap = new Map(alunosData.map((a: any) => [a.id, a]));
+      const membrosCompletos = membrosTurma.map((membro: any) => {
+        const aluno = alunosMap.get(membro.aluno_id);
+        return {
+          aluno_id: membro.aluno_id,
+          alunos: aluno || { id: membro.aluno_id, nome: "Desconhecido", email: "" }
+        };
+      });
 
-    if (error) {
+      setMembros(membrosCompletos);
+    } catch (error) {
+      console.error("Erro ao carregar membros:", error);
       toast.error("Erro ao carregar membros");
-      return;
     }
-
-    setMembros(data || []);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -112,31 +119,33 @@ export function ClassGroupManager() {
 
     setLoading(true);
 
-    if (selectedTurma) {
-      const { error } = await supabase
-        .from("turmas")
-        .update(formData)
-        .eq("id", selectedTurma.id);
+    try {
+      if (selectedTurma) {
+        const result = await apiClient.requestSafe(`/api/turmas/${selectedTurma.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ ...formData }),
+        });
+        if (!result.success) {
+          throw new Error(result.error || 'Erro ao atualizar turma');
+        }
 
-      if (error) {
-        toast.error("Erro ao atualizar turma");
-        setLoading(false);
-        return;
+        toast.success("Turma atualizada com sucesso!");
+      } else {
+        const result = await apiClient.requestSafe('/api/turmas', {
+          method: 'POST',
+          body: JSON.stringify({ ...formData, coach_id: user.id }),
+        });
+        if (!result.success) {
+          throw new Error(result.error || 'Erro ao criar turma');
+        }
+
+        toast.success("Turma criada com sucesso!");
       }
-
-      toast.success("Turma atualizada com sucesso!");
-    } else {
-      const { error } = await supabase
-        .from("turmas")
-        .insert([{ ...formData, coach_id: user.id }]);
-
-      if (error) {
-        toast.error("Erro ao criar turma");
-        setLoading(false);
-        return;
-      }
-
-      toast.success("Turma criada com sucesso!");
+    } catch (error) {
+      console.error("Erro ao salvar turma:", error);
+      toast.error(selectedTurma ? "Erro ao atualizar turma" : "Erro ao criar turma");
+      setLoading(false);
+      return;
     }
 
     setLoading(false);
@@ -150,16 +159,19 @@ export function ClassGroupManager() {
 
     setLoading(true);
 
-    const inserts = selectedAlunos.map(alunoId => ({
-      turma_id: selectedTurma.id,
-      aluno_id: alunoId,
-    }));
-
-    const { error } = await supabase
-      .from("turmas_alunos")
-      .insert(inserts);
-
-    if (error) {
+    try {
+      // Inserir membros um por um (apiClient não suporta batch insert)
+      for (const alunoId of selectedAlunos) {
+        await apiClient.requestSafe('/api/turmas-alunos', {
+          method: 'POST',
+          body: JSON.stringify({
+            turma_id: selectedTurma.id,
+            aluno_id: alunoId,
+          }),
+        });
+      }
+    } catch (error) {
+      console.error("Erro ao adicionar alunos:", error);
       toast.error("Erro ao adicionar alunos");
       setLoading(false);
       return;
@@ -175,38 +187,53 @@ export function ClassGroupManager() {
   const handleRemoveMember = async (alunoId: string) => {
     if (!selectedTurma) return;
 
-    const { error } = await supabase
-      .from("turmas_alunos")
-      .delete()
-      .eq("turma_id", selectedTurma.id)
-      .eq("aluno_id", alunoId);
-
-    if (error) {
-      toast.error("Erro ao remover aluno");
+    if (
+      !(await confirmDelete(
+        confirm,
+        "Este aluno será removido da turma.",
+        "Confirmar remoção",
+      ))
+    ) {
       return;
     }
 
-    toast.success("Aluno removido da turma!");
-    loadMembros(selectedTurma.id);
+    try {
+      const membrosRes = await apiClient.requestSafe<any[]>(`/api/turmas-alunos?turma_id=${selectedTurma.id}&aluno_id=${alunoId}`);
+      const membros = membrosRes.success && Array.isArray(membrosRes.data) ? membrosRes.data : [];
+      for (const membro of membros) {
+        await apiClient.requestSafe(`/api/turmas-alunos/${membro.id}`, { method: 'DELETE' });
+      }
+
+      toast.success("Aluno removido da turma!");
+      loadMembros(selectedTurma.id);
+    } catch (error) {
+      console.error("Erro ao remover aluno:", error);
+      toast.error("Erro ao remover aluno");
+    }
   };
 
   const handleDeleteTurma = async (id: string) => {
-    if (!confirm("Tem certeza que deseja excluir esta turma?")) return;
-
-    const { error } = await supabase
-      .from("turmas")
-      .update({ ativo: false })
-      .eq("id", id);
-
-    if (error) {
-      toast.error("Erro ao excluir turma");
+    if (!(await confirmDelete(confirm, "Esta turma será desactivada e deixará de aparecer na lista."))) {
       return;
     }
 
-    toast.success("Turma excluída com sucesso!");
-    loadTurmas();
-    if (selectedTurma?.id === id) {
-      setSelectedTurma(null);
+    try {
+      const result = await apiClient.requestSafe(`/api/turmas/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ ativo: false }),
+      });
+      if (!result.success) {
+        throw new Error(result.error || 'Erro ao excluir turma');
+      }
+
+      toast.success("Turma excluída com sucesso!");
+      loadTurmas();
+      if (selectedTurma?.id === id) {
+        setSelectedTurma(null);
+      }
+    } catch (error) {
+      console.error("Erro ao excluir turma:", error);
+      toast.error("Erro ao excluir turma");
     }
   };
 
@@ -238,7 +265,7 @@ export function ClassGroupManager() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold">Gestão de Turmas</h2>
+          <h2 className="text-xl font-bold sm:text-2xl">Gestão de Turmas</h2>
           <p className="text-muted-foreground">Organize seus alunos em turmas</p>
         </div>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -253,6 +280,9 @@ export function ClassGroupManager() {
               <DialogTitle>
                 {selectedTurma ? "Editar Turma" : "Nova Turma"}
               </DialogTitle>
+              <DialogDescription>
+                Nome, descrição e cor para identificar a turma na agenda e listagens.
+              </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
@@ -385,6 +415,9 @@ export function ClassGroupManager() {
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Adicionar Alunos à Turma</DialogTitle>
+                      <DialogDescription>
+                        Marque os alunos a incluir e confirme para atualizar a turma.
+                      </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4">
                       {alunosDisponiveis.length === 0 ? (

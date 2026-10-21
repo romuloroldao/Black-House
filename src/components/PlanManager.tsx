@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
+import { useApiSafeList } from "@/hooks/useApiSafe";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +15,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { Plus, Edit, Trash2, CreditCard, Users, UserPlus, X } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { API_CONTRACT } from "@/contracts/api-contract";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
 interface Plan {
   id: string;
@@ -50,8 +53,24 @@ const FREQUENCIAS = [
   { value: "anual", label: "Anual" },
 ];
 
-export default function PlanManager() {
+interface PlanManagerProps {
+  /** Oculta cabeçalho e padding quando embutido no hub Financeiro */
+  embedded?: boolean;
+  /** catalog: só CRUD de planos; subscriptions: só alunos em planos; full: tudo */
+  mode?: "full" | "catalog" | "subscriptions";
+}
+
+export default function PlanManager({ embedded = false, mode = "full" }: PlanManagerProps) {
   const { user } = useAuth();
+  const { confirm } = useConfirm();
+  const coachEndpoint = user?.id ? API_CONTRACT.alunos.byCoach() : undefined;
+  
+  // REACT-API-RESILIENCE-FIX-008: Usar hook resiliente para alunos
+  const { data: alunosRaw, loading: loadingAlunos, error: errorAlunos, refetch: refetchAlunos } = useApiSafeList(
+    () => apiClient.getAlunosByCoachSafe(),
+    { autoFetch: !!user, endpointKey: coachEndpoint, availabilityKey: 'alunosByCoach' }
+  );
+  
   const [plans, setPlans] = useState<Plan[]>([]);
   const [alunos, setAlunos] = useState<Aluno[]>([]);
   const [recurringConfigs, setRecurringConfigs] = useState<RecurringConfig[]>([]);
@@ -75,6 +94,18 @@ export default function PlanManager() {
     dias_antecedencia_lembrete: "3",
   });
 
+  // REACT-API-RESILIENCE-FIX-008: Processar alunos quando carregarem
+  useEffect(() => {
+    if (!loadingAlunos) {
+      const alunosFormatados = alunosRaw.map((a: any) => ({ 
+        id: a.id, 
+        nome: a.nome, 
+        email: a.email 
+      }));
+      setAlunos(alunosFormatados);
+    }
+  }, [alunosRaw, loadingAlunos]);
+
   useEffect(() => {
     if (user) {
       loadData();
@@ -82,30 +113,34 @@ export default function PlanManager() {
   }, [user]);
 
   const loadData = async () => {
-    try {
-      setLoading(true);
-      
-      const [plansRes, alunosRes, configsRes] = await Promise.all([
-        supabase.from("payment_plans").select("*").order("nome"),
-        supabase.from("alunos").select("id, nome, email").eq("coach_id", user?.id),
-        supabase.from("recurring_charges_config").select(`
-          *,
-          aluno:alunos(id, nome, email)
-        `).eq("ativo", true)
-      ]);
+    setLoading(true);
 
-      if (plansRes.error) throw plansRes.error;
-      if (alunosRes.error) throw alunosRes.error;
-      if (configsRes.error) throw configsRes.error;
+    const [plansRes, alunosRes, configsRes] = await Promise.all([
+      apiClient.requestSafe<any[]>('/api/payment-plans'),
+      apiClient.getAlunosByCoachSafe(),
+      apiClient.requestSafe<any[]>('/api/recurring-charges-config?ativo=true')
+    ]);
 
-      setPlans(plansRes.data || []);
-      setAlunos(alunosRes.data || []);
-      setRecurringConfigs(configsRes.data || []);
-    } catch (error: any) {
-      toast.error("Erro ao carregar dados: " + error.message);
-    } finally {
-      setLoading(false);
+    const planos = plansRes.success && Array.isArray(plansRes.data) ? plansRes.data : [];
+    const alunosList = alunosRes.success && Array.isArray(alunosRes.data)
+      ? alunosRes.data.map((a: any) => ({ id: a.id, nome: a.nome, email: a.email }))
+      : [];
+    const configs = configsRes.success && Array.isArray(configsRes.data) ? configsRes.data : [];
+
+    const alunosMap = new Map(alunosList.map((a: any) => [a.id, a]));
+    const configsComAlunos = configs.map((config: any) => ({
+      ...config,
+      aluno: alunosMap.get(config.aluno_id) || null
+    }));
+
+    setPlans(planos);
+    setAlunos(alunosList);
+    setRecurringConfigs(configsComAlunos);
+
+    if (!plansRes.success || !alunosRes.success || !configsRes.success) {
+      toast.error("Erro ao carregar dados: fallback aplicado");
     }
+    setLoading(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -128,19 +163,24 @@ export default function PlanManager() {
       };
 
       if (editingPlan) {
-        const { error } = await supabase
-          .from("payment_plans")
-          .update(planData)
-          .eq("id", editingPlan.id);
-
-        if (error) throw error;
+        const updateResult = await apiClient.requestSafe(`/api/payment-plans/${editingPlan.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(planData),
+        });
+        if (!updateResult.success) {
+          toast.error("Erro ao salvar plano: " + updateResult.error);
+          return;
+        }
         toast.success("Plano atualizado com sucesso!");
       } else {
-        const { error } = await supabase
-          .from("payment_plans")
-          .insert([planData]);
-
-        if (error) throw error;
+        const createResult = await apiClient.requestSafe('/api/payment-plans', {
+          method: 'POST',
+          body: JSON.stringify(planData),
+        });
+        if (!createResult.success) {
+          toast.error("Erro ao salvar plano: " + createResult.error);
+          return;
+        }
         toast.success("Plano criado com sucesso!");
       }
 
@@ -168,24 +208,25 @@ export default function PlanManager() {
 
       if (existingConfig) {
         // Update existing config to the new plan
-        const { error } = await supabase
-          .from("recurring_charges_config")
-          .update({
+        const updateResult = await apiClient.requestSafe(`/api/recurring-charges-config/${existingConfig.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
             payment_plan_id: selectedPlan.id,
             valor_customizado: assignFormData.valor_customizado ? parseFloat(assignFormData.valor_customizado) : null,
             dia_vencimento_customizado: assignFormData.dia_vencimento_customizado ? parseInt(assignFormData.dia_vencimento_customizado) : null,
             enviar_lembrete: assignFormData.enviar_lembrete,
             dias_antecedencia_lembrete: parseInt(assignFormData.dias_antecedencia_lembrete),
           })
-          .eq("id", existingConfig.id);
-
-        if (error) throw error;
+        });
+        if (!updateResult.success) {
+          toast.error("Erro ao atribuir aluno: " + updateResult.error);
+          return;
+        }
         toast.success("Plano do aluno atualizado!");
       } else {
-        // Create new config
-        const { error } = await supabase
-          .from("recurring_charges_config")
-          .insert([{
+        const createResult = await apiClient.requestSafe('/api/recurring-charges-config', {
+          method: 'POST',
+          body: JSON.stringify({
             aluno_id: assignFormData.aluno_id,
             payment_plan_id: selectedPlan.id,
             coach_id: user?.id,
@@ -194,9 +235,12 @@ export default function PlanManager() {
             enviar_lembrete: assignFormData.enviar_lembrete,
             dias_antecedencia_lembrete: parseInt(assignFormData.dias_antecedencia_lembrete),
             ativo: true,
-          }]);
-
-        if (error) throw error;
+          })
+        });
+        if (!createResult.success) {
+          toast.error("Erro ao atribuir aluno: " + createResult.error);
+          return;
+        }
         toast.success("Aluno atribuído ao plano!");
       }
 
@@ -209,15 +253,25 @@ export default function PlanManager() {
   };
 
   const handleRemoveStudent = async (configId: string) => {
-    if (!confirm("Remover este aluno do plano?")) return;
+    if (
+      !(await confirmDelete(
+        confirm,
+        "Este aluno será removido do plano de cobrança.",
+        "Confirmar remoção",
+      ))
+    ) {
+      return;
+    }
 
     try {
-      const { error } = await supabase
-        .from("recurring_charges_config")
-        .update({ ativo: false })
-        .eq("id", configId);
-
-      if (error) throw error;
+      const result = await apiClient.requestSafe(`/api/recurring-charges-config/${configId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ ativo: false }),
+      });
+      if (!result.success) {
+        toast.error("Erro ao remover aluno: " + result.error);
+        return;
+      }
       toast.success("Aluno removido do plano!");
       loadData();
     } catch (error: any) {
@@ -238,15 +292,14 @@ export default function PlanManager() {
   };
 
   const handleDelete = async (planId: string) => {
-    if (!confirm("Tem certeza que deseja excluir este plano?")) return;
+    if (!(await confirmDelete(confirm, "Este plano de pagamento será removido."))) return;
 
     try {
-      const { error } = await supabase
-        .from("payment_plans")
-        .delete()
-        .eq("id", planId);
-
-      if (error) throw error;
+      const result = await apiClient.requestSafe(`/api/payment-plans/${planId}`, { method: 'DELETE' });
+      if (!result.success) {
+        toast.error("Erro ao excluir plano: " + result.error);
+        return;
+      }
       toast.success("Plano excluído com sucesso!");
       loadData();
     } catch (error: any) {
@@ -303,30 +356,89 @@ export default function PlanManager() {
     return alunos.filter(a => !assignedStudentIds.includes(a.id));
   };
 
+  const showCatalog = mode === "full" || mode === "catalog";
+  const showSubscriptions = mode === "full" || mode === "subscriptions";
+  const catalogPlans = mode === "subscriptions" ? [] : plans;
+
   if (loading) {
-    return <div className="p-8">Carregando planos...</div>;
+    return <div className={embedded ? "py-8" : "p-8"}>Carregando planos...</div>;
   }
 
-  return (
-    <div className="p-8">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-3xl font-bold">Planos de Pagamento</h1>
-          <p className="text-muted-foreground">Gerencie seus planos e atribua alunos diretamente</p>
-        </div>
-        <Button
-          onClick={() => {
-            resetForm();
-            setIsDialogOpen(true);
-          }}
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          Novo Plano
-        </Button>
-      </div>
+  const activeSubscriptions = recurringConfigs.filter((c) => c.ativo);
 
+  return (
+    <div className={embedded ? "" : "p-8"}>
+      {!embedded && (
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h1 className="text-xl font-bold sm:text-2xl">Planos de Pagamento</h1>
+            <p className="text-muted-foreground">Gerencie seus planos e atribua alunos diretamente</p>
+          </div>
+          {showCatalog && (
+            <Button
+              onClick={() => {
+                resetForm();
+                setIsDialogOpen(true);
+              }}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Novo Plano
+            </Button>
+          )}
+        </div>
+      )}
+
+      {embedded && showCatalog && (
+        <div className="flex justify-end mb-4">
+          <Button
+            onClick={() => {
+              resetForm();
+              setIsDialogOpen(true);
+            }}
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Novo Plano
+          </Button>
+        </div>
+      )}
+
+      {showSubscriptions && mode === "subscriptions" && (
+        <div className="space-y-3 mb-6">
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <Users className="h-5 w-5" />
+            Assinaturas ativas ({activeSubscriptions.length})
+          </h2>
+          {activeSubscriptions.length === 0 ? (
+            <p className="text-muted-foreground text-sm">Nenhuma assinatura ativa. Atribua alunos em Planos.</p>
+          ) : (
+            <div className="space-y-2">
+              {activeSubscriptions.map((config) => {
+                const plan = plans.find((p) => p.id === config.payment_plan_id);
+                return (
+                  <Card key={config.id}>
+                    <CardContent className="py-3 flex items-center justify-between">
+                      <div>
+                        <p className="font-medium">{config.aluno?.nome || "Aluno"}</p>
+                        <p className="text-sm text-muted-foreground">{plan?.nome || "Plano"}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="default">Ativa</Badge>
+                        <Button variant="ghost" size="sm" onClick={() => handleRemoveStudent(config.id)}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {showCatalog && (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {plans.map((plan) => {
+        {catalogPlans.map((plan) => {
           const planStudents = getStudentsForPlan(plan.id);
           
           return (
@@ -337,6 +449,7 @@ export default function PlanManager() {
                   <CardTitle className="text-lg">{plan.nome}</CardTitle>
                 </div>
                 <div className="flex gap-2">
+                  {showSubscriptions && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -345,6 +458,7 @@ export default function PlanManager() {
                     <UserPlus className="h-4 w-4 mr-1" />
                     Adicionar Aluno
                   </Button>
+                  )}
                   <Button
                     variant="outline"
                     size="icon"
@@ -379,6 +493,7 @@ export default function PlanManager() {
 
                   <Separator />
 
+                  {showSubscriptions && mode !== "catalog" && (
                   <div>
                     <div className="flex items-center gap-2 mb-3">
                       <Users className="h-4 w-4 text-muted-foreground" />
@@ -423,14 +538,16 @@ export default function PlanManager() {
                       </p>
                     )}
                   </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
           );
         })}
       </div>
+      )}
 
-      {plans.length === 0 && (
+      {showCatalog && catalogPlans.length === 0 && mode !== "subscriptions" && (
         <div className="text-center py-12">
           <CreditCard className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
           <p className="text-muted-foreground">
@@ -450,6 +567,9 @@ export default function PlanManager() {
             <DialogTitle>
               {editingPlan ? "Editar Plano" : "Novo Plano"}
             </DialogTitle>
+            <DialogDescription>
+              Nome, valor, dia de vencimento, frequência e descrição do plano de pagamento.
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit}>
             <div className="space-y-4">
@@ -557,6 +677,9 @@ export default function PlanManager() {
             <DialogTitle>
               Adicionar Aluno ao Plano "{selectedPlan?.nome}"
             </DialogTitle>
+            <DialogDescription>
+              Escolha o aluno e, se quiser, personalize valor, vencimento e lembretes.
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleAssignStudent}>
             <div className="space-y-4">

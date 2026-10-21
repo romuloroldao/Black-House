@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
+import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -8,12 +9,41 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare, Trash2, User, Utensils, TrendingUp, Activity, Wallet } from "lucide-react";
+import { ArrowLeft, CalendarClock, Edit, Loader2, Save, Plus, Dumbbell, MessageSquare, Trash2, User, Utensils, TrendingUp, Activity, Wallet, Upload } from "lucide-react";
+import StudentImporter, { type ImportCompleteResult } from "./StudentImporter";
+import ImportHistoryPanel from "@/components/import/ImportHistoryPanel";
+import StudentPortalStatusCard from "@/components/student/StudentPortalStatusCard";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import StudentProgressDashboard from "./student/StudentProgressDashboard";
+import StudentProgressCoachTabs from "./coach/StudentProgressCoachTabs";
+import BodyMetricsCard from "./coach/BodyMetricsCard";
+import WeightTimelineChart from "./coach/WeightTimelineChart";
+import type { BodyMetricsResponse } from "@/types/profile-completeness";
 import StudentFinancialManagement from "./student/StudentFinancialManagement";
+import RefeicoesRegistradasList from "@/components/student/meal-photo/RefeicoesRegistradasList";
+import WeeklyWorkoutAgendaEditor from "@/components/student/treino-agenda/WeeklyWorkoutAgendaEditor";
+import { DietReturnDateFields } from "@/components/DietReturnDateFields";
+import {
+  DietRotationFields,
+  dietRotationFromRow,
+  dietRotationToPayload,
+  type DietRotationFormState,
+} from "@/components/DietRotationFields";
+import { DietRotationBadge } from "@/components/DietRotationBadge";
+import { getAlunoDisplayName } from "@/lib/aluno-display";
+import {
+  addDaysToDateKey,
+  dateKeyFromApi,
+  daysBetweenDateKeys,
+  formatDateBR,
+  formatISODateToBR,
+  todayDateKey,
+} from "@/lib/date-format";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
+import EvolutionTimelineExperience from "@/components/student/progress/evolution/EvolutionTimelineExperience";
+import LoadProgressionSection from "@/components/coach/LoadProgressionSection";
+import type { EvolutionPhoto } from "@/lib/evolution-timeline";
 
 interface Student {
   id: string;
@@ -23,6 +53,9 @@ interface Student {
   peso: number | null;
   objetivo: string | null;
   created_at: string;
+  ultimo_contato_em?: string | null;
+  ultimo_contato_resumo?: string | null;
+  ultimo_contato_tipo?: string | null;
 }
 
 interface Feedback {
@@ -48,9 +81,15 @@ interface Dieta {
   nome: string;
   objetivo: string | null;
   data_criacao: string;
+  data_retorno?: string | null;
+  rotacao_ativa?: boolean | null;
+  rotacao_dias_plano_a?: number | null;
+  rotacao_dias_plano_b?: number | null;
+  rotacao_plano_inicial?: string | null;
+  rotacao_data_inicio?: string | null;
 }
 
-interface Foto {
+interface Foto extends EvolutionPhoto {
   id: string;
   url: string;
   descricao: string | null;
@@ -61,6 +100,8 @@ export default function StudentDetails() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user } = useAuth();
+  const { confirm } = useConfirm();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -70,7 +111,6 @@ export default function StudentDetails() {
   const [treinos, setTreinos] = useState<Array<Treino & { alunoTreinoId: string }>>([]);
   const [dieta, setDieta] = useState<Dieta | null>(null);
   const [fotos, setFotos] = useState<Foto[]>([]);
-  const [selectedFoto, setSelectedFoto] = useState<string | null>(null);
   
   // Estados para atribuir treino
   const [treinosDisponiveis, setTreinosDisponiveis] = useState<Treino[]>([]);
@@ -78,13 +118,47 @@ export default function StudentDetails() {
   const [treinoSelecionado, setTreinoSelecionado] = useState<string>("");
   const [diasValidade, setDiasValidade] = useState<string>("45");
   const [diasAntecedenciaNotif, setDiasAntecedenciaNotif] = useState<string>("7");
+
+  // Estados para renovar validade de um treino atribuído
+  const [renovarTreino, setRenovarTreino] = useState<(Treino & { alunoTreinoId: string }) | null>(null);
+  const [renovarDias, setRenovarDias] = useState<string>("45");
+  const [renovarData, setRenovarData] = useState<string>("");
+  const [renovarAntecedencia, setRenovarAntecedencia] = useState<string>("7");
+  const [renovando, setRenovando] = useState(false);
   
   // Estados para criar dieta
   const [isCriarDietaOpen, setIsCriarDietaOpen] = useState(false);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [importHistoryRefresh, setImportHistoryRefresh] = useState(0);
+  const [portalStatusRefresh, setPortalStatusRefresh] = useState(0);
+  const [bodyMetrics, setBodyMetrics] = useState<BodyMetricsResponse | null>(null);
+  const [bodyMetricsLoading, setBodyMetricsLoading] = useState(false);
   const [novaDieta, setNovaDieta] = useState({
     nome: "",
     objetivo: "",
+    data_retorno: "",
+    dias_validade: "",
   });
+  const [rotacaoDieta, setRotacaoDieta] = useState<DietRotationFormState>({
+    rotacao_ativa: false,
+    blocos: [
+      { plano: "A", dias: "3" },
+      { plano: "B", dias: "1" },
+    ],
+    rotacao_data_inicio: "",
+  });
+
+  const resetNovaDieta = () => {
+    setNovaDieta({ nome: "", objetivo: "", data_retorno: "", dias_validade: "" });
+    setRotacaoDieta({
+      rotacao_ativa: false,
+      blocos: [
+        { plano: "A", dias: "3" },
+        { plano: "B", dias: "1" },
+      ],
+      rotacao_data_inicio: "",
+    });
+  };
 
   useEffect(() => {
     if (id) {
@@ -96,87 +170,83 @@ export default function StudentDetails() {
   const carregarDadosAluno = async () => {
     try {
       setLoading(true);
+      // Evita mostrar dados do aluno anterior enquanto carrega o novo ID da rota.
+      setStudent(null);
+      setFeedback("");
+      setFeedbackId(null);
+      setTreinos([]);
+      setDieta(null);
+      setFotos([]);
 
       // Carregar dados do aluno
-      const { data: alunoData, error: alunoError } = await supabase
-        .from("alunos")
-        .select("*")
-        .eq("id", id)
-        .single();
+      const alunoResult = await apiClient.requestSafe<any>(`/api/alunos/${id}`);
+      const aluno = alunoResult.success ? alunoResult.data : null;
+      if (!aluno) {
+        toast({
+          title: "Aluno não encontrado",
+          description: "Não foi possível carregar os dados deste aluno.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setStudent(aluno);
 
-      if (alunoError) throw alunoError;
-      setStudent(alunoData);
+      setBodyMetricsLoading(true);
+      const metricsResult = await apiClient.requestSafe<BodyMetricsResponse>(
+        `/api/alunos/${id}/body-metrics`,
+      );
+      setBodyMetrics(metricsResult.success ? metricsResult.data ?? null : null);
+      setBodyMetricsLoading(false);
 
       // Carregar feedback
-      const { data: feedbackData } = await supabase
-        .from("feedbacks_alunos")
-        .select("*")
-        .eq("aluno_id", id)
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (feedbackData) {
-        setFeedback(feedbackData.feedback);
-        setFeedbackId(feedbackData.id);
+      const feedbackResult = await apiClient.listFeedbacksAlunosSafe(id);
+      const feedbackData = feedbackResult.success && Array.isArray(feedbackResult.data) ? feedbackResult.data : [];
+      const feedback = feedbackData.sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime())[0] || null;
+      if (feedback) {
+        setFeedback(feedback.feedback);
+        setFeedbackId(feedback.id);
       }
 
-      // Carregar todos os treinos ativos
-      const { data: treinosData } = await supabase
-        .from("alunos_treinos")
-        .select(`
-          id,
-          treino_id,
-          data_expiracao,
-          dias_antecedencia_notificacao,
-          treinos (
-            id,
-            nome,
-            descricao,
-            categoria,
-            dificuldade,
-            duracao
-          )
-        `)
-        .eq("aluno_id", id)
-        .eq("ativo", true)
-        .order("created_at", { ascending: false });
+      // Carregar todos os treinos ativos - buscar alunos_treinos e depois treinos
+      const alunosTreinosResult = await apiClient.requestSafe<any[]>(`/api/alunos-treinos?aluno_id=${id}&ativo=true`);
+      const alunosTreinos = alunosTreinosResult.success && Array.isArray(alunosTreinosResult.data) ? alunosTreinosResult.data : [];
+      
+      // Buscar dados dos treinos para cada aluno_treino
+      const treinosFormatados = await Promise.all(
+        alunosTreinos.map(async (item: any) => {
+          const treinoResult = await apiClient.requestSafe<any>(
+            `/api/alunos-treinos/${item.id}/treino-resolvido`,
+          );
+          const treino = treinoResult.success ? treinoResult.data : null;
+          if (treino) {
+            return {
+              ...treino,
+              alunoTreinoId: item.id,
+              dataExpiracao: item.data_expiracao,
+              diasAntecedenciaNotificacao: item.dias_antecedencia_notificacao,
+              personalizacoes: treino.personalizacoes ?? 0,
+            };
+          }
+          return null;
+        })
+      );
 
-      if (treinosData) {
-        const treinosFormatados = treinosData
-          .filter((item: any) => item.treinos)
-          .map((item: any) => ({
-            ...item.treinos,
-            alunoTreinoId: item.id,
-            dataExpiracao: item.data_expiracao,
-            diasAntecedenciaNotificacao: item.dias_antecedencia_notificacao
-          }));
-        setTreinos(treinosFormatados);
-      }
+      setTreinos(treinosFormatados.filter((t): t is Treino & { alunoTreinoId: string } => t !== null));
 
       // Carregar dieta atual
-      const { data: dietaData } = await supabase
-        .from("dietas")
-        .select("*")
-        .eq("aluno_id", id)
-        .order("data_criacao", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (dietaData) {
-        setDieta(dietaData);
+      const dietasResult = await apiClient.requestSafe<any[]>(`/api/dietas?aluno_id=${id}`);
+      const dietas = dietasResult.success && Array.isArray(dietasResult.data) ? dietasResult.data : [];
+      const dieta = dietas.sort((a, b) => new Date(b.data_criacao || 0).getTime() - new Date(a.data_criacao || 0).getTime())[0] || null;
+      if (dieta) {
+        setDieta(dieta);
+        setRotacaoDieta(dietRotationFromRow(dieta));
       }
 
       // Carregar fotos
-      const { data: fotosData } = await supabase
-        .from("fotos_alunos")
-        .select("*")
-        .eq("aluno_id", id)
-        .order("created_at", { ascending: false });
-
-      if (fotosData) {
-        setFotos(fotosData);
-      }
+      const fotosResult = await apiClient.requestSafe<any[]>(`/api/fotos-alunos?aluno_id=${id}`);
+      const fotosData = fotosResult.success && Array.isArray(fotosResult.data) ? fotosResult.data : [];
+      const fotos = fotosData.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+      setFotos(fotos);
     } catch (error: any) {
       toast({
         title: "Erro ao carregar dados",
@@ -206,26 +276,19 @@ export default function StudentDetails() {
 
       if (feedbackId) {
         // Atualizar feedback existente
-        const { error } = await supabase
-          .from("feedbacks_alunos")
-          .update({ feedback })
-          .eq("id", feedbackId);
-
-        if (error) throw error;
+        const updateResult = await apiClient.updateFeedbackAlunoSafe(feedbackId, { feedback });
+        if (!updateResult.success) {
+          throw new Error(updateResult.error || 'Erro ao atualizar feedback');
+        }
       } else {
         // Criar novo feedback
-        const { data, error } = await supabase
-          .from("feedbacks_alunos")
-          .insert({
-            aluno_id: id,
-            coach_id: coachId,
-            feedback,
-          })
-          .select()
-          .single();
-
-        if (error) throw error;
-        if (data) setFeedbackId(data.id);
+        const createResult = await apiClient.createFeedbackAlunoSafe({
+          aluno_id: id,
+          coach_id: coachId,
+          feedback,
+        });
+        const feedbackRecord = createResult.success ? createResult.data : null;
+        if (feedbackRecord) setFeedbackId(feedbackRecord.id);
       }
 
       toast({
@@ -245,13 +308,10 @@ export default function StudentDetails() {
 
   const carregarTreinosDisponiveis = async () => {
     try {
-      const { data, error } = await supabase
-        .from("treinos")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      if (data) setTreinosDisponiveis(data);
+      const result = await apiClient.requestSafe<any[]>('/api/treinos');
+      const data = result.success && Array.isArray(result.data) ? result.data : [];
+      const ordenados = data.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+      setTreinosDisponiveis(ordenados);
     } catch (error: any) {
       console.error("Erro ao carregar treinos:", error);
     }
@@ -270,30 +330,29 @@ export default function StudentDetails() {
     try {
       setSaving(true);
 
-      // Calcular data de expiração
-      let dataExpiracao = null;
-      if (diasValidade && parseInt(diasValidade) > 0) {
-        dataExpiracao = new Date();
-        dataExpiracao.setDate(dataExpiracao.getDate() + parseInt(diasValidade));
-      }
+      const dataExpiracao =
+        diasValidade && parseInt(diasValidade) > 0
+          ? addDaysToDateKey(todayDateKey(), parseInt(diasValidade))
+          : null;
 
-      // Atribuir novo treino com validade
-      const { error } = await supabase
-        .from("alunos_treinos")
-        .insert({
+      // Atribuir: vincula o template ao aluno (personalizações ficam no vínculo)
+      const createResult = await apiClient.requestSafe('/api/alunos-treinos/assign', {
+        method: 'POST',
+        body: JSON.stringify({
           aluno_id: id,
           treino_id: treinoSelecionado,
-          ativo: true,
-          data_expiracao: dataExpiracao?.toISOString().split('T')[0],
+          data_expiracao: dataExpiracao,
+          data_retorno: dataExpiracao,
           dias_antecedencia_notificacao: diasAntecedenciaNotif ? parseInt(diasAntecedenciaNotif) : 7,
-          notificacao_expiracao_enviada: false,
-        });
-
-      if (error) throw error;
+        }),
+      });
+      if (!createResult.success) {
+        throw new Error(createResult.error || 'Erro ao atribuir treino');
+      }
 
       toast({
         title: "Sucesso!",
-        description: "Treino atribuído com sucesso",
+        description: "Treino atribuído — pode personalizar no perfil do aluno.",
       });
 
       setIsAtribuirTreinoOpen(false);
@@ -312,20 +371,92 @@ export default function StudentDetails() {
     }
   };
 
+  const abrirRenovarValidade = (treino: Treino & { alunoTreinoId: string }) => {
+    setRenovarTreino(treino);
+    setRenovarDias("45");
+    setRenovarData(addDaysToDateKey(todayDateKey(), 45));
+    setRenovarAntecedencia(String(treino.diasAntecedenciaNotificacao ?? 7));
+  };
+
+  const handleRenovarDiasChange = (value: string) => {
+    setRenovarDias(value);
+    const n = parseInt(value);
+    if (Number.isFinite(n) && n >= 0) {
+      setRenovarData(addDaysToDateKey(todayDateKey(), n));
+    }
+  };
+
+  const handleRenovarDataChange = (value: string) => {
+    setRenovarData(value);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      setRenovarDias(String(daysBetweenDateKeys(todayDateKey(), value)));
+    }
+  };
+
+  const handleRenovarValidade = async () => {
+    if (!renovarTreino) return;
+    const hoje = todayDateKey();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(renovarData) || renovarData < hoje) {
+      toast({
+        title: "Data inválida",
+        description: "Escolha uma data de vencimento a partir de hoje.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const antecedencia = parseInt(renovarAntecedencia);
+
+    try {
+      setRenovando(true);
+      const result = await apiClient.requestSafe(
+        `/api/alunos-treinos/${renovarTreino.alunoTreinoId}/validade`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            data_expiracao: renovarData,
+            ...(Number.isFinite(antecedencia) ? { dias_antecedencia_notificacao: antecedencia } : {}),
+          }),
+        },
+      );
+      if (!result.success) {
+        throw new Error(result.error || 'Erro ao renovar validade');
+      }
+
+      toast({
+        title: "Validade renovada",
+        description: `"${renovarTreino.nome}" vale até ${formatISODateToBR(renovarData)}.`,
+      });
+      setRenovarTreino(null);
+      carregarDadosAluno();
+    } catch (error: any) {
+      toast({
+        title: "Erro ao renovar validade",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setRenovando(false);
+    }
+  };
+
   const handleRemoverTreino = async (alunoTreinoId: string, treinoNome: string) => {
-    if (!confirm(`Tem certeza que deseja remover o treino "${treinoNome}"?`)) {
+    if (
+      !(await confirmDelete(
+        confirm,
+        `O treino "${treinoNome}" será desvinculado deste aluno.`,
+        "Confirmar remoção",
+      ))
+    ) {
       return;
     }
 
     try {
       setSaving(true);
 
-      const { error } = await supabase
-        .from("alunos_treinos")
-        .delete()
-        .eq("id", alunoTreinoId);
-
-      if (error) throw error;
+      const deleteResult = await apiClient.requestSafe(`/api/alunos-treinos/${alunoTreinoId}`, { method: 'DELETE' });
+      if (!deleteResult.success) {
+        throw new Error(deleteResult.error || 'Erro ao remover treino');
+      }
 
       toast({
         title: "Sucesso!",
@@ -357,17 +488,17 @@ export default function StudentDetails() {
     try {
       setSaving(true);
 
-      const { data, error } = await supabase
-        .from("dietas")
-        .insert({
+      const createResult = await apiClient.requestSafe<any>('/api/dietas', {
+        method: 'POST',
+        body: JSON.stringify({
           nome: novaDieta.nome,
           objetivo: novaDieta.objetivo || null,
           aluno_id: id,
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
+          data_retorno: novaDieta.data_retorno || null,
+          ...dietRotationToPayload(rotacaoDieta),
+        }),
+      });
+      const dieta = createResult.success ? createResult.data : null;
 
       toast({
         title: "Sucesso!",
@@ -375,12 +506,11 @@ export default function StudentDetails() {
       });
 
       setIsCriarDietaOpen(false);
-      setNovaDieta({ nome: "", objetivo: "" });
+      resetNovaDieta();
       carregarDadosAluno();
-      
-      // Redirecionar para a página de edição da dieta
-      if (data) {
-        navigate(`/dieta/${data.id}`);
+
+      if (dieta) {
+        navigate(`/dieta/${dieta.id}`);
       }
     } catch (error: any) {
       toast({
@@ -393,15 +523,22 @@ export default function StudentDetails() {
     }
   };
 
+  const handleImportComplete = (result?: ImportCompleteResult) => {
+    setIsImportDialogOpen(false);
+    setImportHistoryRefresh((k) => k + 1);
+    setPortalStatusRefresh((k) => k + 1);
+    carregarDadosAluno();
+    if (result?.dietaId) {
+      navigate(`/dieta/${result.dietaId}`);
+    }
+  };
+
   const handleIniciarConversa = async () => {
     if (!id) return;
 
     try {
       setSaving(true);
 
-      // Obter o ID do usuário autenticado (coach)
-      const { data: { user } } = await supabase.auth.getUser();
-      
       if (!user) {
         toast({
           title: "Erro",
@@ -412,23 +549,19 @@ export default function StudentDetails() {
       }
 
       // Verificar se já existe uma conversa
-      const { data: conversaExistente } = await supabase
-        .from("conversas")
-        .select("id")
-        .eq("coach_id", user.id)
-        .eq("aluno_id", id)
-        .single();
+      const conversaResult = await apiClient.requestSafe<any[]>('/api/conversas');
+      const conversaData = conversaResult.success && Array.isArray(conversaResult.data) ? conversaResult.data : [];
+      const conversaExistente = conversaData.find(c => c.coach_id === user.id && c.aluno_id === id) || null;
 
       if (!conversaExistente) {
         // Criar nova conversa
-        const { error } = await supabase
-          .from("conversas")
-          .insert({
+        await apiClient.requestSafe('/api/conversas', {
+          method: 'POST',
+          body: JSON.stringify({
             coach_id: user.id,
             aluno_id: id,
-          });
-
-        if (error) throw error;
+          }),
+        });
       }
 
       // Redirecionar para mensagens
@@ -452,7 +585,7 @@ export default function StudentDetails() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <Loader2 className="h-8 w-8 motion-safe:animate-spin text-primary" />
       </div>
     );
   }
@@ -462,7 +595,7 @@ export default function StudentDetails() {
       <div className="container mx-auto p-6">
         <div className="text-center">
           <h2 className="text-2xl font-bold mb-4">Aluno não encontrado</h2>
-          <Button onClick={() => navigate("/")}>
+          <Button onClick={() => navigate("/?tab=students")}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Voltar
           </Button>
@@ -475,21 +608,59 @@ export default function StudentDetails() {
     <div className="container mx-auto p-6 max-w-6xl">
       {/* Header */}
       <div className="mb-6">
-        <Button variant="ghost" onClick={() => navigate("/")} className="mb-4">
+        <Button variant="ghost" onClick={() => navigate("/?tab=students")} className="mb-4">
           <ArrowLeft className="mr-2 h-4 w-4" />
           Voltar para lista de alunos
         </Button>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold">{student.nome}</h1>
+            <h1 className="text-xl font-bold sm:text-2xl">{getAlunoDisplayName(student)}</h1>
+            {student.ultimo_contato_resumo && (
+              <p className="text-sm text-muted-foreground mt-1">
+                Último contacto: {student.ultimo_contato_resumo}
+                {student.ultimo_contato_em
+                  ? ` — ${new Date(student.ultimo_contato_em).toLocaleDateString("pt-BR")}`
+                  : ""}
+              </p>
+            )}
             <p className="text-muted-foreground">{student.email}</p>
           </div>
-          <Button onClick={handleIniciarConversa} disabled={saving}>
-            <MessageSquare className="mr-2 h-4 w-4" />
-            Enviar Mensagem
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => setIsImportDialogOpen(true)}>
+              <Upload className="mr-2 h-4 w-4" />
+              Importar ficha
+            </Button>
+            <Button onClick={handleIniciarConversa} disabled={saving}>
+              <MessageSquare className="mr-2 h-4 w-4" />
+              Enviar Mensagem
+            </Button>
+          </div>
         </div>
       </div>
+
+      <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
+        <DialogContent className="!flex max-h-[min(92vh,880px)] w-[min(96vw,56rem)] max-w-none flex-col gap-0 overflow-hidden border p-0 shadow-xl sm:rounded-xl">
+          <DialogHeader className="shrink-0 space-y-0 border-b px-4 py-3 text-left sm:px-6 sm:py-4">
+            <DialogTitle className="text-base sm:text-lg">Importar ficha</DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm">
+              A dieta e o protocolo serão vinculados a {getAlunoDisplayName(student)}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-3 sm:px-6 sm:pb-5">
+            <StudentImporter
+              mode="enrich"
+              targetAluno={{
+                id: student.id,
+                nome: getAlunoDisplayName(student),
+                email: student.email,
+              }}
+              showDestinationPicker={false}
+              onClose={() => setIsImportDialogOpen(false)}
+              onImportComplete={handleImportComplete}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Tabs defaultValue="overview" className="w-full">
         <TabsList className="grid w-full grid-cols-5">
@@ -517,21 +688,32 @@ export default function StudentDetails() {
 
         {/* TAB: Visão Geral */}
         <TabsContent value="overview" className="space-y-6 mt-6">
+          {id ? (
+            <StudentPortalStatusCard
+              alunoId={id}
+              refreshKey={portalStatusRefresh}
+              onLinked={() => {
+                setPortalStatusRefresh((k) => k + 1);
+                carregarDadosAluno();
+              }}
+            />
+          ) : null}
+
+          <BodyMetricsCard metrics={bodyMetrics} loading={bodyMetricsLoading} />
+
+          <WeightTimelineChart
+            historico={bodyMetrics?.peso_historico}
+            pesoAtual={bodyMetrics?.peso_kg}
+            loading={bodyMetricsLoading}
+          />
+
           <div className="grid gap-6 md:grid-cols-2">
-            {/* Dados Básicos */}
+            {/* Objetivo e cadastro */}
             <Card>
               <CardHeader>
-                <CardTitle>Informações Básicas</CardTitle>
+                <CardTitle>Objetivo e cadastro</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                <div>
-                  <span className="font-semibold">Data de Nascimento: </span>
-                  <span>{student.data_nascimento ? new Date(student.data_nascimento).toLocaleDateString('pt-BR') : "Não informado"}</span>
-                </div>
-                <div>
-                  <span className="font-semibold">Peso: </span>
-                  <span>{student.peso ? `${student.peso} kg` : "Não informado"}</span>
-                </div>
                 <div>
                   <span className="font-semibold">Objetivo: </span>
                   <span>{student.objetivo || "Não informado"}</span>
@@ -540,6 +722,9 @@ export default function StudentDetails() {
                   <span className="font-semibold">Aluno desde: </span>
                   <span>{new Date(student.created_at).toLocaleDateString('pt-BR')}</span>
                 </div>
+                <p className="text-xs text-muted-foreground pt-2">
+                  Peso, altura, idade e TMB estão no card «Dados corporais» acima.
+                </p>
               </CardContent>
             </Card>
 
@@ -560,7 +745,7 @@ export default function StudentDetails() {
                 <Button onClick={handleSaveFeedback} disabled={saving} className="w-full">
                   {saving ? (
                     <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
                       Salvando...
                     </>
                   ) : (
@@ -612,6 +797,10 @@ export default function StudentDetails() {
               </CardContent>
             </Card>
           </div>
+
+          {id ? (
+            <ImportHistoryPanel alunoId={id} refreshKey={importHistoryRefresh} />
+          ) : null}
         </TabsContent>
 
         {/* TAB: Treinos */}
@@ -630,22 +819,35 @@ export default function StudentDetails() {
                 <DialogContent>
                   <DialogHeader>
                     <DialogTitle>Atribuir Treino</DialogTitle>
+                    <DialogDescription>
+                      Escolha um template ou treino da biblioteca. Será vinculado ao aluno
+                      sem duplicar na biblioteca — personalizações ficam só neste aluno.
+                    </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4 py-4">
                     <div className="space-y-2">
                       <Label>Selecione um treino</Label>
-                      <Select value={treinoSelecionado} onValueChange={setTreinoSelecionado}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Escolha um treino..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {treinosDisponiveis.map((t) => (
-                            <SelectItem key={t.id} value={t.id}>
-                              {t.nome} - {t.categoria} ({t.dificuldade})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      {treinosDisponiveis.length === 0 ? (
+                        <div className="rounded-md border border-dashed border-amber-500/40 bg-amber-500/5 p-3 text-sm text-muted-foreground">
+                          <p className="font-medium text-foreground">Nenhum treino cadastrado</p>
+                          <p className="mt-1">
+                            Crie treinos no menu lateral em <strong>Treinos</strong> antes de atribuir a um aluno.
+                          </p>
+                        </div>
+                      ) : (
+                        <Select value={treinoSelecionado} onValueChange={setTreinoSelecionado}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Escolha um treino..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {treinosDisponiveis.map((t) => (
+                              <SelectItem key={t.id} value={t.id}>
+                                {t.nome} - {t.categoria} ({t.dificuldade})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="dias-validade">Validade (dias)</Label>
@@ -679,10 +881,13 @@ export default function StudentDetails() {
                       <Button variant="outline" onClick={() => setIsAtribuirTreinoOpen(false)}>
                         Cancelar
                       </Button>
-                      <Button onClick={handleAtribuirTreino} disabled={saving}>
+                      <Button
+                        onClick={handleAtribuirTreino}
+                        disabled={saving || treinosDisponiveis.length === 0}
+                      >
                         {saving ? (
                           <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
                             Atribuindo...
                           </>
                         ) : (
@@ -699,10 +904,9 @@ export default function StudentDetails() {
             {treinos.length > 0 ? (
               <div className="grid gap-4 md:grid-cols-2">
                 {treinos.map((treino) => {
-                  const hoje = new Date();
-                  const dataExpiracao = treino.dataExpiracao ? new Date(treino.dataExpiracao) : null;
-                  const diasRestantes = dataExpiracao 
-                    ? Math.ceil((dataExpiracao.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24))
+                  const expiracaoKey = dateKeyFromApi(treino.dataExpiracao);
+                  const diasRestantes = expiracaoKey
+                    ? daysBetweenDateKeys(todayDateKey(), expiracaoKey)
                     : null;
                   
                   return (
@@ -715,28 +919,52 @@ export default function StudentDetails() {
                         <Badge variant="outline">{treino.categoria}</Badge>
                         <Badge variant="outline">{treino.dificuldade}</Badge>
                         <Badge variant="outline">{treino.duracao} min</Badge>
+                        {(treino.personalizacoes ?? 0) > 0 && (
+                          <Badge variant="secondary" className="bg-warning/10 text-warning border-warning/20">
+                            {treino.personalizacoes} personalizações
+                          </Badge>
+                        )}
                         {diasRestantes !== null && (
                           <Badge 
                             variant={diasRestantes <= 7 ? "destructive" : "secondary"}
                             className={diasRestantes <= 7 ? "bg-destructive/10 text-destructive border-destructive/20" : ""}
                           >
-                            {diasRestantes > 0 
+                            {diasRestantes > 0
                               ? `Expira em ${diasRestantes} ${diasRestantes === 1 ? 'dia' : 'dias'}`
-                              : 'Expirado'
+                              : diasRestantes === 0
+                                ? 'Expira hoje'
+                                : 'Expirado'
                             }
                           </Badge>
                         )}
                       </div>
-                      <Button 
-                        variant="destructive" 
-                        size="sm" 
-                        className="w-full"
-                        onClick={() => handleRemoverTreino(treino.alunoTreinoId, treino.nome)}
-                        disabled={saving}
-                      >
+                      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                        <Button
+                          className="flex-1"
+                          variant="outline"
+                          onClick={() => navigate(`/treino/${treino.id}?atribuicao=${treino.alunoTreinoId}&from=/alunos/${id}`)}
+                        >
+                          <Edit className="mr-2 h-4 w-4" />
+                          Editar treino
+                        </Button>
+                        <Button
+                          className="flex-1"
+                          variant={diasRestantes !== null && diasRestantes < 0 ? "default" : "outline"}
+                          onClick={() => abrirRenovarValidade(treino)}
+                        >
+                          <CalendarClock className="mr-2 h-4 w-4" />
+                          Renovar validade
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => handleRemoverTreino(treino.alunoTreinoId, treino.nome)}
+                          disabled={saving}
+                        >
                         {saving ? (
                           <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
                             Removendo...
                           </>
                         ) : (
@@ -745,7 +973,8 @@ export default function StudentDetails() {
                             Remover Treino
                           </>
                         )}
-                      </Button>
+                        </Button>
+                      </div>
                     </div>
                   );
                 })}
@@ -757,6 +986,91 @@ export default function StudentDetails() {
             )}
           </CardContent>
         </Card>
+
+        <Dialog
+          open={renovarTreino !== null}
+          onOpenChange={(open) => {
+            if (!open && !renovando) setRenovarTreino(null);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Renovar validade</DialogTitle>
+              <DialogDescription>
+                {renovarTreino?.nome}: mantém exercícios e personalizações deste aluno, só muda a data
+                de vencimento e reagenda os lembretes de retorno.
+                {renovarTreino?.dataExpiracao && (
+                  <> Vencimento atual: {formatISODateToBR(dateKeyFromApi(renovarTreino.dataExpiracao))}.</>
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="renovar-dias">Validade (dias a partir de hoje)</Label>
+                  <Input
+                    id="renovar-dias"
+                    type="number"
+                    min="0"
+                    value={renovarDias}
+                    onChange={(e) => handleRenovarDiasChange(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="renovar-data">Ou data exata</Label>
+                  <Input
+                    id="renovar-data"
+                    type="date"
+                    min={todayDateKey()}
+                    value={renovarData}
+                    onChange={(e) => handleRenovarDataChange(e.target.value)}
+                  />
+                </div>
+              </div>
+              {renovarData && (
+                <p className="text-sm text-muted-foreground">
+                  Vence em <strong className="text-foreground">{formatISODateToBR(renovarData)}</strong>
+                </p>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="renovar-antecedencia">Notificar com antecedência (dias)</Label>
+                <Input
+                  id="renovar-antecedencia"
+                  type="number"
+                  min="0"
+                  value={renovarAntecedencia}
+                  onChange={(e) => setRenovarAntecedencia(e.target.value)}
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={() => setRenovarTreino(null)} disabled={renovando}>
+                  Cancelar
+                </Button>
+                <Button onClick={handleRenovarValidade} disabled={renovando || !renovarData}>
+                  {renovando ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
+                      Salvando...
+                    </>
+                  ) : (
+                    "Renovar"
+                  )}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <WeeklyWorkoutAgendaEditor
+          alunoId={id!}
+          treinos={treinos.map((t) => ({
+            alunoTreinoId: t.alunoTreinoId,
+            id: t.id,
+            nome: t.nome,
+            categoria: t.categoria,
+            dificuldade: t.dificuldade,
+          }))}
+        />
         </TabsContent>
 
         {/* TAB: Nutrição */}
@@ -770,18 +1084,30 @@ export default function StudentDetails() {
             {dieta ? (
               <div className="space-y-4">
                 <div>
-                  <h3 className="font-semibold text-lg">{dieta.nome}</h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-semibold text-lg">{dieta.nome}</h3>
+                    <DietRotationBadge config={dieta} />
+                  </div>
                   <p className="text-sm text-muted-foreground">
                     Objetivo: {dieta.objetivo || "Não especificado"}
                   </p>
                   <p className="text-xs text-muted-foreground mt-2">
                     Criada em: {new Date(dieta.data_criacao).toLocaleDateString('pt-BR')}
                   </p>
+                  {dieta.data_retorno && (
+                    <p className="text-xs text-muted-foreground">
+                      Retorno / vencimento: {formatDateBR(dieta.data_retorno)}
+                    </p>
+                  )}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <Button className="flex-1" variant="outline" onClick={() => navigate(`/dieta/${dieta.id}`)}>
                     <Edit className="mr-2 h-4 w-4" />
                     Editar Dieta
+                  </Button>
+                  <Button className="flex-1" variant="secondary" onClick={() => setIsImportDialogOpen(true)}>
+                    <Upload className="mr-2 h-4 w-4" />
+                    Reimportar ficha
                   </Button>
                   <Dialog open={isCriarDietaOpen} onOpenChange={setIsCriarDietaOpen}>
                     <DialogTrigger asChild>
@@ -793,6 +1119,9 @@ export default function StudentDetails() {
                     <DialogContent>
                       <DialogHeader>
                         <DialogTitle>Criar Nova Dieta</DialogTitle>
+                        <DialogDescription>
+                          Defina nome, objetivo e opcionalmente a data de retorno da dieta.
+                        </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-4 py-4">
                         <div className="space-y-2">
@@ -820,6 +1149,17 @@ export default function StudentDetails() {
                             </SelectContent>
                           </Select>
                         </div>
+                        <DietReturnDateFields
+                          dataRetorno={novaDieta.data_retorno}
+                          diasValidade={novaDieta.dias_validade}
+                          onDataRetornoChange={(iso) =>
+                            setNovaDieta({ ...novaDieta, data_retorno: iso })
+                          }
+                          onDiasValidadeChange={(dias) =>
+                            setNovaDieta({ ...novaDieta, dias_validade: dias })
+                          }
+                        />
+                        <DietRotationFields value={rotacaoDieta} onChange={setRotacaoDieta} />
                         <div className="flex gap-2 justify-end">
                           <Button variant="outline" onClick={() => setIsCriarDietaOpen(false)}>
                             Cancelar
@@ -827,7 +1167,7 @@ export default function StudentDetails() {
                           <Button onClick={handleCriarDieta} disabled={saving}>
                             {saving ? (
                               <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
                                 Criando...
                               </>
                             ) : (
@@ -843,6 +1183,11 @@ export default function StudentDetails() {
             ) : (
               <div className="text-center py-8">
                 <p className="text-muted-foreground mb-4">Nenhuma dieta atribuída</p>
+                <div className="flex flex-col sm:flex-row gap-2 justify-center">
+                  <Button variant="default" onClick={() => setIsImportDialogOpen(true)}>
+                    <Upload className="mr-2 h-4 w-4" />
+                    Importar ficha PDF
+                  </Button>
                 <Dialog open={isCriarDietaOpen} onOpenChange={setIsCriarDietaOpen}>
                   <DialogTrigger asChild>
                     <Button variant="outline">
@@ -853,6 +1198,9 @@ export default function StudentDetails() {
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Criar Nova Dieta</DialogTitle>
+                      <DialogDescription>
+                        Defina nome, objetivo e opcionalmente a data de retorno da dieta.
+                      </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
                       <div className="space-y-2">
@@ -880,6 +1228,17 @@ export default function StudentDetails() {
                           </SelectContent>
                         </Select>
                       </div>
+                      <DietReturnDateFields
+                        dataRetorno={novaDieta.data_retorno}
+                        diasValidade={novaDieta.dias_validade}
+                        onDataRetornoChange={(iso) =>
+                          setNovaDieta({ ...novaDieta, data_retorno: iso })
+                        }
+                        onDiasValidadeChange={(dias) =>
+                          setNovaDieta({ ...novaDieta, dias_validade: dias })
+                        }
+                      />
+                      <DietRotationFields value={rotacaoDieta} onChange={setRotacaoDieta} />
                       <div className="flex gap-2 justify-end">
                         <Button variant="outline" onClick={() => setIsCriarDietaOpen(false)}>
                           Cancelar
@@ -887,7 +1246,7 @@ export default function StudentDetails() {
                         <Button onClick={handleCriarDieta} disabled={saving}>
                           {saving ? (
                             <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
                               Criando...
                             </>
                           ) : (
@@ -898,49 +1257,34 @@ export default function StudentDetails() {
                     </div>
                   </DialogContent>
                 </Dialog>
+                </div>
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Refeições livres (foto)</CardTitle>
+            <CardDescription>
+              Estimativas registadas pelo aluno — valores aproximados, não clinicamente precisos.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {id ? <RefeicoesRegistradasList alunoId={id} readonly /> : null}
           </CardContent>
         </Card>
         </TabsContent>
 
         {/* TAB: Progresso */}
         <TabsContent value="progress" className="space-y-6 mt-6">
-          {/* Fotos do Aluno */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Galeria de Fotos</CardTitle>
-              <CardDescription>Progresso visual do aluno</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {fotos.length > 0 ? (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {fotos.map((foto) => (
-                    <div
-                      key={foto.id}
-                      className="relative aspect-square rounded-lg overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
-                      onClick={() => setSelectedFoto(foto.url)}
-                    >
-                      <img
-                        src={foto.url}
-                        alt={foto.descricao || "Foto do aluno"}
-                        className="w-full h-full object-cover"
-                      />
-                      {foto.descricao && (
-                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs p-2">
-                          {foto.descricao}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <p>Nenhuma foto disponível</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          {id ? <LoadProgressionSection alunoId={id} /> : null}
+          <EvolutionTimelineExperience
+            photos={fotos}
+            readonly
+            coachPoseEdit
+            onPhotosRefresh={() => id && carregarDadosAluno()}
+          />
 
           {/* Dashboard de Progresso do Aluno */}
           <Card>
@@ -951,7 +1295,7 @@ export default function StudentDetails() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <StudentProgressDashboard studentId={id} />
+              <StudentProgressCoachTabs studentId={id} studentName={getAlunoDisplayName(student)} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -965,18 +1309,6 @@ export default function StudentDetails() {
         </TabsContent>
       </Tabs>
 
-      {/* Dialog para ampliar foto */}
-      <Dialog open={!!selectedFoto} onOpenChange={() => setSelectedFoto(null)}>
-        <DialogContent className="max-w-4xl">
-          {selectedFoto && (
-            <img
-              src={selectedFoto}
-              alt="Foto ampliada"
-              className="w-full h-auto"
-            />
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

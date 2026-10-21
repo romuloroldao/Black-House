@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,8 +7,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DateInputBR } from "@/components/ui/date-input-br";
 import { toast } from "sonner";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import { Plus, Pencil, Trash2, AlertCircle, CheckCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
@@ -36,7 +38,8 @@ interface Aluno {
   email: string;
 }
 
-export default function FinancialExceptionsManager() {
+export default function FinancialExceptionsManager({ embedded = false }: { embedded?: boolean }) {
+  const { confirm } = useConfirm();
   const { user } = useAuth();
   const [exceptions, setExceptions] = useState<FinancialException[]>([]);
   const [alunos, setAlunos] = useState<Aluno[]>([]);
@@ -77,24 +80,24 @@ export default function FinancialExceptionsManager() {
       setLoading(true);
       
       const [exceptionsRes, alunosRes] = await Promise.all([
-        supabase
-          .from('financial_exceptions')
-          .select(`
-            *,
-            aluno:alunos(nome, email)
-          `)
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('alunos')
-          .select('id, nome, email')
-          .order('nome')
+        apiClient.requestSafe<any[]>('/api/financial-exceptions'),
+        apiClient.requestSafe<any[]>('/api/alunos')
       ]);
 
-      if (exceptionsRes.error) throw exceptionsRes.error;
-      if (alunosRes.error) throw alunosRes.error;
+      const exceptions = exceptionsRes.success && Array.isArray(exceptionsRes.data) ? exceptionsRes.data : [];
+      const alunos = alunosRes.success && Array.isArray(alunosRes.data) ? alunosRes.data : [];
+      const alunosMap = new Map(alunos.map((a: any) => [a.id, a]));
 
-      setExceptions((exceptionsRes.data || []) as FinancialException[]);
-      setAlunos(alunosRes.data || []);
+      const exceptionsCompletas = exceptions.map((exception: any) => {
+        const aluno = alunosMap.get(exception.aluno_id);
+        return {
+          ...exception,
+          aluno: aluno || { nome: 'Aluno não encontrado', email: '' }
+        };
+      });
+
+      setExceptions(exceptionsCompletas as FinancialException[]);
+      setAlunos(alunos);
     } catch (error: any) {
       console.error('Erro ao carregar dados:', error);
       toast.error("Erro ao carregar exceções financeiras");
@@ -121,19 +124,22 @@ export default function FinancialExceptionsManager() {
       };
 
       if (editingId) {
-        const { error } = await supabase
-          .from('financial_exceptions')
-          .update(payload)
-          .eq('id', editingId);
-
-        if (error) throw error;
+        const result = await apiClient.requestSafe(`/api/financial-exceptions/${editingId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
+        if (!result.success) {
+          throw new Error(result.error || 'Erro ao atualizar exceção');
+        }
         toast.success("Exceção atualizada com sucesso!");
       } else {
-        const { error } = await supabase
-          .from('financial_exceptions')
-          .insert([payload]);
-
-        if (error) throw error;
+        const result = await apiClient.requestSafe('/api/financial-exceptions', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        if (!result.success) {
+          throw new Error(result.error || 'Erro ao criar exceção');
+        }
         toast.success("Exceção criada com sucesso!");
       }
 
@@ -162,15 +168,13 @@ export default function FinancialExceptionsManager() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Tem certeza que deseja excluir esta exceção?")) return;
+    if (!(await confirmDelete(confirm, "Esta exceção financeira será removida."))) return;
 
     try {
-      const { error } = await supabase
-        .from('financial_exceptions')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
+      const result = await apiClient.requestSafe(`/api/financial-exceptions/${id}`, { method: 'DELETE' });
+      if (!result.success) {
+        throw new Error(result.error || 'Erro ao excluir exceção');
+      }
       toast.success("Exceção excluída com sucesso!");
       loadData();
     } catch (error: any) {
@@ -211,6 +215,7 @@ export default function FinancialExceptionsManager() {
 
   return (
     <div className="space-y-6">
+      {!embedded && (
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold">Exceções Financeiras</h2>
@@ -221,6 +226,16 @@ export default function FinancialExceptionsManager() {
           Nova Exceção
         </Button>
       </div>
+      )}
+
+      {embedded && (
+        <div className="flex justify-end">
+          <Button onClick={() => setDialogOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            Nova exceção
+          </Button>
+        </div>
+      )}
 
       <div className="grid gap-4">
         {exceptions.length === 0 ? (
@@ -279,6 +294,9 @@ export default function FinancialExceptionsManager() {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingId ? 'Editar' : 'Nova'} Exceção Financeira</DialogTitle>
+            <DialogDescription>
+              Defina tipo de exceção, descontos, período de vigência e observações.
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
@@ -348,21 +366,19 @@ export default function FinancialExceptionsManager() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="data_inicio">Data Início *</Label>
-                <Input
+                <DateInputBR
                   id="data_inicio"
-                  type="date"
                   value={formData.data_inicio}
-                  onChange={(e) => setFormData({...formData, data_inicio: e.target.value})}
+                  onChange={(value) => setFormData({...formData, data_inicio: value})}
                   required
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="data_fim">Data Fim</Label>
-                <Input
+                <DateInputBR
                   id="data_fim"
-                  type="date"
                   value={formData.data_fim}
-                  onChange={(e) => setFormData({...formData, data_fim: e.target.value})}
+                  onChange={(value) => setFormData({...formData, data_fim: value})}
                 />
               </div>
             </div>

@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useEffect, useState } from "react";
+import { apiClient } from "@/lib/api-client";
+import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,8 +11,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { 
   ArrowLeft, 
+  BookmarkPlus,
+  Loader2,
   Plus, 
   Trash2, 
   Save, 
@@ -24,12 +28,17 @@ import {
 
 interface WorkoutFormProps {
   workout?: any;
+  /** Edição de treino atribuído a um aluno (personalização, não template). */
+  studentCopy?: boolean;
+  /** ID do vínculo alunos_treinos para gravar overrides. */
+  atribuicaoId?: string;
   onBack: () => void;
   onSave: () => void;
 }
 
 interface Exercise {
   id: string;
+  slotKey?: string;
   name: string;
   sets: number;
   reps: string;
@@ -40,9 +49,13 @@ interface Exercise {
   order: number;
 }
 
-const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
+const WorkoutForm = ({ workout, studentCopy = false, atribuicaoId, onBack, onSave }: WorkoutFormProps) => {
+  const { user } = useAuth();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
+  const [isSaveTemplateOpen, setIsSaveTemplateOpen] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
   const [formData, setFormData] = useState({
     name: workout?.name || "",
     description: workout?.description || "",
@@ -56,12 +69,10 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
   });
 
   const [exercises, setExercises] = useState<Exercise[]>(() => {
-    // Ensure we always have an array of exercises
-    if (workout?.exercises && Array.isArray(workout.exercises)) {
+    if (workout?.exercises && Array.isArray(workout.exercises) && workout.exercises.length > 0) {
       return workout.exercises;
     }
-    
-    // Default exercise if no valid exercises array
+
     return [
       {
         id: "1",
@@ -78,6 +89,65 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
 
   const [newTag, setNewTag] = useState("");
 
+  useEffect(() => {
+    if (!workout) {
+      setFormData({
+        name: "",
+        description: "",
+        category: "",
+        difficulty: "",
+        duration: 60,
+        isTemplate: false,
+        tags: [],
+        objectives: [],
+        notes: "",
+      });
+      setExercises([
+        {
+          id: "1",
+          name: "",
+          sets: 3,
+          reps: "12",
+          weight: "",
+          rest: "60s",
+          notes: "",
+          order: 1,
+        },
+      ]);
+      return;
+    }
+
+    const mappedExercises = Array.isArray(workout.exercises) ? workout.exercises : [];
+    setFormData({
+      name: String(workout.name ?? ""),
+      description: String(workout.description ?? ""),
+      category: String(workout.category ?? ""),
+      difficulty: String(workout.difficulty ?? ""),
+      duration: Number(workout.duration ?? 60),
+      isTemplate: workout.isTemplate === true,
+      tags: Array.isArray(workout.tags) ? workout.tags : [],
+      objectives: Array.isArray(workout.objectives) ? workout.objectives : [],
+      notes: String(workout.notes ?? ""),
+    });
+
+    if (mappedExercises.length > 0) {
+      setExercises(mappedExercises);
+    } else {
+      setExercises([
+        {
+          id: "1",
+          name: "",
+          sets: 3,
+          reps: "12",
+          weight: "",
+          rest: "60s",
+          notes: "",
+          order: 1,
+        },
+      ]);
+    }
+  }, [workout?.id]);
+
   const categories = [
     "Hipertrofia",
     "Força",
@@ -91,8 +161,10 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
   const difficulties = ["Iniciante", "Intermediário", "Avançado"];
 
   const addExercise = () => {
+    const slotKey = crypto.randomUUID();
     const newExercise: Exercise = {
-      id: Date.now().toString(),
+      id: slotKey,
+      slotKey,
       name: "",
       sets: 3,
       reps: "12",
@@ -131,6 +203,92 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
     });
   };
 
+  // asNewTemplate: novos slot_keys para que o template não partilhe identidade com o original
+  const buildTreinoPayload = (
+    coachId: string,
+    options: { asNewTemplate?: boolean; nome?: string } = {},
+  ) => ({
+    nome: options.nome ?? formData.name,
+    descricao: formData.description,
+    categoria: formData.category,
+    dificuldade: formData.difficulty,
+    duracao: formData.duration,
+    is_template: options.asNewTemplate ? true : studentCopy ? false : formData.isTemplate,
+    tags: formData.tags,
+    num_exercicios: exercises.length,
+    exercicios: exercises.map((ex, index) => {
+      const slotKey = options.asNewTemplate ? crypto.randomUUID() : ex.slotKey || ex.id;
+      return {
+        slot_key: slotKey,
+        id: slotKey,
+        nome: ex.name,
+        series: ex.sets,
+        repeticoes: ex.reps,
+        peso: ex.weight,
+        descanso: ex.rest,
+        observacoes: ex.notes,
+        video_url: ex.videoUrl,
+        ordem: ex.order ?? index + 1,
+      };
+    }),
+    coach_id: coachId,
+  });
+
+  const openSaveAsTemplate = () => {
+    setTemplateName(formData.name ? `${formData.name} (cópia)` : "");
+    setIsSaveTemplateOpen(true);
+  };
+
+  const handleSaveAsTemplate = async () => {
+    const nome = templateName.trim();
+    if (!nome || !formData.category || !formData.difficulty) {
+      toast({
+        title: "Erro",
+        description: "Nome, categoria e dificuldade são obrigatórios",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!user) {
+      toast({
+        title: "Erro",
+        description: "Você precisa estar autenticado para salvar um treino.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setSavingTemplate(true);
+      const result = await apiClient.requestSafe('/api/treinos', {
+        method: 'POST',
+        body: JSON.stringify(buildTreinoPayload(user.id, { asNewTemplate: true, nome })),
+      });
+      if (!result.success) {
+        toast({
+          title: "Erro ao criar template",
+          description: result.error || "Não foi possível criar o template.",
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: "Template criado!",
+        description: `"${nome}" já está na biblioteca para atribuir a outros alunos. Este aluno continua no treino atual.`,
+      });
+      setIsSaveTemplateOpen(false);
+    } catch (error) {
+      console.error('Erro ao criar template:', error);
+      toast({
+        title: "Erro ao criar template",
+        description: "Não foi possível criar o template. Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
+
   const handleSave = async () => {
     try {
       setSaving(true);
@@ -145,9 +303,6 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
         return;
       }
 
-      // Obter o ID do usuário autenticado
-      const { data: { user } } = await supabase.auth.getUser();
-      
       if (!user) {
         toast({
           title: "Erro",
@@ -158,49 +313,63 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
         return;
       }
 
-      const treinoData = {
-        nome: formData.name,
-        descricao: formData.description,
-        categoria: formData.category,
-        dificuldade: formData.difficulty,
-        duracao: formData.duration,
-        is_template: formData.isTemplate,
-        tags: formData.tags,
-        num_exercicios: exercises.length,
-        exercicios: exercises.map(ex => ({
-          nome: ex.name,
-          series: ex.sets,
-          repeticoes: ex.reps,
-          peso: ex.weight,
-          descanso: ex.rest,
-          observacoes: ex.notes,
-          video_url: ex.videoUrl,
-          ordem: ex.order
-        })),
-        coach_id: user.id, // Adicionar coach_id para RLS
-      };
+      const treinoData = buildTreinoPayload(user.id);
 
       if (workout?.id) {
-        // Update existing workout
-        const { error } = await supabase
-          .from('treinos')
-          .update(treinoData)
-          .eq('id', workout.id);
-
-        if (error) throw error;
-
-        toast({
-          title: "Treino atualizado!",
-          description: "As alterações foram salvas com sucesso.",
-        });
+        if (studentCopy && atribuicaoId) {
+          const updateResult = await apiClient.requestSafe(
+            `/api/alunos-treinos/${atribuicaoId}/personalizacao`,
+            {
+              method: 'PATCH',
+              body: JSON.stringify({ exercicios: treinoData.exercicios }),
+            },
+          );
+          if (!updateResult.success) {
+            toast({
+              title: "Erro ao salvar",
+              description: updateResult.error || "Não foi possível salvar a personalização.",
+              variant: "destructive",
+            });
+            setSaving(false);
+            return;
+          }
+          toast({
+            title: "Personalização guardada!",
+            description: "Alterações aplicadas só a este aluno. O template original não foi modificado.",
+          });
+        } else {
+          const updateResult = await apiClient.requestSafe(`/api/treinos/${workout.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify(treinoData),
+          });
+          if (!updateResult.success) {
+            toast({
+              title: "Erro ao salvar",
+              description: updateResult.error || "Não foi possível salvar o treino.",
+              variant: "destructive",
+            });
+            setSaving(false);
+            return;
+          }
+          toast({
+            title: "Treino atualizado!",
+            description: "As alterações foram salvas com sucesso.",
+          });
+        }
       } else {
-        // Create new workout
-        const { error } = await supabase
-          .from('treinos')
-          .insert([treinoData]);
-
-        if (error) throw error;
-
+        const createResult = await apiClient.requestSafe('/api/treinos', {
+          method: 'POST',
+          body: JSON.stringify(treinoData),
+        });
+        if (!createResult.success) {
+          toast({
+            title: "Erro ao salvar",
+            description: createResult.error || "Não foi possível salvar o treino.",
+            variant: "destructive",
+          });
+          setSaving(false);
+          return;
+        }
         toast({
           title: "Treino criado!",
           description: "O novo treino foi adicionado com sucesso.",
@@ -228,21 +397,36 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
           <ArrowLeft className="w-5 h-5" />
         </Button>
         <div className="flex-1">
-          <h1 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+          <h1 className="bg-gradient-primary bg-clip-text text-xl font-bold text-transparent sm:text-2xl">
             {workout ? "Editar Treino" : "Novo Treino"}
           </h1>
           <p className="text-muted-foreground">
-            {workout ? "Modifique os detalhes do treino" : "Crie um novo treino personalizado"}
+            {studentCopy
+              ? "Ajustes só deste aluno — o template original na biblioteca não muda."
+              : workout
+                ? "Modifique os detalhes do treino"
+                : "Crie um novo treino personalizado"}
           </p>
+          {studentCopy && (workout?.personalizacoes ?? 0) > 0 && (
+            <Badge variant="secondary" className="mt-2 bg-warning/10 text-warning border-warning/20">
+              {workout.personalizacoes} personalização{workout.personalizacoes === 1 ? "" : "ões"} activa{workout.personalizacoes === 1 ? "" : "s"}
+            </Badge>
+          )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           <Button variant="outline" onClick={onBack} disabled={saving}>
             Cancelar
           </Button>
+          {studentCopy && (
+            <Button variant="outline" onClick={openSaveAsTemplate} disabled={saving || savingTemplate}>
+              <BookmarkPlus className="w-4 h-4 mr-2" />
+              Salvar como novo template
+            </Button>
+          )}
           <Button onClick={handleSave} className="shadow-glow" disabled={saving}>
             {saving ? (
               <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full motion-safe:animate-spin mr-2" />
                 Salvando...
               </>
             ) : (
@@ -327,14 +511,16 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
                 />
               </div>
 
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="template"
-                  checked={formData.isTemplate}
-                  onCheckedChange={(checked) => setFormData({...formData, isTemplate: checked})}
-                />
-                <Label htmlFor="template">Salvar como template</Label>
-              </div>
+              {!studentCopy && (
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="template"
+                    checked={formData.isTemplate}
+                    onCheckedChange={(checked) => setFormData({ ...formData, isTemplate: checked })}
+                  />
+                  <Label htmlFor="template">Salvar como template</Label>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -488,6 +674,55 @@ const WorkoutForm = ({ workout, onBack, onSave }: WorkoutFormProps) => {
           </Card>
         </div>
       </div>
+
+      <Dialog
+        open={isSaveTemplateOpen}
+        onOpenChange={(open) => {
+          if (!savingTemplate) setIsSaveTemplateOpen(open);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Salvar como novo template</DialogTitle>
+            <DialogDescription>
+              Cria um template na biblioteca com os exercícios exatamente como estão nesta tela,
+              incluindo alterações ainda não salvas. O aluno continua neste treino e o template
+              original não muda.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="template-name">Nome do novo template</Label>
+              <Input
+                id="template-name"
+                value={templateName}
+                onChange={(e) => setTemplateName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && !savingTemplate && handleSaveAsTemplate()}
+                autoFocus
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => setIsSaveTemplateOpen(false)}
+                disabled={savingTemplate}
+              >
+                Cancelar
+              </Button>
+              <Button onClick={handleSaveAsTemplate} disabled={savingTemplate || !templateName.trim()}>
+                {savingTemplate ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 motion-safe:animate-spin" />
+                    Criando...
+                  </>
+                ) : (
+                  "Criar template"
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

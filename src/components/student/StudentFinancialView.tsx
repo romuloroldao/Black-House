@@ -1,42 +1,42 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
+import { getPlanoAlunoLegivel } from "@/lib/aluno-display";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDataContext } from "@/contexts/DataContext";
 import { DollarSign, CreditCard, Calendar, Download } from "lucide-react";
 
 const StudentFinancialView = () => {
-  const { user } = useAuth();
+  const { user, payment_status } = useAuth();
+  const { isReady } = useDataContext();
   const [pagamentos, setPagamentos] = useState<any[]>([]);
   const [alunoData, setAlunoData] = useState<any>(null);
 
   useEffect(() => {
-    if (user) {
+    if (isReady && user) {
       loadFinancialData();
     }
-  }, [user]);
+  }, [isReady, user]);
 
   const loadFinancialData = async () => {
-    try {
-      const { data: aluno } = await supabase
-        .from("alunos")
-        .select("*")
-        .eq("email", user?.email)
-        .maybeSingle();
+    const alunoResult = await apiClient.getMeSafe();
+    const aluno = alunoResult.success ? alunoResult.data : null;
 
-      if (aluno) {
-        setAlunoData(aluno);
+    if (aluno) {
+      setAlunoData(aluno);
 
-        const { data: pagamentosData } = await supabase
-          .from("asaas_payments")
-          .select("*")
-          .eq("aluno_id", aluno.id)
-          .order("due_date", { ascending: false });
-
-        setPagamentos(pagamentosData || []);
-      }
-    } catch (error) {
-      console.error("Erro ao carregar dados financeiros:", error);
+      const pagamentosResult = await apiClient.requestSafe<any[]>('/api/asaas-payments');
+      const pagamentosData = pagamentosResult.success && Array.isArray(pagamentosResult.data)
+        ? pagamentosResult.data
+        : [];
+      const filtrados = pagamentosData
+        .filter(p => p.aluno_id === aluno.id)
+        .sort((a, b) => new Date(b.due_date || 0).getTime() - new Date(a.due_date || 0).getTime());
+      setPagamentos(filtrados);
+    } else {
+      setAlunoData(null);
+      setPagamentos([]);
     }
   };
 
@@ -61,10 +61,32 @@ const StudentFinancialView = () => {
     return types[type] || type;
   };
 
+  // DESIGN-022: Componente só renderiza quando DataContext === READY
+  if (!isReady) {
+    return null;
+  }
+
+  const overdueCount = pagamentos.filter((p) => p.status === 'OVERDUE').length;
+  const pendingOverdue = pagamentos.filter(
+    (p) => p.status === 'PENDING' && p.due_date && new Date(p.due_date) < new Date(),
+  ).length;
+  const statusLabel =
+    payment_status === 'OVERDUE' || payment_status === 'PENDING_AFTER_DUE_DATE'
+      ? 'Inadimplente'
+      : overdueCount > 0 || pendingOverdue > 0
+        ? 'Atenção'
+        : 'Em dia';
+  const statusVariant =
+    statusLabel === 'Inadimplente'
+      ? 'destructive'
+      : statusLabel === 'Atenção'
+        ? 'outline'
+        : 'premium';
+
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold mb-2">Financeiro</h1>
+        <h1 className="mb-2 text-xl font-bold sm:text-2xl">Financeiro</h1>
         <p className="text-muted-foreground">
           Gerencie seus pagamentos e histórico financeiro
         </p>
@@ -77,7 +99,7 @@ const StudentFinancialView = () => {
             <CreditCard className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{alunoData?.plano || "Premium"}</div>
+            <div className="text-2xl font-bold break-words">{getPlanoAlunoLegivel(alunoData)}</div>
             <p className="text-xs text-muted-foreground mt-1">Ativo</p>
           </CardContent>
         </Card>
@@ -99,9 +121,11 @@ const StudentFinancialView = () => {
             <Calendar className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <Badge variant="premium" className="mt-1">Em dia</Badge>
+            <Badge variant={statusVariant} className="mt-1">{statusLabel}</Badge>
             <p className="text-xs text-muted-foreground mt-2">
-              Nenhuma pendência
+              {statusLabel === 'Em dia'
+                ? 'Nenhuma pendência'
+                : `${overdueCount + pendingOverdue} cobrança(s) em aberto`}
             </p>
           </CardContent>
         </Card>

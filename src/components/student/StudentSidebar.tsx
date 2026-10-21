@@ -1,27 +1,71 @@
-import { Home, Utensils, Dumbbell, Play, MessageSquare, TrendingUp, DollarSign, User, LogOut, FileText, Megaphone, ClipboardCheck } from "lucide-react";
+import {
+  CalendarDays,
+  Utensils,
+  Dumbbell,
+  Play,
+  MessageSquare,
+  Camera,
+  DollarSign,
+  User,
+  LogOut,
+  FileText,
+  ClipboardCheck,
+  BookOpen,
+  ChevronDown,
+  MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
+  type LucideIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDataContext } from "@/contexts/DataContext";
 import { useNavigate } from "react-router-dom";
-import { useState, useEffect, useRef } from "react";
-import { supabase } from "@/integrations/supabase/client";
-import logoWhite from "@/assets/logo-white.svg";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { apiClient } from "@/lib/api-client";
+import { BrandLogo } from "@/components/BrandLogo";
+import { ThemeToggleCompact } from "@/components/ui/mode-toggle";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import MessagesPopover from "./MessagesPopover";
+import { Skeleton } from "@/components/ui/skeleton";
+import { countIncomingUnread } from "@/lib/message-read";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { useStudentNavMode } from "@/hooks/useStudentNavMode";
 
 interface StudentSidebarProps {
   activeTab: string;
-  onTabChange: (tab: string) => void;
+  onTabChange: (tab: string, extra?: Record<string, string>) => void;
+  mobileOpen?: boolean;
+  onMobileOpenChange?: (open: boolean) => void;
+  /** Controlado pelo portal para sync com padding do main */
+  navMode?: "compact" | "expanded";
+  onToggleNavMode?: () => void;
 }
 
-const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
+const StudentSidebar = ({
+  activeTab,
+  onTabChange,
+  mobileOpen = false,
+  onMobileOpenChange,
+  navMode: navModeProp,
+  onToggleNavMode,
+}: StudentSidebarProps) => {
   const { signOut, user } = useAuth();
+  const { isReady, identity } = useDataContext();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const internalNav = useStudentNavMode();
+  const mode = navModeProp ?? internalNav.mode;
+  const isCompact = mode === "compact";
+  const toggle = onToggleNavMode ?? internalNav.toggle;
   const [unreadCount, setUnreadCount] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [animateBadge, setAnimateBadge] = useState(false);
@@ -31,413 +75,519 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
   const [studentAvatar, setStudentAvatar] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(true);
   const isMarkingAsReadRef = useRef(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  /** Expansão temporária no hover (só desktop compact + pointer fino) */
+  const [hoverExpand, setHoverExpand] = useState(false);
+
+  const MORE_TAB_IDS = ["progress", "videos", "education", "reports", "financial", "profile", "dashboard"];
+  const coachUnreadTotal = unreadMessages + unreadCount;
+
+  /** Expansão permanente ou hover no desktop (ignora mobileOpen). */
+  const railExpanded = !isCompact || hoverExpand;
+  /** Labels no rail expandido, hover, ou drawer mobile aberto. */
+  const showLabels = railExpanded || mobileOpen;
+  /** Tooltips só no compact sem hover (desktop). */
+  const showIconTooltips = isCompact && !hoverExpand && !mobileOpen;
+
+  const getFirstName = (value?: string | null): string => {
+    if (!value) return "Usuário";
+    const normalized = value.trim();
+    if (!normalized) return "Usuário";
+    return normalized.split(/\s+/)[0] || "Usuário";
+  };
+
+  const getFirstNameFromEmail = (email?: string | null): string => {
+    const rawEmail = (email || "").trim().toLowerCase();
+    if (!rawEmail.includes("@")) return "Usuário";
+
+    const localPart = rawEmail.split("@")[0] || "";
+    const normalized = localPart.replace(/[._-]+/g, " ").trim();
+    const firstChunk = normalized.split(" ").filter(Boolean)[0];
+    if (!firstChunk) return "Usuário";
+    return firstChunk.charAt(0).toUpperCase() + firstChunk.slice(1);
+  };
+
+  const normalizeAvatarUrl = (raw: unknown): string | null => {
+    if (typeof raw !== "string") return null;
+    const value = raw.trim();
+    if (!value) return null;
+    if (value.startsWith("/api/")) {
+      const base = (import.meta.env.VITE_API_URL || "https://api.blackhouse.app.br").replace(/\/$/, "");
+      return `${base}${value}`;
+    }
+    if (/^http:\/\/localhost:3001/i.test(value)) {
+      return value.replace(/^http:\/\/localhost:3001/i, "https://api.blackhouse.app.br");
+    }
+    return value;
+  };
+
+  const safeStudentName = studentName
+    ? getFirstName(studentName)
+    : identity?.nome
+      ? getFirstName(identity.nome)
+      : getFirstNameFromEmail(user?.email);
+  const safeStudentAvatar = studentAvatar || null;
+  const safeInitial = safeStudentName.charAt(0)?.toUpperCase() || "?";
 
   useEffect(() => {
-    // Initialize audio for notifications
-    audioRef.current = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZURE');
-    
+    audioRef.current = new Audio(
+      "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZURE",
+    );
+
     if (user) {
-      loadStudentProfile();
+      loadStudentProfile().catch((error) => {
+        console.warn("[STUDENT-SIDEBAR] Erro ao carregar perfil do aluno (não crítico):", error);
+      });
       loadUnreadCount();
       loadUnreadMessages();
-      
-      // Subscribe to avisos changes
-      const avisosChannel = supabase
-        .channel('avisos-changes')
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'avisos_destinatarios'
-          },
-          () => {
-            // Only reload if we're not currently marking messages as read
-            if (!isMarkingAsReadRef.current) {
-              loadUnreadCount();
-            }
+
+      let intervalId: NodeJS.Timeout | null = null;
+
+      if (user.role === "aluno") {
+        intervalId = setInterval(() => {
+          if (!isMarkingAsReadRef.current) {
+            loadUnreadCount();
+            loadUnreadMessages();
           }
-        )
-        .subscribe();
+        }, 10000);
+      }
 
-      // Subscribe to mensagens changes for chat
-      const mensagensChannel = supabase
-        .channel('mensagens-changes')
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'mensagens'
-          },
-          async (payload) => {
-            // Check if message is for current user
-            const { data: alunoData } = await supabase
-              .from("alunos")
-              .select("id")
-              .eq("email", user.email)
-              .single();
-
-            if (alunoData) {
-              const { data: conversaData } = await supabase
-                .from("conversas")
-                .select("id")
-                .eq("aluno_id", alunoData.id)
-                .single();
-
-              if (conversaData && payload.new.conversa_id === conversaData.id && payload.new.remetente_id !== user.id) {
-                // New message received
-                loadUnreadMessages();
-                
-                // Play notification sound
-                if (audioRef.current) {
-                  audioRef.current.play().catch(e => console.log('Audio play failed:', e));
-                }
-                
-                // Trigger badge animation
-                setAnimateBadge(true);
-                setTimeout(() => setAnimateBadge(false), 1000);
-                
-                // Show toast notification
-                toast({
-                  title: "Nova mensagem",
-                  description: "Você recebeu uma nova mensagem no chat",
-                });
-              }
-            }
-          }
-        )
-        .subscribe();
-
-      // Presence channel for online status
-      const presenceChannel = supabase.channel('student-presence');
-      
-      presenceChannel
-        .on('presence', { event: 'sync' }, () => {
-          setIsOnline(true);
-        })
-        .subscribe(async (status) => {
-          if (status === 'SUBSCRIBED') {
-            await presenceChannel.track({
-              user_id: user.id,
-              online_at: new Date().toISOString(),
-            });
-          }
-        });
-
-      // Handle visibility change to update presence
-      const handleVisibilityChange = async () => {
-        if (document.hidden) {
-          await presenceChannel.untrack();
-          setIsOnline(false);
-        } else {
-          await presenceChannel.track({
-            user_id: user.id,
-            online_at: new Date().toISOString(),
-          });
-          setIsOnline(true);
-        }
+      const handleVisibilityChange = () => {
+        setIsOnline(!document.hidden);
       };
 
-      document.addEventListener('visibilitychange', handleVisibilityChange);
+      document.addEventListener("visibilitychange", handleVisibilityChange);
 
       return () => {
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-        supabase.removeChannel(avisosChannel);
-        supabase.removeChannel(mensagensChannel);
-        supabase.removeChannel(presenceChannel);
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+        if (intervalId) clearInterval(intervalId);
       };
     }
-  }, [user, toast]);
+  }, [user, toast, identity]);
+
+  useEffect(() => {
+    if (MORE_TAB_IDS.includes(activeTab)) {
+      setMoreOpen(true);
+    }
+  }, [activeTab]);
+
+  const canHoverExpand = useCallback(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+  }, []);
+
+  const handleRailEnter = () => {
+    if (isCompact && !mobileOpen && canHoverExpand()) setHoverExpand(true);
+  };
+
+  const handleRailLeave = () => {
+    setHoverExpand(false);
+  };
 
   const loadStudentProfile = async () => {
-    if (!user) return;
-
-    // Get user metadata from auth
-    const { data: userData } = await supabase.auth.getUser();
-    if (userData?.user) {
-      const metadata = userData.user.user_metadata;
-      const avatarUrl = metadata?.avatar_url || null;
-      setStudentAvatar(avatarUrl);
+    if (!user?.id) {
+      setStudentAvatar(null);
+      return;
     }
 
-    // Get student name from alunos table
-    const { data: alunoData } = await supabase
-      .from("alunos")
-      .select("nome")
-      .eq("email", user.email)
-      .single();
+    const baseName = identity?.nome
+      ? getFirstName(identity.nome)
+      : getFirstNameFromEmail(user.email);
+    setStudentName(baseName);
 
-    if (alunoData?.nome) {
-      const firstName = alunoData.nome.split(' ')[0];
-      setStudentName(firstName);
-    } else {
-      const fallbackName = user.email?.split('@')[0] || 'Aluno';
-      setStudentName(fallbackName);
+    const profileResult = await apiClient.requestSafe<any>("/api/profiles/me");
+    if (profileResult.success && profileResult.data) {
+      const displayName = String(profileResult.data.display_name || "").trim();
+      if (displayName) {
+        setStudentName(getFirstName(displayName));
+      }
+      setStudentAvatar(normalizeAvatarUrl(profileResult.data.avatar_url));
+      return;
     }
+
+    setStudentAvatar(null);
   };
 
   const loadUnreadCount = async () => {
     if (!user) return;
 
-    // Get student ID
-    const { data: alunoData } = await supabase
-      .from("alunos")
-      .select("id")
-      .eq("email", user.email)
-      .single();
+    const alunoResult = await apiClient.getMeSafe();
+    const aluno = alunoResult.success ? alunoResult.data : null;
+    if (!aluno) return;
 
-    if (!alunoData) return;
+    const turmasResult = await apiClient.requestSafe<any[]>("/api/turmas-alunos");
+    const turmasAluno =
+      turmasResult.success && Array.isArray(turmasResult.data) ? turmasResult.data : [];
+    const turmaIds = turmasAluno.filter((t) => t.aluno_id === aluno.id).map((t) => t.turma_id);
 
-    // Get student's classes
-    const { data: turmasAluno } = await supabase
-      .from("turmas_alunos")
-      .select("turma_id")
-      .eq("aluno_id", alunoData.id);
+    const avisosResult = await apiClient.requestSafe<any[]>("/api/avisos-destinatarios");
+    const avisos =
+      avisosResult.success && Array.isArray(avisosResult.data) ? avisosResult.data : [];
 
-    const turmaIds = turmasAluno?.map(t => t.turma_id) || [];
+    const individualCount = avisos.filter((a) => a.aluno_id === aluno.id && a.lido === false).length;
+    const classCount =
+      turmaIds.length > 0
+        ? avisos.filter((a) => a.lido === false && turmaIds.includes(a.turma_id)).length
+        : 0;
 
-    // Count unread individual messages
-    const { count: individualCount } = await supabase
-      .from("avisos_destinatarios")
-      .select("*", { count: "exact", head: true })
-      .eq("aluno_id", alunoData.id)
-      .eq("lido", false);
-
-    // Count unread class messages
-    let classCount = 0;
-    if (turmaIds.length > 0) {
-      const { count } = await supabase
-        .from("avisos_destinatarios")
-        .select("*", { count: "exact", head: true })
-        .in("turma_id", turmaIds)
-        .eq("lido", false);
-      classCount = count || 0;
-    }
-
-    setUnreadCount((individualCount || 0) + classCount);
+    setUnreadCount(individualCount + classCount);
   };
 
   const loadUnreadMessages = async () => {
-    if (!user) return;
+    if (!user || user.role !== "aluno") {
+      setUnreadMessages(0);
+      return;
+    }
 
-    const { data: alunoData } = await supabase
-      .from("alunos")
-      .select("id")
-      .eq("email", user.email)
-      .single();
+    const mensagensResult = await apiClient.requestSafe<any[]>("/api/mensagens");
+    const mensagens =
+      mensagensResult.success && Array.isArray(mensagensResult.data) ? mensagensResult.data : [];
 
-    if (!alunoData) return;
+    const newCount = countIncomingUnread(mensagens, user.id);
 
-    const { data: conversaData } = await supabase
-      .from("conversas")
-      .select("id")
-      .eq("aluno_id", alunoData.id)
-      .single();
-
-    if (!conversaData) return;
-
-    const { count } = await supabase
-      .from("mensagens")
-      .select("*", { count: "exact", head: true })
-      .eq("conversa_id", conversaData.id)
-      .eq("lida", false)
-      .neq("remetente_id", user.id);
-
-    const newCount = count || 0;
-    
-    // Check if count increased
     if (newCount > previousUnreadRef.current && previousUnreadRef.current > 0) {
       setAnimateBadge(true);
       setTimeout(() => setAnimateBadge(false), 1000);
     }
-    
+
     previousUnreadRef.current = newCount;
     setUnreadMessages(newCount);
   };
 
-  const markChatMessagesAsRead = async () => {
-    if (!user) return;
-
-    // Clear badge immediately for better UX
-    setUnreadMessages(0);
-
-    const { data: alunoData } = await supabase
-      .from("alunos")
-      .select("id")
-      .eq("email", user.email)
-      .single();
-
-    if (!alunoData) return;
-
-    const { data: conversaData } = await supabase
-      .from("conversas")
-      .select("id")
-      .eq("aluno_id", alunoData.id)
-      .single();
-
-    if (!conversaData) return;
-
-    await supabase
-      .from("mensagens")
-      .update({ lida: true })
-      .eq("conversa_id", conversaData.id)
-      .eq("lida", false)
-      .neq("remetente_id", user.id);
-  };
-
-  const markAnnouncementsAsRead = async () => {
-    if (!user) return;
-
-    // Set flag to prevent real-time subscription from reloading
-    isMarkingAsReadRef.current = true;
-    
-    // Clear badge immediately for better UX
-    setUnreadCount(0);
-
-    const { data: alunoData } = await supabase
-      .from("alunos")
-      .select("id")
-      .eq("email", user.email)
-      .single();
-
-    if (!alunoData) {
-      isMarkingAsReadRef.current = false;
-      return;
-    }
-
-    const { data: turmasAluno } = await supabase
-      .from("turmas_alunos")
-      .select("turma_id")
-      .eq("aluno_id", alunoData.id);
-
-    const turmaIds = turmasAluno?.map(t => t.turma_id) || [];
-
-    // Mark individual messages as read
-    await supabase
-      .from("avisos_destinatarios")
-      .update({ lido: true, lido_em: new Date().toISOString() })
-      .eq("aluno_id", alunoData.id)
-      .eq("lido", false);
-
-    // Mark class messages as read
-    if (turmaIds.length > 0) {
-      await supabase
-        .from("avisos_destinatarios")
-        .update({ lido: true, lido_em: new Date().toISOString() })
-        .in("turma_id", turmaIds)
-        .eq("lido", false);
-    }
-
-    // Wait a bit for database to propagate changes, then allow real-time updates again
-    setTimeout(() => {
-      isMarkingAsReadRef.current = false;
-    }, 500);
-  };
-
   const handleTabChange = (tab: string) => {
-    onTabChange(tab);
-    
-    // Mark messages as read when user opens the respective tab
-    if (tab === "chat" && unreadMessages > 0) {
-      markChatMessagesAsRead();
-    } else if (tab === "messages" && unreadCount > 0) {
-      markAnnouncementsAsRead();
+    if (tab === "coach") {
+      const coachView =
+        unreadMessages > 0 ? "chat" : unreadCount > 0 ? "avisos" : "chat";
+      onTabChange("coach", { coachView });
+    } else {
+      onTabChange(tab);
     }
+    onMobileOpenChange?.(false);
+  };
+
+  const isTabActive = (tabId: string): boolean => {
+    if (tabId === "coach") {
+      return activeTab === "coach" || activeTab === "chat" || activeTab === "messages";
+    }
+    if (tabId === "hoje") {
+      return activeTab === "hoje" || activeTab === "dashboard";
+    }
+    return activeTab === tabId;
   };
 
   const handleLogout = async () => {
+    onMobileOpenChange?.(false);
     await signOut();
     navigate("/auth");
   };
 
-  const menuItems = [
-    { id: "dashboard", label: "Dashboard", icon: Home },
-    { id: "diet", label: "Minha Dieta", icon: Utensils },
-    { id: "workouts", label: "Meus Treinos", icon: Dumbbell },
-    { id: "videos", label: "Galeria de Vídeos", icon: Play },
-    { id: "chat", label: "Chat", icon: MessageSquare, badge: unreadMessages },
-    { id: "messages", label: "Mensagens do Coach", icon: Megaphone, badge: unreadCount },
-    { id: "reports", label: "Meus Relatórios", icon: FileText },
-    { id: "checkin", label: "Check-in Semanal", icon: ClipboardCheck },
-    { id: "progress", label: "Meu Progresso", icon: TrendingUp },
-    { id: "financial", label: "Financeiro", icon: DollarSign },
-    { id: "profile", label: "Meu Perfil", icon: User },
+  const handleToggleMode = () => {
+    setHoverExpand(false);
+    // Limpa flag do drawer — no desktop mobileOpen=true forçava labels sem overlay de fecho
+    onMobileOpenChange?.(false);
+    toggle();
+  };
+
+  type MenuItem = {
+    id: string;
+    label: string;
+    icon: LucideIcon;
+    badge?: number;
+  };
+
+  const primaryMenuItems: MenuItem[] = [
+    { id: "hoje", label: "Hoje", icon: CalendarDays },
+    { id: "diet", label: "Dieta", icon: Utensils },
+    { id: "workouts", label: "Treinos", icon: Dumbbell },
+    { id: "coach", label: "Coach", icon: MessageSquare, badge: coachUnreadTotal },
+    { id: "checkin", label: "Check-in", icon: ClipboardCheck },
   ];
 
+  const moreMenuItems: MenuItem[] = [
+    { id: "progress", label: "Fotos e métricas", icon: Camera },
+    { id: "videos", label: "Vídeos", icon: Play },
+    { id: "education", label: "Educação", icon: BookOpen },
+    { id: "reports", label: "Relatórios", icon: FileText },
+    { id: "financial", label: "Financeiro", icon: DollarSign },
+    { id: "profile", label: "Perfil", icon: User },
+  ];
+
+  const renderMenuButton = (item: MenuItem) => {
+    const Icon = item.icon;
+    const isActive = isTabActive(item.id);
+    const itemBadge = typeof item.badge === "number" ? item.badge : undefined;
+
+    const button = (
+      <Button
+        variant={isActive ? "default" : "ghost"}
+        className={cn(
+          "relative w-full min-h-11 transition-[width,padding,background-color,color] duration-200 ease-out motion-reduce:transition-none",
+          showLabels ? "justify-start px-3" : "justify-center px-0",
+        )}
+        onClick={() => handleTabChange(item.id)}
+        aria-label={item.label}
+        aria-current={isActive ? "page" : undefined}
+      >
+        <Icon className={cn("h-4 w-4 shrink-0", showLabels && "mr-3")} aria-hidden />
+        <span
+          className={cn(
+            "truncate transition-opacity duration-150 motion-reduce:transition-none",
+            showLabels ? "opacity-100" : "sr-only opacity-0",
+          )}
+        >
+          {item.label}
+        </span>
+        {itemBadge !== undefined && itemBadge > 0 && (
+          <Badge
+            variant="destructive"
+            className={cn(
+              showLabels ? "ml-auto" : "absolute right-1 top-1 h-4 min-w-4 px-1 text-[10px]",
+              animateBadge && item.id === "coach" && "motion-safe:animate-bounce",
+            )}
+          >
+            {itemBadge > 9 ? "9+" : itemBadge}
+          </Badge>
+        )}
+      </Button>
+    );
+
+    if (!showIconTooltips) {
+      return <div key={item.id}>{button}</div>;
+    }
+
+    return (
+      <Tooltip key={item.id}>
+        <TooltipTrigger asChild>{button}</TooltipTrigger>
+        <TooltipContent side="right" sideOffset={8}>
+          <p>{item.label}</p>
+        </TooltipContent>
+      </Tooltip>
+    );
+  };
+
+  const showSkeleton = !isReady;
+
   return (
-    <aside className="w-64 bg-card border-r border-border flex flex-col transition-all duration-300 ease-in-out">
-      <div className="p-6 border-b border-border flex items-center justify-between">
-        <img src={logoWhite} alt="Black House" className="h-12 w-auto" />
-        <MessagesPopover unreadCount={unreadMessages} onCountChange={setUnreadMessages} />
-      </div>
-
-      <ScrollArea className="flex-1">
-        <nav className="p-4 space-y-2">
-          <TooltipProvider delayDuration={0}>
-            {menuItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeTab === item.id;
-              return (
-                <Tooltip key={item.id}>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant={isActive ? "default" : "ghost"}
-                      className="w-full justify-start relative transition-all duration-200 ease-in-out"
-                      onClick={() => handleTabChange(item.id)}
-                    >
-                      <Icon className="mr-3 h-4 w-4" />
-                      {item.label}
-                      {item.badge !== undefined && item.badge > 0 && (
-                        <Badge 
-                          variant="destructive" 
-                          className={`ml-auto ${animateBadge && item.id === 'chat' ? 'animate-bounce' : ''}`}
-                        >
-                          {item.badge}
-                        </Badge>
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right" className="md:hidden">
-                    <p>{item.label}</p>
-                  </TooltipContent>
-                </Tooltip>
-              );
-            })}
-          </TooltipProvider>
-        </nav>
-      </ScrollArea>
-
-      <div className="p-4 border-t border-border">
-        <div className="flex items-center gap-3 mb-4 p-2 rounded-lg hover:bg-muted/50 transition-colors">
-          <div className="relative">
-            <Avatar className="h-10 w-10">
-              <AvatarImage src={studentAvatar || undefined} alt={studentName} />
-              <AvatarFallback className="bg-primary/10 text-primary font-medium">
-                {studentName.charAt(0).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-            <div 
-              className={cn(
-                "absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-background transition-colors",
-                isOnline ? "bg-green-500" : "bg-muted-foreground"
-              )}
-              title={isOnline ? "Online" : "Offline"}
-            />
+    <>
+      {mobileOpen && (
+        <button
+          type="button"
+          aria-label="Fechar menu"
+          className="fixed inset-0 z-[110] bg-black/60 md:hidden"
+          onClick={() => onMobileOpenChange?.(false)}
+        />
+      )}
+      <aside
+        data-nav-mode={mode}
+        data-hover-expand={hoverExpand ? "true" : "false"}
+        onMouseEnter={handleRailEnter}
+        onMouseLeave={handleRailLeave}
+        className={cn(
+          "flex shrink-0 flex-col overflow-hidden border-r border-border bg-card",
+          "transition-[width] duration-200 ease-out motion-reduce:transition-none",
+          /* Desktop: compact w-16 / expandido ou hover w-64 */
+          "md:z-auto md:sticky md:top-0 md:self-start md:h-dvh md:max-h-dvh md:shadow-none",
+          railExpanded ? "md:w-64" : "md:w-16",
+          /* Mobile: menu lateral só via hamburger / drawer */
+          "max-md:hidden",
+          mobileOpen && "max-md:!flex",
+          mobileOpen &&
+            "max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-[120] max-md:flex max-md:h-full max-md:w-[min(288px,88vw)] max-md:shadow-xl",
+        )}
+        aria-label="Navegação principal"
+      >
+        <div
+          className={cn(
+            "flex items-center border-b border-border",
+            showLabels ? "justify-between gap-2 p-4" : "justify-center gap-1 p-3",
+          )}
+        >
+          <BrandLogo
+            className={cn(
+              "transition-all duration-200 motion-reduce:transition-none",
+              showLabels ? "h-10" : "h-7",
+            )}
+          />
+          <div className="flex shrink-0 items-center gap-0.5">
+            <ThemeToggleCompact />
+            {mobileOpen ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-11 w-11 shrink-0 md:hidden"
+                aria-label="Fechar menu"
+                onClick={() => onMobileOpenChange?.(false)}
+              >
+                <PanelLeftClose className="h-5 w-5" aria-hidden />
+              </Button>
+            ) : null}
           </div>
-          <span className="text-sm font-medium text-foreground">{studentName}</span>
         </div>
 
-        <Button
-          variant="outline"
-          className="w-full justify-start"
-          onClick={handleLogout}
+        <ScrollArea className="flex-1">
+          <nav className={cn("space-y-1", showLabels ? "p-3" : "p-2")} aria-label="Secções">
+            <TooltipProvider delayDuration={300}>
+              {showSkeleton ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <Skeleton
+                      key={i}
+                      className={cn("h-11", showLabels ? "w-full" : "mx-auto w-11")}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <>
+                  {primaryMenuItems.map(renderMenuButton)}
+
+                  <Collapsible
+                    open={moreOpen}
+                    onOpenChange={setMoreOpen}
+                    className="pt-2 md:hidden"
+                  >
+                    <CollapsibleTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        className="min-h-11 w-full justify-between text-muted-foreground hover:text-foreground"
+                      >
+                        <span className="flex items-center gap-3">
+                          <MoreHorizontal className="h-4 w-4" aria-hidden />
+                          Mais
+                        </span>
+                        <ChevronDown
+                          className={cn(
+                            "h-4 w-4 transition-transform motion-reduce:transition-none",
+                            moreOpen && "rotate-180",
+                          )}
+                          aria-hidden
+                        />
+                      </Button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="space-y-1 pt-1">
+                      {moreMenuItems.map(renderMenuButton)}
+                    </CollapsibleContent>
+                  </Collapsible>
+
+                  <div
+                    className={cn(
+                      "hidden border-t border-border/60 pt-3 md:block",
+                      showLabels ? "space-y-1" : "space-y-1",
+                    )}
+                  >
+                    {showLabels && (
+                      <p className="px-3 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Mais
+                      </p>
+                    )}
+                    {moreMenuItems.map(renderMenuButton)}
+                  </div>
+                </>
+              )}
+            </TooltipProvider>
+          </nav>
+        </ScrollArea>
+
+        <div
+          className={cn(
+            "border-t border-border",
+            showLabels ? "space-y-2 p-3" : "space-y-2 p-2",
+          )}
         >
-          <LogOut className="mr-3 h-4 w-4" />
-          Sair
-        </Button>
-      </div>
-    </aside>
+          {/* Toggle desktop — sempre visível */}
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={cn(
+                    "min-h-11 w-full transition-all duration-200 motion-reduce:transition-none",
+                    showLabels ? "justify-start px-3" : "justify-center px-0",
+                  )}
+                  onClick={handleToggleMode}
+                  aria-pressed={!isCompact}
+                  aria-label={
+                    isCompact
+                      ? "Expandir navegação (mostrar nomes)"
+                      : "Recolher navegação (só ícones)"
+                  }
+                >
+                  {isCompact ? (
+                    <PanelLeftOpen className={cn("h-4 w-4 shrink-0", showLabels && "mr-3")} aria-hidden />
+                  ) : (
+                    <PanelLeftClose className={cn("h-4 w-4 shrink-0", showLabels && "mr-3")} aria-hidden />
+                  )}
+                  <span className={cn(showLabels ? "truncate" : "sr-only")}>
+                    {isCompact ? "Expandir menu" : "Recolher menu"}
+                  </span>
+                </Button>
+              </TooltipTrigger>
+              {showIconTooltips && (
+                <TooltipContent side="right" sideOffset={8}>
+                  <p>{isCompact ? "Expandir menu" : "Recolher menu"}</p>
+                </TooltipContent>
+              )}
+            </Tooltip>
+          </TooltipProvider>
+
+          <div
+            className={cn(
+              "flex items-center rounded-lg transition-colors motion-reduce:transition-none",
+              showLabels ? "gap-3 p-2 hover:bg-muted/50" : "justify-center p-1",
+            )}
+          >
+            <div className="relative shrink-0">
+              <Avatar className={cn(showLabels ? "h-10 w-10" : "h-9 w-9")}>
+                <AvatarImage src={safeStudentAvatar || undefined} alt={safeStudentName} />
+                <AvatarFallback className="bg-primary/10 font-medium text-primary">
+                  {safeInitial}
+                </AvatarFallback>
+              </Avatar>
+              <div
+                className={cn(
+                  "absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-background transition-colors",
+                  isOnline ? "bg-green-500" : "bg-muted-foreground",
+                )}
+                title={isOnline ? "Online" : "Offline"}
+              />
+            </div>
+            <span
+              className={cn(
+                "truncate text-sm font-medium text-foreground",
+                showLabels ? "opacity-100" : "sr-only",
+              )}
+            >
+              {safeStudentName}
+            </span>
+          </div>
+
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    "min-h-11 w-full",
+                    showLabels ? "justify-start px-3" : "justify-center px-0",
+                  )}
+                  onClick={handleLogout}
+                  aria-label="Sair"
+                >
+                  <LogOut className={cn("h-4 w-4 shrink-0", showLabels && "mr-3")} aria-hidden />
+                  <span className={cn(showLabels ? "" : "sr-only")}>Sair</span>
+                </Button>
+              </TooltipTrigger>
+              {showIconTooltips && (
+                <TooltipContent side="right" sideOffset={8}>
+                  <p>Sair</p>
+                </TooltipContent>
+              )}
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+      </aside>
+    </>
   );
 };
 

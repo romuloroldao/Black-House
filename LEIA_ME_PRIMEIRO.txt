@@ -1,0 +1,53 @@
+╔══════════════════════════════════════════════════════════════════════╗
+║          IMPORTAÇÃO DE DADOS CSV - GUIA SUPER SIMPLES               ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+🎯 O QUE VOCÊ PRECISA FAZER:
+
+═══════════════════════════════════════════════════════════════════════
+
+OPÇÃO 1: AUTOMÁTICO (MAIS FÁCIL)
+═══════════════════════════════════════════════════════════════════════
+
+1. Copie os 4 arquivos CSV para /root/:
+   
+   - migrations_rows.csv
+   - objects_rows.csv
+   - buckets_rows.csv
+   - prefixes_rows.csv
+
+2. Execute este comando:
+   
+   bash FAZER_TUDO.sh
+
+3. Pronto! Os scripts SQL serão gerados automaticamente!
+
+═══════════════════════════════════════════════════════════════════════
+
+OPÇÃO 2: EU FAÇO PARA VOCÊ
+═══════════════════════════════════════════════════════════════════════
+
+Se você não sabe como copiar os arquivos, me diga:
+
+"Execute o script para mim" ou "Faça a importação"
+
+E eu faço tudo! Você só precisa ter os arquivos CSV disponíveis.
+
+═══════════════════════════════════════════════════════════════════════
+
+O QUE ACONTECE DEPOIS:
+═══════════════════════════════════════════════════════════════════════
+
+1. ✅ Scripts SQL são gerados automaticamente
+2. ✅ Você recebe 4 arquivos .sql prontos
+3. ✅ Você cola cada um no Supabase SQL Editor
+4. ✅ Pronto! Dados importados!
+
+═══════════════════════════════════════════════════════════════════════
+
+PRECISA DE AJUDA?
+═══════════════════════════════════════════════════════════════════════
+
+Me diga: "Preciso de ajuda" e eu te ajudo passo a passo!
+
+═══════════════════════════════════════════════════════════════════════

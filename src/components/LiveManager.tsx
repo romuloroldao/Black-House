@@ -1,10 +1,9 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { 
   Plus, 
   Search, 
@@ -35,14 +34,10 @@ const LiveManager = () => {
 
   const carregarLives = async () => {
     try {
-      const { data, error } = await supabase
-        .from('lives')
-        .select('*')
-        .order('data_agendamento', { ascending: false });
-
-      if (error) throw error;
-
-      const livesFormatadas = data?.map(live => ({
+      const result = await apiClient.requestSafe<any[]>('/api/lives');
+      const livesData = result.success && Array.isArray(result.data) ? result.data : [];
+      const ordered = livesData.sort((a, b) => new Date(b.data_agendamento || 0).getTime() - new Date(a.data_agendamento || 0).getTime());
+      const livesFormatadas = ordered.map(live => ({
         id: live.id,
         title: live.titulo,
         description: live.descricao || '',
@@ -58,7 +53,7 @@ const LiveManager = () => {
         remindersEnabled: live.lembretes_ativados,
         autoRecord: live.auto_gravar,
         tags: live.tags || []
-      })) || [];
+      }));
 
       setLives(livesFormatadas);
     } catch (error) {
@@ -241,7 +236,7 @@ const LiveManager = () => {
   if (loading) {
     return (
       <div className="space-y-6">
-        <div className="animate-pulse">
+        <div className="motion-safe:animate-pulse">
           <div className="h-8 bg-muted rounded w-1/3 mb-4"></div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
             {[1, 2, 3].map(i => (

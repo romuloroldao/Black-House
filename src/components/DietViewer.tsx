@@ -1,13 +1,27 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import {
+  dietHasMultiplosCardapiosFromItens,
+  filterItensForPlanoView,
+  parseRefeicaoLabel,
+  type DietPlano,
+} from '@/lib/diet-student-utils';
+import { sortPlanos } from '@/lib/diet-plano';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/api-client';
+import {
+  Food,
+  getAllFoodsSafe,
+  listarSubstituicoesIsocaloricas,
+  macroScaleFactor,
+  quantityUnitLabel,
+} from '@/lib/foodService';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { Calendar, Eye, Calculator, ChefHat, Pencil, Trash2 } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 
@@ -25,17 +39,9 @@ interface Dieta {
 interface ItemDieta {
   id: string;
   quantidade: number;
+  unidade_quantidade?: string;
   refeicao: string;
-  alimento: {
-    id: number;
-    nome: string;
-    quantidade: number;
-    kcal: number;
-    carboidratos: number;
-    proteinas: number;
-    lipidios: number;
-    grupo: string;
-  };
+  alimento: Food;
 }
 
 interface DietaCompleta extends Dieta {
@@ -48,6 +54,30 @@ const DietViewer = () => {
   const [dietaSelecionada, setDietaSelecionada] = useState<DietaCompleta | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingDetalhes, setLoadingDetalhes] = useState(false);
+  const [planoVisao, setPlanoVisao] = useState<DietPlano>('A');
+
+  const itensVisao = useMemo(() => {
+    if (!dietaSelecionada?.itens?.length) return [];
+    return filterItensForPlanoView(dietaSelecionada.itens, planoVisao);
+  }, [dietaSelecionada, planoVisao]);
+
+  const planosVisao = useMemo(() => {
+    if (!dietaSelecionada?.itens?.length) return [] as DietPlano[];
+    const set = new Set<DietPlano>();
+    for (const item of dietaSelecionada.itens) {
+      const { plano } = parseRefeicaoLabel(item.refeicao);
+      if (plano) set.add(plano);
+    }
+    return sortPlanos(set);
+  }, [dietaSelecionada]);
+
+  const temMultiplosCardapios = planosVisao.length >= 2;
+
+  useEffect(() => {
+    if (planosVisao.length > 0 && !planosVisao.includes(planoVisao)) {
+      setPlanoVisao(planosVisao[0]);
+    }
+  }, [planosVisao, planoVisao]);
 
   useEffect(() => {
     carregarDietas();
@@ -55,27 +85,23 @@ const DietViewer = () => {
 
   const carregarDietas = async () => {
     try {
-      const { data, error } = await supabase
-        .from('dietas')
-        .select(`
-          id,
-          nome,
-          objetivo,
-          data_criacao,
-          alunos:aluno_id (
-            nome,
-            email
-          )
-        `)
-        .order('data_criacao', { ascending: false });
+      const [dietasRes, alunosRes] = await Promise.all([
+        apiClient.requestSafe<any[]>('/api/dietas'),
+        apiClient.requestSafe<any[]>('/api/alunos'),
+      ]);
+      const dietasData = dietasRes.success && Array.isArray(dietasRes.data) ? dietasRes.data : [];
+      const alunosData = alunosRes.success && Array.isArray(alunosRes.data) ? alunosRes.data : [];
+      const alunosMap = new Map(alunosData.map((a: any) => [a.id, a]));
 
-      if (error) throw error;
-      
-      const dietasFormatadas = data?.map(dieta => ({
-        ...dieta,
-        aluno: dieta.alunos as any
-      })) || [];
-      
+      const dietasFormatadas = dietasData
+        .sort((a: any, b: any) => new Date(b.data_criacao || 0).getTime() - new Date(a.data_criacao || 0).getTime())
+        .map((dieta: any) => {
+          const aluno = alunosMap.get(dieta.aluno_id);
+          return {
+            ...dieta,
+            aluno: aluno || { nome: 'Aluno não encontrado', email: '' }
+          };
+        });
       setDietas(dietasFormatadas);
     } catch (error) {
       console.error('Erro ao carregar dietas:', error);
@@ -87,54 +113,57 @@ const DietViewer = () => {
   const carregarDetalhesDieta = async (dietaId: string) => {
     setLoadingDetalhes(true);
     try {
-      const { data: dieta, error: dietaError } = await supabase
-        .from('dietas')
-        .select(`
-          id,
-          nome,
-          objetivo,
-          data_criacao,
-          alunos:aluno_id (
-            nome,
-            email
-          )
-        `)
-        .eq('id', dietaId)
-        .single();
+      const dietaRes = await apiClient.requestSafe<any>(`/api/dietas/${dietaId}`);
+      const dieta = dietaRes.success ? dietaRes.data : null;
+      if (!dieta) throw new Error('Dieta não encontrada');
 
-      if (dietaError) throw dietaError;
+      // Buscar dados do aluno
+      const alunoRes = await apiClient.requestSafe<any>(`/api/alunos/${dieta.aluno_id}`);
+      const aluno = alunoRes.success ? alunoRes.data : null;
 
-      const { data: itens, error: itensError } = await supabase
-        .from('itens_dieta')
-        .select(`
-          id,
-          quantidade,
-          refeicao,
-          alimentos:alimento_id (
-            id,
-            nome,
-            quantidade,
-            kcal,
-            carboidratos,
-            proteinas,
-            lipidios,
-            grupo
-          )
-        `)
-        .eq('dieta_id', dietaId);
+      // Buscar itens da dieta
+      const itensRes = await apiClient.requestSafe<any[]>(`/api/itens-dieta?dieta_id=${dietaId}`);
+      const itens = itensRes.success && Array.isArray(itensRes.data) ? itensRes.data : [];
 
-      if (itensError) throw itensError;
+      const alimentosRes = await getAllFoodsSafe();
+      const alimentosData = alimentosRes.success && Array.isArray(alimentosRes.data) ? alimentosRes.data : [];
+      const alimentosMap = new Map(alimentosData.map((a: Food) => [a.id, a]));
+
+      // Buscar dados dos alimentos para cada item
+      const itensCompletos = await Promise.all(
+        itens.map(async (item: any) => {
+          const alimento = alimentosMap.get(item.alimento_id) || null;
+          
+          // Garantir que quantidade seja número
+          const quantidade = typeof item.quantidade === 'string' ? parseFloat(item.quantidade) || 0 : (item.quantidade || 0);
+          
+          return {
+            ...item,
+            quantidade: quantidade,
+            alimento: alimento ?? {
+              id: '',
+              name: 'Alimento não encontrado',
+              portion: 0,
+              calories: 0,
+              carbs: 0,
+              protein: 0,
+              fat: 0,
+              tipo_id: null,
+              tipo_nome: null,
+              origem_ptn: null,
+            },
+          };
+        })
+      );
 
       const dietaCompleta: DietaCompleta = {
         ...dieta,
-        aluno: dieta.alunos as any,
-        itens: itens?.map(item => ({
-          ...item,
-          alimento: item.alimentos as any
-        })) || []
+        aluno: aluno || { nome: 'Aluno não encontrado', email: '' },
+        itens: itensCompletos
       };
 
       setDietaSelecionada(dietaCompleta);
+      setPlanoVisao('A');
     } catch (error) {
       console.error('Erro ao carregar detalhes da dieta:', error);
     } finally {
@@ -142,57 +171,43 @@ const DietViewer = () => {
     }
   };
 
-  const calcularSubstituicoes = (item: ItemDieta, alimentos: any[]) => {
-    const alimento = item.alimento;
-    let nutrienteDominante: keyof Pick<typeof alimento, 'proteinas' | 'carboidratos' | 'lipidios'> = 'proteinas';
-    
-    if (alimento.grupo === 'Carboidrato') nutrienteDominante = 'carboidratos';
-    if (alimento.grupo === 'Lipídio') nutrienteDominante = 'lipidios';
-
-    const valorOriginal = alimento[nutrienteDominante];
-    if (valorOriginal === 0) return [];
-
-    return alimentos
-      .filter(a => 
-        a.grupo === alimento.grupo && 
-        a.id !== alimento.id &&
-        a[nutrienteDominante] > 0
-      )
-      .map(sub => {
-        const valorSub = sub[nutrienteDominante];
-        const qtdEquivalente = (item.quantidade * valorOriginal) / valorSub;
-        return {
-          nome: sub.nome,
-          quantidade: Math.round(qtdEquivalente * 10) / 10,
-          nutriente: nutrienteDominante === 'proteinas' ? 'Proteínas' : 
-                    nutrienteDominante === 'carboidratos' ? 'Carboidratos' : 'Lipídios'
-        };
-      })
-      .slice(0, 3);
+  const calcularSubstituicoes = (item: ItemDieta, alimentosLista: Food[]) => {
+    const alimento = item.alimento as Food;
+    return listarSubstituicoesIsocaloricas(
+      alimento,
+      item.quantidade,
+      item.unidade_quantidade || 'g',
+      alimentosLista,
+      { limit: 3 },
+    ).map((s) => ({
+      nome: s.alimento.name,
+      quantidade: s.quantidadeEquivalente,
+      nutriente: `${s.kcalEquivalente.toFixed(0)} kcal`,
+    }));
   };
 
   const calcularTotaisRefeicao = (itens: ItemDieta[], refeicao: string) => {
     return itens
       .filter(item => item.refeicao === refeicao)
       .reduce((total, item) => {
-        const fator = item.quantidade / item.alimento.quantidade;
+        const fator = macroScaleFactor(item.quantidade, item.unidade_quantidade, item.alimento.portion);
         return {
-          kcal: total.kcal + (item.alimento.kcal * fator),
-          proteinas: total.proteinas + (item.alimento.proteinas * fator),
-          carboidratos: total.carboidratos + (item.alimento.carboidratos * fator),
-          lipidios: total.lipidios + (item.alimento.lipidios * fator)
+          kcal: total.kcal + (item.alimento.calories * fator),
+          proteinas: total.proteinas + (item.alimento.protein * fator),
+          carboidratos: total.carboidratos + (item.alimento.carbs * fator),
+          lipidios: total.lipidios + (item.alimento.fat * fator)
         };
       }, { kcal: 0, proteinas: 0, carboidratos: 0, lipidios: 0 });
   };
 
   const calcularTotaisDieta = (itens: ItemDieta[]) => {
     return itens.reduce((total, item) => {
-      const fator = item.quantidade / item.alimento.quantidade;
+      const fator = macroScaleFactor(item.quantidade, item.unidade_quantidade, item.alimento.portion);
       return {
-        kcal: total.kcal + (item.alimento.kcal * fator),
-        proteinas: total.proteinas + (item.alimento.proteinas * fator),
-        carboidratos: total.carboidratos + (item.alimento.carboidratos * fator),
-        lipidios: total.lipidios + (item.alimento.lipidios * fator)
+        kcal: total.kcal + (item.alimento.calories * fator),
+        proteinas: total.proteinas + (item.alimento.protein * fator),
+        carboidratos: total.carboidratos + (item.alimento.carbs * fator),
+        lipidios: total.lipidios + (item.alimento.fat * fator)
       };
     }, { kcal: 0, proteinas: 0, carboidratos: 0, lipidios: 0 });
   };
@@ -204,20 +219,15 @@ const DietViewer = () => {
   const handleExcluirDieta = async (dietaId: string) => {
     try {
       // Primeiro excluir os itens da dieta
-      const { error: itensError } = await supabase
-        .from('itens_dieta')
-        .delete()
-        .eq('dieta_id', dietaId);
-
-      if (itensError) throw itensError;
+      // Nota: apiClient.delete() pode precisar de filtro diferente, então vamos buscar IDs primeiro
+      const itensRes = await apiClient.requestSafe<any[]>(`/api/itens-dieta?dieta_id=${dietaId}`);
+      const itens = itensRes.success && Array.isArray(itensRes.data) ? itensRes.data : [];
+      for (const item of itens) {
+        await apiClient.requestSafe(`/api/itens-dieta/${item.id}`, { method: 'DELETE' });
+      }
 
       // Depois excluir a dieta
-      const { error: dietaError } = await supabase
-        .from('dietas')
-        .delete()
-        .eq('id', dietaId);
-
-      if (dietaError) throw dietaError;
+      await apiClient.requestSafe(`/api/dietas/${dietaId}`, { method: 'DELETE' });
 
       toast.success('Dieta excluída com sucesso!');
       carregarDietas();
@@ -232,7 +242,7 @@ const DietViewer = () => {
   if (loading) {
     return (
       <div className="p-6">
-        <div className="animate-pulse space-y-4">
+        <div className="motion-safe:animate-pulse space-y-4">
           <div className="h-8 bg-muted rounded w-1/3"></div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[1, 2, 3].map(i => (
@@ -247,7 +257,7 @@ const DietViewer = () => {
   return (
     <div className="p-6 space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
+        <h1 className="flex items-center gap-2 text-xl font-bold text-foreground sm:text-2xl">
           <ChefHat className="w-8 h-8" />
           Dietas Criadas
         </h1>
@@ -310,7 +320,10 @@ const DietViewer = () => {
                       </AlertDialogHeader>
                       <AlertDialogFooter>
                         <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => handleExcluirDieta(dieta.id)}>
+                        <AlertDialogAction
+                          onClick={() => handleExcluirDieta(dieta.id)}
+                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        >
                           Excluir
                         </AlertDialogAction>
                       </AlertDialogFooter>
@@ -331,11 +344,14 @@ const DietViewer = () => {
                     <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
                       <DialogHeader>
                         <DialogTitle>{dietaSelecionada?.nome}</DialogTitle>
+                        <DialogDescription>
+                          Detalhes da dieta do aluno, resumo nutricional e refeições com itens e substituições.
+                        </DialogDescription>
                       </DialogHeader>
                       
                       {loadingDetalhes ? (
                         <div className="space-y-4">
-                          <div className="animate-pulse">
+                          <div className="motion-safe:animate-pulse">
                             <div className="h-4 bg-muted rounded w-1/2 mb-2"></div>
                             <div className="h-4 bg-muted rounded w-3/4"></div>
                           </div>
@@ -361,11 +377,31 @@ const DietViewer = () => {
                                 <CardTitle className="flex items-center gap-2 text-base">
                                   <Calculator className="w-4 h-4" />
                                   Resumo Nutricional Total
+                                  {temMultiplosCardapios ? (
+                                    <span className="text-xs font-normal text-muted-foreground">
+                                      (Plano {planoVisao})
+                                    </span>
+                                  ) : null}
                                 </CardTitle>
+                                {temMultiplosCardapios ? (
+                                  <div className="flex flex-wrap gap-2 pt-2">
+                                    {planosVisao.map((p) => (
+                                      <Button
+                                        key={p}
+                                        type="button"
+                                        size="sm"
+                                        variant={planoVisao === p ? 'default' : 'outline'}
+                                        onClick={() => setPlanoVisao(p)}
+                                      >
+                                        Plano {p}
+                                      </Button>
+                                    ))}
+                                  </div>
+                                ) : null}
                               </CardHeader>
                               <CardContent>
                                 {(() => {
-                                  const totais = calcularTotaisDieta(dietaSelecionada.itens);
+                                  const totais = calcularTotaisDieta(itensVisao);
                                   return (
                                     <div className="grid grid-cols-4 gap-4 text-center">
                                       <div>
@@ -394,10 +430,10 @@ const DietViewer = () => {
                           {/* Refeições */}
                           <div className="space-y-4">
                             {refeicoesPadrao.map(nomeRefeicao => {
-                              const itensRefeicao = dietaSelecionada.itens.filter(item => item.refeicao === nomeRefeicao);
+                              const itensRefeicao = itensVisao.filter(item => item.refeicao === nomeRefeicao);
                               if (itensRefeicao.length === 0) return null;
 
-                              const totaisRefeicao = calcularTotaisRefeicao(dietaSelecionada.itens, nomeRefeicao);
+                              const totaisRefeicao = calcularTotaisRefeicao(itensVisao, nomeRefeicao);
 
                               return (
                                 <div key={nomeRefeicao} className="border rounded-lg p-4">
@@ -413,9 +449,19 @@ const DietViewer = () => {
                                     {itensRefeicao.map(item => (
                                       <div key={item.id} className="border rounded p-3 space-y-2">
                                         <div className="flex items-center justify-between">
-                                          <span className="font-medium">{item.alimento.nome}</span>
+                                          <span className="font-medium">{item.alimento.name}</span>
                                           <span className="text-sm text-muted-foreground">
-                                            {item.quantidade}g - {Math.round((item.alimento.kcal * item.quantidade) / item.alimento.quantidade)} kcal
+                                            {item.quantidade}
+                                            {quantityUnitLabel(item.unidade_quantidade)} —{' '}
+                                            {Math.round(
+                                              item.alimento.calories *
+                                                macroScaleFactor(
+                                                  item.quantidade,
+                                                  item.unidade_quantidade,
+                                                  item.alimento.portion,
+                                                ),
+                                            )}{' '}
+                                            kcal
                                           </span>
                                         </div>
 

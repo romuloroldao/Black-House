@@ -46,8 +46,17 @@ const useFormField = () => {
 
   const fieldState = getFieldState(fieldContext.name, formState)
 
+  // DESIGN-ROOT-RENDER-UNBLOCK-001: Não lançar erro durante render - retornar valores seguros
   if (!fieldContext) {
-    throw new Error("useFormField should be used within <FormField>")
+    console.warn('[DESIGN-ROOT-RENDER-UNBLOCK-001] useFormField usado fora de <FormField>. Retornando valores padrão.');
+    return {
+      id: '',
+      name: '',
+      formItemId: '',
+      formDescriptionId: '',
+      formMessageId: '',
+      ...fieldContext,
+    };
   }
 
   const { id } = itemContext

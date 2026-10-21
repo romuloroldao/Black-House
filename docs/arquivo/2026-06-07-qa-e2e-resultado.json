@@ -1,0 +1,215 @@
+{
+  "at": "2026-06-07T18:53:21.937Z",
+  "results": [
+    {
+      "area": "Coach API",
+      "name": "Lista alunos",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Coach API",
+      "name": "Count check-ins pendentes",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Coach API",
+      "name": "Lista check-ins",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Coach API",
+      "name": "Galeria vídeos",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Coach API",
+      "name": "Biblioteca educativa",
+      "pass": false,
+      "detail": "500 permission denied for table educational_contents",
+      "severity": "P0"
+    },
+    {
+      "area": "Coach API",
+      "name": "Templates treino",
+      "pass": false,
+      "detail": "404 Rota não encontrada: GET /api/treinos",
+      "severity": "P1"
+    },
+    {
+      "area": "Coach API",
+      "name": "Conversas",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Coach API",
+      "name": "Notificações coach",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Coach API",
+      "name": "Agenda",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Coach API",
+      "name": "Planos pagamento",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Coach API",
+      "name": "Pagamentos Asaas",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Coach API",
+      "name": "Alimentos",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Coach API",
+      "name": "Histórico importação",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Aluno API",
+      "name": "Resumo Hoje",
+      "pass": false,
+      "detail": "404 Rota não encontrada: GET /api/alunos/hoje",
+      "severity": "P1"
+    },
+    {
+      "area": "Aluno API",
+      "name": "Dieta activa",
+      "pass": false,
+      "detail": "404 Rota não encontrada: GET /api/dietas",
+      "severity": "P1"
+    },
+    {
+      "area": "Aluno API",
+      "name": "Treinos atribuídos",
+      "pass": false,
+      "detail": "404 Rota não encontrada: GET /api/alunos-treinos",
+      "severity": "P1"
+    },
+    {
+      "area": "Aluno API",
+      "name": "Check-ins semanal",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Aluno API",
+      "name": "Vídeos",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Aluno API",
+      "name": "Conteúdos educativos",
+      "pass": false,
+      "detail": "403 Acesso negado",
+      "severity": "P2"
+    },
+    {
+      "area": "Aluno API",
+      "name": "Chat coach",
+      "pass": false,
+      "detail": "403 Acesso negado",
+      "severity": "P2"
+    },
+    {
+      "area": "Aluno API",
+      "name": "Notificações aluno",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Aluno API",
+      "name": "Relatórios",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Aluno API",
+      "name": "Financeiro aluno",
+      "pass": true,
+      "detail": "200",
+      "severity": "ok"
+    },
+    {
+      "area": "Realtime",
+      "name": "Socket.io polling handshake",
+      "pass": true,
+      "detail": "status 200",
+      "severity": "ok"
+    },
+    {
+      "area": "Dados",
+      "name": "Notificação check-in usa cp.nome (coluna inexistente)",
+      "pass": "fail",
+      "detail": "column cp.nome does not exist",
+      "severity": "ok"
+    },
+    {
+      "area": "Dados",
+      "name": "app_user SELECT educational_contents",
+      "pass": false,
+      "detail": "permission denied",
+      "severity": "P2"
+    },
+    {
+      "area": "Regressão",
+      "name": "Ederlon enviou check-in",
+      "pass": false,
+      "detail": "0 registos",
+      "severity": "P2"
+    },
+    {
+      "area": "UI/Observado",
+      "name": "Contrato vs servidor treinos",
+      "pass": false,
+      "detail": "GET /api/treinos no contrato mas 404 no servidor",
+      "severity": "P1"
+    },
+    {
+      "area": "UI/Observado",
+      "name": "Coach realtime check-ins",
+      "pass": false,
+      "detail": "Coach usa polling 30s — sem Socket.io Fase 2",
+      "severity": "P2"
+    },
+    {
+      "area": "UI/Observado",
+      "name": "Modo seguro bootstrap",
+      "pass": false,
+      "detail": "Overlay \"Modo Seguro\" visível no /auth em produção",
+      "severity": "P2"
+    }
+  ]
+}

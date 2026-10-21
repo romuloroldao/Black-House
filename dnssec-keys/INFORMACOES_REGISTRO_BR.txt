@@ -1,0 +1,64 @@
+═══════════════════════════════════════════════════════════════
+  INFORMAÇÕES DNSSEC PARA CONFIGURAR NO REGISTRO.BR
+═══════════════════════════════════════════════════════════════
+
+Domínio: blackhouse.app.br
+Chave KSK: Kblackhouse.app.br.+008+34441
+
+═══════════════════════════════════════════════════════════════
+  VALORES PARA PREENCHER NO FORMULÁRIO:
+═══════════════════════════════════════════════════════════════
+
+Keytag 1: 34441
+
+Digest 1: 45EECD88BB92D99D342CB19C9CABAEF8A053D5E222616A4A081CA266D6A90641
+
+═══════════════════════════════════════════════════════════════
+  REGISTRO DS COMPLETO (para referência):
+═══════════════════════════════════════════════════════════════
+
+blackhouse.app.br. IN DS 34441 8 2 45EECD88BB92D99D342CB19C9CABAEF8A053D5E222616A4A081CA266D6A90641
+
+Estrutura do registro DS:
+- Keytag: 34441      (identificador da chave)
+- Algoritmo: 8       (RSASHA256)
+- Digest Type: 2     (SHA-256)
+- Digest: 45EECD88... (hash SHA-256 da chave pública)
+
+═══════════════════════════════════════════════════════════════
+  ARQUIVOS GERADOS:
+═══════════════════════════════════════════════════════════════
+
+Localização: /root/dnssec-keys/
+
+Chaves geradas:
+- Kblackhouse.app.br.+008+34441.key      (chave pública KSK)
+- Kblackhouse.app.br.+008+34441.private  (chave privada KSK)
+- Kblackhouse.app.br.+008+57934.key      (chave pública ZSK)
+- Kblackhouse.app.br.+008+57934.private  (chave privada ZSK)
+
+⚠️ IMPORTANTE: Mantenha as chaves privadas (.private) SEGURAS!
+Elas são necessárias para assinar a zona DNS.
+
+═══════════════════════════════════════════════════════════════
+  OBSERVAÇÕES IMPORTANTES:
+═══════════════════════════════════════════════════════════════
+
+1. Se você está usando DNS do Registro.br (a.auto.dns.br e 
+   b.auto.dns.br), geralmente NÃO precisa preencher isso 
+   manualmente. O Registro.br gera as chaves automaticamente 
+   quando você ativa DNSSEC no painel.
+
+2. Só use essas chaves se:
+   - O Registro.br pedir explicitamente os registros DS
+   - Você estiver usando servidores DNS próprios
+   - Você não conseguir ativar DNSSEC automaticamente
+
+3. Se você usar essas chaves manuais, precisará configurar 
+   seu servidor DNS para usar essas chaves também. Isso é 
+   complexo e geralmente não é necessário quando usa DNS do 
+   Registro.br.
+
+═══════════════════════════════════════════════════════════════
+Data de geração: $(date)
+═══════════════════════════════════════════════════════════════

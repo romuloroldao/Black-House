@@ -1,16 +1,19 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
+import { useApiSafeList } from "@/hooks/useApiSafe";
+import { safeArray } from "@/lib/data-safe-utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { DateInputBR } from "@/components/ui/date-input-br";
 import { 
   DollarSign,
   Plus,
@@ -55,10 +58,21 @@ const PaymentManager = () => {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [alunos, setAlunos] = useState<any[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
-  const [loading, setLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [usePlan, setUsePlan] = useState(false);
+  const { data: alunosRaw, loading: loadingAlunos, error: errorAlunos } = useApiSafeList(
+    () => apiClient.requestSafe<any[]>('/api/alunos'),
+    { autoFetch: !!user, endpointKey: '/api/alunos', availabilityKey: 'alunosList' }
+  );
+  const { data: plansRaw, loading: loadingPlans, error: errorPlans } = useApiSafeList(
+    () => apiClient.requestSafe<any[]>('/api/payment-plans'),
+    { autoFetch: !!user, endpointKey: '/api/payment-plans', availabilityKey: 'paymentPlans' }
+  );
+  const { data: paymentsRaw, loading: loadingPayments, error: errorPayments, refetch: refetchPayments } = useApiSafeList(
+    () => apiClient.requestSafe<any[]>('/api/asaas-payments'),
+    { autoFetch: !!user, endpointKey: '/api/asaas-payments' }
+  );
   
   const [formData, setFormData] = useState({
     aluno_id: "",
@@ -70,81 +84,49 @@ const PaymentManager = () => {
   });
 
   useEffect(() => {
-    if (user) {
-      loadData();
+    if (!user) {
+      setAlunos([]);
+      setPlans([]);
+      setPayments([]);
+      return;
     }
-  }, [user]);
 
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      
-      // Carregar alunos
-      const { data: alunosData, error: alunosError } = await supabase
-        .from("alunos")
-        .select("id, nome, email")
-        .eq("coach_id", user?.id)
-        .order("nome");
+    const alunosFiltrados = safeArray(alunosRaw)
+      .filter((aluno: any) => aluno && aluno.coach_id === user.id)
+      .sort((a: any, b: any) => String(a?.nome || '').localeCompare(String(b?.nome || '')));
+    setAlunos(alunosFiltrados);
 
-      if (alunosError) throw alunosError;
-      setAlunos(alunosData || []);
+    const planosFiltrados = safeArray(plansRaw)
+      .filter((plan: any) => plan && plan.coach_id === user.id && plan.ativo === true)
+      .sort((a: any, b: any) => String(a?.nome || '').localeCompare(String(b?.nome || '')));
+    setPlans(planosFiltrados);
 
-      // Carregar planos
-      const { data: plansData, error: plansError } = await supabase
-        .from("payment_plans")
-        .select("*")
-        .eq("coach_id", user?.id)
-        .eq("ativo", true)
-        .order("nome");
-
-      if (plansError) throw plansError;
-      setPlans(plansData || []);
-
-      // Carregar pagamentos
-      await loadPayments();
-    } catch (error) {
-      console.error("Erro ao carregar dados:", error);
-      toast({
-        title: "Erro",
-        description: "Não foi possível carregar os dados",
-        variant: "destructive",
+    const pagamentosFiltrados = safeArray(paymentsRaw)
+      .filter((payment: any) => payment && payment.coach_id === user.id)
+      .sort((a: any, b: any) => {
+        const aTime = new Date(a?.created_at || 0).getTime();
+        const bTime = new Date(b?.created_at || 0).getTime();
+        return bTime - aTime;
       });
-    } finally {
-      setLoading(false);
+
+    const pagamentosComNomes = pagamentosFiltrados.map((payment: any) => {
+      const aluno = alunosFiltrados.find((a: any) => a.id === payment.aluno_id);
+      return {
+        ...payment,
+        aluno_nome: aluno?.nome || "Aluno",
+      };
+    });
+
+    setPayments(pagamentosComNomes);
+
+    if (errorAlunos || errorPlans || errorPayments) {
+      console.warn('[REACT-SUPABASE-LEGACY-PURGE-FIX-010] Erro ao carregar dados de pagamento (fallback vazio):', {
+        errorAlunos,
+        errorPlans,
+        errorPayments
+      });
     }
-  };
-
-  const loadPayments = async () => {
-    try {
-      const { data, error } = await supabase
-        .from("asaas_payments")
-        .select("*")
-        .eq("coach_id", user?.id)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-
-      // Buscar nomes dos alunos
-      const paymentsWithNames = await Promise.all(
-        (data || []).map(async (payment) => {
-          const { data: alunoData } = await supabase
-            .from("alunos")
-            .select("nome")
-            .eq("id", payment.aluno_id)
-            .maybeSingle();
-
-          return {
-            ...payment,
-            aluno_nome: alunoData?.nome || "Aluno",
-          };
-        })
-      );
-
-      setPayments(paymentsWithNames);
-    } catch (error) {
-      console.error("Erro ao carregar pagamentos:", error);
-    }
-  };
+  }, [user, alunosRaw, plansRaw, paymentsRaw, errorAlunos, errorPlans, errorPayments]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -185,50 +167,49 @@ const PaymentManager = () => {
       return;
     }
 
-    try {
-      setIsCreating(true);
+    setIsCreating(true);
 
-      let value = formData.value;
-      let description = formData.description;
+    let value = formData.value;
+    let description = formData.description;
 
-      if (usePlan && formData.plan_id) {
-        const selectedPlan = plans.find(p => p.id === formData.plan_id);
-        if (selectedPlan) {
-          value = selectedPlan.valor.toString();
-          description = description || selectedPlan.nome;
-        }
+    if (usePlan && formData.plan_id) {
+      const selectedPlan = plans.find(p => p.id === formData.plan_id);
+      if (selectedPlan) {
+        value = selectedPlan.valor.toString();
+        description = description || selectedPlan.nome;
       }
+    }
 
-      const { data, error } = await supabase.functions.invoke('create-asaas-payment', {
-        body: {
-          alunoId: formData.aluno_id,
-          value: parseFloat(value),
-          description: description,
-          billingType: formData.billing_type,
-          dueDate: formData.due_date,
-        },
-      });
+    const result = await apiClient.requestSafe('/api/payments/create-asaas', {
+      method: 'POST',
+      body: JSON.stringify({
+        alunoId: formData.aluno_id,
+        value: parseFloat(value),
+        description: description,
+        billingType: formData.billing_type,
+        dueDate: formData.due_date,
+      }),
+    });
 
-      if (error) throw error;
-
-      toast({
-        title: "Cobrança criada!",
-        description: "A cobrança foi criada com sucesso.",
-      });
-
-      setIsDialogOpen(false);
-      resetForm();
-      loadPayments();
-    } catch (error) {
-      console.error("Erro ao criar cobrança:", error);
+    if (!result.success) {
       toast({
         title: "Erro",
-        description: "Não foi possível criar a cobrança",
-        variant: "destructive",
+        description: result.error || 'Erro ao criar cobrança',
+        variant: "destructive"
       });
-    } finally {
       setIsCreating(false);
+      return;
     }
+
+    toast({
+      title: "Cobrança criada!",
+      description: "A cobrança foi criada com sucesso.",
+    });
+
+    setIsDialogOpen(false);
+    resetForm();
+    refetchPayments();
+    setIsCreating(false);
   };
 
   const resetForm = () => {
@@ -289,10 +270,11 @@ const PaymentManager = () => {
     }
   };
 
+  const loading = loadingAlunos || loadingPlans || loadingPayments;
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
-        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full motion-safe:animate-spin" />
       </div>
     );
   }
@@ -301,7 +283,7 @@ const PaymentManager = () => {
     <div className="p-6 space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+        <h1 className="bg-gradient-primary bg-clip-text text-xl font-bold text-transparent sm:text-2xl">
           Pagamentos
         </h1>
         <p className="text-muted-foreground">
@@ -418,6 +400,9 @@ const PaymentManager = () => {
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Nova Cobrança</DialogTitle>
+            <DialogDescription>
+              Selecione o aluno, valor ou plano, forma de pagamento, vencimento e descrição.
+            </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -517,11 +502,10 @@ const PaymentManager = () => {
 
               <div className="col-span-2 space-y-2">
                 <Label htmlFor="due_date">Data de Vencimento *</Label>
-                <Input
+                <DateInputBR
                   id="due_date"
-                  type="date"
                   value={formData.due_date}
-                  onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
+                  onChange={(value) => setFormData({ ...formData, due_date: value })}
                   required
                 />
               </div>

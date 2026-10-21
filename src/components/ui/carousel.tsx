@@ -34,7 +34,16 @@ function useCarousel() {
   const context = React.useContext(CarouselContext)
 
   if (!context) {
-    throw new Error("useCarousel must be used within a <Carousel />")
+    // DESIGN-ROOT-RENDER-UNBLOCK-001: Não lançar erro durante render - retornar valores seguros
+    console.warn('[DESIGN-ROOT-RENDER-UNBLOCK-001] useCarousel usado fora de <Carousel />. Retornando valores padrão.');
+    return {
+      carouselRef: { current: null },
+      api: undefined,
+      scrollPrev: () => {},
+      scrollNext: () => {},
+      canScrollPrev: false,
+      canScrollNext: false,
+    };
   }
 
   return context

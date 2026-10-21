@@ -1,17 +1,107 @@
-import { createClient } from '@supabase/supabase-js';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as readline from 'readline';
 
-// Configurações do Supabase
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://cghzttbggklhuyqxzabq.supabase.co';
-const SUPABASE_KEY = process.env.SUPABASE_KEY || '';
+// Configurações da API
+const API_URL = process.env.VITE_API_URL || 'http://localhost:3001';
+const API_EMAIL = process.env.API_EMAIL || '';
+const API_PASSWORD = process.env.API_PASSWORD || '';
 
-if (!SUPABASE_KEY) {
-  console.error('❌ SUPABASE_KEY não configurada');
-  process.exit(1);
+// Função para fazer login e obter token
+async function obterToken(): Promise<string> {
+  if (!API_EMAIL || !API_PASSWORD) {
+    console.error('❌ API_EMAIL e API_PASSWORD devem ser configurados');
+    console.log('Use: API_EMAIL=email API_PASSWORD=senha npx tsx src/scripts/import-alimentos.ts');
+    process.exit(1);
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: API_EMAIL, password: API_PASSWORD })
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Erro ao fazer login' }));
+      throw new Error(error.error || 'Erro ao fazer login');
+    }
+
+    const data = await response.json();
+    return data.token;
+  } catch (error: any) {
+    console.error('❌ Erro ao obter token:', error.message);
+    process.exit(1);
+  }
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+// Função para fazer requisição autenticada
+async function apiRequest(endpoint: string, options: RequestInit = {}, token: string) {
+  const response = await fetch(`${API_URL}${endpoint}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      ...options.headers as Record<string, string>
+    }
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Erro na requisição' }));
+    throw new Error(error.error || `Erro ${response.status}: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+// Função para fazer UPSERT (INSERT ON CONFLICT DO UPDATE)
+async function upsertRegistro(table: string, data: any, conflictColumn: string, token: string): Promise<any> {
+  try {
+    // Tentar buscar registro existente
+    const existing = await apiRequest(
+      `/rest/v1/${table}?${conflictColumn}.eq=${encodeURIComponent(data[conflictColumn])}&select=id`,
+      { method: 'GET' },
+      token
+    );
+
+    const existingRecord = Array.isArray(existing) ? existing[0] : existing;
+
+    if (existingRecord && existingRecord.id) {
+      // UPDATE
+      return await apiRequest(
+        `/rest/v1/${table}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ id: existingRecord.id, ...data })
+        },
+        token
+      );
+    } else {
+      // INSERT
+      return await apiRequest(
+        `/rest/v1/${table}`,
+        {
+          method: 'POST',
+          body: JSON.stringify(data)
+        },
+        token
+      );
+    }
+  } catch (error: any) {
+    // Se erro 404 ou 400, tentar INSERT direto
+    if (error.message.includes('404') || error.message.includes('400')) {
+      return await apiRequest(
+        `/rest/v1/${table}`,
+        {
+          method: 'POST',
+          body: JSON.stringify(data)
+        },
+        token
+      );
+    }
+    throw error;
+  }
+}
 
 interface CSVRow {
   'Nome do alimento': string;
@@ -76,11 +166,21 @@ function parseCSV(content: string): CSVRow[] {
 }
 
 async function importarAlimentos() {
-  console.log('🚀 Iniciando importação de alimentos...\n');
+  console.log('🚀 Iniciando importação de alimentos via API REST...\n');
   
   try {
+    // Obter token de autenticação
+    console.log('🔐 Autenticando...');
+    const token = await obterToken();
+    console.log('✅ Autenticação realizada\n');
+    
     // Ler CSV
     const csvPath = path.join(__dirname, '../data/grupo_personalizado_cleaned.csv');
+    if (!fs.existsSync(csvPath)) {
+      console.error(`❌ Arquivo CSV não encontrado: ${csvPath}`);
+      process.exit(1);
+    }
+    
     const csvContent = fs.readFileSync(csvPath, 'utf-8');
     const rows = parseCSV(csvContent);
     
@@ -93,20 +193,20 @@ async function importarAlimentos() {
     const tiposMap = new Map<string, string>();
     
     for (const tipo of tiposUnicos) {
-      const { data, error } = await supabase
-        .from('tipos_alimentos')
-        .upsert(
+      try {
+        const result = await upsertRegistro(
+          'tipos_alimentos',
           { nome_tipo: tipo },
-          { onConflict: 'nome_tipo' }
-        )
-        .select()
-        .single();
-      
-      if (error) {
+          'nome_tipo',
+          token
+        );
+        
+        if (result && result.id) {
+          tiposMap.set(tipo, result.id);
+          console.log(`✅ Tipo importado: ${tipo}`);
+        }
+      } catch (error: any) {
         console.error(`❌ Erro ao inserir tipo ${tipo}:`, error.message);
-      } else if (data) {
-        tiposMap.set(tipo, data.id);
-        console.log(`✅ Tipo importado: ${tipo}`);
       }
     }
     
@@ -153,28 +253,48 @@ async function importarAlimentos() {
         autor: row['Autor'] || null
       };
       
-      // UPSERT: inserir ou atualizar se já existir
-      const { data, error } = await supabase
-        .from('alimentos')
-        .upsert(alimentoData, { onConflict: 'nome' })
-        .select();
-      
-      if (error) {
-        console.error(`❌ Erro ao importar ${nomeAlimento}:`, error.message);
-        erros++;
-      } else {
-        // Verificar se foi INSERT ou UPDATE
-        const { count } = await supabase
-          .from('alimentos')
-          .select('*', { count: 'exact', head: true })
-          .eq('nome', nomeAlimento);
+      try {
+        // Tentar buscar se existe
+        const existing = await apiRequest(
+          `/rest/v1/alimentos?nome.eq=${encodeURIComponent(nomeAlimento)}&select=id`,
+          { method: 'GET' },
+          token
+        ).catch(() => null);
         
-        if (count === 1) {
-          console.log(`✅ ${nomeAlimento}`);
-          importados++;
-        } else {
+        const existingRecord = Array.isArray(existing) ? existing[0] : existing;
+        
+        if (existingRecord && existingRecord.id) {
+          // UPDATE
+          await apiRequest(
+            '/rest/v1/alimentos',
+            {
+              method: 'PATCH',
+              body: JSON.stringify({ id: existingRecord.id, ...alimentoData })
+            },
+            token
+          );
           console.log(`🔄 Atualizado: ${nomeAlimento}`);
           atualizados++;
+        } else {
+          // INSERT
+          await apiRequest(
+            '/rest/v1/alimentos',
+            {
+              method: 'POST',
+              body: JSON.stringify(alimentoData)
+            },
+            token
+          );
+          console.log(`✅ ${nomeAlimento}`);
+          importados++;
+        }
+      } catch (error: any) {
+        if (error.message.includes('duplicate') || error.message.includes('23505')) {
+          duplicatasIgnoradas++;
+          console.warn(`⚠️  Duplicata ignorada: ${nomeAlimento}`);
+        } else {
+          console.error(`❌ Erro ao importar ${nomeAlimento}:`, error.message);
+          erros++;
         }
       }
     }
@@ -188,32 +308,8 @@ async function importarAlimentos() {
     console.log(`❌ Erros: ${erros}`);
     console.log('='.repeat(60));
     
-    // Validar cálculos
-    console.log('\n🧮 Testando função calcular_nutrientes...');
-    
-    const { data: alimentoTeste } = await supabase
-      .from('alimentos')
-      .select('*')
-      .eq('nome', 'Arroz branco')
-      .single();
-    
-    if (alimentoTeste) {
-      const { data: resultado, error } = await supabase.rpc('calcular_nutrientes', {
-        alimento_id: alimentoTeste.id,
-        quantidade_consumida_g: 150
-      });
-      
-      if (error) {
-        console.error('❌ Erro ao testar cálculo:', error.message);
-      } else if (resultado && resultado.length > 0) {
-        console.log('✅ Função calcular_nutrientes OK');
-        console.log(`   Teste: 150g de ${resultado[0].nome_alimento}`);
-        console.log(`   Resultado: ${resultado[0].kcal}kcal, ${resultado[0].cho}g CHO, ${resultado[0].ptn}g PTN, ${resultado[0].lip}g LIP`);
-      }
-    }
-    
-  } catch (error) {
-    console.error('❌ Erro geral na importação:', error);
+  } catch (error: any) {
+    console.error('❌ Erro geral na importação:', error.message || error);
     process.exit(1);
   }
 }

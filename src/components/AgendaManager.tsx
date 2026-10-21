@@ -1,17 +1,19 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { DateInputBR } from "@/components/ui/date-input-br";
 import { 
   Calendar as CalendarIcon, 
   Plus, 
@@ -27,6 +29,27 @@ import {
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
+import { formatDateBR } from "@/lib/date-format";
+import { safeGetItem, safeSetItem } from "@/lib/safe-storage";
+
+const SUGGESTIONS_DISMISS_KEY = "agenda.suggestions.dismissed";
+
+function loadDismissedSuggestionIds(coachId: string | undefined): Set<string> {
+  if (!coachId) return new Set();
+  try {
+    const raw = safeGetItem(`${SUGGESTIONS_DISMISS_KEY}.${coachId}`);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function persistDismissedSuggestionIds(coachId: string | undefined, ids: Set<string>) {
+  if (!coachId) return;
+  safeSetItem(`${SUGGESTIONS_DISMISS_KEY}.${coachId}`, JSON.stringify([...ids]));
+}
 
 interface Evento {
   id: string;
@@ -39,11 +62,57 @@ interface Evento {
   prioridade: string;
   aluno_id: string | null;
   aluno_nome?: string;
+  snoozed_until?: string | null;
+  ultimo_contato_em?: string | null;
+  ultimo_contato_resumo?: string | null;
+}
+
+interface AgendaSummary {
+  pendentes_hoje: number;
+  pendentes_amanha: number;
+  atrasados: number;
+  proximos_7_dias: number;
+  por_tipo?: Record<string, number>;
+}
+
+type JanelaOperacional = "atrasado" | "hoje" | "amanha" | "futuro" | "outro";
+
+function normalizeDateKey(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return String(value).split("T")[0] || null;
+}
+
+function computeJanela(dataEvento: string, status: string): JanelaOperacional {
+  if (status !== "pendente") return "outro";
+  const hoje = format(new Date(), "yyyy-MM-dd");
+  const amanha = format(new Date(Date.now() + 86400000), "yyyy-MM-dd");
+  const d = normalizeDateKey(dataEvento);
+  if (!d) return "outro";
+  if (d < hoje) return "atrasado";
+  if (d === hoje) return "hoje";
+  if (d === amanha) return "amanha";
+  return "futuro";
+}
+
+function janelaBadge(janela: JanelaOperacional) {
+  switch (janela) {
+    case "atrasado":
+      return { label: "Atrasado", variant: "destructive" as const };
+    case "hoje":
+      return { label: "Hoje", variant: "default" as const };
+    case "amanha":
+      return { label: "Amanhã", variant: "secondary" as const };
+    case "futuro":
+      return { label: "Em breve", variant: "outline" as const };
+    default:
+      return null;
+  }
 }
 
 const AgendaManager = () => {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { confirm } = useConfirm();
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [eventos, setEventos] = useState<Evento[]>([]);
   const [alunos, setAlunos] = useState<any[]>([]);
@@ -52,7 +121,21 @@ const AgendaManager = () => {
   const [eventoSelecionado, setEventoSelecionado] = useState<Evento | null>(null);
   const [filtroTipo, setFiltroTipo] = useState<string>("todos");
   const [filtroStatus, setFiltroStatus] = useState<string>("todos");
-  
+  const [filtroJanela, setFiltroJanela] = useState<string>("todos");
+  const [summary, setSummary] = useState<AgendaSummary | null>(null);
+  const [suggestions, setSuggestions] = useState<
+    Array<{
+      aluno_id: string;
+      aluno_nome: string;
+      mensagem: string;
+      tipo_sugerido: string;
+      dias_sem_checkin: number;
+    }>
+  >([]);
+  const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+
   const [formData, setFormData] = useState({
     titulo: "",
     descricao: "",
@@ -66,6 +149,7 @@ const AgendaManager = () => {
 
   useEffect(() => {
     if (user) {
+      setDismissedSuggestionIds(loadDismissedSuggestionIds(user.id));
       carregarDados();
     }
   }, [user]);
@@ -75,17 +159,15 @@ const AgendaManager = () => {
       setLoading(true);
       
       // Carregar alunos
-      const { data: alunosData, error: alunosError } = await supabase
-        .from("alunos")
-        .select("id, nome")
-        .eq("coach_id", user?.id)
-        .order("nome");
-
-      if (alunosError) throw alunosError;
-      setAlunos(alunosData || []);
+      const alunosRes = await apiClient.requestSafe<any[]>('/api/alunos');
+      const alunosData = alunosRes.success && Array.isArray(alunosRes.data) ? alunosRes.data : [];
+      const alunosFiltrados = alunosData
+        .filter((a: any) => a.coach_id === user?.id)
+        .sort((a: any, b: any) => String(a?.nome || '').localeCompare(String(b?.nome || '')));
+      setAlunos(alunosFiltrados);
 
       // Carregar eventos
-      await carregarEventos();
+      await Promise.all([carregarEventos(), carregarResumo()]);
     } catch (error) {
       console.error("Erro ao carregar dados:", error);
       toast({
@@ -98,39 +180,134 @@ const AgendaManager = () => {
     }
   };
 
+  const carregarResumo = async () => {
+    const [sumRes, sugRes] = await Promise.all([
+      apiClient.requestSafe<AgendaSummary>("/api/agenda-eventos/summary"),
+      apiClient.requestSafe<
+        Array<{
+          aluno_id: string;
+          aluno_nome: string;
+          mensagem: string;
+          tipo_sugerido: string;
+          dias_sem_checkin: number;
+        }>
+      >("/api/agenda-eventos/suggestions"),
+    ]);
+    if (sumRes.success && sumRes.data) {
+      setSummary(sumRes.data);
+    }
+    if (sugRes.success && Array.isArray(sugRes.data)) {
+      setSuggestions(sugRes.data);
+    }
+  };
+
+  const handleSnooze = async (eventoId: string) => {
+    const res = await apiClient.requestSafe(`/api/agenda-eventos/${eventoId}/snooze`, {
+      method: "POST",
+      body: JSON.stringify({ days: 1 }),
+    });
+    if (res.success) {
+      toast({ title: "Lembrete adiado", description: "Lembretes adiados por 1 dia (data do evento mantida)." });
+      void Promise.all([carregarEventos(), carregarResumo()]);
+    } else {
+      toast({ title: "Erro", description: res.error || "Não foi possível adiar", variant: "destructive" });
+    }
+  };
+
+  const handleAgendarFromSuggestion = (s: (typeof suggestions)[0]) => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    setEventoSelecionado(null);
+    setFormData({
+      titulo: `Acompanhamento — ${s.aluno_nome}`,
+      descricao: s.mensagem,
+      data_evento: format(d, "yyyy-MM-dd"),
+      hora_evento: "",
+      tipo: s.tipo_sugerido || "acompanhamento",
+      status: "pendente",
+      prioridade: s.dias_sem_checkin >= 21 ? "alta" : "normal",
+      aluno_id: s.aluno_id,
+    });
+    setIsDialogOpen(true);
+  };
+
+  const handleDismissSuggestion = (alunoId: string) => {
+    setDismissedSuggestionIds((prev) => {
+      const next = new Set(prev);
+      next.add(alunoId);
+      persistDismissedSuggestionIds(user?.id, next);
+      return next;
+    });
+    toast({ title: "Sugestão dispensada", description: "Ela deixa de aparecer nesta lista." });
+  };
+
+  const aplicarFiltroJanela = (janela: "atrasados" | "hoje" | "amanha" | "proximos7") => {
+    setFiltroJanela(janela);
+    setFiltroStatus("pendente");
+    // Sem dia no calendário a lista mostra todos os eventos da janela (exceto "hoje")
+    if (janela === "hoje") {
+      setDate(new Date());
+    } else {
+      setDate(undefined);
+    }
+    requestAnimationFrame(() => {
+      document.getElementById("agenda-eventos-lista")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  };
+
   const carregarEventos = async () => {
     try {
-      const { data, error } = await supabase
-        .from("agenda_eventos")
-        .select("*")
-        .eq("coach_id", user?.id)
-        .order("data_evento", { ascending: true })
-        .order("hora_evento", { ascending: true });
+      if (!user?.id) {
+        console.warn("Usuário não autenticado, não é possível carregar eventos");
+        return;
+      }
 
-      if (error) throw error;
+      const eventosRes = await apiClient.requestSafe<any[]>('/api/agenda-eventos');
+      const data = eventosRes.success && Array.isArray(eventosRes.data) ? eventosRes.data : [];
+      const eventosCoach = data.filter((e: any) => e.coach_id === user.id);
+
+      console.log("Eventos carregados:", data);
 
       // Buscar nomes dos alunos
-      const eventosComNomes = await Promise.all(
-        (data || []).map(async (evento) => {
-          if (evento.aluno_id) {
-            const { data: alunoData } = await supabase
-              .from("alunos")
-              .select("nome")
-              .eq("id", evento.aluno_id)
-              .maybeSingle();
+      const alunosRes = await apiClient.requestSafe<any[]>('/api/alunos');
+      const alunosData = alunosRes.success && Array.isArray(alunosRes.data) ? alunosRes.data : [];
+      const alunosMap = new Map(alunosData.map((a: any) => [a.id, a]));
+      const eventosComNomes = eventosCoach.map((evento: any) => {
+        if (evento.aluno_id) {
+          const alunoData = alunosMap.get(evento.aluno_id);
+          return {
+            ...evento,
+            aluno_nome: alunoData?.nome || "Aluno",
+          };
+        }
+        return evento;
+      });
 
-            return {
-              ...evento,
-              aluno_nome: alunoData?.nome || "Aluno",
-            };
-          }
-          return evento;
-        })
-      );
+      // Ordenar eventos por data e hora
+      eventosComNomes.sort((a, b) => {
+        const dataA = new Date(`${a.data_evento} ${a.hora_evento || '00:00'}`);
+        const dataB = new Date(`${b.data_evento} ${b.hora_evento || '00:00'}`);
+        return dataA.getTime() - dataB.getTime();
+      });
 
       setEventos(eventosComNomes);
+      console.log("Eventos processados:", eventosComNomes.length);
+      console.log("Eventos com datas:", eventosComNomes.map(e => ({ 
+        id: e.id, 
+        titulo: e.titulo, 
+        data_evento: e.data_evento,
+        data_normalizada: e.data_evento ? e.data_evento.split('T')[0] : null
+      })));
     } catch (error) {
       console.error("Erro ao carregar eventos:", error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível carregar os eventos",
+        variant: "destructive",
+      });
     }
   };
 
@@ -146,22 +323,34 @@ const AgendaManager = () => {
       return;
     }
 
+    if (!user?.id) {
+      toast({
+        title: "Erro",
+        description: "Usuário não autenticado",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       const eventoData = {
         ...formData,
-        coach_id: user?.id,
+        coach_id: user.id,
         aluno_id: formData.aluno_id || null,
         hora_evento: formData.hora_evento || null,
+        descricao: formData.descricao || null,
       };
 
       if (eventoSelecionado) {
-        // Atualizar
-        const { error } = await supabase
-          .from("agenda_eventos")
-          .update(eventoData)
-          .eq("id", eventoSelecionado.id);
-
-        if (error) throw error;
+        // Atualizar - remover id do objeto de atualização
+        const { id, ...updateData } = eventoData;
+        const updateResult = await apiClient.requestSafe(`/api/agenda-eventos/${eventoSelecionado.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(updateData),
+        });
+        if (!updateResult.success) {
+          throw new Error(updateResult.error || 'Erro ao atualizar evento');
+        }
 
         toast({
           title: "Evento atualizado!",
@@ -169,11 +358,15 @@ const AgendaManager = () => {
         });
       } else {
         // Criar
-        const { error } = await supabase
-          .from("agenda_eventos")
-          .insert([eventoData]);
+        const result = await apiClient.requestSafe('/api/agenda-eventos', {
+          method: 'POST',
+          body: JSON.stringify(eventoData),
+        });
+        if (!result.success) {
+          throw new Error(result.error || 'Erro ao criar evento');
+        }
 
-        if (error) throw error;
+        console.log("Evento criado:", result);
 
         toast({
           title: "Evento criado!",
@@ -183,34 +376,41 @@ const AgendaManager = () => {
 
       setIsDialogOpen(false);
       resetForm();
-      carregarEventos();
+      
+      // Aguardar um pouco antes de recarregar para garantir que o banco foi atualizado
+      setTimeout(() => {
+        void Promise.all([carregarEventos(), carregarResumo()]);
+      }, 300);
     } catch (error) {
       console.error("Erro ao salvar evento:", error);
+      const errorMessage = error instanceof Error ? error.message : "Não foi possível salvar o evento";
       toast({
         title: "Erro",
-        description: "Não foi possível salvar o evento",
+        description: errorMessage,
         variant: "destructive",
       });
     }
   };
 
   const handleDelete = async (eventoId: string) => {
-    if (!confirm("Tem certeza que deseja deletar este evento?")) return;
+    if (
+      !(await confirmDelete(confirm, "Este evento da agenda será removido permanentemente."))
+    ) {
+      return;
+    }
 
     try {
-      const { error } = await supabase
-        .from("agenda_eventos")
-        .delete()
-        .eq("id", eventoId);
-
-      if (error) throw error;
+      const deleteResult = await apiClient.requestSafe(`/api/agenda-eventos/${eventoId}`, { method: 'DELETE' });
+      if (!deleteResult.success) {
+        throw new Error(deleteResult.error || 'Erro ao deletar evento');
+      }
 
       toast({
         title: "Evento deletado!",
         description: "O evento foi removido da agenda.",
       });
 
-      carregarEventos();
+      void Promise.all([carregarEventos(), carregarResumo()]);
     } catch (error) {
       console.error("Erro ao deletar evento:", error);
       toast({
@@ -259,18 +459,19 @@ const AgendaManager = () => {
     const novoStatus = evento.status === "pendente" ? "concluido" : "pendente";
     
     try {
-      const { error } = await supabase
-        .from("agenda_eventos")
-        .update({ status: novoStatus })
-        .eq("id", evento.id);
-
-      if (error) throw error;
+      const updateResult = await apiClient.requestSafe(`/api/agenda-eventos/${evento.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: novoStatus }),
+      });
+      if (!updateResult.success) {
+        throw new Error(updateResult.error || 'Erro ao atualizar status');
+      }
 
       toast({
         title: novoStatus === "concluido" ? "Evento concluído!" : "Evento reaberto",
       });
 
-      carregarEventos();
+      void Promise.all([carregarEventos(), carregarResumo()]);
     } catch (error) {
       console.error("Erro ao atualizar status:", error);
     }
@@ -280,7 +481,9 @@ const AgendaManager = () => {
     { value: "retorno", label: "Retorno", color: "bg-primary" },
     { value: "ajuste_dieta", label: "Ajuste de Dieta", color: "bg-primary" },
     { value: "alteracao_treino", label: "Alteração de Treino", color: "bg-warning" },
-    { value: "avaliacao", label: "Avaliação", color: "bg-accent" },
+    { value: "consulta", label: "Consulta", color: "bg-accent" },
+    { value: "acompanhamento", label: "Acompanhamento", color: "bg-accent" },
+    { value: "avaliacao", label: "Avaliação (legado)", color: "bg-accent" },
     { value: "outro", label: "Outro", color: "bg-muted" },
   ];
 
@@ -293,9 +496,42 @@ const AgendaManager = () => {
   const eventosFiltrados = eventos.filter((evento) => {
     const matchTipo = filtroTipo === "todos" || evento.tipo === filtroTipo;
     const matchStatus = filtroStatus === "todos" || evento.status === filtroStatus;
-    const matchData = date ? evento.data_evento === format(date, "yyyy-MM-dd") : true;
-    return matchTipo && matchStatus && matchData;
+    const janela = computeJanela(evento.data_evento, evento.status);
+    const limiar7 = format(new Date(Date.now() + 7 * 86400000), "yyyy-MM-dd");
+    const dataKey = normalizeDateKey(evento.data_evento);
+    const matchJanela =
+      filtroJanela === "todos" ||
+      (filtroJanela === "atrasados" && janela === "atrasado") ||
+      (filtroJanela === "hoje" && janela === "hoje") ||
+      (filtroJanela === "amanha" && janela === "amanha") ||
+      (filtroJanela === "proximos7" &&
+        evento.status === "pendente" &&
+        dataKey != null &&
+        dataKey >= format(new Date(), "yyyy-MM-dd") &&
+        dataKey <= limiar7);
+
+    // Com janela operacional activa (exceto "hoje"), não restringe ao dia do calendário
+    let matchData = true;
+    if (date && (filtroJanela === "todos" || filtroJanela === "hoje")) {
+      const dataSelecionada = format(date, "yyyy-MM-dd");
+      matchData = dataKey === dataSelecionada;
+    }
+
+    return matchTipo && matchStatus && matchJanela && matchData;
   });
+
+  const visibleSuggestions = suggestions.filter((s) => !dismissedSuggestionIds.has(s.aluno_id));
+
+  const janelaTitulo =
+    filtroJanela === "atrasados"
+      ? "Atrasados"
+      : filtroJanela === "hoje"
+        ? "Hoje"
+        : filtroJanela === "amanha"
+          ? "Amanhã"
+          : filtroJanela === "proximos7"
+            ? "Próximos 7 dias"
+            : null;
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -312,7 +548,7 @@ const AgendaManager = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
-        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full motion-safe:animate-spin" />
       </div>
     );
   }
@@ -322,7 +558,7 @@ const AgendaManager = () => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+          <h1 className="bg-gradient-primary bg-clip-text text-xl font-bold text-transparent sm:text-2xl">
             Agenda
           </h1>
           <p className="text-muted-foreground">
@@ -334,6 +570,135 @@ const AgendaManager = () => {
           Novo Evento
         </Button>
       </div>
+
+      {visibleSuggestions.length > 0 && (
+        <Card className="border-primary/30 bg-primary/5">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-primary" />
+              Sugestões inteligentes
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {visibleSuggestions.slice(0, 5).map((s) => (
+              <div
+                key={s.aluno_id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 bg-background/80 p-3"
+              >
+                <p className="text-sm flex-1 min-w-[12rem]">{s.mensagem}</p>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => handleAgendarFromSuggestion(s)}>
+                    Agendar retorno
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-muted-foreground"
+                    title="Dispensar sugestão"
+                    onClick={() => handleDismissSuggestion(s.aluno_id)}
+                  >
+                    <XCircle className="w-4 h-4 mr-1" />
+                    Dispensar
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {summary && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Card
+            role="button"
+            tabIndex={0}
+            aria-pressed={filtroJanela === "atrasados"}
+            className={cn(
+              "cursor-pointer border-destructive/40 hover:border-destructive/70 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive",
+              filtroJanela === "atrasados" && "ring-2 ring-destructive/60",
+            )}
+            onClick={() => aplicarFiltroJanela("atrasados")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                aplicarFiltroJanela("atrasados");
+              }
+            }}
+          >
+            <CardContent className="p-4">
+              <p className="text-xs text-muted-foreground">Atrasados</p>
+              <p className="text-2xl font-bold text-destructive">{summary.atrasados}</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Ver lista</p>
+            </CardContent>
+          </Card>
+          <Card
+            role="button"
+            tabIndex={0}
+            aria-pressed={filtroJanela === "hoje"}
+            className={cn(
+              "cursor-pointer hover:border-primary/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+              filtroJanela === "hoje" && "ring-2 ring-primary/60",
+            )}
+            onClick={() => aplicarFiltroJanela("hoje")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                aplicarFiltroJanela("hoje");
+              }
+            }}
+          >
+            <CardContent className="p-4">
+              <p className="text-xs text-muted-foreground">Hoje</p>
+              <p className="text-2xl font-bold">{summary.pendentes_hoje}</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Ver lista</p>
+            </CardContent>
+          </Card>
+          <Card
+            role="button"
+            tabIndex={0}
+            aria-pressed={filtroJanela === "amanha"}
+            className={cn(
+              "cursor-pointer hover:border-primary/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+              filtroJanela === "amanha" && "ring-2 ring-primary/60",
+            )}
+            onClick={() => aplicarFiltroJanela("amanha")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                aplicarFiltroJanela("amanha");
+              }
+            }}
+          >
+            <CardContent className="p-4">
+              <p className="text-xs text-muted-foreground">Amanhã</p>
+              <p className="text-2xl font-bold">{summary.pendentes_amanha}</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Ver lista</p>
+            </CardContent>
+          </Card>
+          <Card
+            role="button"
+            tabIndex={0}
+            aria-pressed={filtroJanela === "proximos7"}
+            className={cn(
+              "cursor-pointer hover:border-primary/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+              filtroJanela === "proximos7" && "ring-2 ring-primary/60",
+            )}
+            onClick={() => aplicarFiltroJanela("proximos7")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                aplicarFiltroJanela("proximos7");
+              }
+            }}
+          >
+            <CardContent className="p-4">
+              <p className="text-xs text-muted-foreground">Próximos 7 dias</p>
+              <p className="text-2xl font-bold">{summary.proximos_7_dias}</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Ver lista</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Calendário */}
@@ -348,7 +713,11 @@ const AgendaManager = () => {
             <Calendar
               mode="single"
               selected={date}
-              onSelect={setDate}
+              onSelect={(selected) => {
+                setDate(selected);
+                // Escolher um dia no calendário volta à vista por data
+                if (selected) setFiltroJanela("todos");
+              }}
               className={cn("rounded-md border pointer-events-auto")}
               locale={ptBR}
             />
@@ -373,6 +742,31 @@ const AgendaManager = () => {
               </div>
 
               <div className="space-y-2">
+                <Label>Janela</Label>
+                <Select
+                  value={filtroJanela}
+                  onValueChange={(value) => {
+                    if (value === "todos") {
+                      setFiltroJanela("todos");
+                      return;
+                    }
+                    aplicarFiltroJanela(value as "atrasados" | "hoje" | "amanha" | "proximos7");
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Todas</SelectItem>
+                    <SelectItem value="atrasados">Atrasados</SelectItem>
+                    <SelectItem value="hoje">Hoje</SelectItem>
+                    <SelectItem value="amanha">Amanhã</SelectItem>
+                    <SelectItem value="proximos7">Próximos 7 dias</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
                 <Label>Status</Label>
                 <Select value={filtroStatus} onValueChange={setFiltroStatus}>
                   <SelectTrigger>
@@ -391,15 +785,33 @@ const AgendaManager = () => {
         </Card>
 
         {/* Lista de Eventos */}
-        <Card className="lg:col-span-2">
+        <Card className="lg:col-span-2" id="agenda-eventos-lista">
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <CardTitle>
-                Eventos {date && `- ${format(date, "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}`}
+                {janelaTitulo
+                  ? `Eventos — ${janelaTitulo}`
+                  : date
+                    ? `Eventos - ${formatDateBR(date)}`
+                    : "Eventos"}
               </CardTitle>
-              <Badge variant="secondary">
-                {eventosFiltrados.length} {eventosFiltrados.length === 1 ? 'evento' : 'eventos'}
-              </Badge>
+              <div className="flex items-center gap-2">
+                {filtroJanela !== "todos" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setFiltroJanela("todos");
+                      setDate(new Date());
+                    }}
+                  >
+                    Limpar filtro
+                  </Button>
+                )}
+                <Badge variant="secondary">
+                  {eventosFiltrados.length} {eventosFiltrados.length === 1 ? "evento" : "eventos"}
+                </Badge>
+              </div>
             </div>
           </CardHeader>
           <CardContent>
@@ -407,14 +819,20 @@ const AgendaManager = () => {
               {eventosFiltrados.length === 0 ? (
                 <div className="text-center py-12">
                   <CalendarIcon className="w-12 h-12 mx-auto text-muted-foreground mb-3 opacity-50" />
-                  <p className="text-muted-foreground">Nenhum evento para esta data</p>
+                  <p className="text-muted-foreground">
+                    {janelaTitulo
+                      ? `Nenhum evento ${janelaTitulo.toLowerCase()}`
+                      : "Nenhum evento para esta data"}
+                  </p>
                   <Button onClick={handleNovoEvento} variant="outline" className="mt-4">
                     Criar Primeiro Evento
                   </Button>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {eventosFiltrados.map((evento) => (
+                  {eventosFiltrados.map((evento) => {
+                    const dataKey = normalizeDateKey(evento.data_evento);
+                    return (
                     <Card key={evento.id} className="overflow-hidden">
                       <div className={`h-1 ${getTipoColor(evento.tipo)}`} />
                       <CardContent className="p-4">
@@ -429,7 +847,23 @@ const AgendaManager = () => {
                               <p className="text-sm text-muted-foreground">{evento.descricao}</p>
                             )}
 
+                            {evento.ultimo_contato_resumo && (
+                              <p className="text-xs text-muted-foreground">
+                                Último contacto: {evento.ultimo_contato_resumo}
+                                {evento.ultimo_contato_em
+                                  ? ` (${formatDateBR(evento.ultimo_contato_em)})`
+                                  : ""}
+                              </p>
+                            )}
+
                             <div className="flex flex-wrap gap-2 text-sm">
+                              {(filtroJanela !== "todos" || !date) && dataKey && (
+                                <Badge variant="outline" className="gap-1">
+                                  <CalendarIcon className="w-3 h-3" />
+                                  {formatDateBR(dataKey)}
+                                </Badge>
+                              )}
+
                               {evento.hora_evento && (
                                 <Badge variant="outline" className="gap-1">
                                   <Clock className="w-3 h-3" />
@@ -454,10 +888,27 @@ const AgendaManager = () => {
                               >
                                 {prioridades.find(p => p.value === evento.prioridade)?.label}
                               </Badge>
+
+                              {(() => {
+                                const jb = janelaBadge(computeJanela(evento.data_evento, evento.status));
+                                return jb ? (
+                                  <Badge variant={jb.variant}>{jb.label}</Badge>
+                                ) : null;
+                              })()}
                             </div>
                           </div>
 
                           <div className="flex gap-1">
+                            {evento.status === "pendente" && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                title="Adiar lembrete 1 dia"
+                                onClick={() => handleSnooze(evento.id)}
+                              >
+                                <Clock className="w-4 h-4" />
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="icon"
@@ -483,7 +934,8 @@ const AgendaManager = () => {
                         </div>
                       </CardContent>
                     </Card>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </ScrollArea>
@@ -498,6 +950,9 @@ const AgendaManager = () => {
             <DialogTitle>
               {eventoSelecionado ? "Editar Evento" : "Novo Evento"}
             </DialogTitle>
+            <DialogDescription>
+              Dados do compromisso: título, descrição, tipo, aluno opcional, data, hora, prioridade e status.
+            </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -559,11 +1014,10 @@ const AgendaManager = () => {
 
               <div className="space-y-2">
                 <Label htmlFor="data_evento">Data *</Label>
-                <Input
+                <DateInputBR
                   id="data_evento"
-                  type="date"
                   value={formData.data_evento}
-                  onChange={(e) => setFormData({ ...formData, data_evento: e.target.value })}
+                  onChange={(value) => setFormData({ ...formData, data_evento: value })}
                   required
                 />
               </div>

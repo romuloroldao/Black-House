@@ -1,19 +1,22 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { DateInputBR } from "./ui/date-input-br";
 import { Checkbox } from "./ui/checkbox";
 import { Calendar } from "./ui/calendar";
 import { toast } from "sonner";
 import { Calendar as CalendarIcon, Plus, Trash2, Users, Clock } from "lucide-react";
 import { Badge } from "./ui/badge";
 import { Alert, AlertDescription } from "./ui/alert";
+import { formatDateBR } from "@/lib/date-format";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
 interface Turma {
   id: string;
@@ -43,6 +46,7 @@ interface Evento {
 }
 
 export function EventsCalendar() {
+  const { confirm } = useConfirm();
   const { user } = useAuth();
   const [eventos, setEventos] = useState<Evento[]>([]);
   const [turmas, setTurmas] = useState<Turma[]>([]);
@@ -71,51 +75,76 @@ export function EventsCalendar() {
   const loadEventos = async () => {
     if (!user) return;
 
-    const { data, error } = await supabase
-      .from("eventos")
-      .select(`
-        *,
-        turmas:turma_id(nome),
-        eventos_participantes(
-          aluno_id,
-          alunos:aluno_id(id, nome, email)
-        )
-      `)
-      .eq("coach_id", user.id)
-      .order("data_inicio", { ascending: true });
+    try {
+      const [eventosRes, turmasRes, participantesRes, alunosRes] = await Promise.all([
+        apiClient.requestSafe<any[]>('/api/eventos'),
+        apiClient.requestSafe<any[]>('/api/turmas'),
+        apiClient.requestSafe<any[]>('/api/eventos-participantes'),
+        apiClient.requestSafe<any[]>('/api/alunos'),
+      ]);
 
-    if (error) {
+      const eventosData = eventosRes.success && Array.isArray(eventosRes.data) ? eventosRes.data : [];
+      const turmasData = turmasRes.success && Array.isArray(turmasRes.data) ? turmasRes.data : [];
+      const participantesData = participantesRes.success && Array.isArray(participantesRes.data) ? participantesRes.data : [];
+      const alunosData = alunosRes.success && Array.isArray(alunosRes.data) ? alunosRes.data : [];
+
+      const turmasMap = new Map(turmasData.map((t: any) => [t.id, t]));
+      const alunosMap = new Map(alunosData.map((a: any) => [a.id, a]));
+      const participantesByEvento = participantesData.reduce((acc: Record<string, any[]>, p: any) => {
+        if (!acc[p.evento_id]) acc[p.evento_id] = [];
+        acc[p.evento_id].push(p);
+        return acc;
+      }, {});
+
+      const eventosComRelacoes = eventosData
+        .filter((e: any) => e.coach_id === user.id)
+        .sort((a: any, b: any) => new Date(a.data_inicio || 0).getTime() - new Date(b.data_inicio || 0).getTime())
+        .map((evento: any) => {
+          const turma = evento.turma_id ? turmasMap.get(evento.turma_id) : null;
+          const participantes = participantesByEvento[evento.id] || [];
+          const participantesComAlunos = participantes.map((p: any) => ({
+            ...p,
+            alunos: alunosMap.get(p.aluno_id) || null
+          }));
+          return {
+            ...evento,
+            turmas: turma ? { nome: turma.nome } : null,
+            eventos_participantes: participantesComAlunos
+          };
+        });
+
+      setEventos(eventosComRelacoes);
+    } catch (error) {
+      console.error("Erro ao carregar eventos:", error);
       toast.error("Erro ao carregar eventos");
-      return;
     }
-
-    setEventos(data || []);
   };
 
   const loadTurmas = async () => {
     if (!user) return;
 
-    const { data, error } = await supabase
-      .from("turmas")
-      .select("id, nome, cor")
-      .eq("coach_id", user.id)
-      .eq("ativo", true);
-
-    if (error) return;
-    setTurmas(data || []);
+    try {
+      const result = await apiClient.requestSafe<any[]>('/api/turmas');
+      const data = result.success && Array.isArray(result.data) ? result.data : [];
+      setTurmas(data.filter((t: any) => t.coach_id === user.id && t.ativo === true));
+    } catch (error) {
+      console.error("Erro ao carregar turmas:", error);
+    }
   };
 
   const loadAlunos = async () => {
     if (!user) return;
 
-    const { data, error } = await supabase
-      .from("alunos")
-      .select("id, nome, email")
-      .eq("coach_id", user.id)
-      .order("nome");
-
-    if (error) return;
-    setAlunos(data || []);
+    try {
+      const result = await apiClient.requestSafe<any[]>('/api/alunos');
+      const data = result.success && Array.isArray(result.data) ? result.data : [];
+      const filtrados = data
+        .filter((a: any) => a.coach_id === user.id)
+        .sort((a: any, b: any) => String(a?.nome || '').localeCompare(String(b?.nome || '')));
+      setAlunos(filtrados);
+    } catch (error) {
+      console.error("Erro ao carregar alunos:", error);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -129,9 +158,9 @@ export function EventsCalendar() {
 
     setLoading(true);
 
-    const { data: evento, error: eventoError } = await supabase
-      .from("eventos")
-      .insert([{
+    const eventoResult = await apiClient.requestSafe<any>('/api/eventos', {
+      method: 'POST',
+      body: JSON.stringify({
         coach_id: user.id,
         titulo: formData.titulo,
         descricao: formData.descricao,
@@ -141,11 +170,11 @@ export function EventsCalendar() {
         recorrencia: formData.recorrencia,
         link_online: formData.link_online || null,
         turma_id: formData.turma_id || null,
-      }])
-      .select()
-      .single();
+      }),
+    });
 
-    if (eventoError || !evento) {
+    const eventoData = eventoResult.success ? eventoResult.data : null;
+    if (!eventoData) {
       toast.error("Erro ao criar evento");
       setLoading(false);
       return;
@@ -155,35 +184,38 @@ export function EventsCalendar() {
     let participantesIds: string[] = [];
     
     if (formData.turma_id) {
-      const { data: membros } = await supabase
-        .from("turmas_alunos")
-        .select("aluno_id")
-        .eq("turma_id", formData.turma_id);
-
-      if (membros) {
-        participantesIds = membros.map(m => m.aluno_id);
-      }
+      const membrosRes = await apiClient.requestSafe<any[]>(`/api/turmas-alunos?turma_id=${formData.turma_id}`);
+      const membros = membrosRes.success && Array.isArray(membrosRes.data) ? membrosRes.data : [];
+      participantesIds = membros.map(m => m.aluno_id);
     } else {
       participantesIds = selectedAlunos;
     }
 
     if (participantesIds.length > 0) {
       const participantes = participantesIds.map(alunoId => ({
-        evento_id: evento.id,
+        evento_id: eventoData.id,
         aluno_id: alunoId,
       }));
 
-      await supabase.from("eventos_participantes").insert(participantes);
+      // DESIGN-SUPABASE-PURGE-GLOBAL-003: Usar rota semântica ao invés de from()
+      await apiClient.requestSafe('/api/eventos-participantes', {
+        method: 'POST',
+        body: JSON.stringify(participantes),
+      });
 
       // Criar notificações para os participantes
       for (const alunoId of participantesIds) {
-        await supabase.from("notificacoes").insert({
-          coach_id: user.id,
-          aluno_id: alunoId,
-          tipo: "novo_evento",
-          titulo: `Novo evento: ${formData.titulo}`,
-          mensagem: `Você foi convidado para o evento "${formData.titulo}" no dia ${new Date(formData.data_inicio).toLocaleDateString("pt-BR")}`,
-          link: "/student-portal?tab=calendar",
+        // DESIGN-SUPABASE-PURGE-GLOBAL-003: Usar rota semântica ao invés de from()
+        await apiClient.requestSafe('/api/notificacoes', {
+          method: 'POST',
+          body: JSON.stringify({
+            coach_id: user.id,
+            aluno_id: alunoId,
+            tipo: "novo_evento",
+            titulo: `Novo evento: ${formData.titulo}`,
+            mensagem: `Você foi convidado para o evento "${formData.titulo}" no dia ${new Date(formData.data_inicio).toLocaleDateString("pt-BR")}`,
+            link: "calendar",
+          }),
         });
       }
     }
@@ -196,14 +228,22 @@ export function EventsCalendar() {
   };
 
   const handleCancelEvento = async (id: string) => {
-    if (!confirm("Tem certeza que deseja cancelar este evento?")) return;
+    if (
+      !(await confirmDelete(
+        confirm,
+        "Este evento será cancelado e os participantes deixarão de vê-lo.",
+        "Confirmar cancelamento",
+      ))
+    ) {
+      return;
+    }
 
-    const { error } = await supabase
-      .from("eventos")
-      .update({ status: "cancelado" })
-      .eq("id", id);
-
-    if (error) {
+    try {
+      await apiClient.requestSafe(`/api/eventos/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: "cancelado" }),
+      });
+    } catch (error) {
       toast.error("Erro ao cancelar evento");
       return;
     }
@@ -212,12 +252,16 @@ export function EventsCalendar() {
     const evento = eventos.find(e => e.id === id);
     if (evento?.eventos_participantes) {
       for (const p of evento.eventos_participantes) {
-        await supabase.from("notificacoes").insert({
-          coach_id: user!.id,
-          aluno_id: p.aluno_id,
-          tipo: "evento_cancelado",
-          titulo: `Evento cancelado: ${evento.titulo}`,
-          mensagem: `O evento "${evento.titulo}" foi cancelado`,
+        // DESIGN-SUPABASE-PURGE-GLOBAL-003: Usar rota semântica ao invés de from()
+        await apiClient.request('/api/notificacoes', {
+          method: 'POST',
+          body: JSON.stringify({
+            coach_id: user!.id,
+            aluno_id: p.aluno_id,
+            tipo: "evento_cancelado",
+            titulo: `Evento cancelado: ${evento.titulo}`,
+            mensagem: `O evento "${evento.titulo}" foi cancelado`,
+          }),
         });
       }
     }
@@ -250,18 +294,14 @@ export function EventsCalendar() {
   });
 
   const formatDate = (date: string) => {
-    return new Date(date).toLocaleDateString("pt-BR", {
-      day: "2-digit",
-      month: "long",
-      year: "numeric",
-    });
+    return formatDateBR(date);
   };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold">Calendário de Eventos</h2>
+          <h2 className="text-xl font-bold sm:text-2xl">Calendário de Eventos</h2>
           <p className="text-muted-foreground">
             Gerencie eventos e lembretes automáticos
           </p>
@@ -276,6 +316,9 @@ export function EventsCalendar() {
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Criar Novo Evento</DialogTitle>
+              <DialogDescription>
+                Título, descrição, data, duração, recorrência, link e participantes ou turma.
+              </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
@@ -302,11 +345,10 @@ export function EventsCalendar() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="data_inicio">Data</Label>
-                  <Input
+                  <DateInputBR
                     id="data_inicio"
-                    type="date"
                     value={formData.data_inicio}
-                    onChange={(e) => setFormData({ ...formData, data_inicio: e.target.value })}
+                    onChange={(value) => setFormData({ ...formData, data_inicio: value })}
                     required
                   />
                 </div>

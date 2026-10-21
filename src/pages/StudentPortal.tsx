@@ -1,171 +1,337 @@
-import { useState, useEffect } from "react";
-import { useSearchParams, Navigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
+import { useEffect, useRef, useState } from "react";
+import StudentOnboardingDialog, {
+  isStudentOnboardingDone,
+} from "@/components/student/StudentOnboardingDialog";
+import { useSearchParams } from "react-router-dom";
+import { Menu } from "lucide-react";
 import StudentSidebar from "@/components/student/StudentSidebar";
-import StudentDashboardView from "@/components/student/StudentDashboardView";
+import StudentTodayView from "@/components/student/StudentTodayView";
+import StudentBottomNav, { shouldShowMobileBottomNav } from "@/components/student/StudentBottomNav";
+import { useAlunoHoje } from "@/hooks/useAlunoHoje";
+import { useAuth } from "@/contexts/AuthContext";
+import { useDataContext } from "@/contexts/DataContext";
 import StudentDietView from "@/components/student/StudentDietView";
 import StudentWorkoutsView from "@/components/student/StudentWorkoutsView";
 import StudentVideosView from "@/components/student/StudentVideosView";
-import StudentChatView from "@/components/student/StudentChatView";
+import StudentEducationalLibraryView from "@/components/student/StudentEducationalLibraryView";
+import StudentCoachHubView from "@/components/student/StudentCoachHubView";
 import StudentProgressView from "@/components/student/StudentProgressView";
 import StudentFinancialView from "@/components/student/StudentFinancialView";
 import StudentProfileView from "@/components/student/StudentProfileView";
+import ProfileCompletionWizard from "@/components/student/ProfileCompletionWizard";
+import { useProfileCompleteness } from "@/hooks/useProfileCompleteness";
 import StudentReportsView from "@/components/student/StudentReportsView";
-import StudentMessagesView from "@/components/student/StudentMessagesView";
 import StudentWeeklyCheckin from "@/components/student/StudentWeeklyCheckin";
-import StudentProgressDashboard from "@/components/student/StudentProgressDashboard";
-
 import NotificationsPopover from "@/components/NotificationsPopover";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useStudentPortalRealtime } from "@/hooks/useStudentPortalRealtime";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, CreditCard, Loader2, LogOut } from "lucide-react";
+import { BrandLogo } from "@/components/BrandLogo";
+import { ThemeToggleCompact } from "@/components/ui/mode-toggle";
+import { cn } from "@/lib/utils";
+import { apiClient } from "@/lib/api-client";
+import AgentReturnFab from "@/components/student/agent/AgentReturnFab";
+import { trackAgentEvent } from "@/lib/agent-analytics";
+import { useStudentNavMode } from "@/hooks/useStudentNavMode";
 
+// RBAC-01: StudentPortal usa payment_status do contexto (via ProtectedRoute)
+// A tela de bloqueio é rota separada (/portal-aluno/blocked)
+// O ProtectedRoute já redireciona alunos inadimplentes automaticamente
 const StudentPortal = () => {
+  const { user } = useAuth();
+  const { isReady } = useDataContext();
+  const { isCompact, mode, setMode, toggle: toggleNavMode } = useStudentNavMode();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "dashboard");
-  const [isInadimplente, setIsInadimplente] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const { user, signOut } = useAuth();
+  const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "hoje");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [profileWizardOpen, setProfileWizardOpen] = useState(false);
+  const hojeState = useAlunoHoje(Boolean(isReady && user));
+  const { coachUnreadTotal } = hojeState;
+  const { status: profileStatus, refetch: refetchProfile } = useProfileCompleteness();
+  const [profileSeed, setProfileSeed] = useState<{
+    nome?: string;
+    telefone?: string;
+    data_nascimento?: string;
+    sexo?: string;
+    peso_kg?: string;
+    altura_cm?: string;
+  }>({});
 
   useEffect(() => {
-    checkPaymentStatus();
-  }, [user]);
-
-  const checkPaymentStatus = async () => {
-    if (!user?.email) {
-      setLoading(false);
+    let tab = searchParams.get("tab") || "hoje";
+    if (tab === "dashboard") {
+      setSearchParams({ tab: "hoje" }, { replace: true });
+      setActiveTab("hoje");
       return;
     }
-
-    try {
-      // Get student ID by email
-      const { data: aluno } = await supabase
-        .from('alunos')
-        .select('id')
-        .eq('email', user.email)
-        .single();
-
-      if (!aluno) {
-        setLoading(false);
-        return;
-      }
-
-      // Check for overdue payments (OVERDUE status or PENDING past due date)
-      const today = new Date().toISOString().split('T')[0];
-      const { data: overduePayments } = await supabase
-        .from('asaas_payments')
-        .select('id, status, due_date')
-        .eq('aluno_id', aluno.id)
-        .or(`status.eq.OVERDUE,and(status.eq.PENDING,due_date.lt.${today})`);
-
-      // Student is delinquent if they have any overdue payments
-      setIsInadimplente((overduePayments?.length || 0) > 0);
-    } catch (error) {
-      console.error('Erro ao verificar status de pagamento:', error);
-    } finally {
-      setLoading(false);
+    if (tab === "chat" || tab === "messages") {
+      setSearchParams(
+        { tab: "coach", coachView: tab === "chat" ? "chat" : "avisos" },
+        { replace: true },
+      );
+      setActiveTab("coach");
+      return;
     }
-  };
-
-  const handleTabChange = (tab: string) => {
     setActiveTab(tab);
-    setSearchParams({ tab });
-  };
+  }, [searchParams, setSearchParams]);
 
-  const handleLogout = async () => {
-    await signOut();
-  };
+  useEffect(() => {
+    if (isReady && user?.role === "aluno" && !isStudentOnboardingDone()) {
+      setOnboardingOpen(true);
+    }
+  }, [isReady, user?.role]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (!isReady || !profileStatus || profileStatus.is_complete) return;
+    const key = "bh-profile-wizard-shown";
+    try {
+      if (sessionStorage.getItem(key) === "1") return;
+      sessionStorage.setItem(key, "1");
+    } catch {
+      /* ignore */
+    }
+    void (async () => {
+      const me = await apiClient.getMeSafe();
+      const aluno = me.success ? me.data : null;
+      setProfileSeed({
+        nome: aluno?.nome || "",
+        telefone: aluno?.telefone || "",
+        data_nascimento: (aluno?.data_nascimento || "").split("T")[0] || "",
+        sexo: aluno?.sexo || "",
+        peso_kg:
+          aluno?.peso_kg != null
+            ? String(aluno.peso_kg)
+            : aluno?.peso != null
+              ? String(aluno.peso)
+              : "",
+        altura_cm:
+          aluno?.altura_cm != null
+            ? String(aluno.altura_cm)
+            : aluno?.altura != null
+              ? String(aluno.altura)
+              : "",
+      });
+      setProfileWizardOpen(true);
+    })();
+  }, [isReady, profileStatus?.is_complete]);
 
-  // Show blocked screen for delinquent students
-  if (isInadimplente) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-4">
-        <Card className="max-w-md w-full border-destructive/50">
-          <CardHeader className="text-center">
-            <div className="mx-auto mb-4 h-16 w-16 rounded-full bg-destructive/10 flex items-center justify-center">
-              <AlertTriangle className="h-8 w-8 text-destructive" />
-            </div>
-            <CardTitle className="text-2xl text-destructive">Acesso Bloqueado</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 text-center">
-            <p className="text-muted-foreground">
-              Seu acesso à plataforma está temporariamente suspenso devido a pendências financeiras.
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Para regularizar sua situação e restaurar o acesso, entre em contato com seu coach ou efetue o pagamento das parcelas em aberto.
-            </p>
-            <div className="flex flex-col gap-2 pt-4">
-              <Button 
-                onClick={() => { setIsInadimplente(false); handleTabChange('financial'); }}
-                className="w-full gap-2"
-              >
-                <CreditCard className="h-4 w-4" />
-                Ver Pendências
-              </Button>
-              <Button 
-                variant="outline" 
-                onClick={handleLogout}
-                className="w-full gap-2"
-              >
-                <LogOut className="h-4 w-4" />
-                Sair
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  const renderContent = () => {
-    switch (activeTab) {
-      case "dashboard":
-        return <StudentDashboardView />;
-      case "diet":
-        return <StudentDietView />;
-      case "workouts":
-        return <StudentWorkoutsView />;
-      case "videos":
-        return <StudentVideosView />;
-      case "chat":
-        return <StudentChatView />;
-      case "messages":
-        return <StudentMessagesView />;
-      case "reports":
-        return <StudentReportsView />;
-      case "progress":
-        return <StudentProgressView />;
-      case "financial":
-        return <StudentFinancialView />;
-      case "profile":
-        return <StudentProfileView />;
-      case "checkin":
-        return <StudentWeeklyCheckin />;
-      default:
-        return <StudentDashboardView />;
+  const handleTabChange = (tab: string, extra?: Record<string, string>) => {
+    setActiveTab(tab);
+    setSearchParams({ tab, ...extra });
+    setMobileNavOpen(false);
+    if (tab !== "hoje" && tab !== "dashboard") {
+      trackAgentEvent("nav_traditional_open", { tab });
     }
   };
 
-  return (
-    <div className="flex min-h-screen w-full bg-background">
-      <StudentSidebar activeTab={activeTab} onTabChange={handleTabChange} />
-      <main className="flex-1 p-6 lg:p-8">
-        <div className="flex justify-end mb-4">
-          <NotificationsPopover onNavigate={handleTabChange} />
+  /** Abrir navegação completa: drawer no mobile; expandir rail no desktop. */
+  const openPlatformNav = () => {
+    trackAgentEvent("nav_traditional_open", { via: "explore" });
+    const isMobile =
+      typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+    if (isMobile) {
+      setMobileNavOpen(true);
+      return;
+    }
+    setMobileNavOpen(false);
+    setMode("expanded");
+  };
+
+  // Ao regressar à home, refrescar pendências (ex.: após abrir chat e marcar lidas).
+  const prevTabRef = useRef(activeTab);
+  useEffect(() => {
+    const prev = prevTabRef.current;
+    prevTabRef.current = activeTab;
+    if (prev === activeTab) return;
+    if (activeTab === "hoje" || activeTab === "dashboard") {
+      void hojeState.refetch();
+    }
+  }, [activeTab, hojeState.refetch]);
+
+  useStudentPortalRealtime({ onNavigate: handleTabChange });
+
+  useEffect(() => {
+    const onRealtime = () => {
+      void hojeState.refetch();
+    };
+    window.addEventListener("blackhouse:student-realtime", onRealtime);
+    return () => window.removeEventListener("blackhouse:student-realtime", onRealtime);
+  }, [hojeState.refetch]);
+
+  // DESIGN-ROOT-RENDER-UNBLOCK-001: renderContent deve sempre retornar componente válido
+  const renderContent = () => {
+    try {
+      switch (activeTab) {
+        case "hoje":
+        case "dashboard":
+          return (
+            <StudentTodayView
+              hojeState={hojeState}
+              profileStatus={profileStatus}
+              onOpenProfileWizard={() => setProfileWizardOpen(true)}
+              onExplorePlatform={openPlatformNav}
+            />
+          );
+        case "diet":
+          return <StudentDietView />;
+        case "workouts":
+          return <StudentWorkoutsView />;
+        case "videos":
+          return <StudentVideosView />;
+        case "education":
+          return <StudentEducationalLibraryView />;
+        case "coach":
+        case "chat":
+        case "messages":
+          return <StudentCoachHubView />;
+        case "reports":
+          return <StudentReportsView />;
+        case "progress":
+          return <StudentProgressView />;
+        case "financial":
+          return <StudentFinancialView />;
+        case "profile":
+          return <StudentProfileView />;
+        case "checkin":
+          return (
+            <StudentWeeklyCheckin
+              checkinStreak={hojeState.data?.checkin_streak ?? null}
+              checkinLoading={hojeState.loading}
+              onCheckinSubmitted={() => void hojeState.refetch()}
+              profileStatus={profileStatus}
+              onRequireProfile={() => setProfileWizardOpen(true)}
+            />
+          );
+        default:
+          return <StudentTodayView onExplorePlatform={openPlatformNav} />;
+      }
+    } catch (error) {
+      // DESIGN-ROOT-RENDER-UNBLOCK-001: Fallback seguro em caso de erro
+      console.warn('[DESIGN-ROOT-RENDER-UNBLOCK-001] Erro ao renderizar conteúdo do StudentPortal. Usando fallback:', error);
+      return <StudentTodayView />;
+    }
+  };
+
+  // DESIGN-ROOT-RENDER-UNBLOCK-001: Garantir que sempre retorna JSX válido
+  try {
+    const content = renderContent();
+    const showMobileBottomNav = shouldShowMobileBottomNav(activeTab);
+    if (!content) {
+      // DESIGN-ROOT-RENDER-UNBLOCK-001: Se renderContent retornar null/undefined, usar fallback
+      console.warn('[DESIGN-ROOT-RENDER-UNBLOCK-001] renderContent retornou null/undefined. Usando fallback.');
+      return (
+        <div className="flex min-h-screen w-full bg-background items-center justify-center">
+          <div className="text-center">
+            <p className="text-muted-foreground">Carregando...</p>
+          </div>
         </div>
-        {renderContent()}
-      </main>
-    </div>
-  );
+      );
+    }
+
+    return (
+      <div
+        className="relative flex h-dvh min-h-0 w-full min-w-0 overflow-hidden bg-background"
+        data-student-nav={isCompact ? "compact" : "expanded"}
+      >
+        <a
+          href="#student-main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[200] focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          Ir para o conteúdo
+        </a>
+        <StudentSidebar
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
+          mobileOpen={mobileNavOpen}
+          onMobileOpenChange={setMobileNavOpen}
+          navMode={mode}
+          onToggleNavMode={toggleNavMode}
+        />
+        <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col max-md:pt-[calc(3rem+env(safe-area-inset-top,0px))]">
+          <header className="flex h-12 min-h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-3 max-md:fixed max-md:inset-x-0 max-md:top-0 max-md:z-[100] max-md:min-h-[calc(3rem+env(safe-area-inset-top,0px))] max-md:pt-[env(safe-area-inset-top,0px)] max-md:shadow-md md:static md:top-auto md:z-30 md:min-h-12 md:pt-0 md:shadow-none bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/90 md:hidden">
+            <Button
+              type="button"
+              variant="secondary"
+              className="h-9 shrink-0 gap-2 border border-primary/40 bg-primary/15 px-2.5 text-foreground shadow-sm hover:bg-primary/25 active:bg-primary/30"
+              aria-label="Abrir menu de navegação"
+              onClick={() => setMobileNavOpen(true)}
+            >
+              <Menu className="h-5 w-5 shrink-0 text-primary" strokeWidth={2.75} aria-hidden />
+              <span className="text-sm font-semibold tracking-wide">Menu</span>
+            </Button>
+            <BrandLogo className="h-7" />
+            <div className="ml-auto flex shrink-0 items-center gap-1">
+              <ThemeToggleCompact />
+              <NotificationsPopover onNavigate={handleTabChange} />
+            </div>
+          </header>
+          <main
+            id="student-main-content"
+            tabIndex={-1}
+            aria-live="polite"
+            className={cn(
+              "flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overscroll-y-contain touch-pan-y [-webkit-overflow-scrolling:touch]",
+              /* Hoje: trava o viewport — o Assistente faz scroll interno (melhor em ecrãs altos) */
+              activeTab === "hoje"
+                ? "overflow-hidden"
+                : "overflow-y-auto",
+              "px-4 pt-4 transition-[padding] duration-200 motion-reduce:transition-none",
+              /* Hoje mobile: menos padding para o chat ganhar altura */
+              activeTab === "hoje" && "max-md:px-3 max-md:pt-2",
+              /* Compact: mais área útil para o agente / conteúdo */
+              isCompact
+                ? "md:px-5 md:pt-5 lg:px-6 lg:pt-6"
+                : "md:px-6 md:pt-6 lg:px-8 lg:pt-8",
+              showMobileBottomNav ? "max-md:pb-student-main md:pb-6" : "max-md:pb-student-main-compact md:pb-6",
+            )}
+          >
+            <div className="mb-4 hidden shrink-0 justify-end md:flex">
+              <NotificationsPopover onNavigate={handleTabChange} />
+            </div>
+            <div
+              key={activeTab}
+              className={cn(
+                "student-tab-enter min-w-0",
+                /* Hoje: preenche a altura do main para o chat expandir */
+                activeTab === "hoje" && "flex h-full min-h-0 flex-1 flex-col",
+              )}
+            >
+              {content}
+            </div>
+          </main>
+          <StudentOnboardingDialog open={onboardingOpen} onOpenChange={setOnboardingOpen} />
+          <ProfileCompletionWizard
+            open={profileWizardOpen}
+            onOpenChange={setProfileWizardOpen}
+            status={profileStatus}
+            initialData={profileSeed}
+            onCompleted={() => void refetchProfile()}
+          />
+          {showMobileBottomNav ? (
+            <StudentBottomNav
+              activeTab={activeTab}
+              onTabChange={handleTabChange}
+              coachBadge={coachUnreadTotal}
+            />
+          ) : null}
+          <AgentReturnFab
+            activeTab={activeTab}
+            onReturn={() => handleTabChange("hoje")}
+          />
+        </div>
+      </div>
+    );
+  } catch (error) {
+    // DESIGN-ROOT-RENDER-UNBLOCK-001: Fallback mínimo se houver erro estrutural
+    console.error('[DESIGN-ROOT-RENDER-UNBLOCK-001] Erro crítico no StudentPortal:', error);
+    return (
+      <div className="flex min-h-screen w-full bg-background items-center justify-center">
+        <div className="text-center">
+          <p className="text-muted-foreground">Carregando...</p>
+        </div>
+      </div>
+    );
+  }
 };
 
 export default StudentPortal;

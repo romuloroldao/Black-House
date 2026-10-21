@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useSearchParams } from "react-router-dom";
+import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Send, MessageSquare, Search, Plus, UserPlus } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -39,6 +40,8 @@ interface Aluno {
 const MessageManager = () => {
   const { user } = useAuth();
   const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const isCoachScoped = user?.role === 'coach';
   const [conversas, setConversas] = useState<Conversa[]>([]);
   const [conversaSelecionada, setConversaSelecionada] = useState<Conversa | null>(null);
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
@@ -54,18 +57,15 @@ const MessageManager = () => {
   const carregarAlunos = async () => {
     if (!user) return;
 
-    try {
-      const { data, error } = await supabase
-        .from("alunos")
-        .select("id, nome, email")
-        .eq("coach_id", user.id)
-        .order("nome");
-
-      if (error) throw error;
-      
-      setAlunos(data || []);
-    } catch (error) {
-      console.error("Erro ao carregar alunos:", error);
+    const result = await apiClient.requestSafe<any[]>('/api/alunos');
+    const data = result.success && Array.isArray(result.data) ? result.data : [];
+    const filtrados = (isCoachScoped
+      ? data.filter((a: any) => a.coach_id === user.id)
+      : data
+    )
+      .sort((a: any, b: any) => String(a?.nome || '').localeCompare(String(b?.nome || '')));
+    setAlunos(filtrados);
+    if (!result.success) {
       toast({
         title: "Erro",
         description: "Não foi possível carregar os alunos",
@@ -78,83 +78,64 @@ const MessageManager = () => {
   const carregarConversas = async () => {
     if (!user) return;
 
-    try {
-      const { data: conversasData, error } = await supabase
-        .from("conversas")
-        .select(`
-          id,
-          aluno_id,
-          ultima_mensagem,
-          ultima_mensagem_em,
-          updated_at
-        `)
-        .eq("coach_id", user.id)
-        .order("updated_at", { ascending: false });
+    const conversasResult = await apiClient.requestSafe<any[]>('/api/conversas');
+    const mensagensResult = await apiClient.requestSafe<any[]>('/api/mensagens');
+    const alunosResult = await apiClient.requestSafe<any[]>('/api/alunos');
 
-      if (error) throw error;
+    const conversasData = conversasResult.success && Array.isArray(conversasResult.data) ? conversasResult.data : [];
+    const mensagensData = mensagensResult.success && Array.isArray(mensagensResult.data) ? mensagensResult.data : [];
+    const alunosData = alunosResult.success && Array.isArray(alunosResult.data) ? alunosResult.data : [];
+    const alunosMap = new Map(alunosData.map((a: any) => [a.id, a]));
 
-      // Buscar nomes dos alunos
-      const conversasComNomes = await Promise.all(
-        (conversasData || []).map(async (conversa) => {
-          const { data: alunoData } = await supabase
-            .from("alunos")
-            .select("nome")
-            .eq("id", conversa.aluno_id)
-            .maybeSingle();
+    const filtradas = (isCoachScoped
+      ? conversasData.filter((c: any) => c.coach_id === user.id)
+      : conversasData
+    )
+      .sort((a: any, b: any) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime());
 
-          // Contar mensagens não lidas
-          const { count } = await supabase
-            .from("mensagens")
-            .select("*", { count: "exact", head: true })
-            .eq("conversa_id", conversa.id)
-            .eq("lida", false)
-            .neq("remetente_id", user.id);
+    const conversasComNomes = filtradas.map((conversa: any) => {
+      const alunoData = alunosMap.get(conversa.aluno_id);
+      const mensagensNaoLidas = mensagensData.filter(
+        (m: any) => m.conversa_id === conversa.id && m.lida === false && m.remetente_id !== user.id
+      ).length;
 
-          return {
-            ...conversa,
-            aluno_nome: alunoData?.nome || "Aluno",
-            mensagens_nao_lidas: count || 0,
-          };
-        })
-      );
+      return {
+        ...conversa,
+        aluno_nome: alunoData?.nome || "Aluno",
+        mensagens_nao_lidas: mensagensNaoLidas,
+      };
+    });
 
-      setConversas(conversasComNomes);
-    } catch (error) {
-      console.error("Erro ao carregar conversas:", error);
+    setConversas(conversasComNomes);
+    if (!conversasResult.success) {
       toast({
         title: "Erro",
         description: "Não foi possível carregar as conversas",
         variant: "destructive",
       });
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
 
   // Carregar mensagens de uma conversa
   const carregarMensagens = async (conversaId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from("mensagens")
-        .select("*")
-        .eq("conversa_id", conversaId)
-        .order("created_at", { ascending: true });
+    const result = await apiClient.requestSafe<any[]>('/api/mensagens');
+    const data = result.success && Array.isArray(result.data) ? result.data : [];
+    const ordenadas = data
+      .filter((m: any) => m.conversa_id === conversaId)
+      .sort((a: any, b: any) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
+    setMensagens(ordenadas);
 
-      if (error) throw error;
-
-      setMensagens(data || []);
-
-      // Marcar mensagens como lidas
-      if (user) {
-        await supabase
-          .from("mensagens")
-          .update({ lida: true })
-          .eq("conversa_id", conversaId)
-          .neq("remetente_id", user.id)
-          .eq("lida", false);
+    if (user) {
+      const mensagensNaoLidas = ordenadas.filter(
+        (m: any) => m.remetente_id !== user.id && m.lida === false
+      );
+      for (const msg of mensagensNaoLidas) {
+        await apiClient.requestSafe(`/api/mensagens/${msg.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ lida: true }),
+        });
       }
-    } catch (error) {
-      console.error("Erro ao carregar mensagens:", error);
     }
   };
 
@@ -162,129 +143,123 @@ const MessageManager = () => {
   const iniciarNovaConversa = async (alunoId: string) => {
     if (!user) return;
 
-    try {
-      // Verificar se já existe conversa
-      const { data: conversaExistente } = await supabase
-        .from("conversas")
-        .select("id")
-        .eq("coach_id", user.id)
-        .eq("aluno_id", alunoId)
-        .maybeSingle();
+    const conversasResult = await apiClient.requestSafe<any[]>('/api/conversas');
+    const conversasData = conversasResult.success && Array.isArray(conversasResult.data) ? conversasResult.data : [];
+    const conversaExistente = conversasData.find(
+      (c: any) =>
+        c.aluno_id === alunoId && (isCoachScoped ? c.coach_id === user.id : true)
+    );
 
-      if (conversaExistente) {
-        // Se já existe, apenas selecionar
-        const conversa = conversas.find(c => c.id === conversaExistente.id);
-        if (conversa) {
-          setConversaSelecionada(conversa);
-        }
-      } else {
-        // Criar nova conversa
-        const { data, error } = await supabase
-          .from("conversas")
-          .insert({
-            coach_id: user.id,
-            aluno_id: alunoId,
-          })
-          .select()
-          .single();
-
-        if (error) throw error;
-
+    if (conversaExistente) {
+      const conversa = conversas.find(c => c.id === conversaExistente.id);
+      if (conversa) {
+        setConversaSelecionada(conversa);
+      }
+    } else {
+      const createResult = await apiClient.requestSafe<any>('/api/conversas', {
+        method: 'POST',
+        body: JSON.stringify({
+          aluno_id: alunoId,
+        }),
+      });
+      const novaConversa = createResult.success ? createResult.data : null;
+      if (!novaConversa) {
         toast({
-          title: "Conversa iniciada!",
-          description: "Agora você pode enviar mensagens",
+          title: "Erro",
+          description: "Não foi possível iniciar a conversa",
+          variant: "destructive",
         });
-
-        // Recarregar conversas e selecionar a nova
-        await carregarConversas();
-        
-        // Buscar nome do aluno para a nova conversa
-        const aluno = alunos.find(a => a.id === alunoId);
-        if (data && aluno) {
-          setConversaSelecionada({
-            ...data,
-            aluno_nome: aluno.nome,
-            mensagens_nao_lidas: 0,
-          });
-        }
+        return;
       }
 
-      setIsNovaConversaOpen(false);
-      setBuscaAluno("");
-    } catch (error) {
-      console.error("Erro ao iniciar conversa:", error);
       toast({
-        title: "Erro",
-        description: "Não foi possível iniciar a conversa",
-        variant: "destructive",
+        title: "Conversa iniciada!",
+        description: "Agora você pode enviar mensagens",
       });
+
+      await carregarConversas();
+      const aluno = alunos.find(a => a.id === alunoId);
+      if (aluno) {
+        setConversaSelecionada({
+          ...novaConversa,
+          aluno_nome: aluno.nome,
+          mensagens_nao_lidas: 0,
+        });
+      }
     }
+
+    setIsNovaConversaOpen(false);
+    setBuscaAluno("");
   };
 
   // Enviar mensagem
   const enviarMensagem = async () => {
     if (!novaMensagem.trim() || !conversaSelecionada || !user) return;
 
-    try {
-      setEnviando(true);
+    setEnviando(true);
 
-      const { error } = await supabase.from("mensagens").insert({
+    const sendResult = await apiClient.requestSafe('/api/mensagens', {
+      method: 'POST',
+      body: JSON.stringify({
         conversa_id: conversaSelecionada.id,
         remetente_id: user.id,
         conteudo: novaMensagem.trim(),
-      });
-
-      if (error) throw error;
-
-      // Atualizar última mensagem da conversa
-      await supabase
-        .from("conversas")
-        .update({
-          ultima_mensagem: novaMensagem.trim(),
-          ultima_mensagem_em: new Date().toISOString(),
-        })
-        .eq("id", conversaSelecionada.id);
-
-      setNovaMensagem("");
-      
-      // Recarregar apenas a lista de conversas (realtime já adiciona a mensagem)
-      await carregarConversas();
-    } catch (error) {
-      console.error("Erro ao enviar mensagem:", error);
+      }),
+    });
+    if (!sendResult.success) {
       toast({
         title: "Erro",
         description: "Não foi possível enviar a mensagem",
         variant: "destructive",
       });
-    } finally {
       setEnviando(false);
+      return;
     }
+
+    await apiClient.requestSafe(`/api/conversas/${conversaSelecionada.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        ultima_mensagem: novaMensagem.trim(),
+        ultima_mensagem_em: new Date().toISOString(),
+      }),
+    });
+
+    setNovaMensagem("");
+    await carregarConversas();
+    setEnviando(false);
   };
 
   // Realtime subscription
   useEffect(() => {
     if (!conversaSelecionada) return;
 
-    const channel = supabase
-      .channel("mensagens-realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "mensagens",
-          filter: `conversa_id=eq.${conversaSelecionada.id}`,
-        },
-        (payload) => {
-          setMensagens((prev) => [...prev, payload.new as Mensagem]);
-        }
-      )
-      .subscribe();
+    // Realtime removido - recarregar mensagens periodicamente ou após ações
+    // Alternativa: usar polling ou WebSocket próprio no futuro
+    const intervalId = setInterval(() => {
+      if (conversaSelecionada) {
+        carregarMensagens(conversaSelecionada.id);
+      }
+    }, 5000); // Recarregar a cada 5 segundos
 
     return () => {
-      supabase.removeChannel(channel);
+      clearInterval(intervalId);
     };
   }, [conversaSelecionada]);
+
+  useEffect(() => {
+    if (loading || !user) return;
+
+    const alunoId = searchParams.get("aluno_id");
+    if (!alunoId) return;
+
+    const conversa = conversas.find((c) => c.aluno_id === alunoId);
+    if (conversa) {
+      setConversaSelecionada(conversa);
+      const next = new URLSearchParams(searchParams);
+      next.delete("aluno_id");
+      setSearchParams(next, { replace: true });
+    }
+  }, [loading, user, conversas, searchParams, setSearchParams]);
 
   useEffect(() => {
     carregarAlunos();
@@ -298,24 +273,29 @@ const MessageManager = () => {
   }, [conversaSelecionada]);
 
   const conversasFiltradas = conversas.filter((c) =>
-    c.aluno_nome?.toLowerCase().includes(busca.toLowerCase())
+    (c.aluno_nome ?? '').toLowerCase().includes(busca.toLowerCase())
   );
 
   const alunosFiltrados = alunos.filter((a) =>
-    a.nome.toLowerCase().includes(buscaAluno.toLowerCase()) &&
+    (a.nome ?? '').toLowerCase().includes(buscaAluno.toLowerCase()) &&
     !conversas.some(c => c.aluno_id === a.id)
+  );
+
+  const alunosJaComConversa = alunos.filter((a) =>
+    (a.nome ?? '').toLowerCase().includes(buscaAluno.toLowerCase()) &&
+    conversas.some(c => c.aluno_id === a.id)
   );
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
-        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full motion-safe:animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-200px)]">
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100dvh-200px)] max-h-[calc(100dvh-200px)]">
       {/* Lista de Conversas */}
       <Card className="lg:col-span-1">
         <CardHeader>
@@ -334,6 +314,9 @@ const MessageManager = () => {
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Iniciar Nova Conversa</DialogTitle>
+                  <DialogDescription>
+                    Busque e selecione um aluno para abrir uma nova conversa.
+                  </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4">
                   <div className="relative">
@@ -348,7 +331,11 @@ const MessageManager = () => {
                   <ScrollArea className="h-[300px]">
                     {alunosFiltrados.length === 0 ? (
                       <div className="text-center text-muted-foreground py-8">
-                        {buscaAluno ? "Nenhum aluno encontrado" : "Todos os alunos já têm conversas"}
+                        {buscaAluno && alunosJaComConversa.length > 0
+                          ? "Este aluno já possui conversa — selecione na lista ao lado"
+                          : buscaAluno
+                            ? "Nenhum aluno encontrado"
+                            : "Todos os alunos já têm conversas"}
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -360,11 +347,11 @@ const MessageManager = () => {
                           >
                             <Avatar>
                               <AvatarFallback>
-                                {aluno.nome.charAt(0)}
+                                {(aluno.nome ?? '?').charAt(0)}
                               </AvatarFallback>
                             </Avatar>
                             <div className="flex-1 text-left">
-                              <p className="font-medium">{aluno.nome}</p>
+                              <p className="font-medium">{aluno.nome ?? 'Aluno'}</p>
                               <p className="text-sm text-muted-foreground">
                                 {aluno.email}
                               </p>
@@ -390,7 +377,7 @@ const MessageManager = () => {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <ScrollArea className="h-[calc(100vh-340px)]">
+          <ScrollArea className="h-[calc(100dvh-340px)] max-h-[calc(100dvh-340px)]">
             {conversasFiltradas.length === 0 ? (
               <div className="p-4 text-center text-muted-foreground">
                 Nenhuma conversa encontrada
@@ -504,13 +491,19 @@ const MessageManager = () => {
                     placeholder="Digite sua mensagem..."
                     value={novaMensagem}
                     onChange={(e) => setNovaMensagem(e.target.value)}
-                    onKeyPress={(e) => e.key === "Enter" && enviarMensagem()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        void enviarMensagem();
+                      }
+                    }}
                     disabled={enviando}
                   />
                   <Button
                     onClick={enviarMensagem}
                     disabled={enviando || !novaMensagem.trim()}
                     size="icon"
+                    aria-label="Enviar mensagem"
                   >
                     <Send className="w-4 h-4" />
                   </Button>

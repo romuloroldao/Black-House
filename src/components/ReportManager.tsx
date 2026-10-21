@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,7 @@ import {
 import ReportForm from "./ReportForm";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 
 interface Report {
   id: string;
@@ -36,6 +37,7 @@ interface Report {
 
 const ReportManager = () => {
   const { user } = useAuth();
+  const { confirm } = useConfirm();
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -56,73 +58,67 @@ const ReportManager = () => {
   }, [user]);
 
   const loadReports = async () => {
-    try {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from("relatorios")
-        .select(`
-          *,
-          alunos (
-            nome,
-            email
-          )
-        `)
-        .eq("coach_id", user?.id)
-        .order("created_at", { ascending: false });
+    setLoading(true);
+    const reportsResult = await apiClient.requestSafe<any[]>('/api/relatorios');
+    const alunosResult = await apiClient.requestSafe<any[]>('/api/alunos');
 
-      if (error) throw error;
+    const data = reportsResult.success && Array.isArray(reportsResult.data) ? reportsResult.data : [];
+    const alunosData = alunosResult.success && Array.isArray(alunosResult.data) ? alunosResult.data : [];
+    const alunosMap = new Map(alunosData.map((a: any) => [a.id, a]));
 
-      setReports(data || []);
+    const filtrados = data
+      .filter((r: any) => r.coach_id === user?.id)
+      .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
-      // Calculate stats
-      const total = data?.length || 0;
-      const enviados = data?.filter((r) => r.status === "enviado").length || 0;
-      const visualizados = data?.filter((r) => r.status === "visualizado").length || 0;
-      const rascunhos = data?.filter((r) => r.status === "rascunho").length || 0;
+    const reportsComAlunos = filtrados.map((report: any) => {
+      const aluno = alunosMap.get(report.aluno_id);
+      return {
+        ...report,
+        alunos: aluno ? { nome: aluno.nome, email: aluno.email } : { nome: "Aluno", email: "" }
+      };
+    });
 
-      setStats({ total, enviados, visualizados, rascunhos });
-    } catch (error: any) {
-      toast.error("Erro ao carregar relatórios: " + error.message);
-    } finally {
-      setLoading(false);
+    setReports(reportsComAlunos);
+
+    const total = filtrados.length;
+    const enviados = filtrados.filter((r: any) => r.status === "enviado").length;
+    const visualizados = filtrados.filter((r: any) => r.status === "visualizado").length;
+    const rascunhos = filtrados.filter((r: any) => r.status === "rascunho").length;
+
+    setStats({ total, enviados, visualizados, rascunhos });
+
+    if (!reportsResult.success) {
+      toast.error("Erro ao carregar relatórios: " + reportsResult.error);
     }
+    setLoading(false);
   };
 
   const handleSendReport = async (reportId: string) => {
-    try {
-      const { error } = await supabase
-        .from("relatorios")
-        .update({ 
-          status: "enviado", 
-          enviado_em: new Date().toISOString() 
-        })
-        .eq("id", reportId);
-
-      if (error) throw error;
-
-      toast.success("Relatório enviado com sucesso!");
-      loadReports();
-    } catch (error: any) {
-      toast.error("Erro ao enviar relatório: " + error.message);
+    const result = await apiClient.requestSafe(`/api/relatorios/${reportId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        status: "enviado",
+        enviado_em: new Date().toISOString(),
+      }),
+    });
+    if (!result.success) {
+      toast.error("Erro ao enviar relatório: " + result.error);
+      return;
     }
+    toast.success("Relatório enviado com sucesso!");
+    loadReports();
   };
 
   const handleDeleteReport = async (reportId: string) => {
-    if (!confirm("Tem certeza que deseja excluir este relatório?")) return;
+    if (!(await confirmDelete(confirm, "Este relatório será removido permanentemente."))) return;
 
-    try {
-      const { error } = await supabase
-        .from("relatorios")
-        .delete()
-        .eq("id", reportId);
-
-      if (error) throw error;
-
-      toast.success("Relatório excluído com sucesso!");
-      loadReports();
-    } catch (error: any) {
-      toast.error("Erro ao excluir relatório: " + error.message);
+    const result = await apiClient.requestSafe(`/api/relatorios/${reportId}`, { method: 'DELETE' });
+    if (!result.success) {
+      toast.error("Erro ao excluir relatório: " + result.error);
+      return;
     }
+    toast.success("Relatório excluído com sucesso!");
+    loadReports();
   };
 
   const getStatusBadge = (status: string) => {
@@ -145,7 +141,7 @@ const ReportManager = () => {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Relatórios de Progresso</h1>
+          <h1 className="mb-2 text-xl font-bold sm:text-2xl">Relatórios de Progresso</h1>
           <p className="text-muted-foreground">
             Gerencie relatórios e acompanhe o desenvolvimento dos alunos
           </p>
