@@ -248,7 +248,7 @@ Não declarar sucesso só porque a PR mergeou.
 5. ~~`feat(student): workout session mode` (3A)~~ **feito**  
 6. ~~`feat(student): diet day view + persist substitutions` (3B)~~ **feito**  
 7. ~~`feat(student): progress truth + mobile reports` (4.x)~~ **feito**  
-8. `feat(student): coleman assist (gated)` (5.x) ← **condicional / próximo**  
+8. ~~`feat(student): coleman assist (gated)` (5.x)~~ **feito (código)** — deploy da function + `LOVABLE_API_KEY` pendente no projeto  
 
 Cada PR: critérios de aceite da tabela da onda + estados loading/vazio/erro + viewport 375 e 768.
 
@@ -256,15 +256,16 @@ Cada PR: critérios de aceite da tabela da onda + estados loading/vazio/erro + v
 
 | Item | Status | Arquivos |
 |------|--------|----------|
-| 0.1 Analytics skeleton | Feito | `src/lib/studentAnalytics.ts`, portal, check-in, treino, dieta |
-| 0.2 Remover mocks | Feito | `StudentDashboardView.tsx` (Hoje) |
-| 1.1–1.3 Shell mobile | Feito | `StudentBottomNav.tsx`, `StudentPortal.tsx`, sidebar só `md+` |
+| 0.1 Analytics skeleton | Feito | `src/lib/studentAnalytics.ts` |
+| 0.2 Remover mocks | Feito | `StudentDashboardView.tsx` |
+| 1.1–1.3 Shell mobile | Feito | `StudentBottomNav.tsx`, `StudentPortal.tsx` |
 | 2.1–2.5 Check-in wizard | Feito | `StudentWeeklyCheckin.tsx` |
 | 3A Treino sessão | Feito | `StudentWorkoutsView.tsx` |
 | 3B Dieta do dia | Feito | `StudentDietView.tsx` |
-| 4.x Progresso + relatórios | Feito | `StudentProgressSummary.tsx`, `StudentProgressView.tsx`, `StudentReportsView.tsx` (full-screen) |
+| 4.x Progresso + relatórios | Feito | `StudentProgressSummary.tsx`, `StudentReportsView.tsx` |
+| 5.x Coleman | Feito no código | `StudentColemanView.tsx`, `supabase/functions/coleman-assist`, `docs/COLEMAN_ESCOPO.md` |
 | 0.3 Entrevistas | Pendente (pesquisa) | — |
-| 5.x Coleman | Condicional | Ausente no repo — só após shell estável + escopo |
+| Deploy coleman-assist | Pendente ops | Secret `LOVABLE_API_KEY` + `supabase functions deploy coleman-assist` |
 
 ---
 

@@ -16,6 +16,7 @@ import StudentProfileView from "@/components/student/StudentProfileView";
 import StudentReportsView from "@/components/student/StudentReportsView";
 import StudentMessagesView from "@/components/student/StudentMessagesView";
 import StudentWeeklyCheckin from "@/components/student/StudentWeeklyCheckin";
+import StudentColemanView from "@/components/student/StudentColemanView";
 
 import NotificationsPopover from "@/components/NotificationsPopover";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -233,6 +234,8 @@ const StudentPortal = () => {
         return <StudentProfileView />;
       case "checkin":
         return <StudentWeeklyCheckin />;
+      case "coleman":
+        return <StudentColemanView onNavigate={handleTabChange} />;
       default:
         return <StudentDashboardView onNavigate={handleTabChange} />;
     }

@@ -12,7 +12,10 @@ export type StudentAnalyticsEvent =
   | "workout_pdf_exported"
   | "diet_sub_applied"
   | "diet_sub_persisted"
-  | "hoje_cta_clicked";
+  | "hoje_cta_clicked"
+  | "coleman_opened"
+  | "coleman_message_sent"
+  | "coleman_escalated";
 
 type EventProps = Record<string, string | number | boolean | null | undefined>;
 

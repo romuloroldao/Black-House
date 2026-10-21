@@ -13,6 +13,7 @@ import {
   DollarSign,
   User,
   LogOut,
+  Bot,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +43,7 @@ const PRIMARY_TABS = [
 
 const MORE_ITEMS = [
   { id: "checkin", label: "Check-in Semanal", icon: ClipboardCheck },
+  { id: "coleman", label: "Coleman", icon: Bot },
   { id: "reports", label: "Meus Relatórios", icon: FileText },
   { id: "chat", label: "Chat", icon: MessageSquare, badgeKey: "messages" as const },
   {
