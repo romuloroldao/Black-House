@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { useState, useEffect, useRef } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,9 +9,21 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import escalaBristol from "@/assets/escala-bristol.jpg";
+import { trackStudentEvent } from "@/lib/studentAnalytics";
 
 export default function StudentWeeklyCheckin() {
   const [loading, setLoading] = useState(false);
+  const submittedRef = useRef(false);
+
+  useEffect(() => {
+    trackStudentEvent("checkin_started");
+    return () => {
+      if (!submittedRef.current) {
+        trackStudentEvent("checkin_abandoned");
+      }
+    };
+  }, []);
+
   const [formData, setFormData] = useState({
     beliscou_fora_plano: "",
     seguiu_plano_nota: 3,
@@ -87,6 +99,8 @@ export default function StudentWeeklyCheckin() {
 
       if (error) throw error;
 
+      submittedRef.current = true;
+      trackStudentEvent("checkin_submitted");
       toast.success("Check-in enviado com sucesso! Seu coach já pode visualizar suas respostas.");
       
       // Reset form

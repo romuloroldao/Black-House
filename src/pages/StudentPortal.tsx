@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
-import { useSearchParams, Navigate } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useIsMobile } from "@/hooks/use-mobile";
 import StudentSidebar from "@/components/student/StudentSidebar";
+import StudentBottomNav from "@/components/student/StudentBottomNav";
 import StudentDashboardView from "@/components/student/StudentDashboardView";
 import StudentDietView from "@/components/student/StudentDietView";
 import StudentWorkoutsView from "@/components/student/StudentWorkoutsView";
@@ -14,23 +16,101 @@ import StudentProfileView from "@/components/student/StudentProfileView";
 import StudentReportsView from "@/components/student/StudentReportsView";
 import StudentMessagesView from "@/components/student/StudentMessagesView";
 import StudentWeeklyCheckin from "@/components/student/StudentWeeklyCheckin";
-import StudentProgressDashboard from "@/components/student/StudentProgressDashboard";
 
 import NotificationsPopover from "@/components/NotificationsPopover";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, CreditCard, Loader2, LogOut } from "lucide-react";
+import { trackStudentEvent } from "@/lib/studentAnalytics";
+import { cn } from "@/lib/utils";
 
 const StudentPortal = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "dashboard");
+  const initialTab = searchParams.get("tab") || "dashboard";
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [isInadimplente, setIsInadimplente] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [unreadMessages, setUnreadMessages] = useState(0);
+  const [unreadAnnouncements, setUnreadAnnouncements] = useState(0);
   const { user, signOut } = useAuth();
+  const isMobile = useIsMobile();
+
+  useEffect(() => {
+    const tab = searchParams.get("tab") || "dashboard";
+    setActiveTab(tab);
+  }, [searchParams]);
 
   useEffect(() => {
     checkPaymentStatus();
   }, [user]);
+
+  useEffect(() => {
+    trackStudentEvent("student_tab_view", { tab: activeTab });
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!user?.email) return;
+
+    let cancelled = false;
+
+    const loadBadges = async () => {
+      const { data: aluno } = await supabase
+        .from("alunos")
+        .select("id")
+        .eq("email", user.email)
+        .maybeSingle();
+
+      if (!aluno || cancelled) return;
+
+      const { data: conversa } = await supabase
+        .from("conversas")
+        .select("id")
+        .eq("aluno_id", aluno.id)
+        .maybeSingle();
+
+      if (conversa) {
+        const { count } = await supabase
+          .from("mensagens")
+          .select("*", { count: "exact", head: true })
+          .eq("conversa_id", conversa.id)
+          .eq("lida", false)
+          .neq("remetente_id", user.id);
+        if (!cancelled) setUnreadMessages(count || 0);
+      }
+
+      const { data: turmasAluno } = await supabase
+        .from("turmas_alunos")
+        .select("turma_id")
+        .eq("aluno_id", aluno.id);
+
+      const turmaIds = turmasAluno?.map((t) => t.turma_id) || [];
+
+      const { count: individualCount } = await supabase
+        .from("avisos_destinatarios")
+        .select("*", { count: "exact", head: true })
+        .eq("aluno_id", aluno.id)
+        .eq("lido", false);
+
+      let classCount = 0;
+      if (turmaIds.length > 0) {
+        const { count } = await supabase
+          .from("avisos_destinatarios")
+          .select("*", { count: "exact", head: true })
+          .in("turma_id", turmaIds)
+          .eq("lido", false);
+        classCount = count || 0;
+      }
+
+      if (!cancelled) {
+        setUnreadAnnouncements((individualCount || 0) + classCount);
+      }
+    };
+
+    loadBadges();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, activeTab]);
 
   const checkPaymentStatus = async () => {
     if (!user?.email) {
@@ -39,11 +119,10 @@ const StudentPortal = () => {
     }
 
     try {
-      // Get student ID by email
       const { data: aluno } = await supabase
-        .from('alunos')
-        .select('id')
-        .eq('email', user.email)
+        .from("alunos")
+        .select("id")
+        .eq("email", user.email)
         .single();
 
       if (!aluno) {
@@ -51,18 +130,16 @@ const StudentPortal = () => {
         return;
       }
 
-      // Check for overdue payments (OVERDUE status or PENDING past due date)
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Date().toISOString().split("T")[0];
       const { data: overduePayments } = await supabase
-        .from('asaas_payments')
-        .select('id, status, due_date')
-        .eq('aluno_id', aluno.id)
+        .from("asaas_payments")
+        .select("id, status, due_date")
+        .eq("aluno_id", aluno.id)
         .or(`status.eq.OVERDUE,and(status.eq.PENDING,due_date.lt.${today})`);
 
-      // Student is delinquent if they have any overdue payments
       setIsInadimplente((overduePayments?.length || 0) > 0);
     } catch (error) {
-      console.error('Erro ao verificar status de pagamento:', error);
+      console.error("Erro ao verificar status de pagamento:", error);
     } finally {
       setLoading(false);
     }
@@ -85,7 +162,6 @@ const StudentPortal = () => {
     );
   }
 
-  // Show blocked screen for delinquent students
   if (isInadimplente) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
@@ -94,25 +170,32 @@ const StudentPortal = () => {
             <div className="mx-auto mb-4 h-16 w-16 rounded-full bg-destructive/10 flex items-center justify-center">
               <AlertTriangle className="h-8 w-8 text-destructive" />
             </div>
-            <CardTitle className="text-2xl text-destructive">Acesso Bloqueado</CardTitle>
+            <CardTitle className="text-2xl text-destructive">
+              Acesso Bloqueado
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-center">
             <p className="text-muted-foreground">
-              Seu acesso à plataforma está temporariamente suspenso devido a pendências financeiras.
+              Seu acesso à plataforma está temporariamente suspenso devido a
+              pendências financeiras.
             </p>
             <p className="text-sm text-muted-foreground">
-              Para regularizar sua situação e restaurar o acesso, entre em contato com seu coach ou efetue o pagamento das parcelas em aberto.
+              Para regularizar sua situação e restaurar o acesso, entre em
+              contato com seu coach ou efetue o pagamento das parcelas em aberto.
             </p>
             <div className="flex flex-col gap-2 pt-4">
-              <Button 
-                onClick={() => { setIsInadimplente(false); handleTabChange('financial'); }}
+              <Button
+                onClick={() => {
+                  setIsInadimplente(false);
+                  handleTabChange("financial");
+                }}
                 className="w-full gap-2"
               >
                 <CreditCard className="h-4 w-4" />
                 Ver Pendências
               </Button>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={handleLogout}
                 className="w-full gap-2"
               >
@@ -129,7 +212,7 @@ const StudentPortal = () => {
   const renderContent = () => {
     switch (activeTab) {
       case "dashboard":
-        return <StudentDashboardView />;
+        return <StudentDashboardView onNavigate={handleTabChange} />;
       case "diet":
         return <StudentDietView />;
       case "workouts":
@@ -151,19 +234,34 @@ const StudentPortal = () => {
       case "checkin":
         return <StudentWeeklyCheckin />;
       default:
-        return <StudentDashboardView />;
+        return <StudentDashboardView onNavigate={handleTabChange} />;
     }
   };
 
   return (
     <div className="flex min-h-screen w-full bg-background">
-      <StudentSidebar activeTab={activeTab} onTabChange={handleTabChange} />
-      <main className="flex-1 p-6 lg:p-8">
+      <div className="hidden md:flex">
+        <StudentSidebar activeTab={activeTab} onTabChange={handleTabChange} />
+      </div>
+
+      <main
+        className={cn(
+          "flex-1 min-w-0",
+          isMobile ? "p-4 pb-24" : "p-6 lg:p-8"
+        )}
+      >
         <div className="flex justify-end mb-4">
           <NotificationsPopover onNavigate={handleTabChange} />
         </div>
         {renderContent()}
       </main>
+
+      <StudentBottomNav
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
+        unreadMessages={unreadMessages}
+        unreadAnnouncements={unreadAnnouncements}
+      />
     </div>
   );
 };

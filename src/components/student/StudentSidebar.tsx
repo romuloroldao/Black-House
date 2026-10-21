@@ -352,15 +352,15 @@ const StudentSidebar = ({ activeTab, onTabChange }: StudentSidebarProps) => {
   };
 
   const menuItems = [
-    { id: "dashboard", label: "Dashboard", icon: Home },
+    { id: "dashboard", label: "Hoje", icon: Home },
     { id: "diet", label: "Minha Dieta", icon: Utensils },
     { id: "workouts", label: "Meus Treinos", icon: Dumbbell },
-    { id: "videos", label: "Galeria de Vídeos", icon: Play },
+    { id: "progress", label: "Meu Progresso", icon: TrendingUp },
+    { id: "checkin", label: "Check-in Semanal", icon: ClipboardCheck },
+    { id: "reports", label: "Meus Relatórios", icon: FileText },
     { id: "chat", label: "Chat", icon: MessageSquare, badge: unreadMessages },
     { id: "messages", label: "Mensagens do Coach", icon: Megaphone, badge: unreadCount },
-    { id: "reports", label: "Meus Relatórios", icon: FileText },
-    { id: "checkin", label: "Check-in Semanal", icon: ClipboardCheck },
-    { id: "progress", label: "Meu Progresso", icon: TrendingUp },
+    { id: "videos", label: "Galeria de Vídeos", icon: Play },
     { id: "financial", label: "Financeiro", icon: DollarSign },
     { id: "profile", label: "Meu Perfil", icon: User },
   ];

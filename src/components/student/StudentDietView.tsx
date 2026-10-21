@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Utensils, Replace, Pill } from "lucide-react";
 import FoodSubstitutionDialog from "@/components/nutrition/FoodSubstitutionDialog";
+import { trackStudentEvent } from "@/lib/studentAnalytics";
 
 const StudentDietView = () => {
   const { user } = useAuth();
@@ -114,8 +115,11 @@ const StudentDietView = () => {
   };
 
   const handleSubstituir = async (novoAlimentoId: string, novaQuantidade: number) => {
-    // Aqui você pode implementar a lógica de salvar a substituição no banco se quiser
-    // Por enquanto, vamos apenas atualizar localmente
+    // Substituição ainda é só local (não persiste) — Onda 3B do roadmap
+    trackStudentEvent("diet_sub_applied", {
+      item_id: substitutionDialog.itemId,
+      persisted: false,
+    });
     const novosItens = itensDieta.map(item => {
       if (item.id === substitutionDialog.itemId) {
         const novoAlimento = todosAlimentos.find(a => a.id === novoAlimentoId);

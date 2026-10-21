@@ -9,6 +9,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Dumbbell, Clock, Target, ChevronDown, Play, Weight, FileDown } from "lucide-react";
 import { exportWorkoutToPdf } from "@/utils/workoutPdfExport";
+import { trackStudentEvent } from "@/lib/studentAnalytics";
 
 const StudentWorkoutsView = () => {
   const { user } = useAuth();
@@ -31,6 +32,7 @@ const StudentWorkoutsView = () => {
         tags: treino.tags,
         dataExpiracao: treino.dataExpiracao,
       }, studentName);
+      trackStudentEvent("workout_pdf_exported", { workout_id: treino.id });
       toast({
         title: "PDF exportado!",
         description: "Seu treino foi exportado com sucesso.",
@@ -47,6 +49,7 @@ const StudentWorkoutsView = () => {
 
   useEffect(() => {
     if (user) {
+      trackStudentEvent("workout_opened");
       loadWorkoutData();
     }
   }, [user]);
