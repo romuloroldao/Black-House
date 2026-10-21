@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useSearchParams } from "react-router-dom";
@@ -25,6 +25,7 @@ import {
 } from "@/lib/checkin-sections";
 import { CHECKIN_FIELD_LABELS, INITIAL_CHECKIN_FORM, type CheckinFormData } from "@/lib/checkin-types";
 import { buildCheckinPayload, type CheckinSubmitExtras } from "@/lib/checkin-payload";
+import { clearCheckinDraft, loadCheckinDraft, saveCheckinDraft } from "@/lib/checkin-draft";
 import { startOfNextCalendarWeek, type CheckinStreakInfo } from "@/lib/checkin-streak";
 import {
   MIN_CHECKIN_PHOTOS,
@@ -66,6 +67,25 @@ export default function StudentWeeklyCheckin({
   const [formData, setFormData] = useState<CheckinFormData>(INITIAL_CHECKIN_FORM);
   const [pesoKg, setPesoKg] = useState("");
   const [photoDrafts, setPhotoDrafts] = useState<CheckinPhotoDraft[]>([]);
+  const draftHydratedFor = useRef<string | null>(null);
+
+  // A aba remonta ao trocar de tab no portal; sem isto o aluno perde as respostas.
+  useEffect(() => {
+    const userId = user?.id;
+    if (!userId || draftHydratedFor.current === userId) return;
+    draftHydratedFor.current = userId;
+    const draft = loadCheckinDraft(userId);
+    if (!draft) return;
+    setFormData(draft.formData);
+    setPesoKg(draft.pesoKg);
+    toast.info("Recuperamos as respostas que você já tinha preenchido. As fotos precisam ser enviadas de novo.");
+  }, [user?.id]);
+
+  useEffect(() => {
+    const userId = user?.id;
+    if (!userId || draftHydratedFor.current !== userId) return;
+    saveCheckinDraft(userId, formData, pesoKg);
+  }, [user?.id, formData, pesoKg]);
 
   const corpoExtras = {
     pesoKg,
@@ -211,6 +231,7 @@ export default function StudentWeeklyCheckin({
         const errText = response.error || "";
         if (errText.includes("CHECKIN_ALREADY_THIS_WEEK")) {
           toast.info("Você já enviou o check-in desta semana.");
+          clearCheckinDraft(user.id);
           onCheckinSubmitted?.();
         } else if (
           errText.includes("CHECKIN_PHOTOS_REQUIRED") ||
@@ -242,6 +263,7 @@ export default function StudentWeeklyCheckin({
       }
 
       toast.success("Check-in enviado com sucesso! Seu coach já pode visualizar suas respostas.");
+      clearCheckinDraft(user.id);
       onCheckinSubmitted?.();
       revokeCheckinPhotoDrafts(photoDrafts);
       setPhotoDrafts([]);
