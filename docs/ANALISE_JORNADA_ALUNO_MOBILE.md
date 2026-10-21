@@ -2,7 +2,34 @@
 
 **Escopo:** pontos de contato — relatório/check-in semanal, métricas, Coleman, treino, dieta/cardápio.  
 **Método:** inspeção estática do portal do aluno (`/aluno`) no código deste repositório.  
-**Limite:** sem analytics de sessão nem quotes de cliente anexados; severidade é heurística + evidência de código.
+**Limite:** sem analytics de sessão nem quotes de cliente anexados; severidade é heurística + evidência de código.  
+**Framework de avaliação:** pilares de interface intuitiva (simplicidade, consistência, feedback, acessibilidade) + práticas de navegação (bottom nav, divulgação progressiva, ícones universais).
+
+---
+
+## Pilares × estado atual do portal
+
+Os quatro pilares são um bom norte — e **batem** com o diagnóstico do shell. Mas não são suficientes sozinhos: faltam *hierarquia de tarefa*, *persistência de trabalho* e *verdade dos dados*. Abaixo, nota 1–5 por evidência de código (não por opinião de marca).
+
+### Scorecard
+
+| Pilar / prática | Nota | Evidência no código | O que “bom” parece no Black House |
+|-----------------|------|---------------------|-----------------------------------|
+| **Simplicidade** | 1/5 | 11 itens de menu; check-in com ~25 campos numa tela; dashboard de progresso densíssimo | 1 tarefa dominante por tela; Home “Hoje” com 1 CTA |
+| **Consistência (padrões mobile)** | 1/5 | Sidebar lateral (padrão desktop/web admin), não bottom nav; Dialogs `max-w-3xl` | Bottom nav 4–5 destinos; sheets em vez de modais desktop |
+| **Feedback imediato** | 2/5 | Toasts em check-in/chat/upload; badge de chat; **sem** progresso de formulário, **sem** confirmação de “comi”/série feita | Micro-confirmação em toda ação irreversível ou ritual (check-in passo a passo, check de exercício) |
+| **Acessibilidade** | 2/5 | Botões `size="sm"` / ícone-only; delete de foto só em `hover`; sliders e radios densos; contraste depende do tema | Alvos ≥44px; ações touch-first; contraste AA; labels explícitas (ex.: T.E.P.) |
+| **Bottom navigation** | 0/5 | Ausente | Hoje · Treino · Dieta · Progresso · Mais |
+| **Divulgação progressiva** | 1/5 | Invertida: mostra metadados primeiro e esconde exercícios; check-in mostra tudo de uma vez | Essencial primeiro; avançado sob “mais” / passo seguinte |
+| **Ícones universais** | 3/5 | Lucide coerente (Home, Utensils, Dumbbell…); labels longas competem com ícones | Ícone + label curta na bottom nav; evitar jargão (T.E.P., “recursos hormonais” sem contexto) |
+
+### Onde o framework precisa de freio (rigor)
+
+1. **Simplicidade ≠ remover o que o coach precisa.** Check-in clínico pode permanecer — mas em camadas (mínimo obrigatório → opcional), não em “menos perguntas” cego.
+2. **Consistência com apps genéricos** ajuda descoberta; **consistência interna** (mesmos padrões de sheet, toast, empty state) importa mais depois do 2º uso. Hoje falham as duas.
+3. **Feedback imediato** sem **verdade**: o dashboard já “confirma” 85% de dieta e 5 treinos — feedback falso é pior que silêncio.
+4. **Divulgação progressiva** mal aplicada esconde o job (exercícios atrás de collapsible). Progressive disclosure serve para *complexidade*, não para *conteúdo da tarefa*.
+5. **Bottom nav** com mais de 5 itens vira o mesmo problema da sidebar. “Mais” é obrigatório; Coleman/financeiro/relatórios não merecem slot permanente no dia 1.
 
 ---
 
@@ -168,15 +195,30 @@ Superfícies envolvidas: Dashboard, Meu Progresso (`StudentProgressDashboard`), 
 
 ---
 
+## Pilares violados por ponto de contato
+
+| Ponto | Pilares mais quebrados | Prática de navegação que corrige |
+|-------|------------------------|----------------------------------|
+| Shell | Simplicidade, Consistência | Bottom nav + Home com 1 tarefa |
+| Check-in | Simplicidade, Feedback, Divulgação progressiva | Wizard (progressivo) + autosave + barra de progresso |
+| Métricas | Simplicidade, Feedback (dados falsos) | Uma métrica-herói; drill-down |
+| Coleman | Consistência de canais (gap) | Um Assistente em “Mais”; não novo silo |
+| Treino | Divulgação progressiva invertida, Feedback | Sessão: essencial = exercício; PDF = secundário |
+| Dieta | Feedback (troca some), Acessibilidade (layout) | Sheet + persistência + check “comi” |
+
+---
+
 ## Ordem de ataque (por dependência, não por calendário)
 
-| # | Iniciativa | Por quê agora | Desbloqueia |
-|---|------------|---------------|-------------|
-| 1 | Shell mobile (bottom nav + Home Hoje) | Sem isso, tudo parece difícil | Descoberta |
-| 2 | Check-in wizard + autosave | Maior custo cognitivo semanal | Adesão + dados |
-| 3 | Treino modo sessão + Dieta do dia | Uso diário | Hábito |
-| 4 | Progresso unificado (matar mocks) | Dashboard mente hoje | Confiança |
-| 5 | Coleman | Precisa de entry point e contexto | Dúvidas 24/7 |
+Alinhada aos pilares: primeiro **consistência mobile + simplicidade do shell**; depois **divulgação progressiva + feedback** nos rituais diários/semanais; por último **novos canais** (Coleman).
+
+| # | Iniciativa | Pilares que sobem | Desbloqueia |
+|---|------------|-------------------|-------------|
+| 1 | Shell mobile (bottom nav + Home Hoje) | Consistência, Simplicidade | Descoberta |
+| 2 | Check-in wizard + autosave | Divulgação progressiva, Feedback | Adesão + dados |
+| 3 | Treino modo sessão + Dieta do dia | Simplicidade, Feedback, Acessibilidade | Hábito |
+| 4 | Progresso unificado (matar mocks) | Feedback verdadeiro, Simplicidade | Confiança |
+| 5 | Coleman | Consistência de canais (se bem encaixado) | Dúvidas 24/7 |
 
 ---
 
