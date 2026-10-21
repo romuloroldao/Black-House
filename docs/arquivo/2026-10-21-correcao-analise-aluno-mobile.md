@@ -27,7 +27,9 @@ O plano `2026-05-25-plano-melhoria-aluno.md` já cobria as mesmas fases.
 
 ## Risco de processo
 
-`main` no GitHub está nove meses atrás de produção. Quem cria branch a partir de `main` (pessoas ou agentes) trabalha num app que não existe mais. Recomendação: promover `melhoria-aluno` para `main`, ou mudar o branch padrão do repositório.
+`main` no GitHub estava nove meses atrás de produção, e quem criava branch a partir dele trabalhava num app que não existe mais.
+
+**Resolvido em 2026-10-21:** `main` recebeu um merge commit (`1eda80b`, PR #14) com árvore idêntica a `melhoria-aluno`, preservando os dois históricos (não há ancestral comum). A VPS passou de `melhoria-aluno` para `main` no mesmo commit, sem alterar ficheiros. Fluxo em `REGRAS-PARA-NAO-CONFUNDIR.md` §7.
 
 ## Gap real encontrado e corrigido
 
