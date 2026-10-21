@@ -1,0 +1,24 @@
+{
+  "name": "black-house-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "API própria Black House — Postgres VPS (caminho B)",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "healthcheck": "node -e \"fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/health').then(r=>r.json()).then(console.log).catch(e=>{console.error(e);process.exit(1)})\""
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.1",
+    "zod": "^3.24.1"
+  }
+}

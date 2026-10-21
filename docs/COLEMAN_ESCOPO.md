@@ -1,6 +1,6 @@
 # Coleman — escopo do assistente (Onda 5)
 
-**Status:** superfície de produto no portal do aluno + edge function `coleman-assist`.  
+**Status:** superfície de produto no portal do aluno + edge function `coleman-assist` (legado) e rota VPS `POST /api/coleman` (caminho B).  
 **Público:** aluno autenticado.  
 **Canal:** aba `Mais → Coleman` (não entra na bottom nav permanente).
 
@@ -25,9 +25,15 @@ A resposta da API pode sinalizar `escalate: true`.
 
 ## Dependências
 
+**Supabase (legado):**
 - Secret `LOVABLE_API_KEY` no Supabase (mesmo gateway de `parse-student-pdf`)
 - Deploy da function `coleman-assist` com `verify_jwt = true`
 - Projeto Supabase com DNS ativo
+
+**VPS (caminho B):**
+- `LOVABLE_API_KEY` em `server/.env`
+- API no ar (`POST /api/coleman` com Bearer JWT)
+- Front com `VITE_USE_VPS_API=true` (client chama a API própria)
 
 ## Métricas
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
+import { apiLogin, getApiToken, useVpsApi } from '@/lib/apiClient';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -67,6 +68,11 @@ const Auth = () => {
   const [passwordStrength, setPasswordStrength] = useState(0);
 
   useEffect(() => {
+    if (useVpsApi) {
+      if (getApiToken()) navigate('/');
+      return;
+    }
+
     // Check if already authenticated and handle password reset
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
@@ -184,6 +190,17 @@ const Auth = () => {
 
     try {
       setLoading(true);
+
+      if (useVpsApi) {
+        await apiLogin(email, password);
+        toast({
+          title: "Bem-vindo de volta!",
+          description: "Login via API VPS realizado com sucesso.",
+        });
+        navigate('/');
+        return;
+      }
+
       const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -204,9 +221,14 @@ const Auth = () => {
       
       navigate('/');
     } catch (error: any) {
+      const msg = error?.message || String(error);
+      if (/credenciais|incorret/i.test(msg)) {
+        setErrors({ password: 'Email ou senha incorretos' });
+        return;
+      }
       toast({
         title: "Erro ao fazer login",
-        description: error.message,
+        description: msg,
         variant: "destructive",
       });
     } finally {

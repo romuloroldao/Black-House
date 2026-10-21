@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
+import { apiColeman, useVpsApi } from "@/lib/apiClient";
 import { Bot, MessageSquare, Send, Loader2, Sparkles } from "lucide-react";
 import { trackStudentEvent } from "@/lib/studentAnalytics";
 import { toast } from "sonner";
@@ -60,11 +61,18 @@ const StudentColemanView = ({ onNavigate }: Props) => {
         .slice(-8)
         .map((m) => ({ role: m.role, content: m.content }));
 
-      const { data, error } = await supabase.functions.invoke("coleman-assist", {
-        body: { message, history },
-      });
+      let data: { reply?: string; escalate?: boolean } | null = null;
 
-      if (error) throw error;
+      if (useVpsApi) {
+        data = await apiColeman(message, history);
+      } else {
+        const { data: edgeData, error } = await supabase.functions.invoke(
+          "coleman-assist",
+          { body: { message, history } }
+        );
+        if (error) throw error;
+        data = edgeData;
+      }
 
       const reply =
         data?.reply ||
