@@ -31,6 +31,7 @@ Legenda: **Válido** · **Parcial** (rever trechos) · **Obsoleto** (não usar p
 | `docs/INVENTARIO-MD.md` | **Válido** | Este ficheiro |
 | `README.md` | **Válido** | Entrada mínima com links para `docs/` |
 | `docs/arquivo/*.md` | **Arquivo** | Notas com data (equivalência, nutrição, cadastro aluno) |
+| `docs/arquivo/2026-10-22-onboarding-contextual-aluno.md` | **Válido (produto)** | Inventário da jornada + onboarding contextual |
 | `docs/arquivo/2026-08-18-prd-blackhouse-completo.md` | **Válido (PRD de produto)** | PRD unificado as-built (arquitectura, features, UX) |
 | `docs/arquivo/2026-07-25-prd-blackhouse-recursos.md` | **Arquivo** | PRD de recursos 2026-07-25; substituído pelo de 2026-08-18 |
 | `docs/arquivo/2026-07-26-auditoria-agentic-os.md` | **Arquivo (visão)** | Auditoria agentic; runtime descrito no PRD 2026-08-18 |

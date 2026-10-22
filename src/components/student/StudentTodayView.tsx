@@ -53,6 +53,12 @@ import type { ProximaAcao } from "@/components/student/agent/NextActionHero";
 import WeightLogDialog from "@/components/student/agent/WeightLogDialog";
 import { chipsForHojeContext } from "@/components/student/agent/agent-chips";
 import { useStudentAgent, type AgentUiOpenTarget } from "@/hooks/useStudentAgent";
+import FeatureOnboardingPanel, {
+  FeatureOnboardingHelpButton,
+} from "@/components/student/onboarding/FeatureOnboardingPanel";
+import { useFeatureOnboarding } from "@/hooks/useFeatureOnboarding";
+import { isStudentOnboardingDone } from "@/components/student/StudentOnboardingDialog";
+import { readCachedPreference } from "@/lib/onboarding";
 
 const CHIP_ICONS: Record<string, LucideIcon> = {
   "Minha dieta": Utensils,
@@ -132,6 +138,34 @@ const StudentTodayView = ({
   const [maisDoDiaOpen, setMaisDoDiaOpen] = useState(() =>
     typeof window !== "undefined" ? readMaisDoDiaOpen() : true,
   );
+
+  const [overviewSettled, setOverviewSettled] = useState(false);
+
+  useEffect(() => {
+    if (isStudentOnboardingDone()) {
+      setOverviewSettled(true);
+      return;
+    }
+    const pref = readCachedPreference(user?.id, "portal-overview");
+    if (pref && pref.state !== "never" && pref.state !== "in_progress") {
+      setOverviewSettled(true);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    const onClosed = (ev: Event) => {
+      const id = (ev as CustomEvent<{ id?: string }>).detail?.id;
+      if (id === "portal-overview") setOverviewSettled(true);
+    };
+    window.addEventListener("blackhouse:onboarding-closed", onClosed);
+    return () => window.removeEventListener("blackhouse:onboarding-closed", onClosed);
+  }, []);
+
+  const hojeOnboarding = useFeatureOnboarding({
+    onboardingId: "hoje-coleman",
+    enabled: !loading && Boolean(user) && overviewSettled,
+    delayMs: 700,
+  });
 
   const setMaisDoDiaOpenPersist = (open: boolean) => {
     setMaisDoDiaOpen(open);
@@ -339,6 +373,7 @@ const StudentTodayView = ({
         )}
 
         {/* Painel opcional — fechado por defeito; chat maximizado */}
+        <div data-onboarding="hoje-mais">
         <Collapsible
           open={maisDoDiaOpen}
           onOpenChange={setMaisDoDiaOpenPersist}
@@ -434,6 +469,7 @@ const StudentTodayView = ({
             )}
           </CollapsibleContent>
         </Collapsible>
+        </div>
       </div>
 
       {/* —— Coleman: conversa como centro —— */}
@@ -457,7 +493,13 @@ const StudentTodayView = ({
           />
         </div>
 
-        <div className="shrink-0 space-y-1.5 border-t border-border/50 bg-card px-3 py-2 sm:px-4">
+        <div
+          data-onboarding="hoje-composer"
+          className="shrink-0 space-y-1.5 border-t border-border/50 bg-card px-3 py-2 sm:px-4"
+        >
+          <div className="flex justify-end">
+            <FeatureOnboardingHelpButton onClick={hojeOnboarding.reopen} label="Como usar o Hoje" />
+          </div>
           <div
             className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             role="group"
@@ -520,6 +562,18 @@ const StudentTodayView = ({
         onOpenChange={agent.setWeightDialogOpen}
         onSubmit={(kg) => void agent.submitWeight(kg)}
         busy={agent.status === "sending"}
+      />
+
+      <FeatureOnboardingPanel
+        open={hojeOnboarding.open}
+        title={hojeOnboarding.definition?.title || "Hoje"}
+        step={hojeOnboarding.step}
+        stepIndex={hojeOnboarding.stepIndex}
+        stepCount={hojeOnboarding.definition?.steps.length || 0}
+        onNext={hojeOnboarding.next}
+        onSkip={hojeOnboarding.skip}
+        onDismissPermanently={hojeOnboarding.dismissPermanently}
+        onClose={hojeOnboarding.skip}
       />
     </div>
   );

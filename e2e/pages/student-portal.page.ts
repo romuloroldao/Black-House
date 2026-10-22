@@ -12,12 +12,17 @@ const TAB_LABELS: Record<StudentTab, string> = {
 export class StudentPortalPage {
   constructor(private readonly page: Page) {}
 
-  /** Fecha tour de onboarding (bh-student-onboarding-v2) se aparecer. */
+  /** Fecha tour de onboarding contextual (Pular / Não ver de novo) se aparecer. */
   async dismissOnboardingIfVisible(): Promise<void> {
-    const skip = this.page.getByRole('button', { name: 'Saltar' });
+    const skip = this.page.getByRole('button', { name: /^(Pular|Saltar)$/ });
     if (await skip.isVisible().catch(() => false)) {
       await skip.click();
       await skip.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => undefined);
+      return;
+    }
+    const dismiss = this.page.getByRole('button', { name: 'Não ver de novo' });
+    if (await dismiss.isVisible().catch(() => false)) {
+      await dismiss.click();
     }
   }
 

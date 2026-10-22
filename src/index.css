@@ -411,6 +411,23 @@ All colors MUST be HSL.
 @media (max-width: 767px) {
   body:has([data-state="open"][role="dialog"]) .student-bottom-nav,
   body:has([data-state="open"][role="alertdialog"]) .student-bottom-nav,
+  /* Destaque de onboarding contextual (alvo real da UI) */
+  [data-onboarding-active="true"] {
+    position: relative;
+    z-index: 105;
+    border-radius: 0.75rem;
+    box-shadow:
+      0 0 0 2px hsl(var(--primary) / 0.85),
+      0 0 0 6px hsl(var(--primary) / 0.2);
+    transition: box-shadow 200ms ease;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-onboarding-active="true"] {
+      transition: none;
+    }
+  }
+
   body.student-overlay-open .student-bottom-nav {
     display: none !important;
   }

@@ -918,6 +918,43 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     },
   );
 
+  // GET /api/alunos/me/onboarding-preferences — estados de tutoriais contextuais
+  router.get(
+    '/alunos/me/onboarding-preferences',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['aluno']),
+    resolveAlunoOrFail,
+    async (req, res) => {
+      try {
+        const { listPreferences } = require('../services/feature-onboarding.service');
+        const items = await listPreferences(pool, req.aluno.id);
+        res.json({ items });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
+  // PUT /api/alunos/me/onboarding-preferences — upsert de um tutorial
+  router.put(
+    '/alunos/me/onboarding-preferences',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['aluno']),
+    resolveAlunoOrFail,
+    async (req, res) => {
+      try {
+        const { upsertPreference } = require('../services/feature-onboarding.service');
+        const item = await upsertPreference(pool, req.aluno.id, req.body || {});
+        res.json({ item });
+      } catch (error) {
+        const status = error.status || (error.message?.includes('inválido') ? 400 : 500);
+        res.status(status).json({ error: error.message });
+      }
+    },
+  );
+
   // PATCH /api/alunos/me - Atualiza dados do aluno canônico
   // DESIGN-GUARD-RAILS-ROLE-ACCESS-003: Rota apenas para alunos
   // DESIGN-LINK-ALUNO-USER-001: NÃO permite alterar user_id (vínculo deve ser via /api/alunos/link-user)

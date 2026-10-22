@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import StudentOnboardingDialog, {
-  isStudentOnboardingDone,
-} from "@/components/student/StudentOnboardingDialog";
 import { useSearchParams } from "react-router-dom";
 import { Menu } from "lucide-react";
+import FeatureOnboardingPanel from "@/components/student/onboarding/FeatureOnboardingPanel";
+import { useFeatureOnboarding } from "@/hooks/useFeatureOnboarding";
 import StudentSidebar from "@/components/student/StudentSidebar";
 import StudentTodayView from "@/components/student/StudentTodayView";
 import StudentBottomNav, { shouldShowMobileBottomNav } from "@/components/student/StudentBottomNav";
@@ -43,7 +42,6 @@ const StudentPortal = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "hoje");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [profileWizardOpen, setProfileWizardOpen] = useState(false);
   const hojeState = useAlunoHoje(Boolean(isReady && user));
   const { coachUnreadTotal } = hojeState;
@@ -74,12 +72,6 @@ const StudentPortal = () => {
     }
     setActiveTab(tab);
   }, [searchParams, setSearchParams]);
-
-  useEffect(() => {
-    if (isReady && user?.role === "aluno" && !isStudentOnboardingDone()) {
-      setOnboardingOpen(true);
-    }
-  }, [isReady, user?.role]);
 
   useEffect(() => {
     if (!isReady || !profileStatus || profileStatus.is_complete) return;
@@ -114,6 +106,15 @@ const StudentPortal = () => {
       setProfileWizardOpen(true);
     })();
   }, [isReady, profileStatus?.is_complete]);
+
+  const overviewOnboarding = useFeatureOnboarding({
+    onboardingId: "portal-overview",
+    enabled:
+      Boolean(isReady && user?.role === "aluno") &&
+      !profileWizardOpen &&
+      (activeTab === "hoje" || activeTab === "dashboard"),
+    delayMs: 900,
+  });
 
   const handleTabChange = (tab: string, extra?: Record<string, string>) => {
     setActiveTab(tab);
@@ -303,7 +304,17 @@ const StudentPortal = () => {
               {content}
             </div>
           </main>
-          <StudentOnboardingDialog open={onboardingOpen} onOpenChange={setOnboardingOpen} />
+          <FeatureOnboardingPanel
+            open={overviewOnboarding.open}
+            title={overviewOnboarding.definition?.title || "Black House"}
+            step={overviewOnboarding.step}
+            stepIndex={overviewOnboarding.stepIndex}
+            stepCount={overviewOnboarding.definition?.steps.length || 0}
+            onNext={overviewOnboarding.next}
+            onSkip={overviewOnboarding.skip}
+            onDismissPermanently={overviewOnboarding.dismissPermanently}
+            onClose={overviewOnboarding.skip}
+          />
           <ProfileCompletionWizard
             open={profileWizardOpen}
             onOpenChange={setProfileWizardOpen}

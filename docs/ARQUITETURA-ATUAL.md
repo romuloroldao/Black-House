@@ -41,6 +41,12 @@
 
 - Aluno com histórico/ficha importada **vs** aluno novo; credencial, vínculo automático por email e vínculo manual pelo coach: ver [`arquivo/2026-03-30-cenarios-cadastro-aluno.md`](arquivo/2026-03-30-cenarios-cadastro-aluno.md).
 
+## Onboarding contextual (portal aluno)
+
+- Preferências por aluno + tutorial: tabela `student_feature_onboarding`, API `GET/PUT /api/alunos/me/onboarding-preferences`.
+- Registry + painel: `src/lib/onboarding/`, `useFeatureOnboarding`, `FeatureOnboardingPanel`.
+- Auditoria / priorização / conteúdos: [`arquivo/2026-10-22-onboarding-contextual-aluno.md`](arquivo/2026-10-22-onboarding-contextual-aluno.md).
+
 ## Produto (PRD)
 
 PRD unificado (arquitectura → features → UX, as-built 2026-08-18): [`arquivo/2026-08-18-prd-blackhouse-completo.md`](arquivo/2026-08-18-prd-blackhouse-completo.md).

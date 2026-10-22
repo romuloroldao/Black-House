@@ -42,6 +42,10 @@ import {
   type DietRotationConfig,
 } from "@/lib/diet-rotation";
 import { STUDENT_REALTIME_EVENT, type StudentRealtimeDetail } from "@/hooks/useStudentPortalRealtime";
+import FeatureOnboardingPanel, {
+  FeatureOnboardingHelpButton,
+} from "@/components/student/onboarding/FeatureOnboardingPanel";
+import { useFeatureOnboarding } from "@/hooks/useFeatureOnboarding";
 
 const StudentDietView = () => {
   const { user } = useAuth();
@@ -53,6 +57,11 @@ const StudentDietView = () => {
   const [todosAlimentos, setTodosAlimentos] = useState<Food[]>([]);
   const [planoAtivo, setPlanoAtivo] = useState<DietPlano>("A");
   const [checkTick, setCheckTick] = useState(0);
+  const dietaOnboarding = useFeatureOnboarding({
+    onboardingId: "dieta-refeicao",
+    enabled: !loading && Boolean(dieta),
+    delayMs: 800,
+  });
   const [serverDoneKeys, setServerDoneKeys] = useState<Set<string>>(() => new Set());
   const mealDayRef = useRef(mealCheckDateKey());
   const [detailMeal, setDetailMeal] = useState<MealGroup | null>(null);
@@ -403,15 +412,18 @@ const StudentDietView = () => {
 
   return (
     <div className="min-w-0 space-y-5">
-      <div>
-        <h1 className="mb-1 text-xl font-bold sm:text-2xl">Minha dieta</h1>
-        <p className="text-muted-foreground">{dieta.nome}</p>
-        {dieta.data_retorno && (
-          <p className="mt-1 text-sm text-primary/90">
-            Retorno{" "}
-            {new Date(String(dieta.data_retorno).slice(0, 10) + "T12:00:00").toLocaleDateString("pt-BR")}
-          </p>
-        )}
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h1 className="mb-1 text-xl font-bold sm:text-2xl">Minha dieta</h1>
+          <p className="text-muted-foreground">{dieta.nome}</p>
+          {dieta.data_retorno && (
+            <p className="mt-1 text-sm text-primary/90">
+              Retorno{" "}
+              {new Date(String(dieta.data_retorno).slice(0, 10) + "T12:00:00").toLocaleDateString("pt-BR")}
+            </p>
+          )}
+        </div>
+        <FeatureOnboardingHelpButton onClick={dietaOnboarding.reopen} label="Como usar a dieta" />
       </div>
 
       {rotationToday && <DietRotationBanner info={rotationToday} />}
@@ -455,22 +467,24 @@ const StudentDietView = () => {
       />
 
       {showPlanoTabs && (
-        <Tabs
-          value={planoAtivo}
-          onValueChange={(v) => setPlanoAtivo(v as DietPlano)}
-          className="w-full max-w-full"
-        >
-          <TabsList
-            className="grid h-auto w-full gap-1"
-            style={{ gridTemplateColumns: `repeat(${Math.min(planosCardapio.length, 6)}, minmax(0, 1fr))` }}
+        <div data-onboarding="dieta-plano">
+          <Tabs
+            value={planoAtivo}
+            onValueChange={(v) => setPlanoAtivo(v as DietPlano)}
+            className="w-full max-w-full"
           >
-            {planosCardapio.map((p) => (
-              <TabsTrigger key={p} value={p} className="text-xs sm:text-sm">
-                Plano {p}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+            <TabsList
+              className="grid h-auto w-full gap-1"
+              style={{ gridTemplateColumns: `repeat(${Math.min(planosCardapio.length, 6)}, minmax(0, 1fr))` }}
+            >
+              {planosCardapio.map((p) => (
+                <TabsTrigger key={p} value={p} className="text-xs sm:text-sm">
+                  Plano {p}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        </div>
       )}
 
       <Card className="shadow-card">
@@ -494,7 +508,7 @@ const StudentDietView = () => {
         </p>
       )}
 
-      <div className="min-w-0">
+      <div className="min-w-0" data-onboarding="dieta-refeicoes">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Refeições de hoje
         </h2>
@@ -562,6 +576,18 @@ const StudentDietView = () => {
         unidadeQuantidade={substitutionDialog.unidadeQuantidade}
         alimentosDisponiveis={todosAlimentos}
         onSubstituir={handleSubstituir}
+      />
+
+      <FeatureOnboardingPanel
+        open={dietaOnboarding.open}
+        title={dietaOnboarding.definition?.title || "Dieta"}
+        step={dietaOnboarding.step}
+        stepIndex={dietaOnboarding.stepIndex}
+        stepCount={dietaOnboarding.definition?.steps.length || 0}
+        onNext={dietaOnboarding.next}
+        onSkip={dietaOnboarding.skip}
+        onDismissPermanently={dietaOnboarding.dismissPermanently}
+        onClose={dietaOnboarding.skip}
       />
     </div>
   );
