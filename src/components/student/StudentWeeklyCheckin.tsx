@@ -41,6 +41,7 @@ import {
 import CheckinPhotosWeightStep, {
   revokeCheckinPhotoDrafts,
 } from "@/components/student/checkin/CheckinPhotosWeightStep";
+import { prepareImageForUpload } from "@/lib/prepare-image-upload";
 import { Skeleton } from "@/components/ui/skeleton";
 import ProfileCompletenessBanner from "@/components/student/ProfileCompletenessBanner";
 import WorkoutEvolutionSection from "@/components/student/WorkoutEvolutionSection";
@@ -66,6 +67,7 @@ export default function StudentWeeklyCheckin({
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
+  const [submitStatus, setSubmitStatus] = useState<string | null>(null);
   const [step, setStep] = useState(() => {
     const raw = Number(searchParams.get("checkin_step"));
     return raw >= 0 && raw < CHECKIN_SECTIONS.length ? raw : 0;
@@ -184,11 +186,11 @@ export default function StudentWeeklyCheckin({
     }
 
     setLoading(true);
+    setSubmitStatus("A preparar envio…");
 
     try {
       if (!user?.id) {
         toast.error("Usuário não autenticado. Por favor, faça login novamente.");
-        setLoading(false);
         return;
       }
 
@@ -196,14 +198,12 @@ export default function StudentWeeklyCheckin({
       const alunoId = me.data?.id;
       if (!alunoId) {
         toast.error("Perfil de aluno não encontrado.");
-        setLoading(false);
         return;
       }
 
       const fotosPayload: CheckinSubmitExtras["fotos"] = [];
       // Ordem canónica dos slots; descricao = orientação sugerida (pose_aluno no servidor).
-      // pose_client vem do MediaPipe no dispositivo; o servidor só aceita acima do limiar.
-      const { getPoseDetection } = await import("@/lib/pose-detect");
+      // pose_client é opcional — nunca deve bloquear o upload (Android/MediaPipe).
       const orderedDrafts = [...photoDrafts].sort((a, b) => {
         const order = ["frente", "costas", "lado_esquerdo", "lado_direito"] as const;
         return order.indexOf(a.descricao as (typeof order)[number]) -
@@ -211,16 +211,32 @@ export default function StudentWeeklyCheckin({
       });
       for (let i = 0; i < orderedDrafts.length; i++) {
         const draft = orderedDrafts[i];
-        const fileName = `${Date.now()}-${i}-${draft.file.name}`;
+        setSubmitStatus(`A preparar foto ${i + 1} de ${orderedDrafts.length}…`);
+        const prepared = await prepareImageForUpload(draft.file);
+        setSubmitStatus(`A enviar foto ${i + 1} de ${orderedDrafts.length}…`);
+        const fileName = `${Date.now()}-${i}-${prepared.name}`;
         const uploadResult = await apiClient.uploadFile(
           "progress-photos",
           `${alunoId}/${fileName}`,
-          draft.file,
+          prepared,
         );
         const publicUrl =
           uploadResult?.url ||
           apiClient.getPublicUrl("progress-photos", `${alunoId}/${fileName}`);
-        const detected = await getPoseDetection(draft.file, 3000);
+
+        let detected: { pose: string; confidence: number } | null = null;
+        try {
+          const poseMod = await Promise.race([
+            import("@/lib/pose-detect"),
+            new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 1500)),
+          ]);
+          if (poseMod) {
+            detected = await poseMod.getPoseDetection(draft.file, 2000);
+          }
+        } catch {
+          detected = null;
+        }
+
         fotosPayload.push({
           url: publicUrl,
           // Orientação do slot do guia visual → pose_aluno (auditoria apenas)
@@ -231,6 +247,7 @@ export default function StudentWeeklyCheckin({
         });
       }
 
+      setSubmitStatus("A guardar check-in…");
       const response = await apiClient.requestSafe<{ success?: boolean }>("/api/checkins", {
         method: "POST",
         body: JSON.stringify(
@@ -269,7 +286,6 @@ export default function StudentWeeklyCheckin({
         } else {
           toast.error(errText || "Erro ao enviar check-in. Tente novamente.");
         }
-        setLoading(false);
         return;
       }
 
@@ -340,6 +356,7 @@ export default function StudentWeeklyCheckin({
       toast.error(mensagemErro);
     } finally {
       setLoading(false);
+      setSubmitStatus(null);
     }
   };
 
@@ -1022,21 +1039,28 @@ export default function StudentWeeklyCheckin({
               <ChevronRight className="ml-2 h-4 w-4" />
             </Button>
           ) : (
-            <Button
-              type="submit"
-              size="lg"
-              className="h-12 min-h-[var(--student-touch-min)] w-full font-semibold sm:ml-auto sm:w-auto"
-              disabled={loading}
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
-                  Enviando...
-                </>
-              ) : (
-                "Enviar check-in"
-              )}
-            </Button>
+            <div className="flex w-full flex-col gap-1.5 sm:ml-auto sm:w-auto">
+              <Button
+                type="submit"
+                size="lg"
+                className="h-12 min-h-[var(--student-touch-min)] w-full font-semibold"
+                disabled={loading}
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
+                    {submitStatus ?? "Enviando…"}
+                  </>
+                ) : (
+                  "Enviar check-in"
+                )}
+              </Button>
+              {loading && submitStatus ? (
+                <p className="text-center text-xs text-muted-foreground sm:text-right" aria-live="polite">
+                  {submitStatus}
+                </p>
+              ) : null}
+            </div>
           )}
         </div>
       </form>

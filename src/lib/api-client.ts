@@ -856,11 +856,28 @@ class ApiClient {
                 const formData = new FormData();
                 formData.append('file', file);
                 const token = this.getToken();
-                const response = await fetch(API_CONTRACT.uploads.progressPhoto(), {
-                    method: 'POST',
-                    headers: token ? { Authorization: `Bearer ${token}` } : {},
-                    body: formData,
-                });
+                const controller = new AbortController();
+                const timer = window.setTimeout(() => controller.abort(), 90_000);
+                let response: Response;
+                try {
+                    response = await fetch(API_CONTRACT.uploads.progressPhoto(), {
+                        method: 'POST',
+                        headers: token ? { Authorization: `Bearer ${token}` } : {},
+                        body: formData,
+                        signal: controller.signal,
+                    });
+                } catch (err) {
+                    if (err instanceof Error && err.name === 'AbortError') {
+                        const timeoutError = new Error(
+                            'O envio da foto demorou demais. Verifique a internet (Wi‑Fi recomendado) e tente de novo.',
+                        );
+                        (timeoutError as any).errorType = ErrorType.NETWORK;
+                        throw timeoutError;
+                    }
+                    throw err;
+                } finally {
+                    window.clearTimeout(timer);
+                }
                 if (!response.ok) {
                     const error = await response.json().catch(() => ({ error: 'Erro no upload' }));
                     const uploadError = new Error(error.error || 'Erro no upload da foto de progresso');
