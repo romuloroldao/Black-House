@@ -278,14 +278,18 @@ const StudentPortal = () => {
               "px-4 pt-4 transition-[padding] duration-200 motion-reduce:transition-none",
               /* Hoje mobile: menos padding para o chat ganhar altura */
               activeTab === "hoje" && "max-md:px-3 max-md:pt-2",
+              /* Check-in: menos padding superior no desktop — a tarefa precisa da dobra */
+              activeTab === "checkin" && "md:pt-4 lg:pt-4",
               /* Compact: mais área útil para o agente / conteúdo */
-              isCompact
-                ? "md:px-5 md:pt-5 lg:px-6 lg:pt-6"
-                : "md:px-6 md:pt-6 lg:px-8 lg:pt-8",
+              activeTab !== "checkin" &&
+                (isCompact
+                  ? "md:px-5 md:pt-5 lg:px-6 lg:pt-6"
+                  : "md:px-6 md:pt-6 lg:px-8 lg:pt-8"),
+              activeTab === "checkin" && "md:px-6 lg:px-8",
               showMobileBottomNav ? "max-md:pb-student-main md:pb-6" : "max-md:pb-student-main-compact md:pb-6",
             )}
           >
-            <div className="mb-4 hidden shrink-0 justify-end md:flex">
+            <div className="mb-2 hidden shrink-0 justify-end md:flex">
               <NotificationsPopover onNavigate={handleTabChange} />
             </div>
             <div
