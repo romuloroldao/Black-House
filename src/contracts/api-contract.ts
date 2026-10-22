@@ -325,6 +325,7 @@ export const API_CONTRACT = {
   },
   coach: {
     notificationPreferences: () => `${API_BASE}/api/coach/me/notification-preferences`,
+    onboardingFunnel: () => `${API_BASE}/api/coach/me/onboarding-funnel`,
     rules: () => `${API_BASE}/api/coach/rules`,
     ruleById: (id: string) => `${API_BASE}/api/coach/rules/${encodeURIComponent(id)}`,
     teamMembers: () => `${API_BASE}/api/coach/team/members`,
@@ -510,6 +511,7 @@ const CONTRACT_PATTERNS = [
   '/api/agenda-eventos/:id/snooze',
   '/api/agenda-eventos/:id',
   '/api/coach/me/notification-preferences',
+  '/api/coach/me/onboarding-funnel',
   '/api/coach/me/adherence-carteira',
   '/api/coach/rules',
   '/api/coach/rules/:id',

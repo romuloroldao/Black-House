@@ -109,6 +109,31 @@ export const FEATURE_ONBOARDINGS: Record<string, FeatureOnboardingDefinition> = 
       },
     ],
   },
+  "progresso-evolucao": {
+    id: "progresso-evolucao",
+    version: 1,
+    title: "Fotos e evolução",
+    steps: [
+      {
+        id: "tabs",
+        title: "Fotos ou métricas",
+        body: "Use as abas para ver o histórico de fotos do check-in ou as métricas de peso e treino.",
+        target: '[data-onboarding="progresso-tabs"]',
+      },
+      {
+        id: "timeline",
+        title: "Linha do tempo",
+        body: "Cada check-in aparece aqui. Toque numa foto para ampliar ou excluir.",
+        target: '[data-onboarding="progresso-timeline"]',
+      },
+      {
+        id: "compare",
+        title: "Comparar semanas",
+        body: "Com pelo menos duas semanas, use Comparar para ver o antes e depois lado a lado.",
+        target: '[data-onboarding="progresso-compare"]',
+      },
+    ],
+  },
 };
 
 export function getOnboardingDefinition(id: string): FeatureOnboardingDefinition | null {

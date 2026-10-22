@@ -11,6 +11,7 @@ import { Progress } from "@/components/ui/progress";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import SearchDialog from "./SearchDialog";
 import CoachAdherenceCarteiraCard from "./coach/CoachAdherenceCarteiraCard";
+import CoachOnboardingFunnelCard from "./coach/CoachOnboardingFunnelCard";
 import { 
   Users, 
   Dumbbell, 
@@ -316,6 +317,7 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
           {/* Sidebar */}
           <div className="space-y-6">
             <CoachAdherenceCarteiraCard onOpenCheckins={() => onTabChange?.("check-ins")} />
+            <CoachOnboardingFunnelCard />
             {/* Quick Actions */}
             <Card className="bg-gradient-card border-0 shadow-card">
               <CardHeader>

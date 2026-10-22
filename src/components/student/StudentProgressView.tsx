@@ -19,6 +19,10 @@ import { useAlunoHoje } from "@/hooks/useAlunoHoje";
 import { useSearchParams } from "react-router-dom";
 import EvolutionTimelineExperience from "@/components/student/progress/evolution/EvolutionTimelineExperience";
 import type { EvolutionPhoto } from "@/lib/evolution-timeline";
+import FeatureOnboardingPanel, {
+  FeatureOnboardingHelpButton,
+} from "@/components/student/onboarding/FeatureOnboardingPanel";
+import { useFeatureOnboarding } from "@/hooks/useFeatureOnboarding";
 
 type FotoAluno = EvolutionPhoto;
 
@@ -31,6 +35,12 @@ const StudentProgressView = () => {
   const [dataLoaded, setDataLoaded] = useState(false);
   const [bodyMetrics, setBodyMetrics] = useState<BodyMetricsResponse | null>(null);
   const [bodyMetricsLoading, setBodyMetricsLoading] = useState(false);
+
+  const progressoOnboarding = useFeatureOnboarding({
+    onboardingId: "progresso-evolucao",
+    enabled: Boolean(user) && dataLoaded,
+    delayMs: 800,
+  });
 
   const sectionParam = searchParams.get("section");
   const focusFotos = searchParams.get("focus") === "fotos";
@@ -116,15 +126,24 @@ const StudentProgressView = () => {
 
   return (
     <div className="min-w-0 space-y-6">
-      <div className="min-w-0">
-        <h1 className="text-xl font-bold sm:text-2xl">Fotos e evolução</h1>
-        <p className="mt-1 text-muted-foreground">
-          Acompanhe o histórico enviado no check-in semanal e as métricas
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold sm:text-2xl">Fotos e evolução</h1>
+          <p className="mt-1 text-muted-foreground">
+            Acompanhe o histórico enviado no check-in semanal e as métricas
+          </p>
+        </div>
+        <FeatureOnboardingHelpButton
+          onClick={progressoOnboarding.reopen}
+          label="Como ver a evolução"
+        />
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="min-w-0 w-full">
-        <TabsList className="grid h-auto w-full min-w-0 max-w-full grid-cols-2 gap-1 sm:max-w-md">
+        <TabsList
+          data-onboarding="progresso-tabs"
+          className="grid h-auto w-full min-w-0 max-w-full grid-cols-2 gap-1 sm:max-w-md"
+        >
           <TabsTrigger value="photos" className="flex items-center gap-2 min-h-11">
             <Camera className="h-4 w-4" />
             Fotos
@@ -173,6 +192,18 @@ const StudentProgressView = () => {
           <StudentProgressDashboard showWorkoutEvolution={false} />
         </TabsContent>
       </Tabs>
+
+      <FeatureOnboardingPanel
+        open={progressoOnboarding.open}
+        title={progressoOnboarding.definition?.title || "Evolução"}
+        step={progressoOnboarding.step}
+        stepIndex={progressoOnboarding.stepIndex}
+        stepCount={progressoOnboarding.definition?.steps.length || 0}
+        onNext={progressoOnboarding.next}
+        onSkip={progressoOnboarding.skip}
+        onDismissPermanently={progressoOnboarding.dismissPermanently}
+        onClose={progressoOnboarding.skip}
+      />
     </div>
   );
 };
