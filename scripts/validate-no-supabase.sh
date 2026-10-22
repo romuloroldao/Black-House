@@ -8,7 +8,9 @@
 
 set -e
 
-echo "🔍 DESIGN-SUPABASE-PURGE-GLOBAL-003: Validando ausência de Supabase/PostgREST..."
+echo "🔍 DESIGN-SUPABASE-PURGE-GLOBAL-003: Guarda de regressão — o app NÃO usa Supabase;"
+echo "   este script só falha se alguém tentar reintroduzir Supabase/PostgREST."
+echo ""
 
 ERRORS=0
 
