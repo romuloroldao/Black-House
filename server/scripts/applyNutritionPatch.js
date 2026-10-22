@@ -36,6 +36,8 @@ const PATCH_FILES = [
     '20260818_treino_serie_log_identity.sql',
     '20261008_ai_usage_events.sql',
     '20261009_foto_pose_reclassify.sql',
+    '20261022_student_feature_onboarding.sql',
+    '20261022_student_onboarding_events.sql',
 ];
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations');

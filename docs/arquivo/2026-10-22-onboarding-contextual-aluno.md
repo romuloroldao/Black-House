@@ -164,9 +164,19 @@ Autorização: só `req.aluno.id` via `resolveAlunoOrFail`.
 
 ## 7. Métricas
 
-Eventos (via extensão de analytics leve, sem PII):
+Eventos cliente (CustomEvent) + persistência servidor:
 
-- `onboarding_eligible|viewed|step_viewed|completed|skipped|dismissed_permanently|reopened`
+| Cliente | Servidor (`student_onboarding_events.event_name`) |
+|---------|-----------------------------------------------------|
+| `onboarding_eligible` | `eligible` (POST) |
+| `onboarding_viewed` | `viewed` (POST) |
+| `onboarding_step_viewed` | `step_viewed` (POST) |
+| `onboarding_completed` | `completed` (via PUT prefs) |
+| `onboarding_skipped` | `skipped` (via PUT prefs) |
+| `onboarding_dismissed_permanently` | `dismissed_permanently` (via PUT prefs) |
+| `onboarding_reopened` | `reopened` (POST) |
+
+Endpoint: `POST /api/alunos/me/onboarding-events` — só metadados (`onboarding_id`, `version`, `step_id`).
 
 Indicadores: início, conclusão, abandono por step, dismiss, reopen. Conclusão ≠ aprendizado.
 

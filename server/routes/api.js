@@ -955,6 +955,26 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     },
   );
 
+  // POST /api/alunos/me/onboarding-events — telemetria mínima (sem PII)
+  router.post(
+    '/alunos/me/onboarding-events',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['aluno']),
+    resolveAlunoOrFail,
+    async (req, res) => {
+      try {
+        const { recordEvent } = require('../services/feature-onboarding.service');
+        const body = req.body || {};
+        const event = await recordEvent(pool, req.aluno.id, body);
+        res.status(201).json({ event });
+      } catch (error) {
+        const status = error.status || (error.message?.includes('inválido') ? 400 : 500);
+        res.status(status).json({ error: error.message });
+      }
+    },
+  );
+
   // PATCH /api/alunos/me - Atualiza dados do aluno canônico
   // DESIGN-GUARD-RAILS-ROLE-ACCESS-003: Rota apenas para alunos
   // DESIGN-LINK-ALUNO-USER-001: NÃO permite alterar user_id (vínculo deve ser via /api/alunos/link-user)
