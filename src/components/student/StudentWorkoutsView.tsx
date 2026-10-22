@@ -20,6 +20,10 @@ import {
   type TreinoAgendaSession,
 } from "@/lib/treino-agenda-types";
 import { loadWorkoutSessionFromServer, type WorkoutSessionProgress } from "@/lib/workout-session-utils";
+import FeatureOnboardingPanel, {
+  FeatureOnboardingHelpButton,
+} from "@/components/student/onboarding/FeatureOnboardingPanel";
+import { useFeatureOnboarding } from "@/hooks/useFeatureOnboarding";
 
 function isoDayToday(): DiaSemanaIso {
   const d = new Date().getDay();
@@ -38,6 +42,12 @@ const StudentWorkoutsView = () => {
   const [expandedWorkouts, setExpandedWorkouts] = useState<Set<string>>(new Set());
   const [studentName, setStudentName] = useState<string>("");
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  const treinoOnboarding = useFeatureOnboarding({
+    onboardingId: "treino-sessao",
+    enabled: !loading && !sessionTreino && treinos.length > 0,
+    delayMs: 800,
+  });
 
   const diaHoje = isoDayToday();
 
@@ -233,13 +243,16 @@ const StudentWorkoutsView = () => {
 
   return (
     <div className="min-w-0 space-y-6">
-      <div>
-        <h1 className="mb-1 text-xl font-bold sm:text-2xl">Meus treinos</h1>
-        <p className="text-muted-foreground">
-          {treinos.length === 1
-            ? "Seu plano de treino personalizado"
-            : `${treinos.length} treinos ativos`}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h1 className="mb-1 text-xl font-bold sm:text-2xl">Meus treinos</h1>
+          <p className="text-muted-foreground">
+            {treinos.length === 1
+              ? "Seu plano de treino personalizado"
+              : `${treinos.length} treinos ativos`}
+          </p>
+        </div>
+        <FeatureOnboardingHelpButton onClick={treinoOnboarding.reopen} label="Como treinar" />
       </div>
 
       {hasAgenda ? (
@@ -325,6 +338,7 @@ const StudentWorkoutsView = () => {
             </div>
             <Button
               type="button"
+              data-onboarding="treino-start"
               className="h-12 w-full text-base font-semibold"
               disabled={exercicioCount === 0}
               onClick={() => setSessionTreino(treinoPrincipal)}
@@ -341,7 +355,7 @@ const StudentWorkoutsView = () => {
         </Card>
       )}
 
-      <div className="grid gap-6">
+      <div className="grid gap-6" data-onboarding="treino-session">
         {treinos.map((treino, idx) => {
           const isExpanded = expandedWorkouts.has(treino.id);
           const exercicios = treino.exercicios || [];
@@ -482,6 +496,18 @@ const StudentWorkoutsView = () => {
           );
         })}
       </div>
+
+      <FeatureOnboardingPanel
+        open={treinoOnboarding.open}
+        title={treinoOnboarding.definition?.title || "Treino"}
+        step={treinoOnboarding.step}
+        stepIndex={treinoOnboarding.stepIndex}
+        stepCount={treinoOnboarding.definition?.steps.length || 0}
+        onNext={treinoOnboarding.next}
+        onSkip={treinoOnboarding.skip}
+        onDismissPermanently={treinoOnboarding.dismissPermanently}
+        onClose={treinoOnboarding.skip}
+      />
     </div>
   );
 };

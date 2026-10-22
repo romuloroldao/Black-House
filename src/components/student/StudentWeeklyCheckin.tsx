@@ -46,6 +46,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import ProfileCompletenessBanner from "@/components/student/ProfileCompletenessBanner";
 import WorkoutEvolutionSection from "@/components/student/WorkoutEvolutionSection";
 import type { ProfileCompletenessStatus } from "@/types/profile-completeness";
+import FeatureOnboardingPanel, {
+  FeatureOnboardingHelpButton,
+} from "@/components/student/onboarding/FeatureOnboardingPanel";
+import { useFeatureOnboarding } from "@/hooks/useFeatureOnboarding";
 
 const SECTION_IDS: CheckinSectionId[] = CHECKIN_SECTIONS.map((s) => s.id);
 
@@ -363,6 +367,16 @@ export default function StudentWeeklyCheckin({
   const jaEnviouEstaSemana = checkinStreak?.fez_esta_semana === true;
   const proximoEnvio = format(startOfNextCalendarWeek(), "EEEE, d 'de' MMMM", { locale: ptBR });
 
+  const checkinOnboarding = useFeatureOnboarding({
+    onboardingId: "checkin-weekly",
+    enabled:
+      !checkinLoading &&
+      !jaEnviouEstaSemana &&
+      !loading &&
+      !(profileStatus?.hard_gate_active && !profileStatus?.is_complete),
+    delayMs: 700,
+  });
+
   if (checkinLoading) {
     return (
       <div className="space-y-6">
@@ -379,12 +393,17 @@ export default function StudentWeeklyCheckin({
 
   return (
     <div className="form-checkin space-y-4 md:space-y-5">
-      <header className="space-y-1">
-        <h2 className="text-lg font-bold tracking-tight sm:text-xl">Check-in Semanal</h2>
-        <p className="text-sm text-muted-foreground">
-          Um envio por semana — peso, fotos (mín. {MIN_CHECKIN_PHOTOS}) e questionário nos blocos
-          seguintes
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-2">
+        <div className="space-y-1">
+          <h2 className="text-lg font-bold tracking-tight sm:text-xl">Check-in Semanal</h2>
+          <p className="text-sm text-muted-foreground">
+            Um envio por semana — peso, fotos (mín. {MIN_CHECKIN_PHOTOS}) e questionário nos blocos
+            seguintes
+          </p>
+        </div>
+        {!jaEnviouEstaSemana ? (
+          <FeatureOnboardingHelpButton onClick={checkinOnboarding.reopen} />
+        ) : null}
       </header>
 
       {draftRestored && !jaEnviouEstaSemana ? (
@@ -438,14 +457,16 @@ export default function StudentWeeklyCheckin({
         </aside>
         <div className="order-2 min-w-0 md:order-1">
       <form onSubmit={handleSubmit} className="space-y-4 md:space-y-5">
-        <CheckinStepHeader
-          step={step}
-          completedSections={completedSections}
-          hasDraft={hasDraft}
-          onSelectStep={(index) => {
-            if (index >= 0 && index <= step) syncStepToUrl(index);
-          }}
-        />
+        <div data-onboarding="checkin-steps">
+          <CheckinStepHeader
+            step={step}
+            completedSections={completedSections}
+            hasDraft={hasDraft}
+            onSelectStep={(index) => {
+              if (index >= 0 && index <= step) syncStepToUrl(index);
+            }}
+          />
+        </div>
 
         <div
           role="region"
@@ -453,13 +474,15 @@ export default function StudentWeeklyCheckin({
           aria-describedby={getCheckinSectionDescId(currentSectionId)}
         >
         {currentSectionId === "corpo" && (
-          <CheckinPhotosWeightStep
-            pesoKg={pesoKg}
-            onPesoKgChange={setPesoKg}
-            photos={photoDrafts}
-            onPhotosChange={setPhotoDrafts}
-            disabled={loading}
-          />
+          <div data-onboarding="checkin-photos">
+            <CheckinPhotosWeightStep
+              pesoKg={pesoKg}
+              onPesoKgChange={setPesoKg}
+              photos={photoDrafts}
+              onPhotosChange={setPhotoDrafts}
+              disabled={loading}
+            />
+          </div>
         )}
 
         {currentSectionId === "nutricao" && (
@@ -1014,7 +1037,10 @@ export default function StudentWeeklyCheckin({
         </div>
 
         {/* Ações no fluxo do documento — NÃO fixed: fixed cobria a resposta do coach (DE gate). */}
-        <div className="flex flex-col-reverse gap-2 border-t border-border/50 pt-4 sm:flex-row sm:justify-between">
+        <div
+          data-onboarding="checkin-submit"
+          className="flex flex-col-reverse gap-2 border-t border-border/50 pt-4 sm:flex-row sm:justify-between"
+        >
           {step > 0 ? (
             <Button
               type="button"
@@ -1067,6 +1093,18 @@ export default function StudentWeeklyCheckin({
         </div>
       </div>
       )}
+
+      <FeatureOnboardingPanel
+        open={checkinOnboarding.open}
+        title={checkinOnboarding.definition?.title || "Check-in"}
+        step={checkinOnboarding.step}
+        stepIndex={checkinOnboarding.stepIndex}
+        stepCount={checkinOnboarding.definition?.steps.length || 0}
+        onNext={checkinOnboarding.next}
+        onSkip={checkinOnboarding.skip}
+        onDismissPermanently={checkinOnboarding.dismissPermanently}
+        onClose={checkinOnboarding.skip}
+      />
     </div>
   );
 }

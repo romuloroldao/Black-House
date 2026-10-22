@@ -27,6 +27,7 @@ export const API_CONTRACT = {
     treinoAgenda: (alunoId: string) =>
       `${API_BASE}/api/alunos/${encodeURIComponent(alunoId)}/treino-agenda`,
     notificationPreferences: () => `${API_BASE}/api/alunos/me/notification-preferences`,
+    onboardingPreferences: () => `${API_BASE}/api/alunos/me/onboarding-preferences`,
     refeicaoConclusoes: (date?: string) => {
       const qs = date ? `?date=${encodeURIComponent(date)}` : '';
       return `${API_BASE}/api/alunos/me/refeicao-conclusoes${qs}`;
@@ -401,6 +402,7 @@ const CONTRACT_PATTERNS = [
   '/api/alunos/:alunoId/treino-agenda',
   '/api/alunos/:alunoId/body-metrics',
   '/api/alunos/me/notification-preferences',
+  '/api/alunos/me/onboarding-preferences',
   '/api/alunos/link-user',
   '/api/alunos/unlinked-registrations',
   '/api/alunos/adopt-registration',
