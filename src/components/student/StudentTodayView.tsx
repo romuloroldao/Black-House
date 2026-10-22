@@ -37,7 +37,9 @@ import TodayPlanCards from "@/components/student/today/TodayPlanCards";
 import CheckinStreakCard from "@/components/student/today/CheckinStreakCard";
 import BehavioralInsightCard from "@/components/student/today/BehavioralInsightCard";
 import TodayPhotoCard from "@/components/student/today/TodayPhotoCard";
+import ContinueCheckinBanner from "@/components/student/checkin/ContinueCheckinBanner";
 import StudentCoachCheckinFeedback from "@/components/student/StudentCoachCheckinFeedback";
+import { hasCheckinDraft } from "@/lib/checkin-draft";
 import AgentComposer from "@/components/student/agent/AgentComposer";
 import AgentThread from "@/components/student/agent/AgentThread";
 import ColemanHeader from "@/components/student/agent/ColemanHeader";
@@ -259,10 +261,18 @@ const StudentTodayView = ({
   const pendingTasks = mapPendenciasFromApi(data?.pendencias);
   const returnCountdown = mapRetornoFromApi(data?.retorno);
   const proximos = data?.proximos_eventos?.slice(0, 2) ?? [];
+  const showContinueCheckin =
+    Boolean(user?.id) &&
+    hasCheckinDraft(user?.id) &&
+    data?.checkin_streak?.fez_esta_semana !== true;
 
   if (!agent.enabled) {
     return (
       <div className="min-w-0 space-y-5 pb-2">
+        <ContinueCheckinBanner
+          visible={showContinueCheckin}
+          onContinue={() => openTab("checkin")}
+        />
         <TodayHeroCard
           loading={loading}
           aluno={data?.aluno as { nome?: string; email?: string; objetivo?: string }}
@@ -311,6 +321,11 @@ const StudentTodayView = ({
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-1.5 pb-1">
       <div className="shrink-0 space-y-1.5">
+        <ContinueCheckinBanner
+          visible={showContinueCheckin}
+          onContinue={() => openTab("checkin")}
+        />
+
         {profileStatus && !profileStatus.is_complete && onOpenProfileWizard && (
           <ProfileCompletenessBanner
             compact

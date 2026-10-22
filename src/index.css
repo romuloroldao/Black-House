@@ -367,6 +367,39 @@ All colors MUST be HSL.
   .student-caption {
     @apply text-xs text-foreground/75;
   }
+
+  /*
+   * Check-in mobile — opções de rádio em “cartões” tácteis.
+   * Evita reescrever dezenas de RadioGroupItem; o markup atual é div.flex > Item + Label.
+   */
+  .form-checkin [role="radiogroup"] > .flex {
+    min-height: var(--student-touch-min);
+    align-items: center;
+    gap: 0.75rem;
+    border-radius: 0.75rem;
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--card));
+    padding: 0.75rem 0.875rem;
+    transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.1s ease;
+  }
+
+  .form-checkin [role="radiogroup"] > .flex:has([data-state="checked"]) {
+    border-color: hsl(var(--primary));
+    background: hsl(var(--primary) / 0.12);
+    box-shadow: 0 0 0 1px hsl(var(--primary) / 0.25);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .form-checkin [role="radiogroup"] > .flex:hover {
+      border-color: hsl(var(--primary) / 0.55);
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .form-checkin [role="radiogroup"] > .flex:active {
+      transform: scale(0.99);
+    }
+  }
 }
 
 /*

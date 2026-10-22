@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import type { CheckinStreakInfo } from "@/lib/checkin-streak";
 
 type CheckinStreakCardProps = {
@@ -24,28 +25,42 @@ const CheckinStreakCard = ({
 
   if (!streak) return null;
 
+  const pending = !streak.fez_esta_semana && Boolean(checkinDue);
+
   return (
-    <Card className="border-border/60 shadow-card">
+    <Card
+      className={cn(
+        "border-border/60 shadow-card",
+        pending && "border-primary/50 bg-primary/5 shadow-gold",
+      )}
+    >
       <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
         <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/15">
+          <div
+            className={cn(
+              "flex h-11 w-11 items-center justify-center rounded-full",
+              pending ? "bg-primary text-primary-foreground" : "bg-primary/15",
+            )}
+          >
             {streak.semanas_consecutivas > 0 ? (
-              <Flame className="h-5 w-5 text-primary" />
+              <Flame className={cn("h-5 w-5", !pending && "text-primary")} />
             ) : (
-              <ClipboardCheck className="h-5 w-5 text-primary" />
+              <ClipboardCheck className={cn("h-5 w-5", !pending && "text-primary")} />
             )}
           </div>
           <div>
             <p className="font-semibold leading-tight">
-              {streak.semanas_consecutivas > 0
-                ? `${streak.semanas_consecutivas} semana${streak.semanas_consecutivas !== 1 ? "s" : ""} seguidas`
-                : "Check-in semanal"}
+              {pending
+                ? "Check-in pendente"
+                : streak.semanas_consecutivas > 0
+                  ? `${streak.semanas_consecutivas} semana${streak.semanas_consecutivas !== 1 ? "s" : ""} seguidas`
+                  : "Check-in semanal"}
             </p>
             <p className="text-xs text-muted-foreground">
               {streak.fez_esta_semana
                 ? "Um envio por semana — você já concluiu esta semana."
-                : checkinDue
-                  ? "Pendente: um check-in por semana (até domingo)."
+                : pending
+                  ? "Ainda dá tempo esta semana. Peso, fotos e blocos curtos."
                   : "Um check-in por semana — mantenha o hábito com seu coach."}
             </p>
             {streak.badge && (
@@ -56,8 +71,16 @@ const CheckinStreakCard = ({
           </div>
         </div>
         {!streak.fez_esta_semana && (
-          <Button type="button" size="sm" onClick={onOpenCheckin}>
-            Fazer check-in
+          <Button
+            type="button"
+            size={pending ? "default" : "sm"}
+            className={cn(
+              "min-h-[var(--student-touch-min)]",
+              pending && "h-11 px-4 font-semibold",
+            )}
+            onClick={onOpenCheckin}
+          >
+            {pending ? "Fazer agora" : "Fazer check-in"}
           </Button>
         )}
       </CardContent>

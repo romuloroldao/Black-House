@@ -52,6 +52,14 @@ export function loadCheckinDraft(userId: string, now: Date = new Date()): Checki
   return parseCheckinDraft(safeGetItem(checkinDraftKey(userId, now)));
 }
 
+/** Há rascunho com conteúdo nesta semana (para CTA no Hoje). */
+export function hasCheckinDraft(userId: string | undefined | null, now: Date = new Date()): boolean {
+  if (!userId) return false;
+  const draft = loadCheckinDraft(userId, now);
+  if (!draft) return false;
+  return !isCheckinDraftEmpty(draft.formData, draft.pesoKg);
+}
+
 export function saveCheckinDraft(
   userId: string,
   formData: CheckinFormData,
