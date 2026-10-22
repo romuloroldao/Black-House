@@ -32,7 +32,6 @@ import {
   saveCheckinDraft,
 } from "@/lib/checkin-draft";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { cn } from "@/lib/utils";
 import { startOfNextCalendarWeek, type CheckinStreakInfo } from "@/lib/checkin-streak";
 import {
   MIN_CHECKIN_PHOTOS,
@@ -358,7 +357,7 @@ export default function StudentWeeklyCheckin({
   }
 
   return (
-    <div className="form-checkin space-y-6 pb-24 md:pb-6">
+    <div className="form-checkin space-y-6">
       <div>
         <h2 className="text-xl font-bold tracking-tight sm:text-2xl">Check-in Semanal</h2>
         <p className="text-muted-foreground mt-2">
@@ -983,13 +982,8 @@ export default function StudentWeeklyCheckin({
 
         </div>
 
-        <div
-          className={cn(
-            "checkin-sticky-actions flex flex-col-reverse gap-2 border-t border-border/60 bg-background/95 p-3 backdrop-blur",
-            "max-md:fixed max-md:inset-x-0 max-md:bottom-[var(--student-bottom-nav-total)] max-md:z-[90] max-md:shadow-[0_-8px_24px_hsl(0_0%_0%/0.12)]",
-            "sm:static sm:flex-row sm:justify-between sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none sm:backdrop-blur-none",
-          )}
-        >
+        {/* Ações no fluxo do documento — NÃO fixed: fixed cobria a resposta do coach (DE gate). */}
+        <div className="flex flex-col-reverse gap-2 border-t border-border/50 pt-4 sm:flex-row sm:justify-between">
           {step > 0 ? (
             <Button
               type="button"

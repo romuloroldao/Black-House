@@ -11,7 +11,7 @@ O rascunho do check-in (PR #15) era correto mas **invisível**: o aluno não via
 | Hoje | Banner dourado **Check-in em andamento** → Continuar (se há rascunho) |
 | Check-in | Alerta **Rascunho recuperado** ao reabrir |
 | Check-in | Cabeçalho com 5 blocos clicáveis + badge **Rascunho salvo** |
-| Check-in | Barra fixa **Próximo bloco / Enviar** acima da bottom nav |
+| Check-in | Botões **Próximo bloco / Enviar** no fluxo da página (não fixed — fixed cobria a resposta do coach) |
 | Check-in | Opções de rádio em cartões tácteis (CSS `.form-checkin`) |
 | Hoje / Mais do dia | Card de streak com CTA **Fazer agora** quando pendente |
 
