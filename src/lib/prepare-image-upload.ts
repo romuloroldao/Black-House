@@ -111,6 +111,26 @@ async function encodeJpeg(
  * HEIC e formatos que o telemóvel não decodifica são enviados como estão;
  * o servidor converte automaticamente para JPEG (ver normalize-upload-image).
  */
+const PREPARE_TIMEOUT_MS = 20_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error(label));
+    }, ms);
+    promise.then(
+      (v) => {
+        window.clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        window.clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
 export async function prepareImageForUpload(
   file: File,
   options?: { maxBytes?: number; maxSide?: number; quality?: number },
@@ -142,14 +162,7 @@ export async function prepareImageForUpload(
     return file;
   }
 
-  try {
-    return await encodeJpeg(file, maxSide, maxBytes, quality);
-  } catch {
-    if (file.size <= maxBytes && (type === "image/png" || type === "image/webp")) {
-      const ext = type.includes("png") ? ".png" : ".webp";
-      return new File([file], defaultOutputName(file, ext), { type: file.type });
-    }
-    // Falha no canvas (comum no Android): envia original; API normaliza no servidor.
+  const fallbackOriginal = (): File => {
     if (file.size <= 12 * 1024 * 1024) {
       const ext = extFromNameOrType(file);
       return new File([file], defaultOutputName(file, ext), {
@@ -159,6 +172,22 @@ export async function prepareImageForUpload(
     throw new Error(
       "A foto é grande demais para enviar. Tente uma imagem mais próxima ou com menos zoom.",
     );
+  };
+
+  try {
+    // Android/Chrome por vezes fica preso em createImageBitmap/decode sem rejeitar.
+    return await withTimeout(
+      encodeJpeg(file, maxSide, maxBytes, quality),
+      PREPARE_TIMEOUT_MS,
+      "prepare_timeout",
+    );
+  } catch {
+    if (file.size <= maxBytes && (type === "image/png" || type === "image/webp")) {
+      const ext = type.includes("png") ? ".png" : ".webp";
+      return new File([file], defaultOutputName(file, ext), { type: file.type });
+    }
+    // Falha/timeout no canvas: envia original; API normaliza no servidor.
+    return fallbackOriginal();
   }
 }
 
