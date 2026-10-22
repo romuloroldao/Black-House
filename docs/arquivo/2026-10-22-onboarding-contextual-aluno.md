@@ -205,8 +205,9 @@ Indicadores: início, conclusão, abandono por step, dismiss, reopen. Conclusão
 | API | `GET/PUT /api/alunos/me/onboarding-preferences` |
 | Registry / política / analytics | `src/lib/onboarding/*` |
 | Hook + painel | `useFeatureOnboarding`, `FeatureOnboardingPanel` |
-| Tutoriais | `portal-overview`, `checkin-weekly`, `hoje-coleman`, `treino-sessao`, `dieta-refeicao` |
+| Tutoriais | `portal-overview`, `checkin-weekly`, `hoje-coleman`, `treino-sessao`, `dieta-refeicao`, `progresso-evolucao` |
 | Reabrir | botão «Como usar» nas telas prioritárias |
+| Funil coach | `GET /api/coach/me/onboarding-funnel` + card no Dashboard |
 
 ## 11. Próximos passos
 

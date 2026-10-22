@@ -217,6 +217,7 @@ function CurrentCheckinHero({
             </p>
             <Button
               type="button"
+              data-onboarding="progresso-compare"
               className="gap-2"
               onClick={() => onCompare(item, firstItem ?? undefined)}
               disabled={!firstItem || firstItem.id === item.id}
@@ -498,7 +499,7 @@ export default function EvolutionTimelineExperience({
   }
 
   return (
-    <div className={cn('space-y-6', className)}>
+    <div className={cn('space-y-6', className)} data-onboarding="progresso-timeline">
       {isAnalyzing ? (
         <div
           className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-sm text-muted-foreground"

@@ -45,6 +45,7 @@
 
 - Preferências por aluno + tutorial: tabela `student_feature_onboarding`, API `GET/PUT /api/alunos/me/onboarding-preferences`.
 - Eventos: tabela `student_onboarding_events`, API `POST /api/alunos/me/onboarding-events`.
+- Funil (coach): `GET /api/coach/me/onboarding-funnel` — agregados sem PII.
 - Registry + painel: `src/lib/onboarding/`, `useFeatureOnboarding`, `FeatureOnboardingPanel`.
 - Auditoria / priorização / conteúdos: [`arquivo/2026-10-22-onboarding-contextual-aluno.md`](arquivo/2026-10-22-onboarding-contextual-aluno.md).
 

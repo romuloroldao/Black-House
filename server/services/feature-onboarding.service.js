@@ -164,6 +164,48 @@ function mapRow(row) {
   };
 }
 
+/**
+ * Funil agregado para o coach (sem PII): contagens por tutorial/estado/evento
+ * apenas dos alunos do escopo.
+ */
+async function getFunnelSummary(pool, { coachId, isAdmin }) {
+  const alunoFilter = isAdmin
+    ? `SELECT id FROM public.alunos`
+    : `SELECT id FROM public.alunos WHERE coach_id = $1`;
+  const params = isAdmin ? [] : [coachId];
+
+  const prefs = await pool.query(
+    `SELECT o.onboarding_id, o.state, count(*)::int AS total
+       FROM public.student_feature_onboarding o
+      WHERE o.aluno_id IN (${alunoFilter})
+      GROUP BY o.onboarding_id, o.state
+      ORDER BY o.onboarding_id, o.state`,
+    params,
+  );
+
+  const events = await pool.query(
+    `SELECT e.onboarding_id, e.event_name, count(*)::int AS total
+       FROM public.student_onboarding_events e
+      WHERE e.aluno_id IN (${alunoFilter})
+        AND e.created_at >= now() - interval '30 days'
+      GROUP BY e.onboarding_id, e.event_name
+      ORDER BY e.onboarding_id, e.event_name`,
+    params,
+  );
+
+  const alunos = await pool.query(
+    `SELECT count(*)::int AS total FROM (${alunoFilter}) a`,
+    params,
+  );
+
+  return {
+    window_days: 30,
+    alunos_total: alunos.rows[0]?.total || 0,
+    preferences: prefs.rows,
+    events_30d: events.rows,
+  };
+}
+
 module.exports = {
   VALID_STATES,
   VALID_EVENTS,
@@ -171,4 +213,5 @@ module.exports = {
   getPreference,
   upsertPreference,
   recordEvent,
+  getFunnelSummary,
 };

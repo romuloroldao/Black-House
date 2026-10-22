@@ -74,6 +74,7 @@ export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/coach/team/members',
     '/api/coach/team/members/',
     '/api/coach/me/notification-preferences',
+    '/api/coach/me/onboarding-funnel',
     '/api/coach/me/adherence-carteira',
     '/api/coach/rules',
     '/api/eventos',

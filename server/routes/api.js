@@ -918,6 +918,27 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     },
   );
 
+  // GET /api/coach/me/onboarding-funnel — agregados (sem PII) dos tutoriais dos alunos
+  router.get(
+    '/coach/me/onboarding-funnel',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    resolveCoachOrFail,
+    async (req, res) => {
+      try {
+        const { getFunnelSummary } = require('../services/feature-onboarding.service');
+        const summary = await getFunnelSummary(pool, {
+          coachId: req.user.id,
+          isAdmin: req.user.role === 'admin',
+        });
+        res.json(summary);
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
   // GET /api/alunos/me/onboarding-preferences — estados de tutoriais contextuais
   router.get(
     '/alunos/me/onboarding-preferences',
