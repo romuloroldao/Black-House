@@ -31,6 +31,7 @@ export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/agent/tools',
     '/api/alunos/me/notification-preferences',
     '/api/alunos/me/onboarding-preferences',
+    '/api/alunos/me/onboarding-events',
     '/api/alunos/link-user',
     '/api/alunos/unlinked-registrations',
     '/api/alunos/adopt-registration',

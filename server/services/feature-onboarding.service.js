@@ -11,6 +11,23 @@ const VALID_STATES = new Set([
   'dismissed_permanently',
 ]);
 
+const VALID_EVENTS = new Set([
+  'eligible',
+  'viewed',
+  'step_viewed',
+  'completed',
+  'skipped',
+  'dismissed_permanently',
+  'reopened',
+]);
+
+/** Mapa estado → evento (quando o PUT muda o estado terminal). */
+const STATE_TO_EVENT = {
+  completed: 'completed',
+  skipped: 'skipped',
+  dismissed_permanently: 'dismissed_permanently',
+};
+
 function normalizeId(id) {
   return String(id || '')
     .trim()
@@ -86,7 +103,53 @@ async function upsertPreference(pool, alunoId, payload) {
      RETURNING onboarding_id, version, state, dismiss_permanently, current_step, completed_at, updated_at`,
     [alunoId, onboardingId, version, state, dismiss, currentStep, completedAt],
   );
-  return mapRow(r.rows[0]);
+  const item = mapRow(r.rows[0]);
+  const eventName = STATE_TO_EVENT[state];
+  if (eventName) {
+    try {
+      await recordEvent(pool, alunoId, {
+        onboarding_id: onboardingId,
+        event_name: eventName,
+        version,
+        step_id: null,
+      });
+    } catch {
+      /* métrica não deve falhar o upsert */
+    }
+  }
+  return item;
+}
+
+/**
+ * Regista evento de onboarding (sem PII). Ignora nomes inválidos.
+ */
+async function recordEvent(pool, alunoId, payload) {
+  const onboardingId = normalizeId(payload.onboarding_id);
+  const eventName = String(payload.event_name || '').trim();
+  if (!onboardingId) {
+    const err = new Error('onboarding_id inválido');
+    err.status = 400;
+    throw err;
+  }
+  if (!VALID_EVENTS.has(eventName)) {
+    const err = new Error('event_name inválido');
+    err.status = 400;
+    throw err;
+  }
+  const version = Math.max(1, parseInt(payload.version, 10) || 1);
+  const stepId =
+    payload.step_id == null || payload.step_id === ''
+      ? null
+      : String(payload.step_id).trim().slice(0, 80);
+
+  const r = await pool.query(
+    `INSERT INTO public.student_onboarding_events
+       (aluno_id, onboarding_id, event_name, version, step_id)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, onboarding_id, event_name, version, step_id, created_at`,
+    [alunoId, onboardingId, eventName, version, stepId],
+  );
+  return r.rows[0];
 }
 
 function mapRow(row) {
@@ -103,7 +166,9 @@ function mapRow(row) {
 
 module.exports = {
   VALID_STATES,
+  VALID_EVENTS,
   listPreferences,
   getPreference,
   upsertPreference,
+  recordEvent,
 };

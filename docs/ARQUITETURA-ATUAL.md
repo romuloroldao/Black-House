@@ -44,6 +44,7 @@
 ## Onboarding contextual (portal aluno)
 
 - Preferências por aluno + tutorial: tabela `student_feature_onboarding`, API `GET/PUT /api/alunos/me/onboarding-preferences`.
+- Eventos: tabela `student_onboarding_events`, API `POST /api/alunos/me/onboarding-events`.
 - Registry + painel: `src/lib/onboarding/`, `useFeatureOnboarding`, `FeatureOnboardingPanel`.
 - Auditoria / priorização / conteúdos: [`arquivo/2026-10-22-onboarding-contextual-aluno.md`](arquivo/2026-10-22-onboarding-contextual-aluno.md).
 
