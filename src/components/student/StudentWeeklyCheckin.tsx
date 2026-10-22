@@ -25,7 +25,14 @@ import {
 } from "@/lib/checkin-sections";
 import { CHECKIN_FIELD_LABELS, INITIAL_CHECKIN_FORM, type CheckinFormData } from "@/lib/checkin-types";
 import { buildCheckinPayload, type CheckinSubmitExtras } from "@/lib/checkin-payload";
-import { clearCheckinDraft, loadCheckinDraft, saveCheckinDraft } from "@/lib/checkin-draft";
+import {
+  clearCheckinDraft,
+  isCheckinDraftEmpty,
+  loadCheckinDraft,
+  saveCheckinDraft,
+} from "@/lib/checkin-draft";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { cn } from "@/lib/utils";
 import { startOfNextCalendarWeek, type CheckinStreakInfo } from "@/lib/checkin-streak";
 import {
   MIN_CHECKIN_PHOTOS,
@@ -67,6 +74,8 @@ export default function StudentWeeklyCheckin({
   const [formData, setFormData] = useState<CheckinFormData>(INITIAL_CHECKIN_FORM);
   const [pesoKg, setPesoKg] = useState("");
   const [photoDrafts, setPhotoDrafts] = useState<CheckinPhotoDraft[]>([]);
+  const [draftRestored, setDraftRestored] = useState(false);
+  const [hasDraft, setHasDraft] = useState(false);
   const draftHydratedFor = useRef<string | null>(null);
 
   // A aba remonta ao trocar de tab no portal; sem isto o aluno perde as respostas.
@@ -78,6 +87,8 @@ export default function StudentWeeklyCheckin({
     if (!draft) return;
     setFormData(draft.formData);
     setPesoKg(draft.pesoKg);
+    setDraftRestored(true);
+    setHasDraft(true);
     toast.info("Recuperamos as respostas que você já tinha preenchido. As fotos precisam ser enviadas de novo.");
   }, [user?.id]);
 
@@ -85,6 +96,7 @@ export default function StudentWeeklyCheckin({
     const userId = user?.id;
     if (!userId || draftHydratedFor.current !== userId) return;
     saveCheckinDraft(userId, formData, pesoKg);
+    setHasDraft(!isCheckinDraftEmpty(formData, pesoKg));
   }, [user?.id, formData, pesoKg]);
 
   const corpoExtras = {
@@ -346,7 +358,7 @@ export default function StudentWeeklyCheckin({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="form-checkin space-y-6 pb-24 md:pb-6">
       <div>
         <h2 className="text-xl font-bold tracking-tight sm:text-2xl">Check-in Semanal</h2>
         <p className="text-muted-foreground mt-2">
@@ -354,6 +366,16 @@ export default function StudentWeeklyCheckin({
           seguintes
         </p>
       </div>
+
+      {draftRestored && !jaEnviouEstaSemana ? (
+        <Alert className="border-primary/40 bg-primary/10">
+          <AlertTitle>Rascunho recuperado</AlertTitle>
+          <AlertDescription>
+            Continuamos de onde você parou neste aparelho. As fotos precisam ser anexadas de novo
+            neste envio.
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       <StudentCoachCheckinFeedback limit={1} showHistoryAction />
 
@@ -386,7 +408,14 @@ export default function StudentWeeklyCheckin({
         </Card>
       ) : (
       <form onSubmit={handleSubmit} className="space-y-6">
-        <CheckinStepHeader step={step} completedSections={completedSections} />
+        <CheckinStepHeader
+          step={step}
+          completedSections={completedSections}
+          hasDraft={hasDraft}
+          onSelectStep={(index) => {
+            if (index >= 0 && index <= step) syncStepToUrl(index);
+          }}
+        />
 
         <div
           role="region"
@@ -954,22 +983,43 @@ export default function StudentWeeklyCheckin({
 
         </div>
 
-        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+        <div
+          className={cn(
+            "checkin-sticky-actions flex flex-col-reverse gap-2 border-t border-border/60 bg-background/95 p-3 backdrop-blur",
+            "max-md:fixed max-md:inset-x-0 max-md:bottom-[var(--student-bottom-nav-total)] max-md:z-[90] max-md:shadow-[0_-8px_24px_hsl(0_0%_0%/0.12)]",
+            "sm:static sm:flex-row sm:justify-between sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none sm:backdrop-blur-none",
+          )}
+        >
           {step > 0 ? (
-            <Button type="button" variant="outline" onClick={goPrev} disabled={loading}>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-12 min-h-[var(--student-touch-min)]"
+              onClick={goPrev}
+              disabled={loading}
+            >
               <ChevronLeft className="mr-2 h-4 w-4" />
               Anterior
             </Button>
           ) : (
-            <span />
+            <span className="hidden sm:block" />
           )}
           {step < CHECKIN_SECTIONS.length - 1 ? (
-            <Button type="button" className="sm:ml-auto" onClick={goNext}>
-              Próximo
+            <Button
+              type="button"
+              className="h-12 min-h-[var(--student-touch-min)] sm:ml-auto"
+              onClick={goNext}
+            >
+              Próximo bloco
               <ChevronRight className="ml-2 h-4 w-4" />
             </Button>
           ) : (
-            <Button type="submit" size="lg" className="w-full sm:ml-auto sm:w-auto" disabled={loading}>
+            <Button
+              type="submit"
+              size="lg"
+              className="h-12 min-h-[var(--student-touch-min)] w-full font-semibold sm:ml-auto sm:w-auto"
+              disabled={loading}
+            >
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 motion-safe:animate-spin" />
