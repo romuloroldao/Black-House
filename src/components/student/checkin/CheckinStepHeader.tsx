@@ -24,7 +24,7 @@ const CheckinStepHeader = ({
   const pct = Math.round(((step + 1) / CHECKIN_SECTIONS.length) * 100);
 
   return (
-    <div className="sticky top-0 z-10 -mx-1 mb-4 space-y-3 rounded-xl border border-primary/25 bg-background/95 p-3 shadow-sm backdrop-blur md:top-2">
+    <div className="sticky top-0 z-10 -mx-1 space-y-2.5 rounded-xl border border-primary/25 bg-background/95 p-3 shadow-sm backdrop-blur md:top-2">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">

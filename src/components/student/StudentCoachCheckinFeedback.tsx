@@ -44,6 +44,15 @@ function pickCheckinsWithResposta(
   );
 }
 
+/** Remove linhas em branco em excesso que inflavam a card (whitespace-pre-wrap). */
+function normalizeCoachResposta(raw: string): string {
+  return raw
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function FeedbackBlock({
   checkin,
   compact,
@@ -55,7 +64,7 @@ function FeedbackBlock({
   className?: string;
   isNew?: boolean;
 }) {
-  const resposta = checkin.coach_resposta?.trim() ?? "";
+  const resposta = normalizeCoachResposta(checkin.coach_resposta ?? "");
   const when = checkin.coach_respondido_em || checkin.created_at;
   const whenLabel = when
     ? format(new Date(when), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })
@@ -67,10 +76,10 @@ function FeedbackBlock({
   if (compact) {
     return (
       <div
-        className={`rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 ${className ?? ""}`}
+        className={`rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5 ${className ?? ""}`}
       >
-        <p className="mb-1 flex items-center gap-2 text-sm font-medium text-primary">
-          <MessageSquare className="h-4 w-4" />
+        <p className="mb-1 flex flex-wrap items-center gap-2 text-sm font-medium text-primary">
+          <MessageSquare className="h-4 w-4 shrink-0" aria-hidden />
           Resposta do seu coach
           {isNew && (
             <Badge variant="default" className="student-badge-sm h-5 px-1.5">
@@ -79,11 +88,13 @@ function FeedbackBlock({
           )}
         </p>
         {checkinDate && (
-          <p className="mb-2 text-xs text-muted-foreground">Check-in de {checkinDate}</p>
+          <p className="mb-1.5 text-xs text-muted-foreground">Check-in de {checkinDate}</p>
         )}
-        <p className="line-clamp-6 whitespace-pre-wrap text-sm leading-relaxed">{resposta}</p>
+        <p className="max-h-28 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-snug md:max-h-40">
+          {resposta}
+        </p>
         {whenLabel && (
-          <p className="mt-2 text-xs text-muted-foreground">Respondido em {whenLabel}</p>
+          <p className="mt-1.5 text-xs text-muted-foreground">Respondido em {whenLabel}</p>
         )}
       </div>
     );
@@ -91,9 +102,9 @@ function FeedbackBlock({
 
   return (
     <Card className={`border-primary/20 bg-primary/5 ${className ?? ""}`}>
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2 text-base text-primary">
-          <MessageSquare className="h-5 w-5" />
+      <CardHeader className="space-y-1 pb-2 pt-4">
+        <CardTitle className="flex flex-wrap items-center gap-2 text-base text-primary">
+          <MessageSquare className="h-5 w-5 shrink-0" aria-hidden />
           Resposta do seu coach
           {isNew && (
             <Badge variant="default" className="student-badge-sm h-5 px-1.5">
@@ -105,10 +116,12 @@ function FeedbackBlock({
           <p className="text-xs text-muted-foreground">Referente ao check-in de {checkinDate}</p>
         )}
       </CardHeader>
-      <CardContent>
-        <p className="line-clamp-[12] whitespace-pre-wrap text-sm leading-relaxed">{resposta}</p>
+      <CardContent className="pb-4 pt-0">
+        <p className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-relaxed md:max-h-56">
+          {resposta}
+        </p>
         {whenLabel && (
-          <p className="mt-3 text-xs text-muted-foreground">Respondido em {whenLabel}</p>
+          <p className="mt-2 text-xs text-muted-foreground">Respondido em {whenLabel}</p>
         )}
       </CardContent>
     </Card>

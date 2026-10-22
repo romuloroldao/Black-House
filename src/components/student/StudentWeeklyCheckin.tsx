@@ -356,18 +356,22 @@ export default function StudentWeeklyCheckin({
     );
   }
 
+  const coachFeedback = (
+    <StudentCoachCheckinFeedback compact limit={1} showHistoryAction />
+  );
+
   return (
-    <div className="form-checkin space-y-6">
-      <div>
-        <h2 className="text-xl font-bold tracking-tight sm:text-2xl">Check-in Semanal</h2>
-        <p className="text-muted-foreground mt-2">
+    <div className="form-checkin space-y-4 md:space-y-5">
+      <header className="space-y-1">
+        <h2 className="text-lg font-bold tracking-tight sm:text-xl">Check-in Semanal</h2>
+        <p className="text-sm text-muted-foreground">
           Um envio por semana — peso, fotos (mín. {MIN_CHECKIN_PHOTOS}) e questionário nos blocos
           seguintes
         </p>
-      </div>
+      </header>
 
       {draftRestored && !jaEnviouEstaSemana ? (
-        <Alert className="border-primary/40 bg-primary/10">
+        <Alert className="border-primary/40 bg-primary/10 py-3">
           <AlertTitle>Rascunho recuperado</AlertTitle>
           <AlertDescription>
             Continuamos de onde você parou neste aparelho. As fotos precisam ser anexadas de novo
@@ -375,8 +379,6 @@ export default function StudentWeeklyCheckin({
           </AlertDescription>
         </Alert>
       ) : null}
-
-      <StudentCoachCheckinFeedback limit={1} showHistoryAction />
 
       {profileStatus && !profileStatus.is_complete && onRequireProfile && (
         <ProfileCompletenessBanner
@@ -387,26 +389,38 @@ export default function StudentWeeklyCheckin({
       )}
 
       {jaEnviouEstaSemana ? (
-        <Card className="border-primary/30 bg-primary/5">
-          <CardContent className="flex flex-col gap-3 p-6 sm:flex-row sm:items-start">
-            <CheckCircle2 className="h-10 w-10 shrink-0 text-primary" aria-hidden />
-            <div className="space-y-1">
-              <p className="text-lg font-semibold">Check-in desta semana já enviado</p>
-              <p className="text-sm text-muted-foreground">
-                Só é possível um check-in por semana. O próximo ficará disponível na{" "}
-                <span className="font-medium text-foreground">{proximoEnvio}</span>.
-              </p>
-              {checkinStreak && checkinStreak.semanas_consecutivas > 0 && (
-                <p className="text-sm text-muted-foreground pt-1">
-                  Sequência atual: {checkinStreak.semanas_consecutivas}{" "}
-                  {checkinStreak.semanas_consecutivas === 1 ? "semana seguida" : "semanas seguidas"}.
+        <div className="space-y-4">
+          <Card className="border-primary/30 bg-primary/5">
+            <CardContent className="flex flex-col gap-3 p-5 sm:flex-row sm:items-start">
+              <CheckCircle2 className="h-10 w-10 shrink-0 text-primary" aria-hidden />
+              <div className="space-y-1">
+                <p className="text-lg font-semibold">Check-in desta semana já enviado</p>
+                <p className="text-sm text-muted-foreground">
+                  Só é possível um check-in por semana. O próximo ficará disponível na{" "}
+                  <span className="font-medium text-foreground">{proximoEnvio}</span>.
                 </p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+                {checkinStreak && checkinStreak.semanas_consecutivas > 0 && (
+                  <p className="pt-1 text-sm text-muted-foreground">
+                    Sequência atual: {checkinStreak.semanas_consecutivas}{" "}
+                    {checkinStreak.semanas_consecutivas === 1 ? "semana seguida" : "semanas seguidas"}.
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+          {coachFeedback}
+        </div>
       ) : (
-      <form onSubmit={handleSubmit} className="space-y-6">
+      /*
+       * Desktop: formulário (tarefa) à esquerda; feedback do coach compacto à direita.
+       * Mobile: feedback curto acima, depois os blocos — sem card gigante a empurrar o formulário.
+       */
+      <div className="grid items-start gap-4 md:grid-cols-[minmax(0,1fr)_minmax(16rem,19rem)] md:gap-6">
+        <aside className="order-1 min-w-0 md:order-2 md:sticky md:top-3 md:self-start">
+          {coachFeedback}
+        </aside>
+        <div className="order-2 min-w-0 md:order-1">
+      <form onSubmit={handleSubmit} className="space-y-4 md:space-y-5">
         <CheckinStepHeader
           step={step}
           completedSections={completedSections}
@@ -1026,6 +1040,8 @@ export default function StudentWeeklyCheckin({
           )}
         </div>
       </form>
+        </div>
+      </div>
       )}
     </div>
   );
