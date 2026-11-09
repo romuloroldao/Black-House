@@ -50,6 +50,25 @@ describe('alimento-substituicoes SQL', () => {
   });
 });
 
+describe('refeicao-substituicao repository', () => {
+  test('getItemDieta não lê itens_dieta.plano (coluna inexistente; o plano vem do pedido)', async () => {
+    const repo = require('../repositories/refeicao-substituicao.repository');
+    let sql = '';
+    await repo.getItemDieta(
+      {
+        async query(q) {
+          sql = q;
+          return { rows: [] };
+        },
+      },
+      'item',
+      'dieta',
+    );
+    assert.match(sql, /FROM public\.itens_dieta/);
+    assert.ok(!/\bplano\b/.test(sql));
+  });
+});
+
 describe('listSubstituicoes all=1 (lista completa)', () => {
   const ref = food('00000000-0000-4000-8000-000000000001', 'Arroz', 130);
   const group = Array.from({ length: 60 }, (_, i) =>
