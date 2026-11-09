@@ -4,7 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { SubstituicaoIsocalorica } from "@/lib/foodEquivalence";
-import { groupByCategory, matchesFoodSearch, type FoodCategory } from "@/lib/food-categories";
+import {
+  UNCATEGORIZED_ID,
+  groupByCategory,
+  matchesFoodSearch,
+  type FoodCategory,
+} from "@/lib/food-categories";
 
 const INITIAL_ROWS = 150;
 const ALL = "__todas__";
@@ -55,7 +60,7 @@ export default function FoodFullList({
   }, [filtered, categories, categoria]);
 
   const totalVisivel = sections.reduce((n, s) => n + s.items.length, 0);
-  const hasCategories = categories.length > 0;
+  const hasCategories = allSections.some((s) => s.id !== UNCATEGORIZED_ID);
 
   if (status === "loading") {
     return (
@@ -148,7 +153,7 @@ export default function FoodFullList({
         <div
           role="radiogroup"
           aria-label="Alimentos substitutos"
-          className="max-h-[min(46dvh,420px)] overflow-y-auto rounded-lg border md:max-h-[44vh]"
+          className="max-h-[min(46dvh,420px)] overflow-y-auto overflow-x-hidden rounded-lg border md:max-h-[44vh]"
         >
           {sections.map((section) => {
             if (restantes <= 0) return null;
