@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { ArrowRight, Info, Loader2, Search } from "lucide-react";
+import { ArrowRight, Info, List, Loader2, Search } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Food,
@@ -30,6 +30,9 @@ import { cn } from "@/lib/utils";
 import { useStudentOverlayLock } from "@/hooks/useStudentOverlayLock";
 import { apiClient } from "@/lib/api-client";
 import { API_CONTRACT } from "@/contracts/api-contract";
+import { useFoodCategories } from "@/hooks/useFoodCategories";
+import FoodFullList from "@/components/nutrition/FoodFullList";
+import FoodCategoryManager from "@/components/nutrition/FoodCategoryManager";
 
 const MIN_SEARCH_CHARS = 2;
 const SEARCH_DEBOUNCE_MS = 280;
@@ -39,6 +42,16 @@ const SEARCH_TIMEOUT_MS = 12_000;
 const EMPTY_FOODS: Food[] = [];
 
 type SearchStatus = "idle" | "searching" | "success" | "empty" | "error";
+type ViewMode = "busca" | "lista";
+type FullListStatus = "loading" | "error" | "ready";
+
+type ApiSubstituicao = {
+  alimento: Food;
+  quantidadeEquivalente: number;
+  kcalReferencia: number;
+  kcalEquivalente: number;
+  formula: string;
+};
 
 interface FoodSubstitutionDialogProps {
   open: boolean;
@@ -68,6 +81,12 @@ export default function FoodSubstitutionDialog({
   const [debouncedBusca, setDebouncedBusca] = useState("");
   const [searchStatus, setSearchStatus] = useState<SearchStatus>("idle");
   const [confirming, setConfirming] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("busca");
+  const [fullList, setFullList] = useState<SubstituicaoIsocalorica[]>([]);
+  const [fullListStatus, setFullListStatus] = useState<FullListStatus>("loading");
+  const [managerOpen, setManagerOpen] = useState(false);
+  const fullListKeyRef = useRef<string | null>(null);
+  const foodCategories = useFoodCategories(open && viewMode === "lista");
 
   const fetchSeqRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -111,6 +130,9 @@ export default function FoodSubstitutionDialog({
     setSelectedSubstituicao("");
     setSearchStatus("idle");
     setConfirming(false);
+    setViewMode("busca");
+    setManagerOpen(false);
+    fullListKeyRef.current = null;
     cacheRef.current.clear();
   }, [open, alimentoId, quantidadeAtual, unidadeQuantidade]);
 
@@ -121,15 +143,7 @@ export default function FoodSubstitutionDialog({
   );
 
   const mapApiResponse = useCallback(
-    (
-      rows: Array<{
-        alimento: Food;
-        quantidadeEquivalente: number;
-        kcalReferencia: number;
-        kcalEquivalente: number;
-        formula: string;
-      }>,
-    ): SubstituicaoIsocalorica[] =>
+    (rows: ApiSubstituicao[]): SubstituicaoIsocalorica[] =>
       rows.map((s) => ({
         alimento: normalizeFood(s.alimento),
         quantidadeEquivalente: s.quantidadeEquivalente,
@@ -195,15 +209,9 @@ export default function FoodSubstitutionDialog({
           q: trimmed,
         });
 
-        const res = await apiClient.requestSafe<{
-          substituicoes: Array<{
-            alimento: Food;
-            quantidadeEquivalente: number;
-            kcalReferencia: number;
-            kcalEquivalente: number;
-            formula: string;
-          }>;
-        }>(url, { signal: controller.signal });
+        const res = await apiClient.requestSafe<{ substituicoes: ApiSubstituicao[] }>(url, {
+          signal: controller.signal,
+        });
 
         if (seq !== fetchSeqRef.current) return;
 
@@ -256,8 +264,38 @@ export default function FoodSubstitutionDialog({
     void executarBusca(debouncedBusca);
   }, [open, alimentoId, debouncedBusca, executarBusca]);
 
+  const carregarListaCompleta = useCallback(async () => {
+    const ref = alimentoAtualRef.current;
+    if (!ref) return;
+    const key = `${ref.id}|${quantidadeAtual}|${unidadeQuantidade}`;
+    fullListKeyRef.current = key;
+    setFullListStatus("loading");
+    const res = await apiClient.requestSafe<{ substituicoes: ApiSubstituicao[] }>(
+      API_CONTRACT.alimentos.substituicoes(ref.id, {
+        quantidade: quantidadeAtual,
+        unidade: unidadeQuantidade,
+        all: true,
+      }),
+    );
+    if (fullListKeyRef.current !== key) return;
+    if (res.success && Array.isArray(res.data?.substituicoes)) {
+      setFullList(mapApiResponse(res.data.substituicoes));
+      setFullListStatus("ready");
+    } else {
+      setFullList([]);
+      setFullListStatus("error");
+    }
+  }, [quantidadeAtual, unidadeQuantidade, mapApiResponse]);
+
+  useEffect(() => {
+    if (!open || viewMode !== "lista" || !alimentoId) return;
+    if (fullListKeyRef.current === `${alimentoId}|${quantidadeAtual}|${unidadeQuantidade}`) return;
+    void carregarListaCompleta();
+  }, [open, viewMode, alimentoId, quantidadeAtual, unidadeQuantidade, carregarListaCompleta]);
+
   const handleSubstituir = async () => {
-    const substituicao = substituicoes.find((s) => s.alimento.id === selectedSubstituicao);
+    const pool = viewMode === "lista" ? fullList : substituicoes;
+    const substituicao = pool.find((s) => s.alimento.id === selectedSubstituicao);
     if (!substituicao || confirming) return;
 
     setConfirming(true);
@@ -330,6 +368,49 @@ export default function FoodSubstitutionDialog({
             </p>
           ) : (
             <>
+              <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1" role="tablist" aria-label="Modo de escolha">
+                {(
+                  [
+                    { id: "busca", label: "Busca rápida", Icon: Search },
+                    { id: "lista", label: "Ver lista completa", Icon: List },
+                  ] as const
+                ).map(({ id, label, Icon }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    aria-selected={viewMode === id}
+                    onClick={() => {
+                      setViewMode(id);
+                      setSelectedSubstituicao("");
+                    }}
+                    className={cn(
+                      "flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                      viewMode === id
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {viewMode === "lista" ? (
+                <FoodFullList
+                  items={fullList}
+                  categories={foodCategories.categories}
+                  status={fullListStatus}
+                  unLabel={unLabel}
+                  selectedId={selectedSubstituicao}
+                  onSelect={setSelectedSubstituicao}
+                  onRetry={() => void carregarListaCompleta()}
+                  grupoLabel={grupoLabel}
+                  onManageCategories={foodCategories.canEdit ? () => setManagerOpen(true) : undefined}
+                />
+              ) : (
+              <>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -347,7 +428,7 @@ export default function FoodSubstitutionDialog({
                 </p>
               ) : searchStatus === "idle" && trimmedBusca.length === 0 ? (
                 <p className="py-4 text-center text-sm text-muted-foreground">
-                  Digite o nome do alimento substituto no grupo {grupoLabel}.
+                  Digite o nome do alimento substituto no grupo {grupoLabel} ou abra a lista completa.
                 </p>
               ) : searchStatus === "searching" ? (
                 <div className="flex items-center justify-center gap-2 py-6 text-muted-foreground">
@@ -415,6 +496,8 @@ export default function FoodSubstitutionDialog({
                   </div>
                 </RadioGroup>
               )}
+              </>
+              )}
             </>
           )}
         </div>
@@ -441,6 +524,15 @@ export default function FoodSubstitutionDialog({
           </Button>
         </div>
       </DialogContent>
+      {foodCategories.canEdit ? (
+        <FoodCategoryManager
+          open={managerOpen}
+          onOpenChange={setManagerOpen}
+          foods={fullList.map((s) => ({ id: s.alimento.id, name: s.alimento.name }))}
+          grupoLabel={grupoLabel}
+          state={foodCategories}
+        />
+      ) : null}
     </Dialog>
   );
 }

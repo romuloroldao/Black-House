@@ -116,13 +116,14 @@ export const API_CONTRACT = {
     gruposEquivalencia: () => `${API_BASE}/api/alimentos/grupos-equivalencia`,
     substituicoes: (
       alimentoId: string,
-      query?: { quantidade?: number; unidade?: string; limit?: number; q?: string },
+      query?: { quantidade?: number; unidade?: string; limit?: number; q?: string; all?: boolean },
     ) => {
       const q = new URLSearchParams();
       if (query?.quantidade != null) q.set('quantidade', String(query.quantidade));
       if (query?.unidade) q.set('unidade', query.unidade);
       if (query?.limit != null) q.set('limit', String(query.limit));
       if (query?.q) q.set('q', query.q);
+      if (query?.all) q.set('all', '1');
       const qs = q.toString();
       return `${API_BASE}/api/alimentos/${alimentoId}/substituicoes${qs ? `?${qs}` : ''}`;
     },
@@ -156,6 +157,12 @@ export const API_CONTRACT = {
     merge: (id: string) => `${API_BASE}/api/food-catalog/${encodeURIComponent(id)}/merge`,
     create: () => `${API_BASE}/api/food-catalog`,
     update: (id: string) => `${API_BASE}/api/food-catalog/${encodeURIComponent(id)}`,
+  },
+  foodCategories: {
+    list: () => `${API_BASE}/api/food-categories`,
+    byId: (id: string) => `${API_BASE}/api/food-categories/${encodeURIComponent(id)}`,
+    items: (id: string) => `${API_BASE}/api/food-categories/${encodeURIComponent(id)}/items`,
+    unassign: () => `${API_BASE}/api/food-categories/items`,
   },
   mensagens: {
     list: () => `${API_BASE}/api/mensagens`,
@@ -439,6 +446,10 @@ const CONTRACT_PATTERNS = [
   '/api/food-catalog/:id/usage',
   '/api/food-catalog/:id/history',
   '/api/food-catalog/:id/versions',
+  '/api/food-categories',
+  '/api/food-categories/items',
+  '/api/food-categories/:id',
+  '/api/food-categories/:id/items',
   '/api/dietas',
   '/api/dietas/:id',
   '/api/feedbacks-alunos',

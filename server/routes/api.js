@@ -20,6 +20,7 @@ const resolveCoachOrFailMiddleware = require('../middleware/resolveCoachOrFail')
 const validateRole = require('../middleware/validateRole');
 const createAlimentosRouter = require('./alimentos');
 const createFoodCatalogRouter = require('./food-catalog');
+const createFoodCategoriesRouter = require('./food-categories');
 const createUploadsRouter = require('./uploads');
 const createEducationalContentsRouter = require('./educational-contents');
 const createRefeicoesRegistradasRouter = require('./refeicoes-registradas');
@@ -224,6 +225,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
   // ROTAS: ALIMENTOS (montadas antes de rotas paramétricas)
   router.use('/alimentos', createAlimentosRouter(pool, authenticate, domainSchemaGuard));
   router.use('/food-catalog', createFoodCatalogRouter(pool, authenticate, domainSchemaGuard));
+  router.use('/food-categories', createFoodCategoriesRouter(pool, authenticate, domainSchemaGuard));
 
   // ROTAS: UPLOADS — PostgreSQL + ficheiros em disco (sem Supabase Storage)
   router.use('/uploads', createUploadsRouter(pool, authenticate));
