@@ -72,20 +72,18 @@ export function useStudentPortalRealtime(options?: { onNavigate?: (tab: string) 
           videos: 'videos',
         };
         const tab = tabMap[link];
-        if (tab && (type === 'checkin_respondido' || type === 'dieta_atualizada')) {
+        if (tab && (type === 'checkin_respondido' || type === 'dieta_atualizada' || type === 'treino_atualizado')) {
           /* utilizador decide se navega — só refresh automático */
         }
       }
     };
 
+    // O servidor emite sempre `notification`; os eventos tipados (`checkin:respondido`,
+    // `dieta:atualizada`) repetem o mesmo payload e dariam toast/recarga em dobro.
     socket.on('notification', handlePayload);
-    socket.on('checkin:respondido', handlePayload);
-    socket.on('dieta:atualizada', handlePayload);
 
     return () => {
       socket.off('notification', handlePayload);
-      socket.off('checkin:respondido', handlePayload);
-      socket.off('dieta:atualizada', handlePayload);
       socket.disconnect();
       socketRef.current = null;
     };

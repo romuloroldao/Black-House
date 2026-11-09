@@ -24,6 +24,7 @@ import FeatureOnboardingPanel, {
   FeatureOnboardingHelpButton,
 } from "@/components/student/onboarding/FeatureOnboardingPanel";
 import { useFeatureOnboarding } from "@/hooks/useFeatureOnboarding";
+import { STUDENT_REALTIME_EVENT, type StudentRealtimeDetail } from "@/hooks/useStudentPortalRealtime";
 
 function isoDayToday(): DiaSemanaIso {
   const d = new Date().getDay();
@@ -118,6 +119,21 @@ const StudentWorkoutsView = () => {
       void loadWorkoutData();
     }
   }, [user]);
+
+  const reloadOnTreinoUpdateRef = useRef<() => void>(() => {});
+  reloadOnTreinoUpdateRef.current = () => {
+    // Não recarregar a meio de uma sessão: o aviso fica no sininho e a lista actualiza ao sair.
+    if (!sessionTreino) void loadWorkoutData();
+  };
+
+  useEffect(() => {
+    const onRealtime = (ev: Event) => {
+      const detail = (ev as CustomEvent<StudentRealtimeDetail>).detail;
+      if (detail?.type === "treino_atualizado") reloadOnTreinoUpdateRef.current();
+    };
+    window.addEventListener(STUDENT_REALTIME_EVENT, onRealtime);
+    return () => window.removeEventListener(STUDENT_REALTIME_EVENT, onRealtime);
+  }, []);
 
   const loadWorkoutData = async () => {
     setLoading(true);

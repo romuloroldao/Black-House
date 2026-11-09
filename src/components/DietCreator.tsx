@@ -445,7 +445,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
 
       toast({
         title: "Sucesso!",
-        description: editingDietaId ? "Dieta atualizada com sucesso" : "Dieta criada com sucesso"
+        description: `${editingDietaId ? "Dieta atualizada" : "Dieta criada"}. O aviso ao aluno é enviado em instantes — acompanhe o estado na ficha do aluno, aba Nutrição.`,
       });
 
       // Se estamos editando, voltar para a lista de dietas

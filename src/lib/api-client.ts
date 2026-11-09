@@ -42,6 +42,7 @@ export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/recurring-charges-config/',
     '/api/alunos-treinos',
     '/api/alunos-treinos/',
+    '/api/avisos-alteracoes/',
     '/api/alimentos',
     '/api/alimentos/nutrition-audit',
     '/api/food-catalog',
@@ -1331,6 +1332,16 @@ class ApiClient {
             return apiSuccess(null);
         }
         return this.safeRequest(API_CONTRACT.alunos.treinoAgendaMe());
+    }
+
+    async getAvisosAlteracoesSafe(
+        alunoId: string,
+    ): Promise<ApiResult<{ items: import('@/lib/plan-change-notices').PlanChangeNotice[] }>> {
+        return this.safeRequest(API_CONTRACT.alunos.avisosAlteracoes(alunoId));
+    }
+
+    async reprocessarAvisoAlteracaoSafe(avisoId: string): Promise<ApiResult<{ id: string; status: string }>> {
+        return this.safeRequest(API_CONTRACT.alunos.reprocessarAvisoAlteracao(avisoId), { method: 'POST' });
     }
 
     async putTreinoAgendaSafe(

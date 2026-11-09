@@ -26,6 +26,10 @@ export const API_CONTRACT = {
     treinoAgendaMe: () => `${API_BASE}/api/alunos/me/treino-agenda`,
     treinoAgenda: (alunoId: string) =>
       `${API_BASE}/api/alunos/${encodeURIComponent(alunoId)}/treino-agenda`,
+    avisosAlteracoes: (alunoId: string) =>
+      `${API_BASE}/api/alunos/${encodeURIComponent(alunoId)}/avisos-alteracoes`,
+    reprocessarAvisoAlteracao: (avisoId: string) =>
+      `${API_BASE}/api/avisos-alteracoes/${encodeURIComponent(avisoId)}/reprocessar`,
     notificationPreferences: () => `${API_BASE}/api/alunos/me/notification-preferences`,
     onboardingPreferences: () => `${API_BASE}/api/alunos/me/onboarding-preferences`,
     onboardingEvents: () => `${API_BASE}/api/alunos/me/onboarding-events`,
@@ -402,6 +406,8 @@ const CONTRACT_PATTERNS = [
   '/api/agent/approvals/:id/decide',
   '/api/agent/tools',
   '/api/alunos/:alunoId/treino-agenda',
+  '/api/alunos/:alunoId/avisos-alteracoes',
+  '/api/avisos-alteracoes/:id/reprocessar',
   '/api/alunos/:alunoId/body-metrics',
   '/api/alunos/me/notification-preferences',
   '/api/alunos/me/onboarding-preferences',
