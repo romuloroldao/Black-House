@@ -19,7 +19,16 @@ export function subscribeToUpdate(listener: () => void): () => void {
 /** Ativa a versão nova e recarrega só esta aba (as outras seguem com a versão antiga até recarregarem). */
 export function applyUpdate(): void {
   if (!wb) return;
-  wb.addEventListener("controlling", () => window.location.reload());
+  let reloaded = false;
+  const reloadOnce = () => {
+    if (reloaded) return;
+    reloaded = true;
+    window.location.reload();
+  };
+  wb.addEventListener("controlling", reloadOnce);
+  // Rede de segurança: se o Chromium ativar o worker sem o evento do Workbox (caso raro),
+  // ainda assim esta aba recarrega. As outras abas não escutam e não recarregam sozinhas.
+  navigator.serviceWorker.addEventListener("controllerchange", reloadOnce, { once: true });
   wb.messageSkipWaiting();
 }
 

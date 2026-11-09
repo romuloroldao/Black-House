@@ -26,6 +26,25 @@ self.addEventListener("message", (event) => {
 });
 
 /**
+ * Pedidos para outros domínios (a API, o socket.io) vão direto para a rede, sem acordar o service worker
+ * (Static Routing API; navegador sem suporte ignora). Sem isso, o polling das abas abertas religa o
+ * service worker antigo bem na hora em que o Chromium o desliga para ativar a versão nova, e o "Atualizar"
+ * fica parado até ele ficar 30 s sem receber nada.
+ */
+declare const URLPattern: new (init: { protocol?: string; hostname?: string; port?: string }) => object;
+type RouterRule = { condition: { urlPattern: object }; source: "fetch-event" | "network" };
+self.addEventListener("install", (event) => {
+  const routable = event as ExtendableEvent & { addRoutes?: (rules: RouterRule[]) => Promise<void> };
+  if (typeof routable.addRoutes !== "function" || typeof URLPattern !== "function") return;
+  const { protocol, hostname, port } = self.location;
+  const rules: RouterRule[] = [
+    { condition: { urlPattern: new URLPattern({ protocol: protocol.slice(0, -1), hostname, port }) }, source: "fetch-event" },
+    { condition: { urlPattern: new URLPattern({}) }, source: "network" },
+  ];
+  event.waitUntil(routable.addRoutes(rules).catch(() => undefined));
+});
+
+/**
  * Navegação: rede primeiro. Rede lenta (passou do teto) → app shell do precache, que não tem dado pessoal.
  * Sem rede nenhuma → /offline.html. O app shell não é servido quando a rede caiu de vez porque o
  * login do app descarta o token quando não consegue falar com a API, e isso deslogaria o usuário.
