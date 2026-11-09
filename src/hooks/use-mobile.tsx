@@ -1,17 +1,17 @@
 import * as React from "react"
+import { PHONE_LAYOUT_MEDIA_QUERY } from "@/lib/device"
 
-const MOBILE_BREAKPOINT = 768
-
+/** Layout compacto: janela abaixo de 768px ou celular (inclusive deitado). */
 export function useIsMobile() {
   const [isMobile, setIsMobile] = React.useState<boolean | undefined>(undefined)
 
   React.useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
+    const mql = window.matchMedia(PHONE_LAYOUT_MEDIA_QUERY)
     const onChange = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+      setIsMobile(mql.matches)
     }
     mql.addEventListener("change", onChange)
-    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+    setIsMobile(mql.matches)
     return () => mql.removeEventListener("change", onChange)
   }, [])
 

@@ -11,8 +11,10 @@ import App from './App.tsx'
 import './index.css'
 import { registerServiceWorker } from './pwa/sw-registration'
 import { initInstallPrompt } from './pwa/install-store'
+import { initExternalLinks } from './pwa/external-links'
 
 initInstallPrompt();
+initExternalLinks();
 
 // DESIGN-CHECKPOINT-FAILSAFE-CLIENT-DELIVERY-001: Montar React e sinalizar sucesso
 const rootElement = document.getElementById("root");

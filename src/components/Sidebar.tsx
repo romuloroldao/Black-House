@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +19,8 @@ import {
 import { BrandLogo } from "@/components/BrandLogo";
 import { ThemeToggleCompact } from "@/components/ui/mode-toggle";
 import { useInstallPrompt } from "@/pwa/useInstallPrompt";
+import { PHONE_LAYOUT_MEDIA_QUERY } from "@/lib/device";
+import { OPEN_COACH_MENU_EVENT } from "@/components/coach/CoachBottomNav";
 import {
   LayoutDashboard,
   Users,
@@ -52,11 +54,13 @@ import {
 interface SidebarProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
+  /** Celular com barra inferior: o menu abre pela barra, sem o botão flutuante. */
+  hideMobileTrigger?: boolean;
 }
 
 // DESIGN-CHECKPOINT-ROOT-RENDER-FAILURE-001: Sidebar deve renderizar mesmo com user null
 // REACT-RENDER-CRASH-FIX-002: useNavigate() só é usado em handlers, não influencia render
-const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
+const Sidebar = ({ activeTab, onTabChange, hideMobileTrigger = false }: SidebarProps) => {
   const { signOut, user } = useAuth();
   // REACT-RENDER-CRASH-FIX-002: useNavigate() pode existir, mas só é usado em handlers (não no render)
   const navigate = useNavigate();
@@ -102,10 +106,11 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
   };
 
   useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    const mql = window.matchMedia(PHONE_LAYOUT_MEDIA_QUERY);
+    const checkMobile = () => setIsMobile(mql.matches);
     checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
+    mql.addEventListener('change', checkMobile);
+    return () => mql.removeEventListener('change', checkMobile);
   }, []);
 
   useEffect(() => {
@@ -213,6 +218,17 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
   };
 
   const installPrompt = useInstallPrompt();
+
+  const menuOpenerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const open = () => {
+      menuOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setMobileMenuOpen(true);
+    };
+    window.addEventListener(OPEN_COACH_MENU_EVENT, open);
+    return () => window.removeEventListener(OPEN_COACH_MENU_EVENT, open);
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -572,16 +588,30 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       {isMobile ? (
         <>
           <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-            <SheetTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="fixed top-4 left-4 z-50 md:hidden transition-transform duration-200 motion-safe:hover:scale-110 motion-reduce:transition-none"
-              >
-                <Menu className="w-6 h-6" />
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="p-0 w-64 transition-all duration-300 ease-in-out motion-reduce:transition-none">
+            {!hideMobileTrigger && (
+              <SheetTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Abrir menu"
+                  className="coach-menu-fab fixed top-4 left-4 z-50 md:hidden transition-transform duration-200 motion-safe:hover:scale-110 motion-reduce:transition-none"
+                >
+                  <Menu className="w-6 h-6" />
+                </Button>
+              </SheetTrigger>
+            )}
+            <SheetContent
+              side="left"
+              className="p-0 w-64 transition-all duration-300 ease-in-out motion-reduce:transition-none"
+              onCloseAutoFocus={(event) => {
+                const opener = menuOpenerRef.current;
+                menuOpenerRef.current = null;
+                if (opener?.isConnected) {
+                  event.preventDefault();
+                  opener.focus();
+                }
+              }}
+            >
               <SidebarContent />
             </SheetContent>
           </Sheet>
