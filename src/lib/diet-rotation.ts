@@ -1,4 +1,11 @@
 import { normalizePlanoLetter, sortPlanos, type DietPlano } from "@/lib/diet-plano";
+import {
+  APP_TIME_ZONE,
+  civilDateKey,
+  civilDateKeyFromValue,
+  diffDateKeys,
+  isDateKey,
+} from "@/lib/calendar-date";
 
 export type { DietPlano };
 
@@ -27,26 +34,9 @@ export type DietRotationDayInfo = {
   dayIndexInCycle: number;
   /** Blocos do ciclo (para UI). */
   blocks: RotationBlock[];
+  /** True quando a data ainda é anterior a rotacao_data_inicio. */
+  beforeStart?: boolean;
 };
-
-function parseDateOnly(value: string | null | undefined): Date | null {
-  if (!value) return null;
-  const iso = String(value).slice(0, 10);
-  const d = new Date(`${iso}T12:00:00`);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function startOfCalendarDay(date: Date): Date {
-  const d = new Date(date);
-  d.setHours(12, 0, 0, 0);
-  return d;
-}
-
-function diffCalendarDays(from: Date, to: Date): number {
-  const a = startOfCalendarDay(from).getTime();
-  const b = startOfCalendarDay(to).getTime();
-  return Math.round((b - a) / 86400000);
-}
 
 function parseJsonBlocks(raw: unknown): RotationBlock[] | null {
   if (!raw) return null;
@@ -140,35 +130,60 @@ function blockAtIndex(sequence: DietPlano[], index: number) {
   };
 }
 
-export function getRotationForDate(
+/**
+ * Âncora do ciclo (YYYY-MM-DD, dia civil America/Sao_Paulo) — mesmo critério de
+ * server/utils/diet-rotation.js: rotacao_data_inicio; senão o dia BRT de created_at.
+ */
+export function resolveRotationAnchorKey(
   config: DietRotationConfig,
-  date: Date = new Date(),
+  timeZone: string = APP_TIME_ZONE,
+): string | null {
+  return (
+    civilDateKeyFromValue(config.rotacao_data_inicio, timeZone) ||
+    civilDateKeyFromValue(config.created_at, timeZone)
+  );
+}
+
+/** Plano do ciclo num dia civil (YYYY-MM-DD). */
+export function getRotationForDateKey(
+  config: DietRotationConfig,
+  dateKey: string,
+  timeZone: string = APP_TIME_ZONE,
 ): DietRotationDayInfo | null {
-  if (!isRotationEnabled(config)) return null;
+  if (!isRotationEnabled(config) || !isDateKey(dateKey)) return null;
 
   const blocks = normalizeRotationBlocks(config);
   const sequence = buildRotationSequence(config);
   if (sequence.length === 0) return null;
 
-  const anchor =
-    parseDateOnly(config.rotacao_data_inicio) ||
-    parseDateOnly(config.created_at) ||
-    startOfCalendarDay(date);
-
-  const days = diffCalendarDays(anchor, date);
-  const idx = ((days % sequence.length) + sequence.length) % sequence.length;
+  const anchorKey = resolveRotationAnchorKey(config, timeZone) || dateKey;
+  const daysRaw = diffDateKeys(anchorKey, dateKey);
+  // Antes da data de início: permanece no 1º dia do ciclo (não envelopa).
+  const beforeStart = daysRaw < 0;
+  const idx = (beforeStart ? 0 : daysRaw) % sequence.length;
   const block = blockAtIndex(sequence, idx);
 
   return {
     plano: block.plano,
     cycleSummary: formatRotationBlocksSummary(blocks),
-    todayLabel: `Hoje: Plano ${block.plano} (dia ${block.dayInBlock} de ${block.blockLength})`,
+    todayLabel: beforeStart
+      ? `Ciclo inicia em breve · Plano ${block.plano} (pré-início)`
+      : `Hoje: Plano ${block.plano} (dia ${block.dayInBlock} de ${block.blockLength})`,
     dayInBlock: block.dayInBlock,
     blockLength: block.blockLength,
     cycleLength: sequence.length,
     dayIndexInCycle: idx + 1,
     blocks,
+    beforeStart,
   };
+}
+
+export function getRotationForDate(
+  config: DietRotationConfig,
+  date: Date = new Date(),
+  timeZone: string = APP_TIME_ZONE,
+): DietRotationDayInfo | null {
+  return getRotationForDateKey(config, civilDateKey(date, timeZone), timeZone);
 }
 
 export function getPlanoForToday(config: DietRotationConfig): DietPlano | null {

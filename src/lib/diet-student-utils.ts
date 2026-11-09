@@ -1,5 +1,6 @@
 import { macroScaleFactor } from "@/lib/foodService";
 import { normalizePlanoLetter, sortPlanos, type DietPlano } from "@/lib/diet-plano";
+import { civilDateKey } from "@/lib/calendar-date";
 
 export type { DietPlano };
 
@@ -285,7 +286,10 @@ export function calcularMacros(itens: DietItemWithFood[]): DietMacros {
   );
 }
 
+/** Dia do checklist/substituições: dia civil de Brasília, como no servidor. */
 export function mealCheckDateKey(date: Date = new Date()): string {
+  const key = civilDateKey(date);
+  if (key) return key;
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");

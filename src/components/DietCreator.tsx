@@ -120,6 +120,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
   const [refeicaoLivreObservacao, setRefeicaoLivreObservacao] = useState('');
   const [refeicaoLivreContentId, setRefeicaoLivreContentId] = useState<string | null>(null);
   const [editingDietaId, setEditingDietaId] = useState<string | null>(null);
+  const [editingDietaCreatedAt, setEditingDietaCreatedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
@@ -230,6 +231,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
       );
       setDiasValidade('');
       setRotacao(dietRotationFromRow(dieta));
+      setEditingDietaCreatedAt(dieta.created_at || null);
       setRefeicaoLivreAtiva(Boolean(dieta.refeicao_livre_ativa));
       setRefeicaoLivreObservacao(dieta.refeicao_livre_observacao || '');
       setRefeicaoLivreContentId(dieta.refeicao_livre_content_id || null);
@@ -651,6 +653,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
         refeicaoLabel={refeicaoLabel}
         syncItensRefeicao={syncItensRefeicao}
         emptyRefeicao={emptyRefeicao}
+        rotationAnchorFallback={editingDietaCreatedAt}
       />
 
       <div className="flex justify-end">
