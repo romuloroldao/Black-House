@@ -971,25 +971,6 @@ class NotificationService {
         );
     }
 
-    /** Aluno: coach actualizou a dieta */
-    async notifyDietaAtualizada({ alunoId, dietaId, dietaNome }) {
-        const studentUserId = await getAuthUserIdForAluno(this.pool, alunoId);
-        if (!studentUserId) return;
-
-        const nome = dietaNome ? `"${String(dietaNome).trim()}"` : 'sua dieta';
-        await this.notifyUser(
-            studentUserId,
-            'dieta_atualizada',
-            'Dieta atualizada',
-            `Seu coach actualizou ${nome}. Confira em Minha dieta.`,
-            {
-                dietaId,
-                alunoId,
-                link: 'diet',
-            },
-        );
-    }
-
     /**
      * Salva notificação no banco de dados
      */
