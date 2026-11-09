@@ -2,7 +2,14 @@
  * Limpeza no logout (LGPD): caches de runtime, IndexedDB e todo dado do usuário em localStorage/sessionStorage.
  * Ficam só preferências do aparelho, sem dado pessoal, e o precache dos arquivos do build.
  */
-const KEEP_LOCAL_KEYS = new Set(["bh-theme", "bh-student-nav-mode", "bh-compare-slider-hint-dismissed"]);
+const KEEP_LOCAL_KEYS = new Set([
+  "bh-theme",
+  "bh-student-nav-mode",
+  "bh-compare-slider-hint-dismissed",
+  "bh-student-onboarding-v2",
+  "bh-coleman-met",
+  "bh-student-mais-do-dia-open",
+]);
 const KEEP_PREFIX = "bh-pwa-";
 const PRECACHE_PREFIX = "workbox-precache";
 const MAX_WAIT_MS = 1500;
