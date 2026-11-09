@@ -12,21 +12,27 @@ const {
     sameEquivalenceGroup,
 } = require('../utils/food-equivalence');
 
-const FOOD_SELECT_BASE = `SELECT
+const FOOD_COLUMNS = `
   a.id, a.nome, a.origem_ptn, a.tipo_id,
   t.nome_tipo AS tipo_nome, t.macro_predominante, t.equiv_livre,
   a.quantidade_referencia_g, a.kcal_por_referencia,
   a.ptn_por_referencia, a.cho_por_referencia, a.lip_por_referencia,
   COALESCE(a.alcool_por_referencia, 0)::numeric AS alcool_por_referencia,
-  a.nome_normalizado
+  a.nome_normalizado`;
+
+const FOOD_FROM = `
 FROM public.alimentos a
 LEFT JOIN public.tipos_alimentos t ON t.id = a.tipo_id`;
 
-const FOOD_SELECT_REF = `${FOOD_SELECT_BASE},
-  a.info_adicional, a.autor, a.created_at`;
+const FOOD_SELECT_BASE = `SELECT${FOOD_COLUMNS}${FOOD_FROM}`;
+
+const FOOD_SELECT_REF = `SELECT${FOOD_COLUMNS},
+  a.info_adicional, a.autor, a.created_at${FOOD_FROM}`;
 
 const MIN_SEARCH_CHARS = 2;
 const DEFAULT_LIMIT = 20;
+/** "Ver lista completa": todo o grupo de uma vez (os grupos têm dezenas de itens, não milhares). */
+const FULL_LIST_LIMIT = 500;
 
 function notFoundError(message) {
     const err = new Error(message);
@@ -48,8 +54,11 @@ async function listSubstituicoes(pool, opts) {
     const alimentoId = opts.alimentoId;
     const quantidade = Number(opts.quantidade) || 100;
     const unidade = String(opts.unidade || 'g').toLowerCase();
-    const limit = Math.min(50, Math.max(1, Number(opts.limit) || DEFAULT_LIMIT));
-    const searchTerm = String(opts.q || '').trim();
+    const all = opts.all === true;
+    const limit = all
+        ? FULL_LIST_LIMIT
+        : Math.min(50, Math.max(1, Number(opts.limit) || DEFAULT_LIMIT));
+    const searchTerm = all ? '' : String(opts.q || '').trim();
     const log = opts.log || (() => {});
 
     const foodRef = await getAlimentoRef(pool, alimentoId);
