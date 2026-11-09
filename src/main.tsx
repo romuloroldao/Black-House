@@ -10,6 +10,9 @@ import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 import './index.css'
 import { registerServiceWorker } from './pwa/sw-registration'
+import { initInstallPrompt } from './pwa/install-store'
+
+initInstallPrompt();
 
 // DESIGN-CHECKPOINT-FAILSAFE-CLIENT-DELIVERY-001: Montar React e sinalizar sucesso
 const rootElement = document.getElementById("root");

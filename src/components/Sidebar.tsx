@@ -18,6 +18,7 @@ import {
 } from "@/lib/financial-routes";
 import { BrandLogo } from "@/components/BrandLogo";
 import { ThemeToggleCompact } from "@/components/ui/mode-toggle";
+import { useInstallPrompt } from "@/pwa/useInstallPrompt";
 import {
   LayoutDashboard,
   Users,
@@ -45,6 +46,7 @@ import {
   LineChart,
   Plug,
   SlidersHorizontal,
+  Download,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -210,6 +212,8 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
     }));
   };
 
+  const installPrompt = useInstallPrompt();
+
   const handleLogout = async () => {
     try {
       await signOut();
@@ -339,6 +343,9 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
       label: "Configurações",
       icon: Settings,
     },
+    ...(installPrompt.canShowMenuItem
+      ? [{ id: "install-app", label: "Instalar app", icon: Download }]
+      : []),
     {
       id: "logout",
       label: "Sair",
@@ -505,6 +512,22 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
             // DESIGN-ROOT-RENDER-UNBLOCK-001: Validar item antes de renderizar
             if (!item || !item.id) {
               return null;
+            }
+            if (item.id === 'install-app') {
+              return (
+                <Button
+                  key={item.id}
+                  variant="ghost"
+                  className="w-full justify-start text-left"
+                  onClick={() => {
+                    if (isMobile) setMobileMenuOpen(false);
+                    void installPrompt.install();
+                  }}
+                >
+                  <item.icon className="w-5 h-5" />
+                  {item.label}
+                </Button>
+              );
             }
             if (item.id === 'logout') {
               return (
