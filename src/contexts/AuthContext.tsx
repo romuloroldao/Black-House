@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
+import { clearUserDataOnLogout } from '@/pwa/clear-user-data';
 
 // RBAC-01: Interface de usuário com role e payment_status
 export interface User {
@@ -242,6 +243,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const signOut = async () => {
     await apiClient.signOut();
+    await clearUserDataOnLogout();
     setUser(null);
     setSession(null);
     setRole(undefined);

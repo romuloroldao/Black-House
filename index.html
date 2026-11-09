@@ -224,13 +224,22 @@
     <div id="root"></div>
     
     <!-- REACT-PWA-SOFT-LOCK-FIX-004: Desregistrar Service Workers antigos que podem bloquear novos deploys -->
+    <!-- O service worker atual do app (/sw.js) e os caches dele (workbox-precache*, bh-static-*) são preservados. -->
     <script>
       // REACT-PWA-SOFT-LOCK-FIX-004: Executar ANTES de qualquer outro script
       // Service Workers antigos podem interceptar requests e servir assets inválidos
       (function() {
-        // REACT-PWA-SOFT-LOCK-FIX-004: Desregistrar TODOS os Service Workers antigos
+        function isCurrentAppWorker(registration) {
+          var sw = registration.active || registration.waiting || registration.installing;
+          return !!sw && new URL(sw.scriptURL).pathname === '/sw.js';
+        }
+        function isCurrentAppCache(name) {
+          return name.indexOf('workbox-precache') === 0 || name.indexOf('bh-static-') === 0;
+        }
+        // REACT-PWA-SOFT-LOCK-FIX-004: Desregistrar Service Workers antigos (qualquer um que não seja /sw.js)
         if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.getRegistrations().then(function(registrations) {
+          navigator.serviceWorker.getRegistrations().then(function(all) {
+            var registrations = all.filter(function(r) { return !isCurrentAppWorker(r); });
             if (registrations.length > 0) {
               console.warn('[REACT-PWA-SOFT-LOCK-FIX-004] Encontrados', registrations.length, 'Service Worker(s) antigo(s). Desregistrando...');
               for (let registration of registrations) {
@@ -255,7 +264,8 @@
         
         // REACT-PWA-SOFT-LOCK-FIX-004: Limpar TODOS os caches antigos que podem conter assets inválidos
         if ('caches' in window) {
-          caches.keys().then(function(cacheNames) {
+          caches.keys().then(function(allNames) {
+            var cacheNames = allNames.filter(function(n) { return !isCurrentAppCache(n); });
             if (cacheNames.length > 0) {
               console.warn('[REACT-PWA-SOFT-LOCK-FIX-004] Encontrados', cacheNames.length, 'cache(s) antigo(s). Limpando...');
               return Promise.all(

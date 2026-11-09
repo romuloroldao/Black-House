@@ -9,6 +9,7 @@ initializeRuntimeShield();
 import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 import './index.css'
+import { registerServiceWorker } from './pwa/sw-registration'
 
 // DESIGN-CHECKPOINT-FAILSAFE-CLIENT-DELIVERY-001: Montar React e sinalizar sucesso
 const rootElement = document.getElementById("root");
@@ -36,4 +37,10 @@ if (rootElement) {
   }
 } else {
   console.error('[DESIGN-CHECKPOINT-FAILSAFE-CLIENT-DELIVERY-001] Elemento root não encontrado. Fail-Safe UI permanecerá visível.');
+}
+
+if (document.readyState === 'complete') {
+  void registerServiceWorker();
+} else {
+  window.addEventListener('load', () => void registerServiceWorker(), { once: true });
 }
