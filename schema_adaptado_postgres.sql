@@ -1993,3 +1993,79 @@ CREATE INDEX IF NOT EXISTS idx_ai_usage_events_created
 
 CREATE INDEX IF NOT EXISTS idx_ai_usage_events_feature_created
   ON public.ai_usage_events (feature, created_at DESC);
+
+-- ============================================================================
+-- Plan change notifications — avisos ao aluno de dieta/treino actualizados
+-- (ver server/migrations/20261109_plan_change_notifications.sql)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.plan_change_notifications (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  aluno_id uuid NOT NULL REFERENCES public.alunos(id) ON DELETE CASCADE,
+  coach_id uuid,
+  dominio text NOT NULL CHECK (dominio IN ('dieta', 'treino')),
+  entity_ids uuid[] NOT NULL DEFAULT '{}',
+  change_count integer NOT NULL DEFAULT 1 CHECK (change_count >= 1),
+  status text NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'processing', 'sent', 'failed', 'cancelled')),
+  first_change_at timestamptz NOT NULL DEFAULT now(),
+  last_change_at timestamptz NOT NULL DEFAULT now(),
+  due_at timestamptz NOT NULL DEFAULT now(),
+  attempts integer NOT NULL DEFAULT 0,
+  last_error text,
+  recipient_user_id uuid,
+  notificacao_id uuid,
+  in_app_status text NOT NULL DEFAULT 'pending'
+    CHECK (in_app_status IN ('pending', 'created', 'failed', 'skipped')),
+  email_status text NOT NULL DEFAULT 'pending'
+    CHECK (email_status IN ('pending', 'queued', 'skipped_preference', 'skipped_no_email', 'failed')),
+  email_queue_id uuid,
+  socket_emitted boolean NOT NULL DEFAULT false,
+  dispatched_at timestamptz,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_change_notifications_pending
+  ON public.plan_change_notifications (aluno_id, dominio)
+  WHERE status = 'pending';
+
+CREATE INDEX IF NOT EXISTS idx_plan_change_notifications_due
+  ON public.plan_change_notifications (status, due_at)
+  WHERE status IN ('pending', 'processing');
+
+CREATE INDEX IF NOT EXISTS idx_plan_change_notifications_aluno_created
+  ON public.plan_change_notifications (aluno_id, created_at DESC);
+
+-- Categorias de alimentos por profissional (server/migrations/20261109_coach_food_categories.sql)
+CREATE TABLE IF NOT EXISTS public.coach_food_categories (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  coach_id uuid NOT NULL REFERENCES app_auth.users(id) ON DELETE CASCADE,
+  nome text NOT NULL CHECK (char_length(btrim(nome)) BETWEEN 1 AND 60),
+  ordem integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_coach_food_categories_nome
+  ON public.coach_food_categories (coach_id, lower(btrim(nome)));
+
+-- Alvo da FK composta: a ligação só aceita categoria do mesmo profissional.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_coach_food_categories_id_coach
+  ON public.coach_food_categories (id, coach_id);
+
+CREATE TABLE IF NOT EXISTS public.coach_food_category_items (
+  coach_id uuid NOT NULL REFERENCES app_auth.users(id) ON DELETE CASCADE,
+  alimento_id uuid NOT NULL REFERENCES public.alimentos(id) ON DELETE CASCADE,
+  category_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (coach_id, alimento_id),
+  CONSTRAINT coach_food_category_items_category_fk
+    FOREIGN KEY (category_id, coach_id)
+    REFERENCES public.coach_food_categories (id, coach_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_coach_food_category_items_category
+  ON public.coach_food_category_items (category_id);

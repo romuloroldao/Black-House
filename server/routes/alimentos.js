@@ -137,7 +137,7 @@ module.exports = function createAlimentosRouter(pool, authenticate, domainSchema
         }
     );
 
-    // GET /api/alimentos/:id/substituicoes?quantidade=100&unidade=g&limit=20&q=pao
+    // GET /api/alimentos/:id/substituicoes?quantidade=100&unidade=g&limit=20&q=pao  (all=1 → grupo inteiro)
     router.get(
         '/:id/substituicoes',
         authenticate,
@@ -152,6 +152,7 @@ module.exports = function createAlimentosRouter(pool, authenticate, domainSchema
                     unidade: req.query.unidade,
                     limit: req.query.limit,
                     q: req.query.q,
+                    all: req.query.all === '1' || req.query.all === 'true',
                     log: (msg, meta) => {
                         if (process.env.NODE_ENV !== 'production') {
                             console.info(`[substituicoes] ${msg}`, meta || '');

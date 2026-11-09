@@ -204,6 +204,43 @@ function buildStudentNotificationEmail(type, ctx = {}) {
       };
     }
 
+    case 'dieta_atualizada': {
+      const intro =
+        'Seu profissional realizou uma atualização no seu plano alimentar. Acesse sua dieta para conferir as alterações.';
+      return {
+        subject: `${appName} — Seu plano alimentar foi atualizado`,
+        text: `${appName}\n\n${greeting}\n\n${intro}\n\n${studentPortalUrl('diet')}\n\n${baseFoot}`,
+        htmlPayload: {
+          preheader: 'Seu plano alimentar foi atualizado.',
+          appName,
+          headline: 'Plano alimentar atualizado',
+          intro,
+          ctaUrl: studentPortalUrl('diet'),
+          ctaLabel: 'Ver minha dieta',
+          expiryLine: 'Você também recebe este aviso no sininho do portal.',
+          footnote: baseFoot,
+        },
+      };
+    }
+
+    case 'treino_atualizado': {
+      const intro = 'Seu treino foi atualizado. Confira as novas orientações na plataforma.';
+      return {
+        subject: `${appName} — Seu treino foi atualizado`,
+        text: `${appName}\n\n${greeting}\n\n${intro}\n\n${studentPortalUrl('workouts')}\n\n${baseFoot}`,
+        htmlPayload: {
+          preheader: 'Seu treino foi atualizado.',
+          appName,
+          headline: 'Treino atualizado',
+          intro,
+          ctaUrl: studentPortalUrl('workouts'),
+          ctaLabel: 'Ver meu treino',
+          expiryLine: 'Você também recebe este aviso no sininho do portal.',
+          footnote: baseFoot,
+        },
+      };
+    }
+
     case 'workout_return_d_minus_2':
     case 'workout_return_d_minus_1':
     case 'workout_return_d_day': {

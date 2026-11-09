@@ -13,12 +13,14 @@ const ProfileCompletenessRemindersJob = require('./profile-completeness-reminder
 const SmartRemindersJob = require('./smart-reminders.job');
 const DailyAdherenceJob = require('./daily-adherence.job');
 const EmailQueueJob = require('./email-queue.job');
+const PlanChangeNotificationsJob = require('./plan-change-notifications.job');
 
 class JobsRunner {
-    constructor(pool, notificationService, financialSync = null) {
+    constructor(pool, notificationService, financialSync = null, planChangeNotifier = null) {
         this.pool = pool;
         this.notificationService = notificationService;
         this.financialSync = financialSync;
+        this.planChangeNotifier = planChangeNotifier;
         this.jobs = [];
     }
 
@@ -85,6 +87,12 @@ class JobsRunner {
         const emailQueue = new EmailQueueJob(this.pool);
         emailQueue.start();
         this.jobs.push(emailQueue);
+
+        if (this.planChangeNotifier) {
+            const planChange = new PlanChangeNotificationsJob(this.planChangeNotifier);
+            planChange.start();
+            this.jobs.push(planChange);
+        }
 
         const photoPoseNormalization = new (require('./photo-pose-normalization.job'))(this.pool);
         photoPoseNormalization.start();

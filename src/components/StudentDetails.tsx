@@ -43,6 +43,7 @@ import {
 import { confirmDelete, useConfirm } from "@/contexts/ConfirmContext";
 import EvolutionTimelineExperience from "@/components/student/progress/evolution/EvolutionTimelineExperience";
 import LoadProgressionSection from "@/components/coach/LoadProgressionSection";
+import PlanChangeNoticeStatus from "@/components/coach/PlanChangeNoticeStatus";
 import type { EvolutionPhoto } from "@/lib/evolution-timeline";
 
 interface Student {
@@ -105,6 +106,7 @@ export default function StudentDetails() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [planNoticeRefresh, setPlanNoticeRefresh] = useState(0);
   const [student, setStudent] = useState<Student | null>(null);
   const [feedback, setFeedback] = useState("");
   const [feedbackId, setFeedbackId] = useState<string | null>(null);
@@ -352,9 +354,10 @@ export default function StudentDetails() {
 
       toast({
         title: "Sucesso!",
-        description: "Treino atribuído — pode personalizar no perfil do aluno.",
+        description: "Treino atribuído. O aviso ao aluno será enviado em instantes.",
       });
 
+      setPlanNoticeRefresh((n) => n + 1);
       setIsAtribuirTreinoOpen(false);
       setTreinoSelecionado("");
       setDiasValidade("45");
@@ -807,8 +810,13 @@ export default function StudentDetails() {
         <TabsContent value="training" className="space-y-6 mt-6">
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Treinos Ativos</CardTitle>
+              <div className="flex items-center justify-between gap-2">
+                <div className="space-y-1">
+                  <CardTitle>Treinos Ativos</CardTitle>
+                  {id ? (
+                    <PlanChangeNoticeStatus alunoId={id} dominio="treino" refreshKey={planNoticeRefresh} />
+                  ) : null}
+                </div>
               <Dialog open={isAtribuirTreinoOpen} onOpenChange={setIsAtribuirTreinoOpen}>
                 <DialogTrigger asChild>
                   <Button variant="outline" size="sm">
@@ -1077,8 +1085,11 @@ export default function StudentDetails() {
         <TabsContent value="nutrition" className="space-y-6 mt-6">
         {/* Dieta Atual */}
         <Card>
-          <CardHeader>
+          <CardHeader className="space-y-1">
             <CardTitle>Dieta Atual</CardTitle>
+            {id ? (
+              <PlanChangeNoticeStatus alunoId={id} dominio="dieta" refreshKey={planNoticeRefresh} />
+            ) : null}
           </CardHeader>
           <CardContent>
             {dieta ? (

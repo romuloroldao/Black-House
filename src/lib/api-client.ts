@@ -42,6 +42,7 @@ export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/recurring-charges-config/',
     '/api/alunos-treinos',
     '/api/alunos-treinos/',
+    '/api/avisos-alteracoes/',
     '/api/alimentos',
     '/api/alimentos/nutrition-audit',
     '/api/food-catalog',
@@ -50,6 +51,7 @@ export const ALLOWED_ENDPOINTS = new Set<string>([
     '/api/food-catalog/tipos',
     '/api/food-catalog/check-duplicate',
     '/api/food-catalog/duplicates',
+    '/api/food-categories',
     '/api/dietas',
     '/api/dietas/',
     '/api/feedbacks-alunos',
@@ -1331,6 +1333,58 @@ class ApiClient {
             return apiSuccess(null);
         }
         return this.safeRequest(API_CONTRACT.alunos.treinoAgendaMe());
+    }
+
+    async getAvisosAlteracoesSafe(
+        alunoId: string,
+    ): Promise<ApiResult<{ items: import('@/lib/plan-change-notices').PlanChangeNotice[] }>> {
+        return this.safeRequest(API_CONTRACT.alunos.avisosAlteracoes(alunoId));
+    }
+
+    async reprocessarAvisoAlteracaoSafe(avisoId: string): Promise<ApiResult<{ id: string; status: string }>> {
+        return this.safeRequest(API_CONTRACT.alunos.reprocessarAvisoAlteracao(avisoId), { method: 'POST' });
+    }
+
+    async getFoodCategoriesSafe(): Promise<ApiResult<import('@/lib/food-categories').FoodCategoriesResponse>> {
+        return this.safeRequest(API_CONTRACT.foodCategories.list());
+    }
+
+    async createFoodCategorySafe(nome: string): Promise<ApiResult<import('@/lib/food-categories').FoodCategory>> {
+        return this.safeRequest(API_CONTRACT.foodCategories.list(), {
+            method: 'POST',
+            body: JSON.stringify({ nome }),
+        });
+    }
+
+    async updateFoodCategorySafe(
+        id: string,
+        patch: { nome?: string; ordem?: number },
+    ): Promise<ApiResult<import('@/lib/food-categories').FoodCategory>> {
+        return this.safeRequest(API_CONTRACT.foodCategories.byId(id), {
+            method: 'PATCH',
+            body: JSON.stringify(patch),
+        });
+    }
+
+    async deleteFoodCategorySafe(id: string): Promise<ApiResult<{ id: string; alimentos_liberados: number }>> {
+        return this.safeRequest(API_CONTRACT.foodCategories.byId(id), { method: 'DELETE' });
+    }
+
+    async assignFoodsToCategorySafe(
+        categoryId: string,
+        alimentoIds: string[],
+    ): Promise<ApiResult<{ category_id: string; alimento_ids: string[] }>> {
+        return this.safeRequest(API_CONTRACT.foodCategories.items(categoryId), {
+            method: 'PUT',
+            body: JSON.stringify({ alimento_ids: alimentoIds }),
+        });
+    }
+
+    async unassignFoodsFromCategoriesSafe(alimentoIds: string[]): Promise<ApiResult<{ alimento_ids: string[] }>> {
+        return this.safeRequest(API_CONTRACT.foodCategories.unassign(), {
+            method: 'DELETE',
+            body: JSON.stringify({ alimento_ids: alimentoIds }),
+        });
     }
 
     async putTreinoAgendaSafe(
