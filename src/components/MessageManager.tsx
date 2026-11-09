@@ -295,7 +295,7 @@ const MessageManager = () => {
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100dvh-200px)] max-h-[calc(100dvh-200px)]">
+    <div className="messages-layout grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100dvh-200px)] max-h-[calc(100dvh-200px)]">
       {/* Lista de Conversas */}
       <Card className="lg:col-span-1">
         <CardHeader>

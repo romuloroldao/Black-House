@@ -2,6 +2,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import Sidebar from "@/components/Sidebar";
 import DietCreator from "@/components/DietCreator";
 import { useState } from "react";
+import { StandaloneBackButton } from "@/components/StandaloneBackButton";
 
 export default function DietaPage() {
   const { id } = useParams<{ id: string }>();
@@ -54,6 +55,7 @@ export default function DietaPage() {
       <main className="flex-1 overflow-auto">
         <DietCreator dietaId={id} />
       </main>
+      <StandaloneBackButton fallback="/?tab=nutrition" />
     </div>
   );
 }

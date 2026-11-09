@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
+import { clearUserDataOnLogout } from '@/pwa/clear-user-data';
+import { signalAppReady } from '@/pwa/splash';
 
 // RBAC-01: Interface de usuário com role e payment_status
 export interface User {
@@ -37,6 +39,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [authInitialized, setAuthInitialized] = useState(false); // REACT-AUTH-BOOTSTRAP-DEADLOCK-FIX-009
   const [role, setRole] = useState<'coach' | 'aluno' | 'admin' | undefined>(undefined);
   const [payment_status, setPaymentStatus] = useState<'CURRENT' | 'OVERDUE' | 'PENDING_AFTER_DUE_DATE' | undefined>(undefined);
+
+  useEffect(() => {
+    if (authInitialized) signalAppReady();
+  }, [authInitialized]);
 
   useEffect(() => {
     // REACT-AUTH-BOOTSTRAP-DEADLOCK-FIX-009: Bootstrap explícito de autenticação
@@ -242,6 +248,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const signOut = async () => {
     await apiClient.signOut();
+    await clearUserDataOnLogout();
     setUser(null);
     setSession(null);
     setRole(undefined);
