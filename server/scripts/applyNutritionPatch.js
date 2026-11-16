@@ -38,6 +38,7 @@ const PATCH_FILES = [
     '20261009_foto_pose_reclassify.sql',
     '20261022_student_feature_onboarding.sql',
     '20261022_student_onboarding_events.sql',
+    '20261116_turma_dia_e_checkin_retorno.sql',
 ];
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations');

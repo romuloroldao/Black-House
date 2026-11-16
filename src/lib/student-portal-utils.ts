@@ -16,7 +16,7 @@ export type ReturnCountdownInfo = {
   date: string;
   days: number;
   label: string;
-  source: "dieta" | "treino";
+  source: "dieta" | "treino" | "checkin";
   planName?: string | null;
   overdue: boolean;
 };
@@ -62,7 +62,7 @@ export function pickReturnCountdown(
   const candidates: Array<{
     date: Date;
     iso: string;
-    source: "dieta" | "treino";
+    source: "dieta" | "treino" | "checkin";
     planName?: string | null;
   }> = [];
 

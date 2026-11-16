@@ -5026,8 +5026,19 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           });
         }
 
-        const { resposta } = req.body || {};
+        const { resposta, data_retorno: dataRetornoRaw } = req.body || {};
         const respostaTrimmed = resposta != null ? String(resposta).trim() : '';
+        let dataRetorno = null;
+        if (dataRetornoRaw != null && String(dataRetornoRaw).trim() !== '') {
+          const iso = String(dataRetornoRaw).trim().slice(0, 10);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+            return res.status(400).json({
+              error: 'data_retorno deve ser uma data AAAA-MM-DD',
+              error_code: 'INVALID_DATA_RETORNO',
+            });
+          }
+          dataRetorno = iso;
+        }
         if (!respostaTrimmed) {
           return res.status(400).json({
             error: 'resposta é obrigatória',
@@ -5064,15 +5075,35 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           }
         }
 
+        const hasReturnCol = dbCols.has('data_retorno');
         const upd = await pool.query(
-          `UPDATE public.weekly_checkins
-           SET coach_resposta = $1,
-               coach_respondido_em = COALESCE(coach_respondido_em, now()),
-               coach_respondido_por = COALESCE(coach_respondido_por, $2)
-           WHERE id = $3
-           RETURNING *`,
-          [respostaTrimmed, req.user.id, id],
+          hasReturnCol
+            ? `UPDATE public.weekly_checkins
+               SET coach_resposta = $1,
+                   coach_respondido_em = COALESCE(coach_respondido_em, now()),
+                   coach_respondido_por = COALESCE(coach_respondido_por, $2),
+                   data_retorno = COALESCE($4::date, data_retorno)
+               WHERE id = $3
+               RETURNING *`
+            : `UPDATE public.weekly_checkins
+               SET coach_resposta = $1,
+                   coach_respondido_em = COALESCE(coach_respondido_em, now()),
+                   coach_respondido_por = COALESCE(coach_respondido_por, $2)
+               WHERE id = $3
+               RETURNING *`,
+          hasReturnCol
+            ? [respostaTrimmed, req.user.id, id, dataRetorno]
+            : [respostaTrimmed, req.user.id, id],
         );
+
+        if (hasReturnCol && dataRetorno) {
+          try {
+            const { applyCheckinReturnDate } = require('../services/return-reminder.service');
+            await applyCheckinReturnDate(pool, existing.rows[0].aluno_id, dataRetorno);
+          } catch (syncErr) {
+            console.warn('[checkin] return date sync failed:', syncErr?.message || syncErr);
+          }
+        }
 
         const checkinRow = upd.rows[0];
         const alunoId = existing.rows[0].aluno_id;
@@ -6606,6 +6637,27 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           await afterTableMutation(pool, 'alunos_treinos', updated.rows[0]);
         } catch (hookErr) {
           console.warn('[treino] return_reminder hook failed:', hookErr?.message || hookErr);
+        }
+
+        if (notificationService && updated.rows[0]?.aluno_id) {
+          const treinoLink = updated.rows[0];
+          void (async () => {
+            let treinoNome = null;
+            if (treinoLink.treino_id) {
+              const nomeR = await pool.query(
+                'SELECT nome FROM public.treinos WHERE id = $1 LIMIT 1',
+                [treinoLink.treino_id],
+              );
+              treinoNome = nomeR.rows[0]?.nome || null;
+            }
+            await notificationService.notifyTreinoAtualizado({
+              alunoId: treinoLink.aluno_id,
+              alunoTreinoId: treinoLink.id,
+              treinoNome,
+            });
+          })().catch((err) => {
+            console.warn('[treino] notify_student_failed:', err?.message || err);
+          });
         }
 
         const fresh = await pool.query('SELECT * FROM public.alunos_treinos WHERE id = $1', [link.id]);

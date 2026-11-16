@@ -55,7 +55,7 @@ class NotificationService {
             }
 
             const { sendStudentNotificationEmail } = require('../utils/send-student-notification-email');
-            await sendStudentNotificationEmail({
+            return await sendStudentNotificationEmail({
                 to: email,
                 type: templateType,
                 context: { ...context, alunoNome },
@@ -66,7 +66,26 @@ class NotificationService {
                 templateType,
                 error: error.message,
             });
+            return { provider: 'none', skipped: true, error: error.message };
         }
+    }
+
+    /**
+     * E-mail de mudança de plano só quando o aluno pediu canal interno e e-mail
+     * e o envio não foi ignorado.
+     */
+    async _emailPlanChangeIfAllowed(alunoId, studentUserId, { kind, nome }) {
+        const wantsEmail = await shouldSendEmail(this.pool, alunoId);
+        if (!wantsEmail) return { emailStatus: 'skipped_preference' };
+        const result = await this.sendStudentEmail(studentUserId, 'plan_updated', {
+            planKind: kind,
+            planName: nome || '',
+        });
+        const provider = result?.provider || 'none';
+        if (!result || provider === 'none' || result.skipped) {
+            return { emailStatus: 'skipped', emailProvider: provider };
+        }
+        return { emailStatus: 'sent', emailProvider: provider };
     }
 
     /**
@@ -988,6 +1007,94 @@ class NotificationService {
                 link: 'diet',
             },
         );
+        await this._emailPlanChangeIfAllowed(alunoId, studentUserId, {
+            kind: 'dieta',
+            nome: dietaNome,
+        });
+    }
+
+    /** Aluno: coach actualizou ou renovou o treino atribuído */
+    async notifyTreinoAtualizado({ alunoId, alunoTreinoId, treinoNome }) {
+        const studentUserId = await getAuthUserIdForAluno(this.pool, alunoId);
+        if (!studentUserId) return;
+
+        const nome = treinoNome ? `"${String(treinoNome).trim()}"` : 'seu treino';
+        await this.notifyUser(
+            studentUserId,
+            'treino_atualizado',
+            'Treino atualizado',
+            `Seu coach actualizou ${nome}. Confira em Meus treinos.`,
+            {
+                alunoTreinoId,
+                alunoId,
+                link: 'workouts',
+            },
+        );
+        await this._emailPlanChangeIfAllowed(alunoId, studentUserId, {
+            kind: 'treino',
+            nome: treinoNome,
+        });
+    }
+
+    /**
+     * Lembrete no dia da turma: responder o check-in até 11h.
+     * Um aviso por semana. E-mail só se o aluno escolheu esse canal.
+     */
+    async notifyTurmaCheckinWindow({ alunoId, coachId }) {
+        const alunoResult = await this.pool.query(
+            'SELECT id, nome FROM public.alunos WHERE id = $1',
+            [alunoId],
+        );
+        if (alunoResult.rows.length === 0) return { sent: false };
+
+        if (await this._hasWeeklyCheckinThisWeek(alunoId)) {
+            return { sent: false, reason: 'already_checked_in' };
+        }
+
+        const { startOfWeekInTimeZone } = require('../utils/zoned-time');
+        const weekStart = startOfWeekInTimeZone(new Date(), 'America/Sao_Paulo');
+        const duplicate = await this.pool.query(
+            `SELECT id FROM public.notificacoes
+             WHERE aluno_id = $1
+               AND tipo = 'checkin_turma_window'
+               AND created_at >= $2::timestamptz
+             LIMIT 1`,
+            [alunoId, weekStart.toISOString()],
+        );
+        if (duplicate.rows.length > 0) return { sent: false, reason: 'already_sent' };
+
+        const aluno = alunoResult.rows[0];
+        const message =
+            'Hoje é o dia da sua turma para o check-in. Responda entre 9h e 11h.';
+
+        const studentUserId = await getAuthUserIdForAluno(this.pool, aluno.id);
+        if (studentUserId) {
+            await this.notifyUser(
+                studentUserId,
+                'checkin_turma_window',
+                'Hora do check-in',
+                message,
+                { alunoId: aluno.id, link: 'checkin' },
+            );
+            const wantsEmail = await shouldSendEmail(this.pool, aluno.id);
+            if (wantsEmail) {
+                await this.sendStudentEmail(studentUserId, 'checkin_turma_window', {
+                    alunoNome: aluno.nome,
+                });
+            }
+        }
+
+        if (coachId) {
+            await this.notifyUser(
+                coachId,
+                'checkin_turma_window',
+                'Check-in da turma',
+                `${aluno.nome} ainda não respondeu o check-in de hoje (janela 9h–11h).`,
+                { alunoId: aluno.id },
+            );
+        }
+
+        return { sent: true };
     }
 
     /**

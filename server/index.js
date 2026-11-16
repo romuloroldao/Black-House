@@ -2184,6 +2184,30 @@ app.patch('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) =
                     });
                 });
         }
+
+        if (table === 'alunos_treinos' && notificationService && result.rows[0]?.aluno_id) {
+            const treinoLink = result.rows[0];
+            void (async () => {
+                let treinoNome = null;
+                if (treinoLink.treino_id) {
+                    const nomeR = await pool.query(
+                        'SELECT nome FROM public.treinos WHERE id = $1 LIMIT 1',
+                        [treinoLink.treino_id],
+                    );
+                    treinoNome = nomeR.rows[0]?.nome || null;
+                }
+                await notificationService.notifyTreinoAtualizado({
+                    alunoId: treinoLink.aluno_id,
+                    alunoTreinoId: treinoLink.id,
+                    treinoNome,
+                });
+            })().catch((err) => {
+                logger.warn('treino.notify_student_failed', {
+                    alunoTreinoId: treinoLink.id,
+                    error: err?.message || String(err),
+                });
+            });
+        }
         
         res.json(result.rows[0]);
     } catch (error) {

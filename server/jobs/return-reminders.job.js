@@ -30,8 +30,8 @@ class ReturnRemindersJob {
       } finally {
         this.isRunning = false;
       }
-    });
-    console.log('[ReturnRemindersJob] Agendado diariamente às 8h');
+    }, { timezone: 'America/Sao_Paulo' });
+    console.log('[ReturnRemindersJob] Agendado diariamente às 8h (America/Sao_Paulo)');
   }
 
   async execute() {

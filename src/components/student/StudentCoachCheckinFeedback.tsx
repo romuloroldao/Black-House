@@ -90,6 +90,16 @@ function FeedbackBlock({
         {checkinDate && (
           <p className="mb-1.5 text-xs text-muted-foreground">Check-in de {checkinDate}</p>
         )}
+        {checkin.data_retorno && (
+          <p className="mb-1.5 text-sm font-medium">
+            Próximo retorno:{" "}
+            {format(
+              new Date(`${String(checkin.data_retorno).slice(0, 10)}T12:00:00`),
+              "dd 'de' MMMM 'de' yyyy",
+              { locale: ptBR },
+            )}
+          </p>
+        )}
         <p className="max-h-28 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-snug md:max-h-40">
           {resposta}
         </p>
@@ -114,6 +124,16 @@ function FeedbackBlock({
         </CardTitle>
         {checkinDate && (
           <p className="text-xs text-muted-foreground">Referente ao check-in de {checkinDate}</p>
+        )}
+        {checkin.data_retorno && (
+          <p className="text-sm font-medium text-foreground">
+            Próximo retorno:{" "}
+            {format(
+              new Date(`${String(checkin.data_retorno).slice(0, 10)}T12:00:00`),
+              "dd 'de' MMMM 'de' yyyy",
+              { locale: ptBR },
+            )}
+          </p>
         )}
       </CardHeader>
       <CardContent className="pb-4 pt-0">

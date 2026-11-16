@@ -11,6 +11,8 @@ const COACH_TYPES = new Set([
   "checkin_missed",
   "task_reminder",
   "dieta_atualizada",
+  "treino_atualizado",
+  "checkin_turma_window",
 ]);
 
 const RETORNO_TYPES = new Set([
