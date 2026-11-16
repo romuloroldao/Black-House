@@ -37,3 +37,11 @@ CREATE TABLE IF NOT EXISTS public.refeicao_variacao_escolhas (
 
 CREATE INDEX IF NOT EXISTS idx_refeicao_variacao_escolhas_aluno
   ON public.refeicao_variacao_escolhas (aluno_id, data_ref DESC);
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON public.refeicao_variacoes TO app_user;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON public.refeicao_variacao_escolhas TO app_user;
+  END IF;
+END $$;
