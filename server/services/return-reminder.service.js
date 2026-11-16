@@ -329,6 +329,45 @@ async function updateNotificationPreferences(pool, alunoId, { notification_chann
   return r.rows[0] || null;
 }
 
+/**
+ * Copia a data de retorno do check-in para a dieta ativa e o treino ativo,
+ * para o job de lembretes (D-2, D-1, D0) encontrar os planos.
+ */
+async function applyCheckinReturnDate(pool, alunoId, dataRetorno) {
+  const iso = parseReturnDate(dataRetorno);
+  if (!alunoId || !iso) return { diet: false, workout: false };
+
+  let diet = false;
+  const dietRes = await pool.query(
+    `SELECT id, aluno_id, schedule_cycle_id
+     FROM public.dietas
+     WHERE aluno_id = $1
+     ORDER BY (CASE WHEN COALESCE(ativa, true) THEN 0 ELSE 1 END), created_at DESC NULLS LAST
+     LIMIT 1`,
+    [alunoId],
+  );
+  if (dietRes.rows[0]) {
+    await syncDietReturnSchedule(pool, { ...dietRes.rows[0], data_retorno: iso });
+    diet = true;
+  }
+
+  let workout = false;
+  const treinoRes = await pool.query(
+    `SELECT id, aluno_id, schedule_cycle_id
+     FROM public.alunos_treinos
+     WHERE aluno_id = $1 AND COALESCE(ativo, true) = true
+     ORDER BY created_at DESC NULLS LAST
+     LIMIT 1`,
+    [alunoId],
+  );
+  if (treinoRes.rows[0]) {
+    await syncWorkoutReturnSchedule(pool, { ...treinoRes.rows[0], data_retorno: iso });
+    workout = true;
+  }
+
+  return { diet, workout };
+}
+
 module.exports = {
   DEFAULT_TZ,
   MILESTONES,
@@ -345,4 +384,5 @@ module.exports = {
   updateDispatchEmailStatus,
   getNotificationPreferences,
   updateNotificationPreferences,
+  applyCheckinReturnDate,
 };

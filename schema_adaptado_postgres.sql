@@ -247,10 +247,12 @@ CREATE TABLE IF NOT EXISTS public.turmas (
   descricao text,
   cor text DEFAULT '#3b82f6'::text,
   ativo boolean NOT NULL DEFAULT true,
+  dia_semana smallint,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT turmas_pkey PRIMARY KEY (id),
-  CONSTRAINT turmas_coach_id_fkey FOREIGN KEY (coach_id) REFERENCES app_auth.users(id)
+  CONSTRAINT turmas_coach_id_fkey FOREIGN KEY (coach_id) REFERENCES app_auth.users(id),
+  CONSTRAINT turmas_dia_semana_check CHECK (dia_semana IS NULL OR (dia_semana >= 1 AND dia_semana <= 7))
 );
 
 CREATE TABLE IF NOT EXISTS public.avisos_destinatarios (
@@ -751,6 +753,7 @@ CREATE TABLE IF NOT EXISTS public.weekly_checkins (
   coach_respondido_em timestamp with time zone,
   coach_respondido_por uuid,
   coach_resposta text,
+  data_retorno date,
   CONSTRAINT weekly_checkins_pkey PRIMARY KEY (id),
   CONSTRAINT weekly_checkins_aluno_id_fkey FOREIGN KEY (aluno_id) REFERENCES public.alunos(id),
   CONSTRAINT weekly_checkins_coach_respondido_por_fkey FOREIGN KEY (coach_respondido_por) REFERENCES app_auth.users(id)

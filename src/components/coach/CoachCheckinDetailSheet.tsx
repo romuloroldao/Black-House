@@ -84,6 +84,7 @@ export default function CoachCheckinDetailSheet({
   const navigate = useNavigate();
   const [section, setSection] = useState<CheckinSectionId>("nutricao");
   const [feedback, setFeedback] = useState("");
+  const [returnDate, setReturnDate] = useState("");
   const [saving, setSaving] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [markedRespondido, setMarkedRespondido] = useState(false);
@@ -105,7 +106,8 @@ export default function CoachCheckinDetailSheet({
     if (!open || !checkin?.id) return;
     setSection("nutricao");
     setFeedback(checkin.coach_resposta?.trim() || "");
-  }, [open, checkin?.id, checkin?.coach_resposta]);
+    setReturnDate(checkin.data_retorno ? String(checkin.data_retorno).slice(0, 10) : "");
+  }, [open, checkin?.id, checkin?.coach_resposta, checkin?.data_retorno]);
 
   const handleSaveFeedback = async () => {
     const texto = feedback.trim();
@@ -137,7 +139,11 @@ export default function CoachCheckinDetailSheet({
         throw new Error("Check-in não encontrado");
       }
 
-      const save = await apiClient.saveWeeklyCheckinRespostaSafe(checkin.id, texto);
+      const save = await apiClient.saveWeeklyCheckinRespostaSafe(
+        checkin.id,
+        texto,
+        returnDate || null,
+      );
       if (!save.success || !save.data) {
         throw new Error(save.error || "Erro ao salvar");
       }
@@ -437,6 +443,21 @@ export default function CoachCheckinDetailSheet({
               Método usado: {draftContext.rules.map((r) => r.title).join(" · ")}
             </p>
           )}
+          <div className="space-y-1">
+            <label htmlFor="checkin-return-date" className="text-sm font-medium">
+              Próximo retorno
+            </label>
+            <input
+              id="checkin-return-date"
+              type="date"
+              value={returnDate}
+              onChange={(e) => setReturnDate(e.target.value)}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            />
+            <p className="text-xs text-muted-foreground">
+              Sem esta data o aluno não vê o retorno nem recebe o lembrete. O texto da resposta continua independente.
+            </p>
+          </div>
           <Textarea
             placeholder="Referencie o que o aluno relatou neste check-in..."
             value={feedback}

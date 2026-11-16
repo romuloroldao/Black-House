@@ -4,7 +4,7 @@ export type AlunoHojeRetorno = {
   date: string;
   days: number;
   label: string;
-  source: "dieta" | "treino";
+  source: "dieta" | "treino" | "checkin";
   plan_name?: string | null;
   overdue: boolean;
 };

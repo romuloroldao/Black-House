@@ -1532,10 +1532,14 @@ class ApiClient {
     async saveWeeklyCheckinRespostaSafe(
         checkinId: string,
         resposta: string,
+        dataRetorno?: string | null,
     ): Promise<ApiResult<WeeklyCheckinRecord>> {
         return this.safeRequest(API_CONTRACT.weeklyCheckins.saveResposta(checkinId), {
             method: 'PATCH',
-            body: JSON.stringify({ resposta }),
+            body: JSON.stringify({
+                resposta,
+                ...(dataRetorno ? { data_retorno: dataRetorno } : {}),
+            }),
         });
     }
 
