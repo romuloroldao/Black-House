@@ -1143,6 +1143,39 @@ class ApiClient {
         });
     }
 
+    /** GET /api/alunos/me/refeicao-variacoes */
+    async getRefeicaoVariacoesSafe(query: {
+        date: string;
+        dieta_id: string;
+        meal_key: string;
+        plano: string;
+        item_ids: string[];
+    }): Promise<ApiResult<{
+        items: Array<{ id: string; indice: number; titulo: string; preparo: string }>;
+        escolha_id: string | null;
+        motivo: string | null;
+        aviso: string;
+    } | null>> {
+        const identity = assertDataContextReady('getRefeicaoVariacoesSafe()');
+        if (!identity) return apiSuccess(null);
+        return this.safeRequest(API_CONTRACT.alunos.refeicaoVariacoes(query));
+    }
+
+    /** PUT /api/alunos/me/refeicao-variacoes */
+    async putRefeicaoVariacaoSafe(body: {
+        dieta_id: string;
+        meal_key: string;
+        plano: string;
+        date: string;
+        item_ids: string[];
+        variacao_id: string;
+    }): Promise<ApiResult<any>> {
+        return this.safeRequest(API_CONTRACT.alunos.refeicaoVariacoes(), {
+            method: 'PUT',
+            body: JSON.stringify(body),
+        });
+    }
+
     /** POST /api/alunos/me/treino-sessoes — iniciar/obter sessão do dia */
     async startTreinoSessaoSafe(body: {
         treino_id: string;

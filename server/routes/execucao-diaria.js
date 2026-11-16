@@ -11,6 +11,7 @@ const validateRole = require('../middleware/validateRole');
 const refeicaoService = require('../services/refeicao-conclusao.service');
 const treinoService = require('../services/treino-sessao.service');
 const { getProximaAcao } = require('../services/proxima-acao.service');
+const variacaoService = require('../services/refeicao-variacao.service');
 
 function sendServiceError(res, error, fallback = 'Erro interno') {
   const status = error.statusCode || 500;
@@ -22,6 +23,52 @@ function sendServiceError(res, error, fallback = 'Erro interno') {
 
 module.exports = function createExecucaoDiariaRouter(pool, authenticate, domainSchemaGuard, resolveAlunoOrFailWithPayment) {
   const router = express.Router();
+
+  // GET /api/alunos/me/refeicao-variacoes — preparos da semana para uma refeição
+  router.get(
+    '/refeicao-variacoes',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['aluno']),
+    resolveAlunoOrFailWithPayment,
+    async (req, res) => {
+      try {
+        const itemIds = String(req.query.item_ids || '')
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean);
+        const payload = await variacaoService.listForMeal(pool, req.aluno.id, {
+          dieta_id: req.query.dieta_id,
+          meal_key: req.query.meal_key,
+          plano: req.query.plano,
+          date: req.query.date,
+          item_ids: itemIds,
+        });
+        return res.json(payload);
+      } catch (error) {
+        console.error('GET refeicao-variacoes', error);
+        return sendServiceError(res, error);
+      }
+    },
+  );
+
+  // PUT /api/alunos/me/refeicao-variacoes — escolha do dia, sem marcar consumo
+  router.put(
+    '/refeicao-variacoes',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['aluno']),
+    resolveAlunoOrFailWithPayment,
+    async (req, res) => {
+      try {
+        const row = await variacaoService.chooseForMeal(pool, req.aluno.id, req.body || {});
+        return res.json(row);
+      } catch (error) {
+        console.error('PUT refeicao-variacoes', error);
+        return sendServiceError(res, error);
+      }
+    },
+  );
 
   // GET /api/alunos/me/refeicao-conclusoes
   router.get(

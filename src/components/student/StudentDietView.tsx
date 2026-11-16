@@ -30,6 +30,7 @@ import {
 import { MacroRingsRow } from "@/components/student/diet/MacroRing";
 import MealTimelineItem from "@/components/student/diet/MealTimelineItem";
 import MealDetailSheet from "@/components/student/diet/MealDetailSheet";
+import type { MealVariationOption } from "@/components/student/diet/MealVariationsPanel";
 import PremiumEmptyState from "@/components/student/PremiumEmptyState";
 import DietRotationBanner from "@/components/student/diet/DietRotationBanner";
 import StudentRefeicaoLivreCard from "@/components/student/StudentRefeicaoLivreCard";
@@ -65,6 +66,9 @@ const StudentDietView = () => {
   const [serverDoneKeys, setServerDoneKeys] = useState<Set<string>>(() => new Set());
   const mealDayRef = useRef(mealCheckDateKey());
   const [detailMeal, setDetailMeal] = useState<MealGroup | null>(null);
+  const [variations, setVariations] = useState<MealVariationOption[]>([]);
+  const [variationSelectedId, setVariationSelectedId] = useState<string | null>(null);
+  const [variationsLoading, setVariationsLoading] = useState(false);
   const [refeicaoLivreContent, setRefeicaoLivreContent] = useState<EducationalContent | null>(null);
   const [mealPhotoOpen, setMealPhotoOpen] = useState(false);
   const [mealHistoryKey, setMealHistoryKey] = useState(0);
@@ -263,6 +267,59 @@ const StudentDietView = () => {
       setPlanoAtivo(rotationToday.plano);
     }
   }, [rotationToday?.plano]);
+
+  useEffect(() => {
+    if (!detailMeal || !dieta?.id) {
+      setVariations([]);
+      setVariationSelectedId(null);
+      return;
+    }
+    const items = getItemsForPlano(detailMeal, planoAtivo, {
+      dietHasMultiplosCardapios: hasMultiplosCardapios,
+    }).filter((item) => !/\(\s*substituto\s*\)/i.test(String(item.refeicao || "")));
+    if (items.length < 2) {
+      setVariations([]);
+      setVariationSelectedId(null);
+      return;
+    }
+    let cancelled = false;
+    setVariationsLoading(true);
+    void apiClient
+      .getRefeicaoVariacoesSafe({
+        date: mealCheckDateKey(),
+        dieta_id: dieta.id,
+        meal_key: detailMeal.key,
+        plano: planoAtivo,
+        item_ids: items.map((item) => item.id),
+      })
+      .then((res) => {
+        if (cancelled) return;
+        setVariations(res.success && res.data?.items ? res.data.items : []);
+        setVariationSelectedId(res.success ? res.data?.escolha_id ?? null : null);
+      })
+      .finally(() => {
+        if (!cancelled) setVariationsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detailMeal, dieta?.id, planoAtivo, hasMultiplosCardapios]);
+
+  const handleSelectVariation = async (variacaoId: string) => {
+    if (!detailMeal || !dieta?.id) return;
+    const items = getItemsForPlano(detailMeal, planoAtivo, {
+      dietHasMultiplosCardapios: hasMultiplosCardapios,
+    }).filter((item) => !/\(\s*substituto\s*\)/i.test(String(item.refeicao || "")));
+    const saved = await apiClient.putRefeicaoVariacaoSafe({
+      dieta_id: dieta.id,
+      meal_key: detailMeal.key,
+      plano: planoAtivo,
+      date: mealCheckDateKey(),
+      item_ids: items.map((item) => item.id),
+      variacao_id: variacaoId,
+    });
+    if (saved.success) setVariationSelectedId(variacaoId);
+  };
 
   const visibleGroups = useMemo(
     () =>
@@ -566,6 +623,12 @@ const StudentDietView = () => {
         plano={planoAtivo}
         dietHasMultiplosCardapios={hasMultiplosCardapios}
         onSubstituir={handleVerSubstitutos}
+        variations={variations}
+        variationSelectedId={variationSelectedId}
+        variationsLoading={variationsLoading}
+        onSelectVariation={(id) => {
+          void handleSelectVariation(id);
+        }}
       />
 
       <FoodSubstitutionDialog
