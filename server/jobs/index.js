@@ -3,6 +3,7 @@
 
 const PaymentRemindersJob = require('./payment-reminders.job');
 const CheckinRemindersJob = require('./checkin-reminders.job');
+const TurmaCheckinRemindersJob = require('./turma-checkin-reminders.job');
 const EventRemindersJob = require('./event-reminders.job');
 const ReturnRemindersJob = require('./return-reminders.job');
 const AgendaCoachRemindersJob = require('./agenda-coach-reminders.job');
@@ -39,6 +40,10 @@ class JobsRunner {
         const checkinReminders = new CheckinRemindersJob(this.pool, this.notificationService);
         checkinReminders.start();
         this.jobs.push(checkinReminders);
+
+        const turmaCheckin = new TurmaCheckinRemindersJob(this.pool, this.notificationService);
+        turmaCheckin.start();
+        this.jobs.push(turmaCheckin);
 
         // Event Reminders
         const eventReminders = new EventRemindersJob(this.pool, this.notificationService);

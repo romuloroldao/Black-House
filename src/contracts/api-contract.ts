@@ -37,6 +37,16 @@ export const API_CONTRACT = {
       const qs = date ? `?date=${encodeURIComponent(date)}` : '';
       return `${API_BASE}/api/alunos/me/refeicao-conclusoes${qs}`;
     },
+    refeicaoVariacoes: (query?: { date?: string; dieta_id?: string; meal_key?: string; plano?: string; item_ids?: string[] }) => {
+      const params = new URLSearchParams();
+      if (query?.date) params.set('date', query.date);
+      if (query?.dieta_id) params.set('dieta_id', query.dieta_id);
+      if (query?.meal_key) params.set('meal_key', query.meal_key);
+      if (query?.plano) params.set('plano', query.plano);
+      if (query?.item_ids?.length) params.set('item_ids', query.item_ids.join(','));
+      const qs = params.toString();
+      return `${API_BASE}/api/alunos/me/refeicao-variacoes${qs ? `?${qs}` : ''}`;
+    },
     refeicaoSubstituicoes: (query?: { date?: string; dieta_id?: string }) => {
       const params = new URLSearchParams();
       if (query?.date) params.set('date', query.date);
@@ -398,6 +408,7 @@ const CONTRACT_PATTERNS = [
   '/api/alunos/me/treino-agenda',
   '/api/alunos/me/refeicao-conclusoes',
   '/api/alunos/me/refeicao-substituicoes',
+  '/api/alunos/me/refeicao-variacoes',
   '/api/alunos/me/treino-sessoes',
   '/api/alunos/me/treino-sessoes/:id',
   '/api/alunos/me/treino-sessoes/:id/series',

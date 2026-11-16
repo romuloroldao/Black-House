@@ -33,6 +33,7 @@ export type WeeklyCheckinRecord = {
   coach_respondido_em?: string | null;
   coach_respondido_por?: string | null;
   coach_resposta?: string | null;
+  data_retorno?: string | null;
 };
 
 export type FeedbackAlunoRecord = {

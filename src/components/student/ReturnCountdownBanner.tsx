@@ -32,7 +32,12 @@ const ReturnCountdownBanner = ({ loading, countdown }: ReturnCountdownBannerProp
     year: "numeric",
   });
 
-  const sourceLabel = countdown.source === "dieta" ? "Plano nutricional" : "Plano de treino";
+  const sourceLabel =
+    countdown.source === "dieta"
+      ? "Plano nutricional"
+      : countdown.source === "checkin"
+        ? "Marcado no check-in"
+        : "Plano de treino";
   const absDays = Math.abs(countdown.days);
 
   return (

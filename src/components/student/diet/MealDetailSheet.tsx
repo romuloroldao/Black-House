@@ -18,6 +18,9 @@ import {
   type MealGroup,
 } from "@/lib/diet-student-utils";
 import { cn } from "@/lib/utils";
+import MealVariationsPanel, {
+  type MealVariationOption,
+} from "@/components/student/diet/MealVariationsPanel";
 import { useStudentOverlayLock } from "@/hooks/useStudentOverlayLock";
 
 type MealDetailSheetProps = {
@@ -28,6 +31,10 @@ type MealDetailSheetProps = {
   plano: DietPlano;
   dietHasMultiplosCardapios: boolean;
   onSubstituir?: (item: DietItemWithFood) => void;
+  variations?: MealVariationOption[];
+  variationSelectedId?: string | null;
+  variationsLoading?: boolean;
+  onSelectVariation?: (id: string) => void;
 };
 
 function MealItemRow({
@@ -171,6 +178,10 @@ const MealDetailSheet = ({
   plano,
   dietHasMultiplosCardapios,
   onSubstituir,
+  variations = [],
+  variationSelectedId = null,
+  variationsLoading = false,
+  onSelectVariation,
 }: MealDetailSheetProps) => {
   useStudentOverlayLock(open);
   const listRef = useRef<HTMLDivElement>(null);
@@ -246,6 +257,15 @@ const MealDetailSheet = ({
                 onSubstituir={onSubstituir}
               />
             </>
+          )}
+          {onSelectVariation && (
+            <MealVariationsPanel
+              loading={variationsLoading}
+              options={variations}
+              selectedId={variationSelectedId}
+              notice={null}
+              onSelect={onSelectVariation}
+            />
           )}
         </div>
       </SheetContent>

@@ -21,6 +21,22 @@ interface Turma {
   cor: string;
   ativo: boolean;
   created_at: string;
+  dia_semana?: number | null;
+}
+
+const DIAS_TURMA = [
+  { value: "1", label: "Segunda" },
+  { value: "2", label: "Terça" },
+  { value: "3", label: "Quarta" },
+  { value: "4", label: "Quinta" },
+  { value: "5", label: "Sexta" },
+  { value: "6", label: "Sábado" },
+  { value: "7", label: "Domingo" },
+] as const;
+
+function labelDiaTurma(dia?: number | null): string | null {
+  if (dia == null) return null;
+  return DIAS_TURMA.find((d) => d.value === String(dia))?.label ?? null;
 }
 
 interface Aluno {
@@ -47,6 +63,7 @@ export function ClassGroupManager() {
     nome: "",
     descricao: "",
     cor: "#3b82f6",
+    dia_semana: "",
   });
   const [selectedAlunos, setSelectedAlunos] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -123,7 +140,12 @@ export function ClassGroupManager() {
       if (selectedTurma) {
         const result = await apiClient.requestSafe(`/api/turmas/${selectedTurma.id}`, {
           method: 'PATCH',
-          body: JSON.stringify({ ...formData }),
+          body: JSON.stringify({
+            nome: formData.nome,
+            descricao: formData.descricao,
+            cor: formData.cor,
+            dia_semana: formData.dia_semana ? Number(formData.dia_semana) : null,
+          }),
         });
         if (!result.success) {
           throw new Error(result.error || 'Erro ao atualizar turma');
@@ -133,7 +155,13 @@ export function ClassGroupManager() {
       } else {
         const result = await apiClient.requestSafe('/api/turmas', {
           method: 'POST',
-          body: JSON.stringify({ ...formData, coach_id: user.id }),
+          body: JSON.stringify({
+            nome: formData.nome,
+            descricao: formData.descricao,
+            cor: formData.cor,
+            dia_semana: formData.dia_semana ? Number(formData.dia_semana) : null,
+            coach_id: user.id,
+          }),
         });
         if (!result.success) {
           throw new Error(result.error || 'Erro ao criar turma');
@@ -238,7 +266,7 @@ export function ClassGroupManager() {
   };
 
   const resetForm = () => {
-    setFormData({ nome: "", descricao: "", cor: "#3b82f6" });
+    setFormData({ nome: "", descricao: "", cor: "#3b82f6", dia_semana: "" });
     setSelectedTurma(null);
   };
 
@@ -248,6 +276,7 @@ export function ClassGroupManager() {
       nome: turma.nome,
       descricao: turma.descricao || "",
       cor: turma.cor,
+      dia_semana: turma.dia_semana != null ? String(turma.dia_semana) : "",
     });
     setIsDialogOpen(true);
   };
@@ -281,7 +310,7 @@ export function ClassGroupManager() {
                 {selectedTurma ? "Editar Turma" : "Nova Turma"}
               </DialogTitle>
               <DialogDescription>
-                Nome, descrição e cor para identificar a turma na agenda e listagens.
+                Nome, descrição, cor e o dia do check-in desta turma.
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -303,6 +332,25 @@ export function ClassGroupManager() {
                   onChange={(e) => setFormData({ ...formData, descricao: e.target.value })}
                   placeholder="Descreva a turma..."
                 />
+              </div>
+              <div>
+                <Label htmlFor="dia-turma">Dia do check-in</Label>
+                <select
+                  id="dia-turma"
+                  value={formData.dia_semana}
+                  onChange={(e) => setFormData({ ...formData, dia_semana: e.target.value })}
+                  className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="">Sem dia fixo</option>
+                  {DIAS_TURMA.map((dia) => (
+                    <option key={dia.value} value={dia.value}>
+                      {dia.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Alunos desta turma recebem um aviso às 9h desse dia para responder o check-in até 11h.
+                </p>
               </div>
               <div>
                 <Label htmlFor="cor">Cor</Label>
@@ -359,6 +407,11 @@ export function ClassGroupManager() {
                           {turma.descricao && (
                             <p className="text-sm text-muted-foreground">
                               {turma.descricao}
+                            </p>
+                          )}
+                          {labelDiaTurma(turma.dia_semana) && (
+                            <p className="text-xs text-muted-foreground">
+                              Check-in: {labelDiaTurma(turma.dia_semana)}
                             </p>
                           )}
                         </div>

@@ -30,6 +30,7 @@ import {
 import { MacroRingsRow } from "@/components/student/diet/MacroRing";
 import MealTimelineItem from "@/components/student/diet/MealTimelineItem";
 import MealDetailSheet from "@/components/student/diet/MealDetailSheet";
+import type { MealVariationOption } from "@/components/student/diet/MealVariationsPanel";
 import PremiumEmptyState from "@/components/student/PremiumEmptyState";
 import DietRotationBanner from "@/components/student/diet/DietRotationBanner";
 import StudentRefeicaoLivreCard from "@/components/student/StudentRefeicaoLivreCard";
@@ -73,6 +74,9 @@ const StudentDietView = () => {
   /** Itens do plano sem as trocas do dia (as trocas valem só para hoje). */
   const [itensPlano, setItensPlano] = useState<DietItemWithFood[]>([]);
   const [detailMeal, setDetailMeal] = useState<MealGroup | null>(null);
+  const [variations, setVariations] = useState<MealVariationOption[]>([]);
+  const [variationSelectedId, setVariationSelectedId] = useState<string | null>(null);
+  const [variationsLoading, setVariationsLoading] = useState(false);
   const [refeicaoLivreContent, setRefeicaoLivreContent] = useState<EducationalContent | null>(null);
   const [mealPhotoOpen, setMealPhotoOpen] = useState(false);
   const [mealHistoryKey, setMealHistoryKey] = useState(0);
@@ -302,6 +306,59 @@ const StudentDietView = () => {
     Boolean(rotationSelected) && planosCardapio.length > 0 && !planosCardapio.includes(plano);
   // Nesse caso só as refeições comuns a todos os dias (sem plano) valem para o dia.
   const filtrarPorPlano = hasMultiplosCardapios || rotationMissingMeals;
+
+  useEffect(() => {
+    if (!detailMeal || !dieta?.id || !isViewingToday) {
+      setVariations([]);
+      setVariationSelectedId(null);
+      return;
+    }
+    const items = getItemsForPlano(detailMeal, plano, {
+      dietHasMultiplosCardapios: filtrarPorPlano,
+    }).filter((item) => !/\(\s*substituto\s*\)/i.test(String(item.refeicao || "")));
+    if (items.length < 2) {
+      setVariations([]);
+      setVariationSelectedId(null);
+      return;
+    }
+    let cancelled = false;
+    setVariationsLoading(true);
+    void apiClient
+      .getRefeicaoVariacoesSafe({
+        date: todayKey,
+        dieta_id: dieta.id,
+        meal_key: detailMeal.key,
+        plano,
+        item_ids: items.map((item) => item.id),
+      })
+      .then((res) => {
+        if (cancelled) return;
+        setVariations(res.success && res.data?.items ? res.data.items : []);
+        setVariationSelectedId(res.success ? res.data?.escolha_id ?? null : null);
+      })
+      .finally(() => {
+        if (!cancelled) setVariationsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detailMeal, dieta?.id, isViewingToday, plano, filtrarPorPlano, todayKey]);
+
+  const handleSelectVariation = async (variacaoId: string) => {
+    if (!detailMeal || !dieta?.id) return;
+    const items = getItemsForPlano(detailMeal, plano, {
+      dietHasMultiplosCardapios: filtrarPorPlano,
+    }).filter((item) => !/\(\s*substituto\s*\)/i.test(String(item.refeicao || "")));
+    const saved = await apiClient.putRefeicaoVariacaoSafe({
+      dieta_id: dieta.id,
+      meal_key: detailMeal.key,
+      plano,
+      date: todayKey,
+      item_ids: items.map((item) => item.id),
+      variacao_id: variacaoId,
+    });
+    if (saved.success) setVariationSelectedId(variacaoId);
+  };
 
   const visibleGroups = useMemo(
     () =>
@@ -643,6 +700,16 @@ const StudentDietView = () => {
         plano={plano}
         dietHasMultiplosCardapios={filtrarPorPlano}
         onSubstituir={isViewingToday ? handleVerSubstitutos : undefined}
+        variations={isViewingToday ? variations : []}
+        variationSelectedId={isViewingToday ? variationSelectedId : null}
+        variationsLoading={isViewingToday && variationsLoading}
+        onSelectVariation={
+          isViewingToday
+            ? (id) => {
+                void handleSelectVariation(id);
+              }
+            : undefined
+        }
       />
 
       <FoodSubstitutionDialog

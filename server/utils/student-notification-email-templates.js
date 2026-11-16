@@ -60,6 +60,26 @@ function buildStudentNotificationEmail(type, ctx = {}) {
     'Você está recebendo este e-mail porque tem uma conta na plataforma. Se não reconhecer este aviso, fale com seu coach.';
 
   switch (type) {
+    case 'checkin_turma_window':
+      return {
+        subject: `${appName} — Check-in da sua turma até 11h`,
+        text:
+          `${appName}\n\n${greeting}\n\n` +
+          `Hoje é o dia da sua turma para o check-in. Responda entre 9h e 11h.\n\n` +
+          `${studentPortalUrl('checkin')}\n\n${baseFoot}`,
+        htmlPayload: {
+          preheader: 'Responda o check-in da sua turma até 11h.',
+          appName,
+          headline: 'Hora do check-in',
+          intro:
+            'Hoje é o dia da sua turma para o check-in. Responda entre 9h e 11h para o coach acompanhar a semana.',
+          ctaUrl: studentPortalUrl('checkin'),
+          ctaLabel: 'Responder check-in',
+          expiryLine: 'A janela deste aviso é das 9h às 11h.',
+          footnote: baseFoot,
+        },
+      };
+
     case 'checkin_reminder':
       return {
         subject: `${appName} — Check-in semanal pendente`,
