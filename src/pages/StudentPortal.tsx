@@ -1,4 +1,23 @@
 import { useEffect, useRef, useState } from "react";
+import { isPhone, isPhoneLayoutNow } from "@/lib/device";
+import { useSafeTopHandled } from "@/hooks/useSafeTopHandled";
+
+const SCREEN_TITLES: Record<string, string> = {
+  hoje: "Hoje",
+  dashboard: "Hoje",
+  diet: "Dieta",
+  workouts: "Treinos",
+  coach: "Coach",
+  chat: "Coach",
+  messages: "Coach",
+  checkin: "Check-in",
+  progress: "Fotos e métricas",
+  videos: "Vídeos",
+  education: "Educação",
+  reports: "Relatórios",
+  financial: "Financeiro",
+  profile: "Perfil",
+};
 import { useSearchParams } from "react-router-dom";
 import { Menu } from "lucide-react";
 import FeatureOnboardingPanel from "@/components/student/onboarding/FeatureOnboardingPanel";
@@ -36,6 +55,8 @@ import { useStudentNavMode } from "@/hooks/useStudentNavMode";
 // A tela de bloqueio é rota separada (/portal-aluno/blocked)
 // O ProtectedRoute já redireciona alunos inadimplentes automaticamente
 const StudentPortal = () => {
+  const phone = isPhone();
+  useSafeTopHandled(phone);
   const { user } = useAuth();
   const { isReady } = useDataContext();
   const { isCompact, mode, setMode, toggle: toggleNavMode } = useStudentNavMode();
@@ -129,7 +150,7 @@ const StudentPortal = () => {
   const openPlatformNav = () => {
     trackAgentEvent("nav_traditional_open", { via: "explore" });
     const isMobile =
-      typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+      typeof window !== "undefined" && isPhoneLayoutNow();
     if (isMobile) {
       setMobileNavOpen(true);
       return;
@@ -260,7 +281,11 @@ const StudentPortal = () => {
               <Menu className="h-5 w-5 shrink-0 text-primary" strokeWidth={2.75} aria-hidden />
               <span className="text-sm font-semibold tracking-wide">Menu</span>
             </Button>
-            <BrandLogo className="h-7" />
+            {phone ? (
+              <p className="min-w-0 truncate text-base font-semibold">{SCREEN_TITLES[activeTab] ?? "Black House"}</p>
+            ) : (
+              <BrandLogo className="h-7" />
+            )}
             <div className="ml-auto flex shrink-0 items-center gap-1">
               <ThemeToggleCompact />
               <NotificationsPopover onNavigate={handleTabChange} />

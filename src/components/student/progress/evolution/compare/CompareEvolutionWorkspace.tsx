@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { isPhoneLayoutNow } from '@/lib/device';
 import { SlidersHorizontal } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -215,7 +216,7 @@ export function CompareEvolutionWorkspace({ items, initialCurrent, initialBaseli
     if (mode === 'align') {
       setShowGuides(true);
       const isMobile =
-        typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches;
+        typeof window !== 'undefined' && isPhoneLayoutNow();
       if (isMobile) setAdjustOpen(true);
     } else {
       setShowGuides(false);

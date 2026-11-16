@@ -106,7 +106,7 @@ async function applyForAluno(pool, alunoId, body) {
   if (!item) throw notFoundError('Item da dieta não encontrado');
 
   const dataRef = body.data_ref || todayIso();
-  const plano = normalizePlano(body.plano || item.plano);
+  const plano = normalizePlano(body.plano);
   const quantidadeOriginal =
     body.quantidade_original != null ? Number(body.quantidade_original) : Number(item.quantidade);
   const unidadeOriginal = body.unidade_original || item.unidade_quantidade || 'g';

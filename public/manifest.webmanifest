@@ -1,0 +1,42 @@
+{
+  "id": "/",
+  "name": "Black House",
+  "short_name": "Black House",
+  "description": "Saúde integrativa e performance: sua dieta, seus treinos e o acompanhamento com o seu coach na palma da mão.",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "categories": ["health", "fitness", "lifestyle"],
+  "related_applications": [{ "platform": "webapp", "url": "https://blackhouse.app.br/manifest.webmanifest" }],
+  "prefer_related_applications": false,
+  "icons": [
+    { "src": "/pwa/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Minha dieta",
+      "short_name": "Dieta",
+      "url": "/portal-aluno/dashboard?tab=diet&source=pwa",
+      "icons": [{ "src": "/pwa/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Meus treinos",
+      "short_name": "Treinos",
+      "url": "/portal-aluno/dashboard?tab=workouts&source=pwa",
+      "icons": [{ "src": "/pwa/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Falar com o coach",
+      "short_name": "Coach",
+      "url": "/portal-aluno/dashboard?tab=coach&source=pwa",
+      "icons": [{ "src": "/pwa/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ]
+}

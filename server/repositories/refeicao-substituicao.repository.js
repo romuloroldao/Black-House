@@ -12,7 +12,7 @@ async function assertDietaOwnsAluno(pool, dietaId, alunoId) {
 
 async function getItemDieta(pool, itemId, dietaId) {
   const r = await pool.query(
-    `SELECT id, dieta_id, alimento_id, quantidade, unidade_quantidade, refeicao, plano
+    `SELECT id, dieta_id, alimento_id, quantidade, unidade_quantidade, refeicao
      FROM public.itens_dieta
      WHERE id = $1 AND dieta_id = $2
      LIMIT 1`,

@@ -15,8 +15,10 @@ import {
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
+  Download,
   type LucideIcon,
 } from "lucide-react";
+import { useInstallPrompt } from "@/pwa/useInstallPrompt";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -274,6 +276,8 @@ const StudentSidebar = ({
     }
     return activeTab === tabId;
   };
+
+  const installPrompt = useInstallPrompt();
 
   const handleLogout = async () => {
     onMobileOpenChange?.(false);
@@ -561,6 +565,35 @@ const StudentSidebar = ({
               {safeStudentName}
             </span>
           </div>
+
+          {installPrompt.canShowMenuItem && (
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    className={cn(
+                      "min-h-11 w-full",
+                      showLabels ? "justify-start px-3" : "justify-center px-0",
+                    )}
+                    onClick={() => {
+                      onMobileOpenChange?.(false);
+                      void installPrompt.install();
+                    }}
+                    aria-label="Instalar app"
+                  >
+                    <Download className={cn("h-4 w-4 shrink-0", showLabels && "mr-3")} aria-hidden />
+                    <span className={cn(showLabels ? "" : "sr-only")}>Instalar app</span>
+                  </Button>
+                </TooltipTrigger>
+                {showIconTooltips && (
+                  <TooltipContent side="right" sideOffset={8}>
+                    <p>Instalar app</p>
+                  </TooltipContent>
+                )}
+              </Tooltip>
+            </TooltipProvider>
+          )}
 
           <TooltipProvider delayDuration={300}>
             <Tooltip>

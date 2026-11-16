@@ -30,6 +30,7 @@ import {
 import { MacroRingsRow } from "@/components/student/diet/MacroRing";
 import MealTimelineItem from "@/components/student/diet/MealTimelineItem";
 import MealDetailSheet from "@/components/student/diet/MealDetailSheet";
+import type { MealVariationOption } from "@/components/student/diet/MealVariationsPanel";
 import PremiumEmptyState from "@/components/student/PremiumEmptyState";
 import DietRotationBanner from "@/components/student/diet/DietRotationBanner";
 import StudentRefeicaoLivreCard from "@/components/student/StudentRefeicaoLivreCard";
@@ -37,10 +38,15 @@ import MealPhotoLogSheet from "@/components/student/meal-photo/MealPhotoLogSheet
 import RefeicoesRegistradasList from "@/components/student/meal-photo/RefeicoesRegistradasList";
 import type { EducationalContent } from "@/lib/educational-content";
 import {
-  getRotationForDate,
+  getRotationForDateKey,
   isRotationEnabled,
   type DietRotationConfig,
 } from "@/lib/diet-rotation";
+import { diffDateKeys, isDateKey, relativeDayLabel } from "@/lib/calendar-date";
+import DietDayNavigator, {
+  DIET_DAY_NAV_FUTURE,
+  DIET_DAY_NAV_PAST,
+} from "@/components/diet/DietDayNavigator";
 import { STUDENT_REALTIME_EVENT, type StudentRealtimeDetail } from "@/hooks/useStudentPortalRealtime";
 import FeatureOnboardingPanel, {
   FeatureOnboardingHelpButton,
@@ -63,8 +69,14 @@ const StudentDietView = () => {
     delayMs: 800,
   });
   const [serverDoneKeys, setServerDoneKeys] = useState<Set<string>>(() => new Set());
-  const mealDayRef = useRef(mealCheckDateKey());
+  const [todayKey, setTodayKey] = useState(() => mealCheckDateKey());
+  const todayKeyRef = useRef(todayKey);
+  /** Itens do plano sem as trocas do dia (as trocas valem só para hoje). */
+  const [itensPlano, setItensPlano] = useState<DietItemWithFood[]>([]);
   const [detailMeal, setDetailMeal] = useState<MealGroup | null>(null);
+  const [variations, setVariations] = useState<MealVariationOption[]>([]);
+  const [variationSelectedId, setVariationSelectedId] = useState<string | null>(null);
+  const [variationsLoading, setVariationsLoading] = useState(false);
   const [refeicaoLivreContent, setRefeicaoLivreContent] = useState<EducationalContent | null>(null);
   const [mealPhotoOpen, setMealPhotoOpen] = useState(false);
   const [mealHistoryKey, setMealHistoryKey] = useState(0);
@@ -79,23 +91,6 @@ const StudentDietView = () => {
     }
   }, [searchParams, setSearchParams]);
 
-  /** Reinicia o checklist quando muda o dia (dieta diária). */
-  useEffect(() => {
-    const syncDay = () => {
-      const today = mealCheckDateKey();
-      if (mealDayRef.current !== today) {
-        mealDayRef.current = today;
-        setCheckTick((t) => t + 1);
-      }
-    };
-    syncDay();
-    document.addEventListener("visibilitychange", syncDay);
-    const interval = window.setInterval(syncDay, 60_000);
-    return () => {
-      document.removeEventListener("visibilitychange", syncDay);
-      window.clearInterval(interval);
-    };
-  }, []);
   const [substitutionDialog, setSubstitutionDialog] = useState<{
     open: boolean;
     alimentoAtual: any;
@@ -110,8 +105,8 @@ const StudentDietView = () => {
     itemId: "",
   });
 
-  const loadDietData = useCallback(async () => {
-    setLoading(true);
+  const loadDietData = useCallback(async ({ quiet = false }: { quiet?: boolean } = {}) => {
+    if (!quiet) setLoading(true);
     const alimentosResult = await getAllFoodsSafe();
     const alimentosData =
       alimentosResult.success && Array.isArray(alimentosResult.data) ? alimentosResult.data : [];
@@ -165,6 +160,7 @@ const StudentDietView = () => {
       ...item,
       alimentos: alimentosMap.get(item.alimento_id) || null,
     }));
+    setItensPlano(itensComAlimentos);
 
     // Phase 4: aplicar overrides de substituição do dia (sem mutar o plano do coach)
     const substRes = await apiClient.getRefeicaoSubstituicoesSafe({
@@ -217,18 +213,59 @@ const StudentDietView = () => {
     }
   }, [user, loadDietData]);
 
+  /** Virada do dia (Brasília): novo plano do ciclo, checklist e trocas do novo dia. */
+  useEffect(() => {
+    const syncDay = () => {
+      const today = mealCheckDateKey();
+      if (todayKeyRef.current === today) return;
+      todayKeyRef.current = today;
+      setTodayKey(today);
+      setCheckTick((t) => t + 1);
+      void loadDietData({ quiet: true });
+    };
+    syncDay();
+    document.addEventListener("visibilitychange", syncDay);
+    const interval = window.setInterval(syncDay, 60_000);
+    return () => {
+      document.removeEventListener("visibilitychange", syncDay);
+      window.clearInterval(interval);
+    };
+  }, [loadDietData]);
+
   useEffect(() => {
     const onRealtime = (ev: Event) => {
       const detail = (ev as CustomEvent<StudentRealtimeDetail>).detail;
       if (detail?.type === 'dieta_atualizada') {
-        void loadDietData();
+        void loadDietData({ quiet: true });
       }
     };
     window.addEventListener(STUDENT_REALTIME_EVENT, onRealtime);
     return () => window.removeEventListener(STUDENT_REALTIME_EVENT, onRealtime);
   }, [loadDietData]);
 
-  const mealGroups = useMemo(() => buildMealGroups(itensDieta), [itensDieta]);
+  const diaParam = searchParams.get("dia");
+  const selectedKey = useMemo(() => {
+    if (!isDateKey(diaParam)) return todayKey;
+    const offset = diffDateKeys(todayKey, diaParam);
+    return offset >= -DIET_DAY_NAV_PAST && offset <= DIET_DAY_NAV_FUTURE ? diaParam : todayKey;
+  }, [diaParam, todayKey]);
+  const isViewingToday = selectedKey === todayKey;
+  const dayLabelLower = relativeDayLabel(selectedKey, todayKey).toLowerCase();
+
+  const selectDay = useCallback(
+    (key: string) => {
+      const next = new URLSearchParams(searchParams);
+      if (key === todayKeyRef.current) next.delete("dia");
+      else next.set("dia", key);
+      setSearchParams(next, { replace: true });
+      setDetailMeal(null);
+    },
+    [searchParams, setSearchParams],
+  );
+
+  /** Hoje mostra as trocas do dia; outros dias mostram o plano do coach. */
+  const itensDoDia = isViewingToday ? itensDieta : itensPlano;
+  const mealGroups = useMemo(() => buildMealGroups(itensDoDia), [itensDoDia]);
   const planosCardapio = useMemo(() => getPlanosFromGroups(mealGroups), [mealGroups]);
   const hasMultiplosCardapios = useMemo(
     () => dietHasMultiplosCardapios(mealGroups),
@@ -247,43 +284,102 @@ const StudentDietView = () => {
     };
   }, [dieta]);
 
-  const rotationToday = useMemo(
-    () => (rotationConfig ? getRotationForDate(rotationConfig) : null),
+  const rotationActive = Boolean(rotationConfig && isRotationEnabled(rotationConfig));
+  const rotationSelected = useMemo(
+    () => (rotationConfig && rotationActive ? getRotationForDateKey(rotationConfig, selectedKey) : null),
+    [rotationConfig, rotationActive, selectedKey],
+  );
+  const planoForDay = useCallback(
+    (key: string) => (rotationConfig ? getRotationForDateKey(rotationConfig, key)?.plano ?? null : null),
     [rotationConfig],
   );
-
-  const rotationActive = Boolean(rotationConfig && isRotationEnabled(rotationConfig));
   const showPlanoTabs = useMemo(
     () => !rotationActive && planosCardapio.length >= 2,
     [planosCardapio.length, rotationActive],
   );
 
+  /** Com rotação, o plano vem do dia escolhido; sem rotação, das abas. */
+  const plano: DietPlano = rotationSelected?.plano ?? planoAtivo;
+
+  /** O ciclo pede um plano que o cardápio não tem (ex.: B no ciclo, só A cadastrado). */
+  const rotationMissingMeals =
+    Boolean(rotationSelected) && planosCardapio.length > 0 && !planosCardapio.includes(plano);
+  // Nesse caso só as refeições comuns a todos os dias (sem plano) valem para o dia.
+  const filtrarPorPlano = hasMultiplosCardapios || rotationMissingMeals;
+
   useEffect(() => {
-    if (rotationToday?.plano) {
-      setPlanoAtivo(rotationToday.plano);
+    if (!detailMeal || !dieta?.id || !isViewingToday) {
+      setVariations([]);
+      setVariationSelectedId(null);
+      return;
     }
-  }, [rotationToday?.plano]);
+    const items = getItemsForPlano(detailMeal, plano, {
+      dietHasMultiplosCardapios: filtrarPorPlano,
+    }).filter((item) => !/\(\s*substituto\s*\)/i.test(String(item.refeicao || "")));
+    if (items.length < 2) {
+      setVariations([]);
+      setVariationSelectedId(null);
+      return;
+    }
+    let cancelled = false;
+    setVariationsLoading(true);
+    void apiClient
+      .getRefeicaoVariacoesSafe({
+        date: todayKey,
+        dieta_id: dieta.id,
+        meal_key: detailMeal.key,
+        plano,
+        item_ids: items.map((item) => item.id),
+      })
+      .then((res) => {
+        if (cancelled) return;
+        setVariations(res.success && res.data?.items ? res.data.items : []);
+        setVariationSelectedId(res.success ? res.data?.escolha_id ?? null : null);
+      })
+      .finally(() => {
+        if (!cancelled) setVariationsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detailMeal, dieta?.id, isViewingToday, plano, filtrarPorPlano, todayKey]);
+
+  const handleSelectVariation = async (variacaoId: string) => {
+    if (!detailMeal || !dieta?.id) return;
+    const items = getItemsForPlano(detailMeal, plano, {
+      dietHasMultiplosCardapios: filtrarPorPlano,
+    }).filter((item) => !/\(\s*substituto\s*\)/i.test(String(item.refeicao || "")));
+    const saved = await apiClient.putRefeicaoVariacaoSafe({
+      dieta_id: dieta.id,
+      meal_key: detailMeal.key,
+      plano,
+      date: todayKey,
+      item_ids: items.map((item) => item.id),
+      variacao_id: variacaoId,
+    });
+    if (saved.success) setVariationSelectedId(variacaoId);
+  };
 
   const visibleGroups = useMemo(
     () =>
       mealGroups.filter(
-        (g) => getItemsForPlano(g, planoAtivo, { dietHasMultiplosCardapios: hasMultiplosCardapios }).length > 0,
+        (g) => getItemsForPlano(g, plano, { dietHasMultiplosCardapios: filtrarPorPlano }).length > 0,
       ),
-    [mealGroups, planoAtivo, hasMultiplosCardapios],
+    [mealGroups, plano, filtrarPorPlano],
   );
 
   const macrosPlano = useMemo(() => {
     const itens = visibleGroups.flatMap((g) =>
-      getItemsForPlano(g, planoAtivo, { dietHasMultiplosCardapios: hasMultiplosCardapios }),
+      getItemsForPlano(g, plano, { dietHasMultiplosCardapios: filtrarPorPlano }),
     );
     return calcularMacros(itens);
-  }, [visibleGroups, planoAtivo, hasMultiplosCardapios]);
+  }, [visibleGroups, plano, filtrarPorPlano]);
 
   const completedCount = useMemo(() => {
     if (!dieta?.id) return 0;
     void checkTick;
-    return countCompletedMeals(dieta.id, visibleGroups, planoAtivo, serverDoneKeys);
-  }, [dieta?.id, visibleGroups, planoAtivo, checkTick, serverDoneKeys]);
+    return countCompletedMeals(dieta.id, visibleGroups, plano, serverDoneKeys);
+  }, [dieta?.id, visibleGroups, plano, checkTick, serverDoneKeys]);
 
   const progressPct =
     visibleGroups.length > 0 ? Math.round((completedCount / visibleGroups.length) * 100) : 0;
@@ -291,18 +387,18 @@ const StudentDietView = () => {
   const firstPendingIdx = useMemo(() => {
     if (!dieta?.id) return 0;
     return visibleGroups.findIndex((g) => {
-      if (serverDoneKeys.has(`${g.key}::${planoAtivo}`)) return false;
-      return !readMealDone(dieta.id, g.key, planoAtivo);
+      if (serverDoneKeys.has(`${g.key}::${plano}`)) return false;
+      return !readMealDone(dieta.id, g.key, plano);
     });
-  }, [dieta?.id, visibleGroups, planoAtivo, checkTick, serverDoneKeys]);
+  }, [dieta?.id, visibleGroups, plano, checkTick, serverDoneKeys]);
 
   const toggleMealDone = (group: MealGroup) => {
     if (!dieta?.id) return;
-    const key = `${group.key}::${planoAtivo}`;
+    const key = `${group.key}::${plano}`;
     const current =
-      serverDoneKeys.has(key) || readMealDone(dieta.id, group.key, planoAtivo);
+      serverDoneKeys.has(key) || readMealDone(dieta.id, group.key, plano);
     const next = !current;
-    writeMealDone(dieta.id, group.key, planoAtivo, next);
+    writeMealDone(dieta.id, group.key, plano, next);
     setServerDoneKeys((prev) => {
       const copy = new Set(prev);
       if (next) copy.add(key);
@@ -315,7 +411,7 @@ const StudentDietView = () => {
       .putRefeicaoConclusaoSafe({
         dieta_id: dieta.id,
         meal_key: group.key,
-        plano: planoAtivo,
+        plano: plano,
         concluido: next,
         data_ref: mealCheckDateKey(),
         origem: "ui",
@@ -323,7 +419,7 @@ const StudentDietView = () => {
       .then((res) => {
         if (!res.success) {
           // reverte cache optimista em falha
-          writeMealDone(dieta.id, group.key, planoAtivo, current);
+          writeMealDone(dieta.id, group.key, plano, current);
           setServerDoneKeys((prev) => {
             const copy = new Set(prev);
             if (current) copy.add(key);
@@ -377,7 +473,7 @@ const StudentDietView = () => {
         unidade_substituto: substitutionDialog.unidadeQuantidade || "g",
         quantidade_original: substitutionDialog.quantidadeAtual,
         unidade_original: substitutionDialog.unidadeQuantidade || "g",
-        plano: planoAtivo,
+        plano: plano,
         data_ref: mealCheckDateKey(),
         origem: "ui",
       });
@@ -426,7 +522,30 @@ const StudentDietView = () => {
         <FeatureOnboardingHelpButton onClick={dietaOnboarding.reopen} label="Como usar a dieta" />
       </div>
 
-      {rotationToday && <DietRotationBanner info={rotationToday} />}
+      {rotationSelected ? (
+        <div className="space-y-3" data-onboarding="dieta-plano">
+          <DietDayNavigator
+            todayKey={todayKey}
+            selectedKey={selectedKey}
+            onSelect={selectDay}
+            planoForDay={planoForDay}
+            selectedDetail={
+              rotationSelected.beforeStart
+                ? `Plano ${rotationSelected.plano} · ciclo ainda não começou`
+                : `Plano ${rotationSelected.plano} · dia ${rotationSelected.dayInBlock} de ${rotationSelected.blockLength}`
+            }
+          />
+          <DietRotationBanner
+            info={rotationSelected}
+            dayLabel={relativeDayLabel(selectedKey, todayKey)}
+            missingMealsMessage={
+              rotationMissingMeals
+                ? `O Plano ${plano} ainda não tem refeições cadastradas. Fale com o seu coach.`
+                : null
+            }
+          />
+        </div>
+      ) : null}
 
       {/* Um bloco: regras + um CTA de foto + histórico (sem cartões/CTAs duplicados). */}
       {dieta.refeicao_livre_ativa ? (
@@ -490,14 +609,18 @@ const StudentDietView = () => {
       <Card className="shadow-card">
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between gap-2">
-            <CardTitle className="text-base">Progresso do dia</CardTitle>
+            <CardTitle className="text-base">
+              {isViewingToday ? "Progresso do dia" : `Resumo · ${dayLabelLower}`}
+            </CardTitle>
             <Badge variant="premium">
-              {completedCount}/{visibleGroups.length} refeições
+              {isViewingToday
+                ? `${completedCount}/${visibleGroups.length} refeições`
+                : `${visibleGroups.length} refeiç${visibleGroups.length === 1 ? "ão" : "ões"}`}
             </Badge>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
-          <Progress value={progressPct} className="h-2" />
+          {isViewingToday ? <Progress value={progressPct} className="h-2" /> : null}
           <MacroRingsRow macros={macrosPlano} />
         </CardContent>
       </Card>
@@ -510,23 +633,34 @@ const StudentDietView = () => {
 
       <div className="min-w-0" data-onboarding="dieta-refeicoes">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Refeições de hoje
+          Refeições {isViewingToday ? "de hoje" : `· ${dayLabelLower}`}
         </h2>
+        {!isViewingToday ? (
+          <p className="mb-3 text-xs text-muted-foreground">
+            Pré-visualização do cardápio. Marcar refeições e trocar alimentos fica disponível no próprio dia.
+          </p>
+        ) : null}
         {visibleGroups.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nenhum item neste plano.</p>
+          <div className="rounded-xl border border-dashed border-border/70 p-4 text-sm text-muted-foreground">
+            {rotationMissingMeals
+              ? `Sem refeições cadastradas para o Plano ${plano} neste dia.`
+              : "Nenhuma refeição cadastrada neste plano."}{" "}
+            Em caso de dúvida, fale com o seu coach.
+          </div>
         ) : (
           visibleGroups.map((group, idx) => (
             <MealTimelineItem
-              key={`${group.key}-${planoAtivo}`}
+              key={`${group.key}-${plano}`}
               group={group}
-              plano={planoAtivo}
-              dietHasMultiplosCardapios={hasMultiplosCardapios}
+              plano={plano}
+              dietHasMultiplosCardapios={filtrarPorPlano}
               done={
-                serverDoneKeys.has(`${group.key}::${planoAtivo}`) ||
-                readMealDone(dieta.id, group.key, planoAtivo)
+                serverDoneKeys.has(`${group.key}::${plano}`) ||
+                readMealDone(dieta.id, group.key, plano)
               }
               isLast={idx === visibleGroups.length - 1}
-              isCurrent={idx === firstPendingIdx}
+              isCurrent={isViewingToday && idx === firstPendingIdx}
+              readOnly={!isViewingToday}
               onToggleDone={() => toggleMealDone(group)}
               onOpenDetail={() => setDetailMeal(group)}
             />
@@ -563,9 +697,19 @@ const StudentDietView = () => {
         onOpenChange={(open) => !open && setDetailMeal(null)}
         mealName={detailMeal?.displayName ?? ""}
         group={detailMeal}
-        plano={planoAtivo}
-        dietHasMultiplosCardapios={hasMultiplosCardapios}
-        onSubstituir={handleVerSubstitutos}
+        plano={plano}
+        dietHasMultiplosCardapios={filtrarPorPlano}
+        onSubstituir={isViewingToday ? handleVerSubstitutos : undefined}
+        variations={isViewingToday ? variations : []}
+        variationSelectedId={isViewingToday ? variationSelectedId : null}
+        variationsLoading={isViewingToday && variationsLoading}
+        onSelectVariation={
+          isViewingToday
+            ? (id) => {
+                void handleSelectVariation(id);
+              }
+            : undefined
+        }
       />
 
       <FoodSubstitutionDialog

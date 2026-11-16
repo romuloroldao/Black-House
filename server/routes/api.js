@@ -20,6 +20,7 @@ const resolveCoachOrFailMiddleware = require('../middleware/resolveCoachOrFail')
 const validateRole = require('../middleware/validateRole');
 const createAlimentosRouter = require('./alimentos');
 const createFoodCatalogRouter = require('./food-catalog');
+const createFoodCategoriesRouter = require('./food-categories');
 const createUploadsRouter = require('./uploads');
 const createEducationalContentsRouter = require('./educational-contents');
 const createRefeicoesRegistradasRouter = require('./refeicoes-registradas');
@@ -32,6 +33,7 @@ const { getCoachFinancialPolicy, recalculateStudentAccess } = require('../financ
 const { registerCoachWebhook } = require('../financial/sync/webhook-registration');
 const { getCoachAsaasService } = require('../financial/coach-asaas');
 const { afterTableMutation } = require('../services/return-reminder.service');
+const { getPlanChangeNotifier } = require('../services/plan-change-notification.service');
 const { parseWorkoutValidityBody } = require('../utils/workout-validity');
 const {
   isMeaningfulCoachResposta,
@@ -51,6 +53,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
   const resolveAlunoOrFailWithPayment = resolveAlunoOrFailMiddleware(pool, { checkPayment: true });
   const resolveCoachOrFail = resolveCoachOrFailMiddleware(pool);
   const requireCompleteProfile = require('../middleware/requireCompleteProfile')(pool);
+  const planChangeNotifier = getPlanChangeNotifier(pool);
 
   /** Exclui fichas de utilizadores com papel coach/admin (evita coaches na gestão de alunos). */
   const EXCLUDE_STAFF_ALUNOS_SQL = `
@@ -222,6 +225,7 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
   // ROTAS: ALIMENTOS (montadas antes de rotas paramétricas)
   router.use('/alimentos', createAlimentosRouter(pool, authenticate, domainSchemaGuard));
   router.use('/food-catalog', createFoodCatalogRouter(pool, authenticate, domainSchemaGuard));
+  router.use('/food-categories', createFoodCategoriesRouter(pool, authenticate, domainSchemaGuard));
 
   // ROTAS: UPLOADS — PostgreSQL + ficheiros em disco (sem Supabase Storage)
   router.use('/uploads', createUploadsRouter(pool, authenticate));
@@ -5026,8 +5030,19 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           });
         }
 
-        const { resposta } = req.body || {};
+        const { resposta, data_retorno: dataRetornoRaw } = req.body || {};
         const respostaTrimmed = resposta != null ? String(resposta).trim() : '';
+        let dataRetorno = null;
+        if (dataRetornoRaw != null && String(dataRetornoRaw).trim() !== '') {
+          const iso = String(dataRetornoRaw).trim().slice(0, 10);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+            return res.status(400).json({
+              error: 'data_retorno deve ser uma data AAAA-MM-DD',
+              error_code: 'INVALID_DATA_RETORNO',
+            });
+          }
+          dataRetorno = iso;
+        }
         if (!respostaTrimmed) {
           return res.status(400).json({
             error: 'resposta é obrigatória',
@@ -5064,15 +5079,35 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           }
         }
 
+        const hasReturnCol = dbCols.has('data_retorno');
         const upd = await pool.query(
-          `UPDATE public.weekly_checkins
-           SET coach_resposta = $1,
-               coach_respondido_em = COALESCE(coach_respondido_em, now()),
-               coach_respondido_por = COALESCE(coach_respondido_por, $2)
-           WHERE id = $3
-           RETURNING *`,
-          [respostaTrimmed, req.user.id, id],
+          hasReturnCol
+            ? `UPDATE public.weekly_checkins
+               SET coach_resposta = $1,
+                   coach_respondido_em = COALESCE(coach_respondido_em, now()),
+                   coach_respondido_por = COALESCE(coach_respondido_por, $2),
+                   data_retorno = COALESCE($4::date, data_retorno)
+               WHERE id = $3
+               RETURNING *`
+            : `UPDATE public.weekly_checkins
+               SET coach_resposta = $1,
+                   coach_respondido_em = COALESCE(coach_respondido_em, now()),
+                   coach_respondido_por = COALESCE(coach_respondido_por, $2)
+               WHERE id = $3
+               RETURNING *`,
+          hasReturnCol
+            ? [respostaTrimmed, req.user.id, id, dataRetorno]
+            : [respostaTrimmed, req.user.id, id],
         );
+
+        if (hasReturnCol && dataRetorno) {
+          try {
+            const { applyCheckinReturnDate } = require('../services/return-reminder.service');
+            await applyCheckinReturnDate(pool, existing.rows[0].aluno_id, dataRetorno);
+          } catch (syncErr) {
+            console.warn('[checkin] return date sync failed:', syncErr?.message || syncErr);
+          }
+        }
 
         const checkinRow = upd.rows[0];
         const alunoId = existing.rows[0].aluno_id;
@@ -6309,6 +6344,16 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     'exercicios',
   ]);
 
+  /** Campos do template que o aluno vê no treino efectivo. */
+  const TREINO_STUDENT_VISIBLE_FIELDS = ['nome', 'descricao', 'duracao', 'exercicios'];
+
+  function treinoStudentVisibleChanged(before, after) {
+    if (!before || !after) return false;
+    return TREINO_STUDENT_VISIBLE_FIELDS.some(
+      (k) => JSON.stringify(before[k] ?? null) !== JSON.stringify(after[k] ?? null),
+    );
+  }
+
   async function fetchTreinoById(treinoId) {
     const r = await pool.query('SELECT * FROM public.treinos WHERE id = $1 LIMIT 1', [treinoId]);
     return r.rows[0] || null;
@@ -6334,6 +6379,82 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
     }
     return { treino, allowed: false, reason: 'FORBIDDEN' };
   }
+
+  // GET /api/alunos/:alunoId/avisos-alteracoes — estado real dos avisos de dieta/treino ao aluno
+  router.get(
+    '/alunos/:alunoId/avisos-alteracoes',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin', 'assistant']),
+    attachCoachScope,
+    validateUUIDParam('alunoId'),
+    async (req, res) => {
+      try {
+        const { alunoId } = req.params;
+        if (req.user.role !== 'admin') {
+          const ok = await assertCoachCanAccessAluno(pool, req.coachScope, alunoId);
+          if (!ok) return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+        }
+        const items = await planChangeNotifier.listForAluno(alunoId, { limit: req.query.limit });
+        return res.json({ items });
+      } catch (error) {
+        console.error('Erro ao listar avisos de alteração:', error);
+        return res.status(500).json({ error: 'Erro ao listar avisos', error_code: 'AVISOS_LIST_ERROR' });
+      }
+    },
+  );
+
+  // POST /api/avisos-alteracoes/:id/reprocessar — volta a pôr na fila um aviso que falhou
+  router.post(
+    '/avisos-alteracoes/:id/reprocessar',
+    authenticate,
+    domainSchemaGuard,
+    validateRole(['coach', 'admin']),
+    attachCoachScope,
+    validateUUIDParam('id'),
+    async (req, res) => {
+      try {
+        const found = await pool.query(
+          'SELECT id, aluno_id, status FROM public.plan_change_notifications WHERE id = $1',
+          [req.params.id],
+        );
+        const row = found.rows[0];
+        if (!row) return res.status(404).json({ error: 'Aviso não encontrado', error_code: 'NOT_FOUND' });
+        if (req.user.role !== 'admin') {
+          const ok = await assertCoachCanAccessAluno(pool, req.coachScope, row.aluno_id);
+          if (!ok) return res.status(403).json({ error: 'Sem permissão', error_code: 'FORBIDDEN' });
+        }
+        if (row.status !== 'failed') {
+          return res.status(409).json({
+            error: 'Só avisos com falha podem ser reprocessados',
+            error_code: 'NOT_FAILED',
+            status: row.status,
+          });
+        }
+        // Uma falha desfaz a transacção inteira (aviso no app + e-mail), por isso repetir não duplica.
+        const updated = await pool.query(
+          `UPDATE public.plan_change_notifications
+           SET status = 'pending', attempts = 0, in_app_status = 'pending', due_at = now(), updated_at = now()
+           WHERE id = $1 AND status = 'failed'
+           RETURNING id`,
+          [row.id],
+        );
+        if (updated.rows.length === 0) {
+          return res.status(409).json({ error: 'Aviso já reprocessado', error_code: 'NOT_FAILED' });
+        }
+        return res.json({ id: row.id, status: 'pending' });
+      } catch (error) {
+        if (error.code === '23505') {
+          return res.status(409).json({
+            error: 'Já existe um aviso pendente para este aluno; ele será enviado em instantes',
+            error_code: 'PENDING_EXISTS',
+          });
+        }
+        console.error('Erro ao reprocessar aviso:', error);
+        return res.status(500).json({ error: 'Erro ao reprocessar aviso', error_code: 'AVISO_RETRY_ERROR' });
+      }
+    },
+  );
 
   // POST /api/alunos-treinos/assign — vincula template ao aluno (sem clonar)
   router.post(
@@ -6443,6 +6564,14 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           console.warn('[treino] return_reminder hook failed:', hookErr?.message || hookErr);
         }
 
+        await planChangeNotifier.schedule({
+          dominio: 'treino',
+          alunoId,
+          entityId: linkResult.rows[0].id,
+          coachId: req.user.id,
+          source: 'api.alunos-treinos.assign',
+        });
+
         const treinoResolvido = await resolveEffectiveWorkout(pool, linkResult.rows[0].id);
 
         return res.status(201).json({
@@ -6541,6 +6670,13 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
         }
 
         const treino = await savePersonalizationFromExercises(pool, link.id, body.exercicios);
+        await planChangeNotifier.schedule({
+          dominio: 'treino',
+          alunoId: link.aluno_id,
+          entityId: link.id,
+          coachId: req.user.id,
+          source: 'api.alunos-treinos.personalizacao',
+        });
         return res.json(treino);
       } catch (error) {
         if (error.code === 'LEGACY_COPY') {
@@ -6606,6 +6742,16 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
           await afterTableMutation(pool, 'alunos_treinos', updated.rows[0]);
         } catch (hookErr) {
           console.warn('[treino] return_reminder hook failed:', hookErr?.message || hookErr);
+        }
+
+        if (updated.rows[0]?.aluno_id) {
+          await planChangeNotifier.schedule({
+            dominio: 'treino',
+            alunoId: updated.rows[0].aluno_id,
+            entityId: updated.rows[0].id,
+            coachId: req.user.id,
+            source: 'api.alunos-treinos.validade',
+          });
         }
 
         const fresh = await pool.query('SELECT * FROM public.alunos_treinos WHERE id = $1', [link.id]);
@@ -6930,7 +7076,8 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
       const { id } = req.params;
       const body = req.body || {};
       const existing = await pool.query(
-        'SELECT id, aluno_id FROM public.treinos WHERE id = $1 AND coach_id = $2 LIMIT 1',
+        `SELECT id, aluno_id, nome, descricao, duracao, exercicios
+         FROM public.treinos WHERE id = $1 AND coach_id = $2 LIMIT 1`,
         [id, req.user.id],
       );
       if (existing.rows.length === 0) {
@@ -6998,6 +7145,12 @@ module.exports = function (pool, authenticate, domainSchemaGuard, notificationSe
          RETURNING *`,
         values,
       );
+      if (treinoStudentVisibleChanged(existing.rows[0], updateResult.rows[0])) {
+        await planChangeNotifier.scheduleForTreinoTemplate(id, {
+          coachId: req.user.id,
+          source: 'api.treinos.patch',
+        });
+      }
       return res.json(updateResult.rows[0]);
     } catch (error) {
       console.error('Erro ao actualizar treino:', error);

@@ -120,6 +120,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
   const [refeicaoLivreObservacao, setRefeicaoLivreObservacao] = useState('');
   const [refeicaoLivreContentId, setRefeicaoLivreContentId] = useState<string | null>(null);
   const [editingDietaId, setEditingDietaId] = useState<string | null>(null);
+  const [editingDietaCreatedAt, setEditingDietaCreatedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
@@ -230,6 +231,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
       );
       setDiasValidade('');
       setRotacao(dietRotationFromRow(dieta));
+      setEditingDietaCreatedAt(dieta.created_at || null);
       setRefeicaoLivreAtiva(Boolean(dieta.refeicao_livre_ativa));
       setRefeicaoLivreObservacao(dieta.refeicao_livre_observacao || '');
       setRefeicaoLivreContentId(dieta.refeicao_livre_content_id || null);
@@ -445,7 +447,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
 
       toast({
         title: "Sucesso!",
-        description: editingDietaId ? "Dieta atualizada com sucesso" : "Dieta criada com sucesso"
+        description: `${editingDietaId ? "Dieta atualizada" : "Dieta criada"}. O aviso ao aluno é enviado em instantes — acompanhe o estado na ficha do aluno, aba Nutrição.`,
       });
 
       // Se estamos editando, voltar para a lista de dietas
@@ -651,6 +653,7 @@ const DietCreator = ({ dietaId }: DietCreatorProps) => {
         refeicaoLabel={refeicaoLabel}
         syncItensRefeicao={syncItensRefeicao}
         emptyRefeicao={emptyRefeicao}
+        rotationAnchorFallback={editingDietaCreatedAt}
       />
 
       <div className="flex justify-end">

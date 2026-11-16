@@ -20,6 +20,10 @@ import EducationalContentManager from "./educational/EducationalContentManager";
 import CoachCheckinInbox from "./coach/CoachCheckinInbox";
 import FinancialRouter from "./financial/FinancialRouter";
 import { useCoachPortalRealtime } from "@/hooks/useCoachPortalRealtime";
+import { useSafeTopHandled } from "@/hooks/useSafeTopHandled";
+import { CoachBottomNav } from "./coach/CoachBottomNav";
+import { isPhone } from "@/lib/device";
+import { cn } from "@/lib/utils";
 import {
   isFinancialPath,
   pathToFinancialTabId,
@@ -28,8 +32,29 @@ import {
   FINANCIAL_PATHS,
 } from "@/lib/financial-routes";
 
+const SCREEN_TITLES: Record<string, string> = {
+  dashboard: "Início",
+  students: "Alunos",
+  workouts: "Treinos",
+  videos: "Galeria de vídeos",
+  "educational-contents": "Conteúdos educativos",
+  nutrition: "Nutrição",
+  messages: "Mensagens",
+  "check-ins": "Check-ins",
+  calendar: "Agenda",
+  reports: "Relatórios de progresso",
+  classes: "Turmas",
+  announcements: "Avisos em massa",
+  events: "Eventos",
+  "user-linking": "Vincular usuários",
+  analytics: "Análises",
+  settings: "Configurações",
+};
+
 const AppLayout = () => {
   useCoachPortalRealtime();
+  const phone = isPhone();
+  useSafeTopHandled(phone);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
@@ -178,6 +203,27 @@ const AppLayout = () => {
                 <div className="text-center">
                   <p className="text-muted-foreground">Carregando...</p>
                 </div>
+              </div>
+            );
+          }
+
+          if (phone) {
+            const screenTitle = isFinancialPath(location.pathname)
+              ? "Financeiro"
+              : SCREEN_TITLES[activeTab] ?? "Black House";
+            return (
+              <div className="flex h-screen bg-background overflow-hidden">
+                <Sidebar activeTab={activeTab} onTabChange={handleTabChange} hideMobileTrigger />
+                <main className={cn("app-main-with-bottom-nav flex-1 overflow-auto overflow-x-hidden")}>
+                  <header className="app-compact-header sticky top-0 z-30 flex items-center gap-2 border-b border-border bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/90">
+                    <p className="min-w-0 flex-1 truncate text-base font-semibold">{screenTitle}</p>
+                    <NotificationsPopover onNavigate={handleTabChange} />
+                  </header>
+                  <div key={isFinancialPath(location.pathname) ? location.pathname : activeTab} className="app-screen-enter">
+                    {content}
+                  </div>
+                </main>
+                <CoachBottomNav activeTab={activeTab} onTabChange={handleTabChange} />
               </div>
             );
           }

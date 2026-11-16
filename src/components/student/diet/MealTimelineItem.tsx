@@ -11,6 +11,8 @@ type MealTimelineItemProps = {
   done: boolean;
   isLast?: boolean;
   isCurrent?: boolean;
+  /** Dia que não é hoje: mostra o cardápio sem checklist. */
+  readOnly?: boolean;
   onToggleDone: () => void;
   onOpenDetail: () => void;
 };
@@ -22,6 +24,7 @@ const MealTimelineItem = ({
   done,
   isLast,
   isCurrent,
+  readOnly = false,
   onToggleDone,
   onOpenDetail,
 }: MealTimelineItemProps) => {
@@ -41,28 +44,37 @@ const MealTimelineItem = ({
           aria-hidden
         />
       )}
-      <button
-        type="button"
-        aria-label={done ? "Marcar refeição como pendente" : "Marcar refeição como concluída"}
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggleDone();
-        }}
-        className={cn(
-          "relative z-10 mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 transition-colors motion-reduce:transition-none",
-          done
-            ? "border-primary bg-primary text-primary-foreground"
-            : "border-muted-foreground/40 bg-background hover:border-primary/60",
-        )}
-      >
-        {done ? <Check className="h-4 w-4" strokeWidth={3} /> : <Circle className="h-4 w-4 text-muted-foreground/50" />}
-      </button>
+      {readOnly ? (
+        <span
+          className="relative z-10 mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-dashed border-muted-foreground/30 bg-background"
+          aria-hidden
+        >
+          <Circle className="h-4 w-4 text-muted-foreground/40" />
+        </span>
+      ) : (
+        <button
+          type="button"
+          aria-label={done ? "Marcar refeição como pendente" : "Marcar refeição como concluída"}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleDone();
+          }}
+          className={cn(
+            "relative z-10 mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 transition-colors motion-reduce:transition-none",
+            done
+              ? "border-primary bg-primary text-primary-foreground"
+              : "border-muted-foreground/40 bg-background hover:border-primary/60",
+          )}
+        >
+          {done ? <Check className="h-4 w-4" strokeWidth={3} /> : <Circle className="h-4 w-4 text-muted-foreground/50" />}
+        </button>
+      )}
 
       <button
         type="button"
         className={cn(
           "min-w-0 flex-1 rounded-xl border p-3 text-left transition-colors motion-reduce:transition-none",
-          isCurrent && !done
+          isCurrent && !done && !readOnly
             ? "border-primary/50 bg-primary/5 shadow-sm"
             : "border-border/60 bg-card hover:bg-muted/30",
           done && "opacity-80",

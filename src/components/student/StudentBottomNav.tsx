@@ -40,6 +40,7 @@ const StudentBottomNav = ({ activeTab, onTabChange, coachBadge = 0 }: StudentBot
 
   return (
     <nav
+      data-app-bottom-nav
       className="student-bottom-nav student-bottom-nav-safe max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:z-40 shrink-0 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/90 md:hidden"
       aria-label="Navegação principal"
     >

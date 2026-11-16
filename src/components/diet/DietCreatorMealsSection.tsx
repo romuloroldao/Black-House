@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -64,10 +64,12 @@ import {
 import type { DietRotationFormState } from "@/components/DietRotationFields";
 import DietRotationBanner from "@/components/student/diet/DietRotationBanner";
 import {
-  getRotationForDate,
+  getRotationForDateKey,
   isRotationEnabled,
   type DietRotationConfig,
 } from "@/lib/diet-rotation";
+import { civilDateKey, relativeDayLabel } from "@/lib/calendar-date";
+import DietDayNavigator from "@/components/diet/DietDayNavigator";
 
 export type ItemRefeicaoEditor = {
   id: string;
@@ -104,6 +106,8 @@ export type DietCreatorMealsSectionProps = {
   refeicaoLabel: (refeicao: RefeicaoEditor) => string;
   syncItensRefeicao: (refeicao: RefeicaoEditor) => RefeicaoEditor;
   emptyRefeicao: (nome: string) => RefeicaoEditor;
+  /** created_at da dieta em edição: âncora do ciclo quando não há data de início (igual ao aluno). */
+  rotationAnchorFallback?: string | null;
 };
 
 type ViewMode = "edit" | "preview";
@@ -516,12 +520,16 @@ function PreviewMealsList({
   rotacao,
   planoAtivo,
   onPlanoChange,
+  rotationAnchorFallback,
 }: {
   refeicoes: RefeicaoEditor[];
   rotacao: DietRotationFormState;
   planoAtivo: DietPlano;
   onPlanoChange: (p: DietPlano) => void;
+  rotationAnchorFallback: string | null;
 }) {
+  const todayKey = civilDateKey();
+  const [selectedKey, setSelectedKey] = useState(todayKey);
   const previewItens = useMemo(() => refeicoesToPreviewItens(refeicoes), [refeicoes]);
   const mealGroups = useMemo(() => buildMealGroups(previewItens), [previewItens]);
   const planosCardapio = useMemo(() => getPlanosFromGroups(mealGroups), [mealGroups]);
@@ -537,50 +545,83 @@ function PreviewMealsList({
       dias: parseInt(b.dias, 10) || 0,
     })),
     rotacao_data_inicio: rotacao.rotacao_data_inicio || null,
-  }), [rotacao]);
+    created_at: rotationAnchorFallback,
+  }), [rotacao, rotationAnchorFallback]);
 
-  const rotationToday = useMemo(
-    () => (isRotationEnabled(rotationConfig) ? getRotationForDate(rotationConfig) : null),
+  const rotationEnabled = isRotationEnabled(rotationConfig);
+  const rotationSelected = useMemo(
+    () => (rotationEnabled ? getRotationForDateKey(rotationConfig, selectedKey) : null),
+    [rotationConfig, rotationEnabled, selectedKey],
+  );
+  const planoForDay = useCallback(
+    (key: string) => getRotationForDateKey(rotationConfig, key)?.plano ?? null,
     [rotationConfig],
   );
 
-  const rotationActive = Boolean(rotationToday);
-  const effectivePlano = rotationToday?.plano ?? planoAtivo;
+  const rotationActive = Boolean(rotationSelected);
+  const effectivePlano = rotationSelected?.plano ?? planoAtivo;
   const showPlanoTabs = !rotationActive && planosCardapio.length >= 2;
+  const rotationMissingMeals =
+    rotationActive && planosCardapio.length > 0 && !planosCardapio.includes(effectivePlano);
+  const filtrarPorPlano = hasMulti || rotationMissingMeals;
 
   const visibleGroups = useMemo(
     () =>
       mealGroups.filter(
         (g) =>
-          getItemsForPlano(g, effectivePlano, { dietHasMultiplosCardapios: hasMulti }).length > 0,
+          getItemsForPlano(g, effectivePlano, { dietHasMultiplosCardapios: filtrarPorPlano }).length > 0,
       ),
-    [mealGroups, effectivePlano, hasMulti],
+    [mealGroups, effectivePlano, filtrarPorPlano],
   );
 
   const macros = useMemo(() => {
     const itens = visibleGroups.flatMap((g) =>
-      getItemsForPlano(g, effectivePlano, { dietHasMultiplosCardapios: hasMulti }),
+      getItemsForPlano(g, effectivePlano, { dietHasMultiplosCardapios: filtrarPorPlano }),
     );
     return calcularMacros(itens);
-  }, [visibleGroups, effectivePlano, hasMulti]);
+  }, [visibleGroups, effectivePlano, filtrarPorPlano]);
 
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-dashed border-primary/30 bg-primary/[0.03] px-4 py-3">
         <p className="text-sm font-medium flex items-center gap-2">
           <Eye className="h-4 w-4 text-primary" />
-          Pré-visualização — como o aluno vê hoje
+          Pré-visualização — como o aluno vê{" "}
+          {rotationActive ? relativeDayLabel(selectedKey, todayKey).toLowerCase() : "hoje"}
         </p>
         <p className="text-xs text-muted-foreground mt-1">
           {rotationActive
-            ? "Com rotação activa, o aluno vê automaticamente o cardápio do dia."
+            ? "Com rotação activa, o aluno vê automaticamente o cardápio de cada dia. Use as setas para conferir os próximos dias."
             : hasMulti
               ? "Alterne entre os planos para rever cada cardápio completo."
               : "Refeições sem cardápio aparecem todos os dias."}
         </p>
       </div>
 
-      {rotationToday ? <DietRotationBanner info={rotationToday} /> : null}
+      {rotationSelected ? (
+        <>
+          <DietDayNavigator
+            todayKey={todayKey}
+            selectedKey={selectedKey}
+            onSelect={setSelectedKey}
+            planoForDay={planoForDay}
+            selectedDetail={
+              rotationSelected.beforeStart
+                ? `Plano ${rotationSelected.plano} · ciclo ainda não começou`
+                : `Plano ${rotationSelected.plano} · dia ${rotationSelected.dayInBlock} de ${rotationSelected.blockLength}`
+            }
+          />
+          <DietRotationBanner
+            info={rotationSelected}
+            dayLabel={relativeDayLabel(selectedKey, todayKey)}
+            missingMealsMessage={
+              rotationMissingMeals
+                ? `O ciclo pede o Plano ${effectivePlano} neste dia, mas não há refeições com esse plano. O aluno verá só as refeições comuns.`
+                : null
+            }
+          />
+        </>
+      ) : null}
 
       {showPlanoTabs ? (
         <Tabs
@@ -606,10 +647,10 @@ function PreviewMealsList({
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {(
           [
-            ["Calorias", `${Math.round(macros.kcal)}`, "text-primary"],
-            ["Proteínas", `${Math.round(macros.proteinas)}g`, "text-primary"],
-            ["Carboidratos", `${Math.round(macros.carboidratos)}g`, "text-warning"],
-            ["Lipídios", `${Math.round(macros.lipidios)}g`, "text-destructive"],
+            ["Calorias", `${Math.round(macros.totalCalorias)}`, "text-primary"],
+            ["Proteínas", `${Math.round(macros.totalProteinas)}g`, "text-primary"],
+            ["Carboidratos", `${Math.round(macros.totalCarboidratos)}g`, "text-warning"],
+            ["Lipídios", `${Math.round(macros.totalLipidios)}g`, "text-destructive"],
           ] as const
         ).map(([label, value, color]) => (
           <div key={label} className="rounded-lg border bg-muted/30 p-3 text-center">
@@ -627,7 +668,7 @@ function PreviewMealsList({
         <div className="space-y-3">
           {visibleGroups.map((group) => {
             const items = getItemsForPlano(group, effectivePlano, {
-              dietHasMultiplosCardapios: hasMulti,
+              dietHasMultiplosCardapios: filtrarPorPlano,
             });
             return (
               <Card key={group.key} className="overflow-hidden">
@@ -678,6 +719,7 @@ export function DietCreatorMealsSection({
   refeicaoLabel,
   syncItensRefeicao,
   emptyRefeicao,
+  rotationAnchorFallback = null,
 }: DietCreatorMealsSectionProps) {
   const { toast } = useToast();
   const [viewMode, setViewMode] = useState<ViewMode>("edit");
@@ -957,6 +999,7 @@ export function DietCreatorMealsSection({
           rotacao={rotacao}
           planoAtivo={previewPlano}
           onPlanoChange={setPreviewPlano}
+          rotationAnchorFallback={rotationAnchorFallback}
         />
       ) : (
         <div className="space-y-5">

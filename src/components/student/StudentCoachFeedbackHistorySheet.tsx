@@ -56,6 +56,13 @@ function FeedbackHistoryItem({
   const respondedLabel = respondedAt
     ? format(new Date(respondedAt), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })
     : null;
+  const returnLabel = checkin.data_retorno
+    ? format(
+        new Date(`${String(checkin.data_retorno).slice(0, 10)}T12:00:00`),
+        "dd/MM/yyyy",
+        { locale: ptBR },
+      )
+    : null;
 
   if (!needsCollapse) {
     return (
@@ -68,6 +75,11 @@ function FeedbackHistoryItem({
           )}
           {respondedLabel && (
             <span className="text-xs text-muted-foreground">Respondido em {respondedLabel}</span>
+          )}
+          {returnLabel && (
+            <Badge variant="secondary" className="text-xs">
+              Retorno {returnLabel}
+            </Badge>
           )}
         </div>
         <p className="whitespace-pre-wrap text-sm leading-relaxed">{resposta}</p>
@@ -91,6 +103,11 @@ function FeedbackHistoryItem({
               )}
               {respondedLabel && (
                 <span className="text-xs text-muted-foreground">Respondido em {respondedLabel}</span>
+              )}
+              {returnLabel && (
+                <Badge variant="secondary" className="text-xs">
+                  Retorno {returnLabel}
+                </Badge>
               )}
             </div>
             <p className="line-clamp-3 whitespace-pre-wrap text-sm leading-relaxed">{preview}</p>

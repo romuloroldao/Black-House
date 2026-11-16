@@ -26,12 +26,26 @@ export const API_CONTRACT = {
     treinoAgendaMe: () => `${API_BASE}/api/alunos/me/treino-agenda`,
     treinoAgenda: (alunoId: string) =>
       `${API_BASE}/api/alunos/${encodeURIComponent(alunoId)}/treino-agenda`,
+    avisosAlteracoes: (alunoId: string) =>
+      `${API_BASE}/api/alunos/${encodeURIComponent(alunoId)}/avisos-alteracoes`,
+    reprocessarAvisoAlteracao: (avisoId: string) =>
+      `${API_BASE}/api/avisos-alteracoes/${encodeURIComponent(avisoId)}/reprocessar`,
     notificationPreferences: () => `${API_BASE}/api/alunos/me/notification-preferences`,
     onboardingPreferences: () => `${API_BASE}/api/alunos/me/onboarding-preferences`,
     onboardingEvents: () => `${API_BASE}/api/alunos/me/onboarding-events`,
     refeicaoConclusoes: (date?: string) => {
       const qs = date ? `?date=${encodeURIComponent(date)}` : '';
       return `${API_BASE}/api/alunos/me/refeicao-conclusoes${qs}`;
+    },
+    refeicaoVariacoes: (query?: { date?: string; dieta_id?: string; meal_key?: string; plano?: string; item_ids?: string[] }) => {
+      const params = new URLSearchParams();
+      if (query?.date) params.set('date', query.date);
+      if (query?.dieta_id) params.set('dieta_id', query.dieta_id);
+      if (query?.meal_key) params.set('meal_key', query.meal_key);
+      if (query?.plano) params.set('plano', query.plano);
+      if (query?.item_ids?.length) params.set('item_ids', query.item_ids.join(','));
+      const qs = params.toString();
+      return `${API_BASE}/api/alunos/me/refeicao-variacoes${qs ? `?${qs}` : ''}`;
     },
     refeicaoSubstituicoes: (query?: { date?: string; dieta_id?: string }) => {
       const params = new URLSearchParams();
@@ -112,13 +126,14 @@ export const API_CONTRACT = {
     gruposEquivalencia: () => `${API_BASE}/api/alimentos/grupos-equivalencia`,
     substituicoes: (
       alimentoId: string,
-      query?: { quantidade?: number; unidade?: string; limit?: number; q?: string },
+      query?: { quantidade?: number; unidade?: string; limit?: number; q?: string; all?: boolean },
     ) => {
       const q = new URLSearchParams();
       if (query?.quantidade != null) q.set('quantidade', String(query.quantidade));
       if (query?.unidade) q.set('unidade', query.unidade);
       if (query?.limit != null) q.set('limit', String(query.limit));
       if (query?.q) q.set('q', query.q);
+      if (query?.all) q.set('all', '1');
       const qs = q.toString();
       return `${API_BASE}/api/alimentos/${alimentoId}/substituicoes${qs ? `?${qs}` : ''}`;
     },
@@ -152,6 +167,12 @@ export const API_CONTRACT = {
     merge: (id: string) => `${API_BASE}/api/food-catalog/${encodeURIComponent(id)}/merge`,
     create: () => `${API_BASE}/api/food-catalog`,
     update: (id: string) => `${API_BASE}/api/food-catalog/${encodeURIComponent(id)}`,
+  },
+  foodCategories: {
+    list: () => `${API_BASE}/api/food-categories`,
+    byId: (id: string) => `${API_BASE}/api/food-categories/${encodeURIComponent(id)}`,
+    items: (id: string) => `${API_BASE}/api/food-categories/${encodeURIComponent(id)}/items`,
+    unassign: () => `${API_BASE}/api/food-categories/items`,
   },
   mensagens: {
     list: () => `${API_BASE}/api/mensagens`,
@@ -387,6 +408,7 @@ const CONTRACT_PATTERNS = [
   '/api/alunos/me/treino-agenda',
   '/api/alunos/me/refeicao-conclusoes',
   '/api/alunos/me/refeicao-substituicoes',
+  '/api/alunos/me/refeicao-variacoes',
   '/api/alunos/me/treino-sessoes',
   '/api/alunos/me/treino-sessoes/:id',
   '/api/alunos/me/treino-sessoes/:id/series',
@@ -402,6 +424,8 @@ const CONTRACT_PATTERNS = [
   '/api/agent/approvals/:id/decide',
   '/api/agent/tools',
   '/api/alunos/:alunoId/treino-agenda',
+  '/api/alunos/:alunoId/avisos-alteracoes',
+  '/api/avisos-alteracoes/:id/reprocessar',
   '/api/alunos/:alunoId/body-metrics',
   '/api/alunos/me/notification-preferences',
   '/api/alunos/me/onboarding-preferences',
@@ -433,6 +457,10 @@ const CONTRACT_PATTERNS = [
   '/api/food-catalog/:id/usage',
   '/api/food-catalog/:id/history',
   '/api/food-catalog/:id/versions',
+  '/api/food-categories',
+  '/api/food-categories/items',
+  '/api/food-categories/:id',
+  '/api/food-categories/:id/items',
   '/api/dietas',
   '/api/dietas/:id',
   '/api/feedbacks-alunos',

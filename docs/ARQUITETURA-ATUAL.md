@@ -49,6 +49,13 @@
 - Registry + painel: `src/lib/onboarding/`, `useFeatureOnboarding`, `FeatureOnboardingPanel`.
 - Auditoria / priorização / conteúdos: [`arquivo/2026-10-22-onboarding-contextual-aluno.md`](arquivo/2026-10-22-onboarding-contextual-aluno.md).
 
+## Dietas: substituição, dias e avisos de alteração
+
+- Substituição: `GET /api/alimentos/:id/substituicoes` (`all=1` = grupo inteiro); categorias pessoais do profissional em `coach_food_categories` / `coach_food_category_items`, API `/api/food-categories`.
+- Rotação de cardápios no dia civil `America/Sao_Paulo` (`src/lib/calendar-date.ts`, `src/lib/diet-rotation.ts`, espelho de `server/utils/diet-rotation.js`).
+- Avisos de alteração de dieta/treino: outbox `plan_change_notifications` + job `server/jobs/plan-change-notifications.job.js`; estado para o coach em `GET /api/alunos/:alunoId/avisos-alteracoes`.
+- Detalhe e migrações a aplicar: [`arquivo/2026-11-09-dietas-substituicao-notificacoes.md`](arquivo/2026-11-09-dietas-substituicao-notificacoes.md).
+
 ## Produto (PRD)
 
 PRD unificado (arquitectura → features → UX, as-built 2026-08-18): [`arquivo/2026-08-18-prd-blackhouse-completo.md`](arquivo/2026-08-18-prd-blackhouse-completo.md).

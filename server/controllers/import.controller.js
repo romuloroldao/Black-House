@@ -15,6 +15,7 @@ const StudentRepository = require('../repositories/student.repository');
 const DietRepository = require('../repositories/diet.repository');
 const FoodMatchingService = require('../services/food-matching.service');
 const { insertImportHistory, listImportHistory } = require('../services/import-history.service');
+const { getPlanChangeNotifier } = require('../services/plan-change-notification.service');
 
 // STEP-15: Usar helper compartilhado
 const { assertQueryable: assertQueryableShared } = require('../shared/db-guards');
@@ -663,6 +664,16 @@ class ImportController {
                 });
 
                 await client.query('COMMIT');
+
+                if (newDietaId) {
+                    await getPlanChangeNotifier(this._db).schedule({
+                        dominio: 'dieta',
+                        alunoId,
+                        entityId: newDietaId,
+                        coachId: alunoRow.coach_id || userId,
+                        source: 'import.enrich',
+                    });
+                }
 
                 logger.info('Dieta reimportada para aluno existente', {
                     aluno_id: alunoId,

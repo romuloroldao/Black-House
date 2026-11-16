@@ -39,6 +39,7 @@ const requestLogger = require('./middleware/request-logger');
 const { internationalAccessMiddleware } = require('./middleware/international-access');
 const logger = require('./utils/logger');
 const { afterTableMutation } = require('./services/return-reminder.service');
+const { getPlanChangeNotifier } = require('./services/plan-change-notification.service');
 const SecretsValidator = require('./utils/secrets-validator');
 const GracefulShutdown = require('./utils/graceful-shutdown');
 const { assertDatabaseSchema, assertGlobalSchema } = require('./utils/schema-validator');
@@ -376,11 +377,13 @@ logger.info('STEP-03: ImportController instanciado com sucesso');
 // =============== WEBSOCKET ===============
 let websocketService = null;
 let notificationService = null;
+const planChangeNotifier = getPlanChangeNotifier(pool);
 
 if (process.env.ENABLE_WEBSOCKET !== 'false') {
     try {
         websocketService = new WebSocketService(httpServer, pool, JWT_SECRET);
         notificationService = new NotificationService(websocketService, pool);
+        planChangeNotifier.setWebsocket(websocketService);
         logger.info('WebSocket Service inicializado');
     } catch (error) {
         logger.error('Erro ao inicializar WebSocket', { error: error.message });
@@ -424,7 +427,7 @@ let jobsRunner = null;
 
 if (process.env.ENABLE_JOBS !== 'false' && notificationService) {
     try {
-        jobsRunner = new JobsRunner(pool, notificationService, financialSync);
+        jobsRunner = new JobsRunner(pool, notificationService, financialSync, planChangeNotifier);
         jobsRunner.start();
         logger.info('Background Jobs inicializados', { jobsCount: jobsRunner.jobs?.length || 0 });
     } catch (error) {
@@ -1630,6 +1633,37 @@ app.get('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) => 
 
 // Insert - DEPRECATED
 // DESIGN-SUPABASE-PURGE-GLOBAL-002: Rotas genéricas são FORBIDDEN
+/**
+ * Agenda o aviso "dieta atualizada" ao aluno depois de uma escrita já confirmada em
+ * dietas / itens_dieta / dieta_farmacos feita pelo profissional. O debounce do serviço junta
+ * as várias chamadas de um mesmo salvamento (cabeçalho + apagar/regravar itens) num só aviso.
+ */
+async function schedulePlanChangeAfterMutation(req, table, rows, source) {
+    if (!['dietas', 'itens_dieta', 'dieta_farmacos'].includes(table)) return;
+    const role = req.user?.role;
+    if (role !== 'coach' && role !== 'admin') return;
+    const list = (Array.isArray(rows) ? rows : [rows]).filter(Boolean);
+    const coachId = req.user?.id || null;
+    const source_ = `${source}:${table}`;
+    if (table === 'dietas') {
+        for (const row of list) {
+            if (!row.aluno_id) continue;
+            await planChangeNotifier.schedule({
+                dominio: 'dieta',
+                alunoId: row.aluno_id,
+                entityId: row.id,
+                coachId,
+                source: source_,
+            });
+        }
+        return;
+    }
+    const dietaIds = [...new Set(list.map((r) => r.dieta_id).filter(Boolean))];
+    for (const dietaId of dietaIds) {
+        await planChangeNotifier.scheduleForDieta(dietaId, { coachId, source: source_ });
+    }
+}
+
 app.post('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) => {
     console.warn(`⚠️ DEPRECATED: POST /rest/v1/${req.params.table} está deprecated. Use rotas semânticas /api/*`);
     const { table } = req.params;
@@ -1883,6 +1917,8 @@ app.post('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) =>
                 }
             }
         }
+
+        await schedulePlanChangeAfterMutation(req, table, insertedRows, 'rest.post');
 
         res.json(insertedRows.length === 1 ? insertedRows[0] : insertedRows);
     } catch (error) {
@@ -2169,22 +2205,8 @@ app.patch('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) =
             }
         }
 
-        if (table === 'dietas' && notificationService && result.rows[0]?.aluno_id) {
-            const dietaRow = result.rows[0];
-            void notificationService
-                .notifyDietaAtualizada({
-                    alunoId: dietaRow.aluno_id,
-                    dietaId: dietaRow.id,
-                    dietaNome: dietaRow.nome,
-                })
-                .catch((err) => {
-                    logger.warn('dieta.notify_student_failed', {
-                        dietaId: dietaRow.id,
-                        error: err?.message || String(err),
-                    });
-                });
-        }
-        
+        await schedulePlanChangeAfterMutation(req, table, result.rows, 'rest.patch');
+
         res.json(result.rows[0]);
     } catch (error) {
         // SCHEMA-02: Tratamento específico para coluna inexistente
@@ -2517,7 +2539,8 @@ app.delete('/rest/v1/:table', authenticate, domainSchemaGuard, async (req, res) 
             }
         } else {
             // Para outras tabelas, deletar diretamente
-            await pool.query(`DELETE FROM public.${table} WHERE id = $1`, [id]);
+            const deleted = await pool.query(`DELETE FROM public.${table} WHERE id = $1 RETURNING *`, [id]);
+            await schedulePlanChangeAfterMutation(req, table, deleted.rows, 'rest.delete');
             res.json({ message: 'Deletado com sucesso' });
         }
     } catch (error) {

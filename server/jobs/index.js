@@ -3,6 +3,7 @@
 
 const PaymentRemindersJob = require('./payment-reminders.job');
 const CheckinRemindersJob = require('./checkin-reminders.job');
+const TurmaCheckinRemindersJob = require('./turma-checkin-reminders.job');
 const EventRemindersJob = require('./event-reminders.job');
 const ReturnRemindersJob = require('./return-reminders.job');
 const AgendaCoachRemindersJob = require('./agenda-coach-reminders.job');
@@ -13,12 +14,14 @@ const ProfileCompletenessRemindersJob = require('./profile-completeness-reminder
 const SmartRemindersJob = require('./smart-reminders.job');
 const DailyAdherenceJob = require('./daily-adherence.job');
 const EmailQueueJob = require('./email-queue.job');
+const PlanChangeNotificationsJob = require('./plan-change-notifications.job');
 
 class JobsRunner {
-    constructor(pool, notificationService, financialSync = null) {
+    constructor(pool, notificationService, financialSync = null, planChangeNotifier = null) {
         this.pool = pool;
         this.notificationService = notificationService;
         this.financialSync = financialSync;
+        this.planChangeNotifier = planChangeNotifier;
         this.jobs = [];
     }
 
@@ -37,6 +40,10 @@ class JobsRunner {
         const checkinReminders = new CheckinRemindersJob(this.pool, this.notificationService);
         checkinReminders.start();
         this.jobs.push(checkinReminders);
+
+        const turmaCheckin = new TurmaCheckinRemindersJob(this.pool, this.notificationService);
+        turmaCheckin.start();
+        this.jobs.push(turmaCheckin);
 
         // Event Reminders
         const eventReminders = new EventRemindersJob(this.pool, this.notificationService);
@@ -85,6 +92,12 @@ class JobsRunner {
         const emailQueue = new EmailQueueJob(this.pool);
         emailQueue.start();
         this.jobs.push(emailQueue);
+
+        if (this.planChangeNotifier) {
+            const planChange = new PlanChangeNotificationsJob(this.planChangeNotifier);
+            planChange.start();
+            this.jobs.push(planChange);
+        }
 
         const photoPoseNormalization = new (require('./photo-pose-normalization.job'))(this.pool);
         photoPoseNormalization.start();

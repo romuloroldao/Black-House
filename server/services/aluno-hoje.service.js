@@ -2,8 +2,22 @@
  * Agregação para GET /api/alunos/me/hoje — portal do aluno (ecrã Hoje / dashboard).
  */
 
+function isoDateOnly(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const y = value.getUTCFullYear();
+    const m = String(value.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(value.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return String(value).slice(0, 10);
+}
+
 function parseDateOnly(value) {
   if (value == null || value === '') return null;
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    return new Date(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate());
+  }
   const s = String(value).slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
   const [y, m, d] = s.split('-').map(Number);
@@ -26,13 +40,22 @@ function formatReturnLabel(days) {
   return `Retorno há ${overdue} dias`;
 }
 
-function pickReturnCountdown(dieta, alunoTreino, treinoNome) {
+function pickReturnCountdown(dieta, alunoTreino, treinoNome, checkinRetorno) {
   const candidates = [];
+  const checkinDate = parseDateOnly(checkinRetorno);
+  if (checkinDate) {
+    candidates.push({
+      date: checkinDate,
+      iso: isoDateOnly(checkinRetorno),
+      source: 'checkin',
+      planName: null,
+    });
+  }
   const dietaDate = parseDateOnly(dieta?.data_retorno);
   if (dietaDate) {
     candidates.push({
       date: dietaDate,
-      iso: String(dieta.data_retorno).slice(0, 10),
+      iso: isoDateOnly(dieta.data_retorno),
       source: 'dieta',
       planName: dieta?.nome ?? null,
     });
@@ -41,7 +64,7 @@ function pickReturnCountdown(dieta, alunoTreino, treinoNome) {
   if (treinoDate) {
     candidates.push({
       date: treinoDate,
-      iso: String(alunoTreino.data_retorno).slice(0, 10),
+      iso: isoDateOnly(alunoTreino.data_retorno),
       source: 'treino',
       planName: treinoNome ?? null,
     });
@@ -339,10 +362,26 @@ async function getAlunoHoje(pool, { aluno, userId }) {
     ultima_url: ultimaFoto?.url ?? null,
     enviou_esta_semana: enviouEstaSemana,
   };
+  let checkinRetorno = null;
+  try {
+    const checkinRetornoRes = await pool.query(
+      `SELECT data_retorno
+       FROM public.weekly_checkins
+       WHERE aluno_id = $1 AND data_retorno IS NOT NULL
+       ORDER BY COALESCE(coach_respondido_em, created_at) DESC NULLS LAST
+       LIMIT 1`,
+      [alunoId],
+    );
+    checkinRetorno = checkinRetornoRes.rows[0]?.data_retorno ?? null;
+  } catch (err) {
+    if (err.code !== '42703') throw err;
+  }
+
   const retorno = pickReturnCountdown(
     dieta,
     alunoTreinoRow,
     alunoTreinoRow?.treino_nome ?? null,
+    checkinRetorno,
   );
 
   const alunoEnriched = await enrichPlanoNome(pool, aluno);

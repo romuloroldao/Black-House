@@ -4,15 +4,16 @@
  */
 
 let cachedLinkColumn = null;
+let cachedColumns = null;
 let cacheAt = 0;
 const CACHE_MS = 60_000;
 
-async function getAlunoUserLinkColumn(pool) {
+/** Colunas de vínculo presentes em public.alunos (user_id e/ou linked_user_id). */
+async function getAlunoUserLinkColumns(pool) {
     const now = Date.now();
-    if (cachedLinkColumn && now - cacheAt < CACHE_MS) {
-        return cachedLinkColumn;
+    if (cachedColumns && now - cacheAt < CACHE_MS) {
+        return cachedColumns;
     }
-
     const r = await pool.query(
         `SELECT column_name
          FROM information_schema.columns
@@ -20,7 +21,19 @@ async function getAlunoUserLinkColumn(pool) {
            AND table_name = 'alunos'
            AND column_name IN ('linked_user_id', 'user_id')`
     );
-    const cols = new Set(r.rows.map((x) => x.column_name));
+    cachedColumns = new Set(r.rows.map((x) => x.column_name));
+    cachedLinkColumn = null;
+    cacheAt = now;
+    return cachedColumns;
+}
+
+async function getAlunoUserLinkColumn(pool) {
+    const now = Date.now();
+    if (cachedLinkColumn && now - cacheAt < CACHE_MS) {
+        return cachedLinkColumn;
+    }
+
+    const cols = await getAlunoUserLinkColumns(pool);
 
     if (cols.has('linked_user_id')) {
         cachedLinkColumn = 'linked_user_id';
@@ -35,10 +48,12 @@ async function getAlunoUserLinkColumn(pool) {
 
 function invalidateAlunoLinkColumnCache() {
     cachedLinkColumn = null;
+    cachedColumns = null;
     cacheAt = 0;
 }
 
 module.exports = {
     getAlunoUserLinkColumn,
+    getAlunoUserLinkColumns,
     invalidateAlunoLinkColumnCache
 };

@@ -259,7 +259,7 @@ const StudentDashboardView = () => {
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
                   {dietaAtual.data_retorno
-                    ? `Retorno: ${new Date(dietaAtual.data_retorno).toLocaleDateString("pt-BR")}`
+                    ? `Retorno: ${new Date(`${String(dietaAtual.data_retorno).slice(0, 10)}T12:00:00`).toLocaleDateString("pt-BR")}`
                     : "Plano nutricional do coach"}
                 </p>
               </>

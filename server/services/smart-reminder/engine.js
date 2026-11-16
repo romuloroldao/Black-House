@@ -26,6 +26,14 @@ async function legacyCheckinFallback(pool, notificationService, now) {
      FROM public.alunos a
      WHERE a.coach_id IS NOT NULL
        AND NOT EXISTS (
+         SELECT 1
+         FROM public.turmas_alunos ta
+         INNER JOIN public.turmas t ON t.id = ta.turma_id
+         WHERE ta.aluno_id = a.id
+           AND COALESCE(t.ativo, true) = true
+           AND t.dia_semana IS NOT NULL
+       )
+       AND NOT EXISTS (
          SELECT 1 FROM public.weekly_checkins wc
          WHERE wc.aluno_id = a.id AND wc.created_at >= $1::timestamptz
        )`,

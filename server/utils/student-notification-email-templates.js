@@ -60,6 +60,26 @@ function buildStudentNotificationEmail(type, ctx = {}) {
     'Você está recebendo este e-mail porque tem uma conta na plataforma. Se não reconhecer este aviso, fale com seu coach.';
 
   switch (type) {
+    case 'checkin_turma_window':
+      return {
+        subject: `${appName} — Check-in da sua turma até 11h`,
+        text:
+          `${appName}\n\n${greeting}\n\n` +
+          `Hoje é o dia da sua turma para o check-in. Responda entre 9h e 11h.\n\n` +
+          `${studentPortalUrl('checkin')}\n\n${baseFoot}`,
+        htmlPayload: {
+          preheader: 'Responda o check-in da sua turma até 11h.',
+          appName,
+          headline: 'Hora do check-in',
+          intro:
+            'Hoje é o dia da sua turma para o check-in. Responda entre 9h e 11h para o coach acompanhar a semana.',
+          ctaUrl: studentPortalUrl('checkin'),
+          ctaLabel: 'Responder check-in',
+          expiryLine: 'A janela deste aviso é das 9h às 11h.',
+          footnote: baseFoot,
+        },
+      };
+
     case 'checkin_reminder':
       return {
         subject: `${appName} — Check-in semanal pendente`,
@@ -198,6 +218,43 @@ function buildStudentNotificationEmail(type, ctx = {}) {
           introSecond: `${coachLine}${retorno !== 'em breve' ? ` Retorno previsto: ${retorno}.` : ''}`.trim(),
           ctaUrl: studentPortalUrl('diet'),
           ctaLabel: 'Acessar minha dieta',
+          expiryLine: 'Você também recebe este aviso no sininho do portal.',
+          footnote: baseFoot,
+        },
+      };
+    }
+
+    case 'dieta_atualizada': {
+      const intro =
+        'Seu profissional realizou uma atualização no seu plano alimentar. Acesse sua dieta para conferir as alterações.';
+      return {
+        subject: `${appName} — Seu plano alimentar foi atualizado`,
+        text: `${appName}\n\n${greeting}\n\n${intro}\n\n${studentPortalUrl('diet')}\n\n${baseFoot}`,
+        htmlPayload: {
+          preheader: 'Seu plano alimentar foi atualizado.',
+          appName,
+          headline: 'Plano alimentar atualizado',
+          intro,
+          ctaUrl: studentPortalUrl('diet'),
+          ctaLabel: 'Ver minha dieta',
+          expiryLine: 'Você também recebe este aviso no sininho do portal.',
+          footnote: baseFoot,
+        },
+      };
+    }
+
+    case 'treino_atualizado': {
+      const intro = 'Seu treino foi atualizado. Confira as novas orientações na plataforma.';
+      return {
+        subject: `${appName} — Seu treino foi atualizado`,
+        text: `${appName}\n\n${greeting}\n\n${intro}\n\n${studentPortalUrl('workouts')}\n\n${baseFoot}`,
+        htmlPayload: {
+          preheader: 'Seu treino foi atualizado.',
+          appName,
+          headline: 'Treino atualizado',
+          intro,
+          ctaUrl: studentPortalUrl('workouts'),
+          ctaLabel: 'Ver meu treino',
           expiryLine: 'Você também recebe este aviso no sininho do portal.',
           footnote: baseFoot,
         },

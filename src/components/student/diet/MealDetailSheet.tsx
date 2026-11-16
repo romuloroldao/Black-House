@@ -18,6 +18,9 @@ import {
   type MealGroup,
 } from "@/lib/diet-student-utils";
 import { cn } from "@/lib/utils";
+import MealVariationsPanel, {
+  type MealVariationOption,
+} from "@/components/student/diet/MealVariationsPanel";
 import { useStudentOverlayLock } from "@/hooks/useStudentOverlayLock";
 
 type MealDetailSheetProps = {
@@ -27,7 +30,11 @@ type MealDetailSheetProps = {
   group: MealGroup | null;
   plano: DietPlano;
   dietHasMultiplosCardapios: boolean;
-  onSubstituir: (item: DietItemWithFood) => void;
+  onSubstituir?: (item: DietItemWithFood) => void;
+  variations?: MealVariationOption[];
+  variationSelectedId?: string | null;
+  variationsLoading?: boolean;
+  onSelectVariation?: (id: string) => void;
 };
 
 function MealItemRow({
@@ -35,7 +42,7 @@ function MealItemRow({
   onSubstituir,
 }: {
   item: DietItemWithFood;
-  onSubstituir: (item: DietItemWithFood) => void;
+  onSubstituir?: (item: DietItemWithFood) => void;
 }) {
   if (!item.alimentos) return null;
   const fator = macroScaleFactor(
@@ -61,16 +68,18 @@ function MealItemRow({
       </div>
       <div className="flex shrink-0 flex-col items-end gap-2">
         <Badge variant="outline">{kcal} kcal</Badge>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-8 text-xs"
-          onClick={() => onSubstituir(item)}
-        >
-          <Replace className="mr-1 h-3.5 w-3.5" />
-          Substitutos
-        </Button>
+        {onSubstituir ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={() => onSubstituir(item)}
+          >
+            <Replace className="mr-1 h-3.5 w-3.5" />
+            Substitutos
+          </Button>
+        ) : null}
       </div>
     </li>
   );
@@ -87,7 +96,7 @@ function MealItemsSection({
   description?: string;
   items: DietItemWithFood[];
   variant?: "default" | "substitutos";
-  onSubstituir: (item: DietItemWithFood) => void;
+  onSubstituir?: (item: DietItemWithFood) => void;
 }) {
   if (items.length === 0) return null;
 
@@ -122,7 +131,7 @@ function CardapioBlock({
   cardapio: DietPlano;
   items: DietItemWithFood[];
   isActive: boolean;
-  onSubstituir: (item: DietItemWithFood) => void;
+  onSubstituir?: (item: DietItemWithFood) => void;
 }) {
   const { principais, substitutos } = partitionMealItems(items);
   if (principais.length === 0 && substitutos.length === 0) return null;
@@ -169,6 +178,10 @@ const MealDetailSheet = ({
   plano,
   dietHasMultiplosCardapios,
   onSubstituir,
+  variations = [],
+  variationSelectedId = null,
+  variationsLoading = false,
+  onSelectVariation,
 }: MealDetailSheetProps) => {
   useStudentOverlayLock(open);
   const listRef = useRef<HTMLDivElement>(null);
@@ -244,6 +257,15 @@ const MealDetailSheet = ({
                 onSubstituir={onSubstituir}
               />
             </>
+          )}
+          {onSelectVariation && (
+            <MealVariationsPanel
+              loading={variationsLoading}
+              options={variations}
+              selectedId={variationSelectedId}
+              notice={null}
+              onSelect={onSelectVariation}
+            />
           )}
         </div>
       </SheetContent>

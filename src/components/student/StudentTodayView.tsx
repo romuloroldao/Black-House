@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { isPhoneLayoutNow } from "@/lib/device";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Calendar,
@@ -83,7 +84,7 @@ const MAIS_DO_DIA_OPEN_KEY = "bh-student-mais-do-dia-open";
 
 function isMobileViewport(): boolean {
   if (typeof window === "undefined") return false;
-  return window.matchMedia("(max-width: 767px)").matches;
+  return isPhoneLayoutNow();
 }
 
 function readMaisDoDiaOpen(): boolean {
