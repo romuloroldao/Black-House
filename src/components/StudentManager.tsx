@@ -733,6 +733,9 @@ const StudentManager = () => {
 
   // REACT-API-RESILIENCE-FIX-008: UI de erro
   if (errorAlunos) {
+    const authLike =
+      /token|autentic|sess[aã]o|expir|401|unauthorized/i.test(errorAlunos) ||
+      !user;
     return (
       <div className="p-6">
         <Card className="border-destructive/50">
@@ -741,12 +744,25 @@ const StudentManager = () => {
               <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mx-auto mb-4">
                 <Alert className="text-2xl text-destructive">!</Alert>
               </div>
-              <h3 className="text-lg font-semibold mb-2">Erro ao carregar alunos</h3>
-              <p className="text-sm text-muted-foreground mb-6">{errorAlunos}</p>
+              <h3 className="text-lg font-semibold mb-2">
+                {authLike ? "Sessão expirada" : "Erro ao carregar alunos"}
+              </h3>
+              <p className="text-sm text-muted-foreground mb-6">
+                {authLike
+                  ? "Não foi possível carregar os alunos porque o login deste computador expirou ou ficou inválido. Entre de novo e tente outra vez."
+                  : errorAlunos}
+              </p>
             </div>
-            <Button onClick={refetchAlunos} variant="outline">
-              Tentar novamente
-            </Button>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Button onClick={refetchAlunos} variant="outline">
+                Tentar novamente
+              </Button>
+              {authLike && (
+                <Button onClick={() => navigate("/auth")} variant="default">
+                  Fazer login
+                </Button>
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
