@@ -2,6 +2,8 @@
  * Limpeza no logout (LGPD): caches de runtime, IndexedDB e todo dado do usuário em localStorage/sessionStorage.
  * Ficam só preferências do aparelho, sem dado pessoal, e o precache dos arquivos do build.
  */
+import { clearApiSafeSessionCaches } from "@/lib/api-safe-session-cache";
+
 const KEEP_LOCAL_KEYS = new Set([
   "bh-theme",
   "bh-student-nav-mode",
@@ -36,6 +38,7 @@ async function clearIndexedDb(): Promise<void> {
 }
 
 export async function clearUserDataOnLogout(): Promise<void> {
+  clearApiSafeSessionCaches();
   try {
     clearStorage(localStorage, (k) => KEEP_LOCAL_KEYS.has(k) || k.startsWith(KEEP_PREFIX));
   } catch {
